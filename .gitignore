@@ -1,0 +1,32 @@
+.cache
+.classpath
+.history
+.project
+.settings
+# Ignore any bin directory in the project root.
+bin/**
+logs/
+target/
+.sync.db*
+icon?
+*.class
+*.log
+
+# sbt specific
+.cache/
+.history/
+.lib/
+dist/*
+target/
+lib_managed/
+src_managed/
+
+# Scala-IDE specific
+.scala_dependencies
+.worksheet
+.idea/
+.idea_modules/
+*.iml
+.scala_dependencies
+*.sublime-project
+*.sublime-workspace
