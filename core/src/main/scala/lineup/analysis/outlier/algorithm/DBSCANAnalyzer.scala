@@ -67,8 +67,9 @@ class DBSCANAnalyzer( override val router: ActorRef ) extends AlgorithmActor {
         isOutlier = outlierTest( clusters )
       } yield frameDistances.zipWithIndex collect { case (fd, i) if isOutlier( fd ) => i }
 
-      val outlierSeries = outlierMarks.flatten.toSet[Int] map { payload.data.data( _ ) }
-      val result = {
+      val result = if ( outlierMarks.isEmpty ) NoOutliers( algorithms = Set(algorithm), source = payload.data )
+      else {
+        val outlierSeries = outlierMarks.flatten.toSet[Int] map { payload.data.data( _ ) }
         if ( outlierSeries.isEmpty ) NoOutliers( algorithms = Set(algorithm), source = payload.data )
         else CohortOutliers( algorithms = Set(algorithm), source = payload.data, outliers = outlierSeries )
       }
