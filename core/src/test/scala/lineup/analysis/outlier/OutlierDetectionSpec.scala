@@ -4,24 +4,17 @@ import akka.actor.UnhandledMessage
 import lineup.model.timeseries.Topic
 import scala.concurrent.duration._
 import akka.testkit._
-import demesne.testkit.ParallelAkkaSpec
 import org.mockito.Mockito._
-import org.scalatest.{ Tag, Outcome }
 import org.scalatest.mock.MockitoSugar
-import peds.commons.log.Trace
 import lineup.model.outlier.{ ReduceOutliers, IsQuorum, OutlierPlan }
+import lineup.testkit.ParallelAkkaSpec
 
 
 /**
  * Created by rolfsd on 10/20/15.
  */
 class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
-  val trace = Trace[OutlierDetectionSpec]
-
   class Fixture extends AkkaFixture {
-    def before(): Unit = { }
-    def after(): Unit = { }
-
     val router = TestProbe()
     val isQuorumA = mock[IsQuorum]
     val reduceA = mock[ReduceOutliers]
@@ -39,21 +32,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
     )
   }
 
-  override def createAkkaFixture(): Fixture = new Fixture
-
-  override def withFixture( test: OneArgTest ): Outcome = trace.block( s"withFixture($test" ) {
-    val f = createAkkaFixture()
-
-    try {
-      f.before()
-      test( f )
-    } finally {
-      f.after()
-      f.system.shutdown()
-    }
-  }
-
-  case object WIP extends Tag( "wip" )
+  override def makeAkkaFixture(): Fixture = new Fixture
 
   "OutlierDetection" should {
     "ignore detect message if no plan and no default" in { f: Fixture =>

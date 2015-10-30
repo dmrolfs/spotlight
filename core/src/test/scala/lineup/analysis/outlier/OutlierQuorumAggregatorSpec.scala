@@ -2,6 +2,7 @@ package lineup.analysis.outlier
 
 import lineup.model.timeseries.{TimeSeriesBase, DataPoint, TimeSeries, Topic}
 
+import scala.concurrent.Await
 import scala.concurrent.duration._
 import akka.actor.Terminated
 import akka.testkit._
@@ -29,14 +30,15 @@ class OutlierQuorumAggregatorSpec extends ParallelAkkaSpec with MockitoSugar {
   override def createAkkaFixture(): Fixture = new Fixture
 
   override def withFixture( test: OneArgTest ): Outcome = trace.block( s"withFixture($test)" ) {
-    val sys = createAkkaFixture()
+    val f = createAkkaFixture()
 
     try {
-      sys.before()
-      test( sys )
+      f.before()
+      test( f )
     } finally {
-      sys.after()
-      sys.system.shutdown()
+      f.after()
+      val terminated = f.system.terminate()
+      Await.result( terminated, 1.second )
     }
   }
 

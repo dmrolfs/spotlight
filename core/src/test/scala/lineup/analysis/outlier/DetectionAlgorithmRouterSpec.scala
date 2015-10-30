@@ -3,10 +3,8 @@ package lineup.analysis.outlier
 import scala.concurrent.duration._
 import akka.testkit._
 import org.joda.{ time => joda }
-import demesne.testkit.ParallelAkkaSpec
-import org.scalatest.{ Tag, Outcome }
+import lineup.testkit.ParallelAkkaSpec
 import org.scalatest.mock.MockitoSugar
-import peds.commons.log.Trace
 import lineup.model.timeseries.{ TimeSeries, DataPoint }
 
 
@@ -14,29 +12,12 @@ import lineup.model.timeseries.{ TimeSeries, DataPoint }
  * Created by rolfsd on 10/20/15.
  */
 class DetectionAlgorithmRouterSpec extends ParallelAkkaSpec with MockitoSugar {
-  val trace = Trace[DetectionAlgorithmRouterSpec]
 
   class Fixture extends AkkaFixture {
-    def before(): Unit = { }
-    def after(): Unit = { }
     val router = TestActorRef[DetectionAlgorithmRouter]( DetectionAlgorithmRouter.props )
   }
 
-  override def createAkkaFixture(): Fixture = new Fixture
-
-  override def withFixture( test: OneArgTest ): Outcome = trace.block( s"withFixture($test)" ) {
-    val f = createAkkaFixture()
-
-    try {
-      f.before()
-      test( f )
-    } finally {
-      f.after()
-      f.system.shutdown()
-    }
-  }
-
-  case object WIP extends Tag( "wip" )
+  override def makeAkkaFixture(): Fixture = new Fixture
 
   "DetectionAlgorithmRouter" should {
     import DetectionAlgorithmRouter.{ AlgorithmRegistered, RegisterDetectionAlgorithm }

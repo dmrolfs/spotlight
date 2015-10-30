@@ -6,15 +6,14 @@ import akka.event.EventStream
 import akka.testkit._
 import shapeless._
 import org.joda.{ time => joda }
+import com.github.nscala_time.time.OrderingImplicits._
 import org.apache.commons.math3.random.RandomDataGenerator
-import org.scalatest.{ Outcome, Tag }
 import org.scalatest.mock.MockitoSugar
-import demesne.testkit.ParallelAkkaSpec
-import peds.commons.log.Trace
 import peds.akka.envelope._
 import lineup.model.outlier.{NoOutliers, CohortOutliers, SeriesOutliers}
 import lineup.model.timeseries._
 import lineup.analysis.outlier._
+import lineup.testkit.ParallelAkkaSpec
 
 
 /**
@@ -23,11 +22,7 @@ import lineup.analysis.outlier._
 class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
   import DBSCANAnalyzerSpec._
 
-  val trace = Trace[DBSCANAnalyzerSpec]
-
   class Fixture extends AkkaFixture {
-    def before(): Unit = { }
-    def after(): Unit = { }
     val router = TestProbe()
     val aggregator = TestProbe()
     val bus = mock[EventStream]
@@ -38,24 +33,9 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       val tweaked = s.points map { dp => valueLens.set( dp )( dp.value * factor ) }
       TimeSeries.pointsLens.set( s )( tweaked )
     }
-
   }
 
-  override def createAkkaFixture(): Fixture = new Fixture
-
-  override def withFixture( test: OneArgTest ): Outcome = trace.block( s"withFixture($test)" ) {
-    val sys = createAkkaFixture()
-
-    try {
-      sys.before()
-      test( sys )
-    } finally {
-      sys.after()
-      sys.system.shutdown()
-    }
-  }
-
-  case object WIP extends Tag( "wip" )
+  override def makeAkkaFixture(): Fixture = new Fixture
 
   "DBSCANAnalyzer" should  {
     "register with router upon create" in { f: Fixture =>
@@ -85,6 +65,8 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       import f._
       val analyzer = TestActorRef[DBSCANAnalyzer]( DBSCANAnalyzer.props(router.ref) )
       val series = TimeSeries( "series", points )
+      val expectedValues = Row( 18.8, 25.2, 31.5, 22.0, 24.1, 39.2 )
+      val expected = points filter { expectedValues contains _.value } sortBy { _.timestamp }
 
       val algProps: Map[String, Any] = Map( DBSCANAnalyzer.EPS -> 5.0, DBSCANAnalyzer.MIN_DENSITY_CONNECTED_POINTS -> 3 )
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered )
@@ -101,6 +83,7 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
           source mustBe series
           m.hasAnomalies mustBe true
           outliers.size mustBe 6
+          outliers mustBe expected
         }
       }
     }
