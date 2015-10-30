@@ -18,9 +18,9 @@ object Dependencies {
     "org.typelevel" %% "scalaz-spire"              % "0.2",
     peds( "commons" ),
     peds( "archetype" ),
-    "joda-time" % "joda-time" % "2.8.2",
+    "joda-time" % "joda-time" % "2.9",
     "org.joda" % "joda-convert" % "1.7",
-    "com.github.nscala-time" %% "nscala-time" % "2.2.0",
+    "com.github.nscala-time" %% "nscala-time" % "2.4.0",
     "org.scalatest" %% "scalatest" % "2.2.4" % "test",
     "org.mockito" % "mockito-core" % "1.10.19" % "test"
   )
@@ -51,9 +51,7 @@ object Dependencies {
 
   val sprayJson = "io.spray" %% "spray-json" % "1.3.1"
 
-  val scopt = "com.github.scopt" %% "scopt" % "3.3.0"
-
-  def akkaModule( id: String ) = "com.typesafe.akka" %% s"akka-$id" % "2.3.11"
+  def akkaModule( id: String ) = "com.typesafe.akka" %% s"akka-$id" % "2.4.0"
   def sprayModule( id: String ) = "io.spray" %% s"spray-$id" % "1.3.3"
   def peds( id: String ) = "com.github.dmrolfs" %% s"peds-$id" % "0.1.6" % "compile" changing()
 }
