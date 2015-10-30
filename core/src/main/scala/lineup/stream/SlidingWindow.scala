@@ -1,9 +1,9 @@
-package lineup.sandbox
+package lineup.stream
 
 import scala.concurrent.duration.FiniteDuration
 import akka.stream.stage._
-import org.joda.{ time => joda }
 import com.github.nscala_time.time.Implicits._
+import org.joda.{ time => joda }
 
 
 object SlidingWindow {

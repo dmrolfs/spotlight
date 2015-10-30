@@ -12,7 +12,7 @@ import lineup.model.outlier.{ Outliers, OutlierPlan }
 
 
 object OutlierDetection {
-  def detectOutlier[T](
+  def detectOutlier(
     detector: ActorRef,
     maxAllowedWait: FiniteDuration,
     parallelism: Int
@@ -51,23 +51,38 @@ class OutlierDetection(
 
   val fullExtractId: OutlierDetection.ExtractId = extractId orElse { case _ => "!null-id!" }
 
-  override def receive: Receive = around( detection )
+  type AggregatorRequesters = Map[ActorRef, ActorRef]
+  override def receive: Receive = around( detection( Map.empty[ActorRef, ActorRef] ) )
 
-  val detection: Receive = LoggingReceive {
+  def detection( outstanding: AggregatorRequesters ): Receive = LoggingReceive {
     case m: OutlierDetectionMessage if default.isDefined && extractId.isDefinedAt(m) => {
-      dispatch( m, plans.getOrElse( extractId(m), default.get ) )
+      val requester = sender()
+      val aggregator = dispatch( m, plans.getOrElse(extractId(m), default.get) )
+      context become around(detection(outstanding + (aggregator -> requester)))
     }
 
-    case m: OutlierDetectionMessage if default.isDefined => dispatch( m, default.get )
+    case m: OutlierDetectionMessage if default.isDefined => {
+      val requester = sender()
+      val aggregator = dispatch( m, default.get )
+      context become around(detection(outstanding + (aggregator -> requester)))
+    }
+
+    case result: Outliers if outstanding.contains( sender() ) => {
+      log info s"outlier detection result topic [${result.topic}] has-anomalies[${result.hasAnomalies}}] algorithms[${result.algorithms}] interval[${result.source.interval})"
+      outstanding( sender() ) ! result
+    }
   }
 
-  def dispatch( m: OutlierDetectionMessage, p: OutlierPlan ): Unit = trace.block( s"dispatch($m, $p)" ) {
+  def dispatch( m: OutlierDetectionMessage, p: OutlierPlan ): ActorRef = trace.block( s"dispatch($m, $p)" ) {
+    log info s"outlier detection request topic [${m.topic}] size[${m.source}}] interval[${m.source.interval})"
     val aggregatorName = s"quorum-${p.name}-${fullExtractId(m)}-${ShortUUID()}"
     val aggregator = context.actorOf( OutlierQuorumAggregator.props( p, m.source ), aggregatorName )
 
     p.algorithms foreach { a =>
       //todo stream enveloping: router !+ DetectUsing( algorithm = a, destination = aggregator, payload = m, p.algorithmProperties )
-      router ! DetectUsing( algorithm = a, destination = aggregator, payload = m, p.algorithmProperties )
+      router ! DetectUsing( algorithm = a, aggregator = aggregator, payload = m, p.algorithmProperties )
     }
+
+    aggregator
   }
 }

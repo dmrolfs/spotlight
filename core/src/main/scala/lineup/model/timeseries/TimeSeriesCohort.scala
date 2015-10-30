@@ -72,6 +72,8 @@ object TimeSeriesCohort {
   import TimeSeriesBase.Merging
 
   implicit val cohortMerging: Merging[TimeSeriesCohort] = new Merging[TimeSeriesCohort] {
+    override def zero( topic: Topic ): TimeSeriesCohort = TimeSeriesCohort( topic )
+
     override def merge( lhs: TimeSeriesCohort, rhs: TimeSeriesCohort ): V[TimeSeriesCohort] = {
       ( checkTopic(lhs.topic, rhs.topic) |@| combineSeries(lhs.data, rhs.data) ) { (_, merged) =>
         dataLens.set( lhs )( merged )

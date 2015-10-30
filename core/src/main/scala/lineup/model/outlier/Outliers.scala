@@ -3,11 +3,12 @@ package lineup.model.outlier
 import scala.annotation.tailrec
 import org.joda.{ time => joda }
 import peds.commons.log.Trace
+import peds.commons.util._
 import lineup.model.timeseries._
 
 
 sealed trait Outliers {
-  type Source
+  type Source <: TimeSeriesBase
   def topic: Topic
   def algorithms: Set[Symbol]
   def hasAnomalies: Boolean
@@ -27,6 +28,8 @@ case class NoOutliers(
   override type Source = TimeSeriesBase
   override val topic: Topic = source.topic
   override val hasAnomalies: Boolean = false
+
+  override def toString: String = s"""${getClass.safeSimpleName}:${topic}"""
 }
 
 case class SeriesOutliers(
@@ -70,6 +73,8 @@ case class SeriesOutliers(
 
     loop( points = source.points.toList, isPreviousOutlier = false, acc = List.empty[OutlierGroups] )
   }
+
+  override def toString: String = s"""${getClass.safeSimpleName}:${topic}[${outliers.mkString(",")}]"""
 }
 
 
@@ -81,4 +86,6 @@ case class CohortOutliers(
   override type Source = TimeSeriesCohort
   override val topic: Topic = source.topic
   override val hasAnomalies: Boolean = outliers.nonEmpty
+
+  override def toString: String = s"""${getClass.safeSimpleName}:${topic}[${outliers.mkString(",")}]"""
 }

@@ -31,6 +31,8 @@ object TimeSeries {
 
 
   implicit val seriesMerging: TimeSeriesBase.Merging[TimeSeries] = new TimeSeriesBase.Merging[TimeSeries] {
+    override def zero( topic: Topic ): TimeSeries = TimeSeries( topic )
+
     override def merge(lhs: TimeSeries, rhs: TimeSeries): V[TimeSeries] = {
       ( checkTopic(lhs.topic, rhs.topic) |@| combinePoints(lhs.points, rhs.points) ) { (_, merged) =>
         pointsLens.set( lhs )( merged )

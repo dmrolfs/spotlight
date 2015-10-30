@@ -45,6 +45,7 @@ package object timeseries {
 
     trait Merging[T <: TimeSeriesBase] {
       def merge( lhs: T, rhs: T ): V[T]
+      def zero( topic: Topic ): T
 
       protected def checkTopic( lhs: Topic, rhs: Topic ): V[Topic] = {
         if ( lhs == rhs ) lhs.successNel

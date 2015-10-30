@@ -37,7 +37,7 @@ package object outlier {
 
   case class DetectUsing(
     algorithm: Symbol,
-    destination: ActorRef,
+    aggregator: ActorRef,
     payload: OutlierDetectionMessage,
     properties: Map[String, Any] = Map()
   ) extends OutlierDetectionMessage {
