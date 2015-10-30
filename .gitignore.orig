@@ -1,3 +1,5 @@
+<<<<<<< HEAD
+=======
 .cache
 .classpath
 .history
@@ -8,12 +10,18 @@ bin/**
 logs/
 .sync.db*
 icon?
+>>>>>>> develop
 *.class
 *.log
 
 # sbt specific
+<<<<<<< HEAD
+.cache
+.history
+=======
 .cache/
 .history/
+>>>>>>> develop
 .lib/
 dist/*
 target/
@@ -25,9 +33,12 @@ project/plugins/project/
 # Scala-IDE specific
 .scala_dependencies
 .worksheet
+<<<<<<< HEAD
+=======
 .idea/
 .idea_modules/
 *.iml
 .scala_dependencies
 *.sublime-project
 *.sublime-workspace
+>>>>>>> develop
