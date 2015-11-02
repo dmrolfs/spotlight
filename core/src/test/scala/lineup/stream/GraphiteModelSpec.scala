@@ -1,9 +1,6 @@
 package lineup.stream
 
-import lineup.analysis.outlier.{DetectionAlgorithmRouter, OutlierDetection}
-import lineup.analysis.outlier.algorithm.DBSCANAnalyzer
-import lineup.model.outlier.{SeriesOutliers, Outliers, IsQuorum, OutlierPlan}
-import lineup.model.timeseries.TimeSeriesBase.Merging
+import com.typesafe.scalalogging.LazyLogging
 
 import scala.concurrent.{ Future, Await }
 import scala.concurrent.duration._
@@ -14,23 +11,39 @@ import akka.stream.testkit.scaladsl.{ TestSource, TestSink }
 import akka.stream.scaladsl._
 import akka.stream.io.Framing
 import akka.util.ByteString
-import akka.testkit.TestProbe
+import akka.testkit._
 import org.apache.commons.math3.random.RandomDataGenerator
 import org.joda.{ time => joda }
 import com.github.nscala_time.time.OrderingImplicits._
 import com.github.nscala_time.time.Imports.{ richSDuration, richDateTime }
-import lineup.model.timeseries.{Topic, TimeSeries, DataPoint, Row}
 import lineup.testkit.ParallelAkkaSpec
+import lineup.analysis.outlier.{ DetectionAlgorithmRouter, OutlierDetection }
+import lineup.analysis.outlier.algorithm.DBSCANAnalyzer
+import lineup.model.outlier.{ SeriesOutliers, IsQuorum, OutlierPlan }
+import lineup.model.timeseries.{ TimeSeries, DataPoint, Row }
 
 
 /**
  * Created by rolfsd on 10/28/15.
  */
-class GraphiteModelSpec extends ParallelAkkaSpec {
+class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
   import GraphiteModelSpec._
 
-  override type Fixture = AkkaFixture
-  override def makeAkkaFixture(): AkkaFixture = new Fixture
+  class Fixture extends AkkaFixture {
+    def status[T]( label: String ): Flow[T, T, Unit] = Flow[T].map { e => logger info s"\n$label:${e.toString}"; e }
+
+    val stringFlow: Flow[ByteString, String, Unit] = Flow[ByteString]
+      .via(
+        Framing.delimiter(
+          delimiter = ByteString("\n"),
+          maximumFrameLength = scala.math.pow( 2, 20 ).toInt,
+          allowTruncation = true
+        )
+      )
+      .map { _.utf8String }
+  }
+
+  override def makeAkkaFixture(): Fixture = new Fixture
 
   "GraphiteModel" should {
     "convert graphite pickle into TimeSeries" in { f: Fixture =>
@@ -69,7 +82,7 @@ class GraphiteModelSpec extends ParallelAkkaSpec {
       result mustBe expected
     }
 
-    "read sliding window" in { f: Fixture =>
+    "read sliding window" taggedAs (WIP) in { f: Fixture =>
       import f._
       import system.dispatcher
 
@@ -80,41 +93,43 @@ class GraphiteModelSpec extends ParallelAkkaSpec {
 
       val expected = TimeSeries( "foo", (dp1 ++ dp3).sortBy( _.timestamp ) )
 
-      val flowUnderTest: Flow[ByteString, TimeSeries, Unit] = {
-        Flow[ByteString]
-        .via(
-          Framing.delimiter(
-            delimiter = ByteString("]"),
-            maximumFrameLength = scala.math.pow( 2, 20 ).toInt,
-            allowTruncation = true
-          )
-        )
-        .map { _.utf8String }
-        .mapConcat( GraphiteModel.toDataPoints )
-        .groupBy( _.topic )
-        .map {
-          case (topic, seriesStream) => {
-            seriesStream
-            .transform { () => SlidingWindow[TimeSeries]( 1.minute ) }
-            .mapConcat { identity }
-            .runFold( TimeSeries(topic) ) { (acc, e) =>
-              implicitly[Merging[TimeSeries]].merge( acc, e ) valueOr { exs => throw exs.head }
-            }
-            .map { e => println( s"SUBSTREAM: ${e}" ); e }
-          }
-        }
-        .mapAsync( 4 ) { identity }
-      }
+      val flowUnderTest: Flow[String, TimeSeries, Unit] = GraphiteModel.graphiteTimeSeries( parallelism = 4, windowSize = 1.second )
+
+//      val flowUnderTest: Flow[ByteString, TimeSeries, Unit] = {
+//        Flow[ByteString]
+//        .via(
+//          Framing.delimiter(
+//            delimiter = ByteString("]"),
+//            maximumFrameLength = scala.math.pow( 2, 20 ).toInt,
+//            allowTruncation = true
+//          )
+//        )
+//        .map { _.utf8String }
+//        .mapConcat( GraphiteModel.toDataPoints )
+//        .groupBy( _.topic )
+//        .map {
+//          case (topic, seriesStream) => {
+//            seriesStream
+//            .transform { () => SlidingWindow[TimeSeries]( 1.minute ) }
+//            .mapConcat { identity }
+//            .runFold( TimeSeries(topic) ) { (acc, e) =>
+//              implicitly[Merging[TimeSeries]].merge( acc, e ) valueOr { exs => throw exs.head }
+//            }
+//            .map { e => println( s"SUBSTREAM: ${e}" ); e }
+//          }
+//        }
+//        .mapAsync( 4 ) { identity }
+//      }
 
       val topics = List( "foo", "bar", "foo" )
       val pickles = topics.zip(List(dp1, dp2, dp3)).map{ pickled }.mkString( "\n" )
-      val future = Source( Future.successful(ByteString(pickles)) ).via( flowUnderTest ).runWith( Sink.head )
-      val result = Await.result( future, 800.millis )
+      val future = Source( Future.successful(ByteString(pickles)) ).via( stringFlow ).via( status("BEFORE_UNDER_TEST") ).via( flowUnderTest ).via( status("AFTER_UNDER_TEST") ).runWith( Sink.head )
+      val result = Await.result( future, 2.seconds.dilated )
       result mustBe expected
     }
 
 
-    "detect Outliers" taggedAs (WIP) in { f: Fixture =>
+    "detect Outliers" in { f: Fixture =>
       import f._
       import system.dispatcher
 
@@ -149,37 +164,41 @@ class GraphiteModelSpec extends ParallelAkkaSpec {
       )
 //      val expected = TimeSeries( "foo", (dp1 ++ dp3).sortBy( _.timestamp ) )
 
-      val flowUnderTest: Flow[ByteString, Outliers, Unit] = {
-        Flow[ByteString]
-        .via(
-          Framing.delimiter(
-            delimiter = ByteString("]"),
-            maximumFrameLength = scala.math.pow( 2, 20 ).toInt,
-            allowTruncation = true
-          )
-        )
-        .map { _.utf8String }
-        .mapConcat( GraphiteModel.toDataPoints )
-        .groupBy( _.topic )
-        .map {
-          case (topic, seriesStream) => {
-            seriesStream
-            .transform { () => SlidingWindow[TimeSeries]( 1.minute ) }
-            .mapConcat { identity }
-            .runFold( TimeSeries(topic) ) { (acc, e) =>
-              implicitly[Merging[TimeSeries]].merge( acc, e ) valueOr { exs => throw exs.head }
-            }
-            .map { e => println( s"SUBSTREAM: ${e}" ); e }
-          }
-        }
-        .mapAsync( 4 ) { identity }
-        .via( OutlierDetection.detectOutlier(detector, 2.seconds, 4) )
-      }
+      val graphiteFlow = GraphiteModel.graphiteTimeSeries( parallelism = 4, windowSize = 20.millis )
+      val detectFlow = OutlierDetection.detectOutlier( detector, maxAllowedWait = 2.seconds, parallelism = 4 )
+
+      val flowUnderTest = graphiteFlow via detectFlow
+//      val flowUnderTest: Flow[ByteString, Outliers, Unit] = {
+//        Flow[ByteString]
+//        .via(
+//          Framing.delimiter(
+//            delimiter = ByteString("]"),
+//            maximumFrameLength = scala.math.pow( 2, 20 ).toInt,
+//            allowTruncation = true
+//          )
+//        )
+//        .map { _.utf8String }
+//        .mapConcat( GraphiteModel.toDataPoints )
+//        .groupBy( _.topic )
+//        .map {
+//          case (topic, seriesStream) => {
+//            seriesStream
+//            .transform { () => SlidingWindow[TimeSeries]( 1.minute ) }
+//            .mapConcat { identity }
+//            .runFold( TimeSeries(topic) ) { (acc, e) =>
+//              implicitly[Merging[TimeSeries]].merge( acc, e ) valueOr { exs => throw exs.head }
+//            }
+//            .map { e => println( s"SUBSTREAM: ${e}" ); e }
+//          }
+//        }
+//        .mapAsync( 4 ) { identity }
+//        .via( OutlierDetection.detectOutlier(detector, 2.seconds, 4) )
+//      }
 
       val topics = List( "foo", "bar", "foo" )
       val pickles = topics.zip(dp1 :: Nil).map{ pickled }.mkString( "\n" )
 //      val pickles = topics.zip(dp1 :: dp2 :: dp3 :: Nil).map{ pickled }.mkString( "\n" )
-      val future = Source( Future.successful(ByteString(pickles)) ).via( flowUnderTest ).runWith( Sink.head )
+      val future = Source( Future.successful(ByteString(pickles)) ).via( stringFlow ).via( flowUnderTest ).runWith( Sink.head )
       val result = Await.result( future, 2.seconds )
       result mustBe expected
     }
