@@ -1,4 +1,6 @@
 import Dependencies._
+import sbtassembly.AssemblyPlugin.autoImport.MergeStrategy
+//import sbtassembly.{MergeStrategy, Assembly}
 
 name := "lineup-core"
 
@@ -17,3 +19,30 @@ libraryDependencies ++= commonDependencies ++ Seq(
   "com.github.dmrolfs" %% "demesne-testkit" % "0.8.0-SNAPSHOT" % "test" changing(),
   "com.github.marklister" %% "product-collections" % "1.4.2" % "test"
 )
+
+mainClass in (Compile, run) := Some("lineup.stream.GraphiteModel")
+
+mainClass in assembly := Some("lineup.stream.GraphiteModel")
+
+assemblyJarName in assembly := "cdkLineup.jar"
+
+assemblyMergeStrategy in assembly := {
+  case x if Assembly.isConfigFile(x) => MergeStrategy.concat
+
+  case PathList(ps @ _*) if Assembly.isReadme(ps.last) || Assembly.isLicenseFile(ps.last) => MergeStrategy.rename
+
+  case PathList("META-INF", xs @ _*) => {
+    (xs map {_.toLowerCase}) match {
+      case ("manifest.mf" :: Nil) | ("index.list" :: Nil) | ("dependencies" :: Nil) => MergeStrategy.discard
+
+      case ps @ (x :: xs) if ps.last.endsWith(".sf") || ps.last.endsWith(".dsa") => MergeStrategy.discard
+
+      case "plexus" :: xs => MergeStrategy.discard
+      case "services" :: xs => MergeStrategy.filterDistinctLines
+      case ("spring.schemas" :: Nil) | ("spring.handlers" :: Nil) => MergeStrategy.filterDistinctLines
+      case _ => MergeStrategy.deduplicate
+    }
+  }
+
+  case _ => MergeStrategy.deduplicate
+}
