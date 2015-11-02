@@ -23,7 +23,9 @@ class OutlierQuorumAggregator( plan: OutlierPlan, source: TimeSeriesBase ) exten
   import OutlierQuorumAggregator._
 
   implicit val ec = context.system.dispatcher
-  context.system.scheduler.scheduleOnce( plan.timeout, self, AnalysisTimedOut )
+
+  val pendingWhistle = context.system.scheduler.scheduleOnce( plan.timeout, self, AnalysisTimedOut )
+  override def postStop(): Unit = pendingWhistle.cancel()
 
   override val trace = Trace[OutlierQuorumAggregator]
 
