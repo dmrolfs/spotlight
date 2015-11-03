@@ -1,6 +1,8 @@
 package lineup.stream
 
 import java.net.InetAddress
+import org.slf4j.MarkerFactory
+
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.concurrent.duration._
 import scala.util.{ Failure, Success }
@@ -16,7 +18,7 @@ import lineup.analysis.outlier.algorithm.DBSCANAnalyzer
 import lineup.analysis.outlier.{ DetectionAlgorithmRouter, OutlierDetection }
 import lineup.model.outlier._
 import lineup.model.timeseries.TimeSeriesBase.Merging
-import lineup.model.timeseries.{ DataPoint, TimeSeries, TimeSeriesBase }
+import lineup.model.timeseries.{Topic, DataPoint, TimeSeries, TimeSeriesBase}
 
 
 /**
@@ -87,7 +89,7 @@ object GraphiteModel extends LazyLogging {
           .via(
             Framing.delimiter(
               delimiter = ByteString( "\n" ),
-              maximumFrameLength = scala.math.pow( 2, 20 ).toInt,
+              maximumFrameLength = scala.math.pow( 2, 20 ).toInt, // from graphite documentation
               allowTruncation = true
             )
           )
@@ -116,23 +118,18 @@ object GraphiteModel extends LazyLogging {
     tsMerging: Merging[TimeSeries],
     materializer: Materializer
   ): Flow[String, TimeSeries, Unit] = {
+    val numTopics = 1
+
     Flow[String]
     .mapConcat { toDataPoints }
-    .groupBy { _.topic }
+    .groupedWithin( n = numTopics * windowSize.toMillis.toInt, d = windowSize )// max elems = 1 per milli; duration = windowSize
     .map {
-      case (topic, seriesSource) => {
-        seriesSource
-        .via( status(s"BEFORE_grouping[$topic]") )
-        .groupedWithin( n = windowSize.toMillis.toInt, d = windowSize ) // max elems = 1 per milli; duration = windowSize
-        .via( status(s"AFTER_grouping[$topic]") )
-//        .map { tss =>
-//          tss.drop(1).foldLeft( tss.head ){ (acc, rhs) => tsMerging.merge( acc, rhs ) valueOr { exs => throw exs.head } }
-//        }
-        .mapConcat { identity }
+      _.groupBy{ _.topic }
+      .map { case (topic, tss) =>
+        tss.tail.foldLeft( tss.head ){ (acc, e) => tsMerging.merge( acc, e ) valueOr { exs => throw exs.head } }
       }
     }
-    .flatten( FlattenStrategy.concat )
-    .via( status(s"AFTER_graphite") )
+    .mapConcat { identity }
   }
 
 

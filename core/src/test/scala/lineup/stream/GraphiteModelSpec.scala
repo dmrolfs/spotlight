@@ -1,5 +1,7 @@
 package lineup.stream
 
+import java.util.concurrent.atomic.AtomicInteger
+
 import com.typesafe.scalalogging.LazyLogging
 
 import scala.concurrent.{ Future, Await }
@@ -41,6 +43,16 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
         )
       )
       .map { _.utf8String }
+      .via( status("fromStringFlow") )
+  }
+
+  object Fixture {
+    case class TickA( topic: String, values: Seq[Int] = Seq(TickA.tickId.incrementAndGet()) )
+
+    object TickA {
+      val tickId = new AtomicInteger()
+      def merge( lhs: TickA, rhs: TickA ): TickA = lhs.copy( values = lhs.values ++ rhs.values )
+    }
   }
 
   override def makeAkkaFixture(): Fixture = new Fixture
@@ -82,7 +94,7 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
       result mustBe expected
     }
 
-    "read sliding window" taggedAs (WIP) in { f: Fixture =>
+    "read sliding window" taggedAs(WIP) in { f: Fixture =>
       import f._
       import system.dispatcher
 
@@ -91,41 +103,27 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
       val dp2 = makeDataPoints( pointsA, start = joda.DateTime.now ).take(3)
       val dp3 = makeDataPoints( pointsB, start = joda.DateTime.now ).take(3)
 
-      val expected = TimeSeries( "foo", (dp1 ++ dp3).sortBy( _.timestamp ) )
+      val expected = Set(
+        TimeSeries( "bar", dp2 ),
+        TimeSeries( "foo", (dp1 ++ dp3).sortBy( _.timestamp ) )
+      )
 
-      val flowUnderTest: Flow[String, TimeSeries, Unit] = GraphiteModel.graphiteTimeSeries( parallelism = 4, windowSize = 1.second )
 
-//      val flowUnderTest: Flow[ByteString, TimeSeries, Unit] = {
-//        Flow[ByteString]
-//        .via(
-//          Framing.delimiter(
-//            delimiter = ByteString("]"),
-//            maximumFrameLength = scala.math.pow( 2, 20 ).toInt,
-//            allowTruncation = true
-//          )
-//        )
-//        .map { _.utf8String }
-//        .mapConcat( GraphiteModel.toDataPoints )
-//        .groupBy( _.topic )
-//        .map {
-//          case (topic, seriesStream) => {
-//            seriesStream
-//            .transform { () => SlidingWindow[TimeSeries]( 1.minute ) }
-//            .mapConcat { identity }
-//            .runFold( TimeSeries(topic) ) { (acc, e) =>
-//              implicitly[Merging[TimeSeries]].merge( acc, e ) valueOr { exs => throw exs.head }
-//            }
-//            .map { e => println( s"SUBSTREAM: ${e}" ); e }
-//          }
-//        }
-//        .mapAsync( 4 ) { identity }
-//      }
-
+      val flowUnderTest = GraphiteModel.graphiteTimeSeries( parallelism = 4, windowSize = 1.second )
       val topics = List( "foo", "bar", "foo" )
       val pickles = topics.zip(List(dp1, dp2, dp3)).map{ pickled }.mkString( "\n" )
-      val future = Source( Future.successful(ByteString(pickles)) ).via( stringFlow ).via( status("BEFORE_UNDER_TEST") ).via( flowUnderTest ).via( status("AFTER_UNDER_TEST") ).runWith( Sink.head )
-      val result = Await.result( future, 2.seconds.dilated )
-      result mustBe expected
+      logger info s"pickles =\n$pickles"
+
+      val future = Source( Future.successful(ByteString(pickles)) )
+                   .via( stringFlow )
+                   .via( status("BEFORE_UNDER_TEST") )
+                   .via( flowUnderTest )
+                   .via( status("AFTER_UNDER_TEST") )
+                   .grouped( 10 )
+                   .runWith( Sink.head )
+
+      val result = Await.result( future, 10.seconds.dilated )
+      result.toSet mustBe expected
     }
 
 
@@ -201,6 +199,48 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
       val future = Source( Future.successful(ByteString(pickles)) ).via( stringFlow ).via( flowUnderTest ).runWith( Sink.head )
       val result = Await.result( future, 2.seconds )
       result mustBe expected
+    }
+
+    "grouped Example" in { f: Fixture =>
+      import f._
+
+      val topics = IndexedSeq( "a", "b", "b", "b", "c" )
+
+      val tickFn = () => {
+        val next = Fixture.TickA.tickId.incrementAndGet()
+        val topic = topics( next % topics.size )
+        Fixture.TickA( topic, Seq(next) )
+      }
+
+      def conflateFlow[T](): Flow[T, T, Unit] = {
+        Flow[T]
+        .conflate( _ => List.empty[T] ){ (l, u) => u :: l }
+        .mapConcat(identity)
+      }
+
+      val source = Source( 0.second, 50.millis, tickFn ).map { t => t() }
+
+      val flowUnderTest: Flow[Fixture.TickA, Fixture.TickA, Unit] = {
+        Flow[Fixture.TickA]
+        .via( status( s"BEFORE_FLOW" ) )
+        .groupedWithin( n = 10000, d = 200.millis )
+        .via( status( s"groupedWithin(${200.millis.toCoarsest})" ) )
+        .map {
+          _.groupBy( _.topic )
+          .map {case (topic, es) => es.tail.foldLeft( es.head ) {(acc, e) => Fixture.TickA.merge( acc, e ) } }
+        }
+        .mapConcat {identity}
+        .via( status( s"AFTER" ) )
+      }
+
+      val future = source
+                   .via( flowUnderTest )
+//                   .grouped( 5 )
+                   .via( status(s"FINAL_GROUP") )
+                   .runWith( Sink.head )
+
+      val result = Await.result( future, 5.seconds )
+      result mustBe Fixture.TickA("b", Seq(1,2,3))
     }
 
     "ex1" in { f: Fixture =>
