@@ -1,7 +1,8 @@
 package lineup.analysis.outlier
 
 import akka.actor.UnhandledMessage
-import lineup.model.timeseries.Topic
+import lineup.model.timeseries._
+import org.joda.{ time => joda }
 import scala.concurrent.duration._
 import akka.testkit._
 import org.mockito.Mockito._
@@ -69,8 +70,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
 
       val detect = TestActorRef[OutlierDetection]( OutlierDetection.props( router.ref, plans, Some(defaultPlan) ) )
 
-      val msg = mock[OutlierDetectionMessage]
-      when( msg.topic ) thenReturn "dummy"
+      val msg = OutlierDetectionMessage( TimeSeries( topic = "dummy", points = Row.empty[DataPoint] ) )
 
       detect receive msg
 
@@ -99,11 +99,11 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
       import f._
 
       val defaultPlan = mock[OutlierPlan]
+      when( defaultPlan.algorithms ) thenReturn Set( 'dummy )
 
       val detect = TestActorRef[OutlierDetection]( OutlierDetection.props( router.ref, plans, Some(defaultPlan) ) )
 
-      val msg = mock[OutlierDetectionMessage]
-      when( msg.topic ) thenReturn metric
+      val msg = OutlierDetectionMessage( TimeSeries( topic = metric, points = Row.empty[DataPoint] ) )
 
       detect receive msg
 
@@ -130,7 +130,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
       verify( defaultPlan, never() ).algorithms
     }
 
-    "apply default plan if nameExtractor does not apply and no other plan is assigned" taggedAs(WIP) in { f: Fixture =>
+    "apply default plan if nameExtractor does not apply and no other plan is assigned" in { f: Fixture =>
       import f._
 
       val defaultPlan = OutlierPlan(
@@ -147,8 +147,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
         OutlierDetection.props( router.ref, plans, Some(defaultPlan), emptyExtractId )
       )
 
-      val msgForDefault = mock[OutlierDetectionMessage]
-      when( msgForDefault.topic ) thenReturn "dummy"
+      val msgForDefault = OutlierDetectionMessage( TimeSeries( topic = "dummy", points = Row.empty[DataPoint] ) )
 
       detect receive msgForDefault
 
@@ -161,8 +160,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
         }
       }
 
-      val metricMsg = mock[OutlierDetectionMessage]
-      when( metricMsg.topic ) thenReturn metric
+      val metricMsg = OutlierDetectionMessage( TimeSeries( topic = metric, points = Row.empty[DataPoint] ) )
 
       detect receive metricMsg
 

@@ -1,26 +1,34 @@
 import sbt.Keys._
 import sbt._
+import sbtassembly._
 import spray.revolver.RevolverPlugin._
 
 import BuildSettings._
 
 
 object LineupBuild extends Build {
-  lazy val root = Project(
-    id = "lineup-root",
-    base = file( "." ),
-    settings = defaultBuildSettings ++ Seq(
-      publish := { },
-      publishTo := Some("bogus" at "http://nowhere.com"),
-      publishLocal := { }
-    )
-  ).aggregate( core )
+  lazy val root = (project in file(".")).
+  settings( defaultBuildSettings:_* ).
+  aggregate( core )
 
-  lazy val core = Project(
-    id = "core",
-    base = file( "core" ),
-    settings = defaultBuildSettings
-  )
+  lazy val core = (project in file("core")).
+  settings( defaultBuildSettings:_* )
+
+//  lazy val root = Project(
+//           id = "lineup-root",
+//           base = file( "." ),
+//           settings = defaultBuildSettings ++ Seq(
+//                                                   publish := { },
+//                                                   publishTo := Some("bogus" at "http://nowhere.com"),
+//                                                   publishLocal := { }
+//                                                 )
+//         ).aggregate( core )
+
+//  lazy val core = Project(
+//                           id = "core",
+//                           base = file( "core" ),
+//                           settings = defaultBuildSettings
+//                         )
 
   // lazy val sandbox = Project(
   //   id = "sandbox",

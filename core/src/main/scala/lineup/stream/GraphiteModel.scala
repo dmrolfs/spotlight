@@ -1,28 +1,30 @@
 package lineup.stream
 
 import java.net.InetAddress
+import org.slf4j.MarkerFactory
 
-import scala.concurrent.Future
+import scala.concurrent.{ ExecutionContext, Future }
 import scala.concurrent.duration._
 import scala.util.{ Failure, Success }
 import akka.actor.{ ActorRef, ActorSystem }
 import akka.stream.io.Framing
-import akka.stream.scaladsl.{ Flow, FlowGraph, Source, Tcp }
+import akka.stream.scaladsl._
 import akka.stream.{ ActorMaterializer, Materializer }
 import akka.util.ByteString
-import com.typesafe.config.ConfigFactory
+import com.typesafe.config.{Config, ConfigFactory}
+import com.typesafe.scalalogging.LazyLogging
 import org.joda.{ time => joda }
 import lineup.analysis.outlier.algorithm.DBSCANAnalyzer
 import lineup.analysis.outlier.{ DetectionAlgorithmRouter, OutlierDetection }
 import lineup.model.outlier._
 import lineup.model.timeseries.TimeSeriesBase.Merging
-import lineup.model.timeseries.{ DataPoint, TimeSeries, TimeSeriesBase }
+import lineup.model.timeseries.{Topic, DataPoint, TimeSeries, TimeSeriesBase}
 
 
 /**
  * Created by rolfsd on 10/21/15.
  */
-object GraphiteModel {
+object GraphiteModel extends LazyLogging {
   def main( args: Array[String] ): Unit = {
     Usage.makeUsageConfig.parse( args, Usage.zero ) match {
       case None => System exit -1
@@ -30,33 +32,7 @@ object GraphiteModel {
       case Some( usage ) => {
         val config = ConfigFactory.load
 
-        val timeout: FiniteDuration = usage.timeout getOrElse {
-          if ( config hasPath Usage.DETECTION_TIMEOUT ) {
-            FiniteDuration( config.getDuration(Usage.DETECTION_TIMEOUT).toNanos, NANOSECONDS )
-          } else {
-            FiniteDuration( 500, MILLISECONDS )
-          }
-        }
-
-        val host = usage.sourceHost getOrElse {
-          if ( config hasPath Usage.SOURCE_HOST ) InetAddress getByName config.getString( Usage.SOURCE_HOST )
-          else InetAddress.getLocalHost
-        }
-
-        val port = usage.sourcePort getOrElse { config getInt Usage.SOURCE_PORT }
-
-        val dbscanEPS = usage.dbscanEps getOrElse config.getDouble( Usage.DBSCAN_EPS )
-        val dbscanDensity = usage.dbscanMinDensityConnectedPoints getOrElse {
-          config.getInt( Usage.DBSCAN_MIN_DENSITY_CONNECTED_POINTS )
-        }
-
-//        println( s"\nUsage=$usage" )
-//        println( s"""\nConfig=${if (config.hasPath("lineup")) config.getConfig("lineup") else "<none>"}""" )
-//        println( s"\ntimeout=${timeout.toCoarsest}")
-//        println( s"\nhost=$host")
-//        println( s"\nport=$port")
-//        println( s"\neps=$dbscanEPS")
-//        println( s"\ndensity=$dbscanDensity")
+        val (timeout, host, port, windowSize, dbscanEPS, dbscanDensity) = getConfiguration( usage, config )
 
         implicit val system = ActorSystem( "Monitor" )
         implicit val materializer: Materializer = ActorMaterializer()
@@ -79,7 +55,7 @@ object GraphiteModel {
 
         val detector = system.actorOf( OutlierDetection.props(router, plans = Map(), default = Some(plan)) )
 
-        streamGraphiteOutliers( host, port, detector ) onComplete {
+        streamGraphiteOutliers( host, port, windowSize, detector ) onComplete {
           case Success(_) => system.terminate()
           case Failure( e ) => {
             println( "Failure: " + e.getMessage )
@@ -94,11 +70,14 @@ object GraphiteModel {
   def streamGraphiteOutliers(
     host: InetAddress,
     port: Int,
+    windowSize: FiniteDuration,
     detector: ActorRef
   )(
     implicit system: ActorSystem,
     materializer: Materializer
   ): Future[Unit] = {
+    implicit val dispatcher = system.dispatcher
+
     val serverBinding: Source[Tcp.IncomingConnection, Future[Tcp.ServerBinding]] = Tcp().bind( host.getHostAddress, port )
 
     serverBinding runForeach { connection =>
@@ -109,25 +88,23 @@ object GraphiteModel {
           Flow[ByteString]
           .via(
             Framing.delimiter(
-              delimiter = ByteString( "]" ),
-              maximumFrameLength = scala.math.pow( 2, 20 ).toInt
+              delimiter = ByteString( "\n" ),
+              maximumFrameLength = scala.math.pow( 2, 20 ).toInt, // from graphite documentation
+              allowTruncation = true
             )
           )
           .map { _.utf8String }
         )
 
-        val timeSeries = b.add( graphiteTimeSeries() )
-        val detectOutlier = OutlierDetection.detectOutlier( detector, 1.second, 4 )
+        val timeSeries = b.add( graphiteTimeSeries( windowSize = windowSize ) )
+        val detectOutlier = b.add( OutlierDetection.detectOutlier(detector, 1.second, 4) )
+        val tap = b.add( Flow[Outliers].mapAsync(parallelism = 4){ o => Future{ System.out.println( o.toString); o } } )
+        val last = b.add( Flow[Outliers] map { o => ByteString(o.toString) } )
 
-        val print = b.add( Flow[Outliers] map { o => println( s"outlier:${o}" ); ByteString(o.toString) } )
+        framing ~> timeSeries ~> detectOutlier ~> tap ~> last
 
-        framing ~> timeSeries ~> detectOutlier ~> print
-
-        (framing.inlet, print.outlet)
+        ( framing.inlet, last.outlet )
       }
-
-      //      val seriesWindow = SlidingWindow[TimeSeries]( 1.minute )
-      //      val cohortWindow = SlidingWindow[TimeSeriesCohort]( 1.minute )
 
       connection.handleWith( detection )
     }
@@ -137,21 +114,22 @@ object GraphiteModel {
     parallelism: Int = 4,
     windowSize: FiniteDuration = 1.minute
   )(
-    implicit tsMerging: Merging[TimeSeries],
+    implicit ec: ExecutionContext,
+    tsMerging: Merging[TimeSeries],
     materializer: Materializer
   ): Flow[String, TimeSeries, Unit] = {
+    val numTopics = 1
+
     Flow[String]
     .mapConcat { toDataPoints }
-    .groupBy { _.topic }
+    .groupedWithin( n = numTopics * windowSize.toMillis.toInt, d = windowSize )// max elems = 1 per milli; duration = windowSize
     .map {
-      case (topic, seriesSource) => {
-        seriesSource
-        .transform { () => SlidingWindow( windowSize ) }
-        .mapConcat { identity }
-        .runFold( tsMerging.zero(topic) ) { (acc, e) => tsMerging.merge( acc, e ) valueOr { exs => throw exs.head } }
+      _.groupBy{ _.topic }
+      .map { case (topic, tss) =>
+        tss.tail.foldLeft( tss.head ){ (acc, e) => tsMerging.merge( acc, e ) valueOr { exs => throw exs.head } }
       }
     }
-    .mapAsync( parallelism ) { identity }
+    .mapConcat { identity }
   }
 
 
@@ -175,11 +153,47 @@ object GraphiteModel {
   }
 
 
+  def status[T]( label: String ): Flow[T, T, Unit] = Flow[T].map { e => logger info s"\n$label:${e.toString}"; e }
+
+
+  def getConfiguration( usage: Usage, config: Config ): (FiniteDuration, InetAddress, Int, FiniteDuration, Double, Int) = {
+    val timeout: FiniteDuration = usage.timeout getOrElse {
+      if ( config hasPath Usage.DETECTION_TIMEOUT ) {
+        FiniteDuration( config.getDuration(Usage.DETECTION_TIMEOUT).toNanos, NANOSECONDS )
+      } else {
+        500.millis
+      }
+    }
+
+    val host = usage.sourceHost getOrElse {
+      if ( config hasPath Usage.SOURCE_HOST ) InetAddress getByName config.getString( Usage.SOURCE_HOST )
+      else InetAddress.getLocalHost
+    }
+
+    val port = usage.sourcePort getOrElse { config getInt Usage.SOURCE_PORT }
+
+    val windowSize = usage.windowSize getOrElse {
+      if ( config hasPath Usage.SOURCE_WINDOW_SIZE ) {
+        FiniteDuration( config.getDuration(Usage.SOURCE_WINDOW_SIZE).toNanos, NANOSECONDS )
+      } else {
+        1.minute
+      }
+    }
+
+    val dbscanEPS = usage.dbscanEps getOrElse config.getDouble( Usage.DBSCAN_EPS )
+    val dbscanDensity = usage.dbscanMinDensityConnectedPoints getOrElse {
+      config.getInt( Usage.DBSCAN_MIN_DENSITY_CONNECTED_POINTS )
+    }
+
+    ( timeout, host, port, windowSize, dbscanEPS, dbscanDensity )
+  }
+
   case class Usage(
     timeout: Option[FiniteDuration] = None,
     sourceHost: Option[InetAddress] = None,
     sourcePort: Option[Int] = None,
-    dbscanEps: Option[Double] = None,
+    windowSize: Option[FiniteDuration] = None,
+    dbscanEps: Option[Double] = None, //todo: change to tolerance value independent of axis scaling effects
     dbscanMinDensityConnectedPoints: Option[Int] = None
   )
 
@@ -187,6 +201,7 @@ object GraphiteModel {
     val DETECTION_TIMEOUT = "lineup.timeout"
     val SOURCE_HOST = "lineup.source.host"
     val SOURCE_PORT = "lineup.source.port"
+    val SOURCE_WINDOW_SIZE = "lineup.source.windowSize"
     val DBSCAN_EPS = "lineup.dbscan.eps"
     val DBSCAN_MIN_DENSITY_CONNECTED_POINTS = "lineup.dbscan.minDensityConnectedPoints"
 
@@ -200,7 +215,7 @@ object GraphiteModel {
 
       opt[Long]( 't', "timeout" ) action { (e, c) =>
         c.copy( timeout = Some(FiniteDuration(e, MILLISECONDS)) )
-      } text( "timeout budget (in milliseconds) for outlier detection" )
+      } text( "timeout budget (in milliseconds) for outlier detection. Default is 500ms." )
 
       opt[Double]( 'e', "eps" ) action { (e, c) =>
         c.copy( dbscanEps = Some(e) )
@@ -217,6 +232,10 @@ object GraphiteModel {
       opt[Int]( 'p', "port" ) action { (e, c) =>
         c.copy( sourcePort = Some(e) )
       } text( "connection port of source server")
+
+      opt[Long]( 'w', "window" ) action { (e, c) =>
+        c.copy( windowSize = Some(FiniteDuration(e, SECONDS)) )
+      } text( "batch window size (in seconds) for collecting time series data. Default = 60s." )
 
       help( "help" )
 
