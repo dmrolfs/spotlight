@@ -1,9 +1,6 @@
 package lineup.stream
 
 import java.util.concurrent.atomic.AtomicInteger
-
-import com.typesafe.scalalogging.LazyLogging
-
 import scala.concurrent.{ Future, Await }
 import scala.concurrent.duration._
 import scala.util.Failure
@@ -14,6 +11,7 @@ import akka.stream.scaladsl._
 import akka.stream.io.Framing
 import akka.util.ByteString
 import akka.testkit._
+import com.typesafe.scalalogging.LazyLogging
 import org.apache.commons.math3.random.RandomDataGenerator
 import org.joda.{ time => joda }
 import com.github.nscala_time.time.OrderingImplicits._
@@ -100,8 +98,8 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
 
       val now = joda.DateTime.now
       val dp1 = makeDataPoints( points, start = now ).take(3)
-      val dp2 = makeDataPoints( pointsA, start = joda.DateTime.now ).take(3)
-      val dp3 = makeDataPoints( pointsB, start = joda.DateTime.now ).take(3)
+      val dp2 = makeDataPoints( pointsA, start = joda.DateTime.now + 2L ).take(3)
+      val dp3 = makeDataPoints( pointsB, start = joda.DateTime.now + 3L ).take(3)
 
       val expected = Set(
         TimeSeries( "bar", dp2 ),
