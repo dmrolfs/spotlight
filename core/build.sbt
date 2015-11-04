@@ -1,5 +1,8 @@
 import Dependencies._
 import sbtassembly.AssemblyPlugin.autoImport.MergeStrategy
+//import sbtdocker.DockerKeys._
+
+
 //import sbtassembly.{MergeStrategy, Assembly}
 
 name := "lineup-core"
@@ -46,3 +49,25 @@ assemblyMergeStrategy in assembly := {
 
   case _ => MergeStrategy.deduplicate
 }
+
+docker <<= (docker dependsOn assembly)
+
+dockerfile in docker := {
+  val artifact = ( assemblyOutputPath in assembly ).value
+  val artifactTargetPath = s"/app/${artifact.name}"
+  new Dockerfile {
+    from( "java:8" )
+//    add( artifact, artifactTargetPath )
+    copy( artifact, artifactTargetPath )
+    entryPoint( "java", "-jar", artifactTargetPath )
+  }
+}
+
+imageNames in docker := Seq(
+  ImageName( s"${organization.value}/${name.value}:latest" ), // Sets the latest tag
+  ImageName(
+    namespace = Some( organization.value ),
+    repository = name.value,
+    tag = Some( "v" + version.value )
+  ) // Sets a name with a tag that contains the project version
+)

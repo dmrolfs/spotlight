@@ -1,6 +1,7 @@
 import sbt.Keys._
 import sbt._
 import sbtassembly._
+import sbtdocker.DockerPlugin
 import spray.revolver.RevolverPlugin._
 
 import BuildSettings._
@@ -12,7 +13,8 @@ object LineupBuild extends Build {
   aggregate( core )
 
   lazy val core = (project in file("core")).
-  settings( defaultBuildSettings:_* )
+  settings( defaultBuildSettings:_* ).
+  enablePlugins( DockerPlugin )
 
 //  lazy val root = Project(
 //           id = "lineup-root",
