@@ -44,7 +44,7 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
   }
 
   object Fixture {
-    case class TickA( topic: String, values: Seq[Int] = Seq(TickA.tickId.incrementAndGet()) )
+    case class TickA( topic: String = "[default]", values: Seq[Int] = Seq(TickA.tickId.incrementAndGet()) )
 
     object TickA {
       val tickId = new AtomicInteger()
