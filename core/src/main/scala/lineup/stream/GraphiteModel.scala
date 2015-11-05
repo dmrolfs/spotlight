@@ -33,6 +33,17 @@ object GraphiteModel extends LazyLogging {
         val config = ConfigFactory.load
 
         val (timeout, host, port, windowSize, dbscanEPS, dbscanDensity) = getConfiguration( usage, config )
+        println(
+          s"""
+             |Running Lineup using the following configuation:
+             |\ttimeout       : ${timeout.toCoarsest}
+             |\tbinding       : ${host}:${port}
+             |\twindow        : ${windowSize.toCoarsest}
+             |\tDBSCAN EPS    : ${dbscanEPS}
+             |\tDBSCAN Density: ${dbscanDensity}
+           """.stripMargin
+        )
+
 
         implicit val system = ActorSystem( "Monitor" )
         implicit val materializer: Materializer = ActorMaterializer()
@@ -66,7 +77,6 @@ object GraphiteModel extends LazyLogging {
     }
   }
 
-
   def streamGraphiteOutliers(
     host: InetAddress,
     port: Int,
@@ -98,7 +108,7 @@ object GraphiteModel extends LazyLogging {
 
         val timeSeries = b.add( graphiteTimeSeries( windowSize = windowSize ) )
         val detectOutlier = b.add( OutlierDetection.detectOutlier(detector, 1.second, 4) )
-        val tap = b.add( Flow[Outliers].mapAsync(parallelism = 4){ o => Future{ System.out.println( o.toString); o } } )
+        val tap = b.add( Flow[Outliers].mapAsyncUnordered(parallelism = 4){ o => Future { System.out.println( o.toString); o } } )
         val last = b.add( Flow[Outliers] map { o => ByteString(o.toString) } )
 
         framing ~> timeSeries ~> detectOutlier ~> tap ~> last
