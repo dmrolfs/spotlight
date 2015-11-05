@@ -27,7 +27,7 @@ mainClass in (Compile, run) := Some("lineup.stream.GraphiteModel")
 
 mainClass in assembly := Some("lineup.stream.GraphiteModel")
 
-assemblyJarName in assembly := "cdkLineup.jar"
+assemblyJarName in assembly := s"${organizationName.value}-${name.value}-${version.value}.jar"
 
 assemblyMergeStrategy in assembly := {
   case x if Assembly.isConfigFile(x) => MergeStrategy.concat
@@ -57,9 +57,9 @@ dockerfile in docker := {
   val artifactTargetPath = s"/app/${artifact.name}"
   new Dockerfile {
     from( "java:8" )
-//    add( artifact, artifactTargetPath )
     copy( artifact, artifactTargetPath )
     entryPoint( "java", "-jar", artifactTargetPath )
+    expose( 2004 )
   }
 }
 
