@@ -41,7 +41,6 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
         )
       )
       .map { _.utf8String }
-      .via( status("fromStringFlow") )
   }
 
   object Fixture {
@@ -110,13 +109,10 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
       val flowUnderTest = GraphiteModel.graphiteTimeSeries( parallelism = 4, windowSize = 1.second )
       val topics = List( "foo", "bar", "foo" )
       val pickles = topics.zip(List(dp1, dp2, dp3)).map{ pickled }.mkString( "\n" )
-      logger info s"pickles =\n$pickles"
 
       val future = Source( Future.successful(ByteString(pickles)) )
                    .via( stringFlow )
-                   .via( status("BEFORE_UNDER_TEST") )
                    .via( flowUnderTest )
-                   .via( status("AFTER_UNDER_TEST") )
                    .grouped( 10 )
                    .runWith( Sink.head )
 
@@ -220,21 +216,17 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
 
       val flowUnderTest: Flow[Fixture.TickA, Fixture.TickA, Unit] = {
         Flow[Fixture.TickA]
-        .via( status( s"BEFORE_FLOW" ) )
         .groupedWithin( n = 10000, d = 210.millis )
-        .via( status( s"groupedWithin(${210.millis.toCoarsest})" ) )
         .map {
           _.groupBy( _.topic )
           .map {case (topic, es) => es.tail.foldLeft( es.head ) {(acc, e) => Fixture.TickA.merge( acc, e ) } }
         }
         .mapConcat {identity}
-        .via( status( s"AFTER" ) )
       }
 
       val future = source
                    .via( flowUnderTest )
 //                   .grouped( 5 )
-                   .via( status(s"FINAL_GROUP") )
                    .runWith( Sink.head )
 
       val result = Await.result( future, 5.seconds )

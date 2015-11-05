@@ -67,14 +67,10 @@ class OutlierDetection(
       context become around(detection(outstanding + (aggregator -> requester)))
     }
 
-    case result: Outliers if outstanding.contains( sender() ) => {
-      log info s"outlier detection result topic [${result.topic}] has-anomalies[${result.hasAnomalies}}] algorithms[${result.algorithms}] interval[${result.source.interval})"
-      outstanding( sender() ) ! result
-    }
+    case result: Outliers if outstanding.contains( sender() ) => outstanding( sender() ) ! result
   }
 
-  def dispatch( m: OutlierDetectionMessage, p: OutlierPlan ): ActorRef = trace.block( s"dispatch($m, $p)" ) {
-    log info s"outlier detection request topic [${m.topic}] size[${m.source}}] interval[${m.source.interval})"
+  def dispatch( m: OutlierDetectionMessage, p: OutlierPlan ): ActorRef = {
     val aggregatorName = s"quorum-${p.name}-${fullExtractId(m)}-${ShortUUID()}"
     val aggregator = context.actorOf( OutlierQuorumAggregator.props( p, m.source ), aggregatorName )
 

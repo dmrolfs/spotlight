@@ -1,8 +1,6 @@
 package lineup.stream
 
 import java.net.InetAddress
-import org.slf4j.MarkerFactory
-
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.concurrent.duration._
 import scala.util.{ Failure, Success }
@@ -11,14 +9,14 @@ import akka.stream.io.Framing
 import akka.stream.scaladsl._
 import akka.stream.{ ActorMaterializer, Materializer }
 import akka.util.ByteString
-import com.typesafe.config.{Config, ConfigFactory}
+import com.typesafe.config.{ Config, ConfigFactory }
 import com.typesafe.scalalogging.LazyLogging
 import org.joda.{ time => joda }
 import lineup.analysis.outlier.algorithm.DBSCANAnalyzer
 import lineup.analysis.outlier.{ DetectionAlgorithmRouter, OutlierDetection }
 import lineup.model.outlier._
 import lineup.model.timeseries.TimeSeriesBase.Merging
-import lineup.model.timeseries.{Topic, DataPoint, TimeSeries, TimeSeriesBase}
+import lineup.model.timeseries.{ DataPoint, TimeSeries, TimeSeriesBase }
 
 
 /**
