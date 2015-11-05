@@ -36,9 +36,10 @@ class OutlierQuorumAggregatorSpec extends ParallelAkkaSpec with MockitoSugar {
       f.before()
       test( f )
     } finally {
+      import f._
       f.after()
       val terminated = f.system.terminate()
-      Await.result( terminated, 1.second )
+      Await.result( terminated, 3.seconds.dilated )
     }
   }
 

@@ -221,8 +221,8 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
       val flowUnderTest: Flow[Fixture.TickA, Fixture.TickA, Unit] = {
         Flow[Fixture.TickA]
         .via( status( s"BEFORE_FLOW" ) )
-        .groupedWithin( n = 10000, d = 200.millis )
-        .via( status( s"groupedWithin(${200.millis.toCoarsest})" ) )
+        .groupedWithin( n = 10000, d = 210.millis )
+        .via( status( s"groupedWithin(${210.millis.toCoarsest})" ) )
         .map {
           _.groupBy( _.topic )
           .map {case (topic, es) => es.tail.foldLeft( es.head ) {(acc, e) => Fixture.TickA.merge( acc, e ) } }
