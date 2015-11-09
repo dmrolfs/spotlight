@@ -1,33 +1,219 @@
 package lineup.model.outlier
 
+import com.typesafe.config.{ConfigFactory, Config}
+import lineup.model.timeseries.Topic
+import peds.commons.log.Trace
+
 import scala.concurrent.duration._
 import shapeless._
 import peds.commons.util._
+
+import scala.util.matching.Regex
 
 
 /**
  * Created by rolfsd on 10/4/15.
  */
-case class OutlierPlan(
+final case class OutlierPlan private[outlier] (
   name: String,
+  appliesTo: OutlierPlan.AppliesTo,
   algorithms: Set[Symbol],
   timeout: FiniteDuration,
   isQuorum: IsQuorum,
   reduce: ReduceOutliers,
-  algorithmProperties: Map[String, Any] = Map()
+  algorithmConfig: Config
 ) {
-  override def toString: String = s"${getClass.safeSimpleName}($name)"
+  override def toString: String = {
+    getClass.safeSimpleName + "(" +
+      s"""name:[$name], timeout:[${timeout.toCoarsest}], """ +
+      s"""algorithms:[${algorithms.mkString(",")}], algorithmConfig:[${algorithmConfig.root}]""" +
+    ")"
+  }
 }
 
 object OutlierPlan {
-  val nameLens: Lens[OutlierPlan, String] = lens[OutlierPlan] >> 'name
-  val algorithmsLens: Lens[OutlierPlan, Set[Symbol]] = lens[OutlierPlan] >> 'algorithms
-  val timeoutLens: Lens[OutlierPlan, FiniteDuration] = lens[OutlierPlan] >> 'timeout
-  val isQuorumLens: Lens[OutlierPlan, IsQuorum] = lens[OutlierPlan] >> 'isQuorum
-  val reduceLens: Lens[OutlierPlan, ReduceOutliers] = lens[OutlierPlan] >> 'reduce
-  val algorithmPropertiesLens: Lens[OutlierPlan, Map[String, Any]] = lens[OutlierPlan] >> 'algorithmProperties
+  val trace = Trace[OutlierPlan.type]
+  type AppliesTo = (Any) => Boolean
+  type ExtractTopic = PartialFunction[Any, Option[Topic]]
+
+  def apply(
+    name: String,
+    timeout: FiniteDuration,
+    isQuorum: IsQuorum,
+    reduce: ReduceOutliers,
+    algorithms: Set[Symbol],
+    algorithmConfig: Config
+  )(
+    appliesTo: AppliesTo
+  ): OutlierPlan = {
+    OutlierPlan(
+      name = name,
+      appliesTo = appliesTo,
+      algorithms = algorithms,
+      timeout = timeout,
+      isQuorum = isQuorum,
+      reduce = reduce,
+      algorithmConfig = algorithmConfig
+    )
+  }
+
+  def apply(
+    name: String,
+    timeout: FiniteDuration,
+    isQuorum: IsQuorum,
+    reduce: ReduceOutliers,
+    algorithms: Set[Symbol],
+    algorithmConfig: Config
+  )(
+    appliesTo: PartialFunction[Any, Boolean]
+  ): OutlierPlan = {
+    OutlierPlan(
+      name = name,
+      appliesTo = appliesTo,
+      algorithms = algorithms,
+      timeout = timeout,
+      isQuorum = isQuorum,
+      reduce = reduce,
+      algorithmConfig = algorithmConfig
+    )
+  }
+
+  def forTopics(
+    name: String,
+    timeout: FiniteDuration,
+    isQuorum: IsQuorum,
+    reduce: ReduceOutliers,
+    algorithms: Set[Symbol],
+    algorithmConfig: Config,
+    extractTopic: ExtractTopic,
+    topics: Set[Topic]
+  ): OutlierPlan = {
+    OutlierPlan(
+      name = name,
+      appliesTo = appliesToTopics( topics, extractTopic ),
+      algorithms = algorithms,
+      timeout = timeout,
+      isQuorum = isQuorum,
+      reduce = reduce,
+      algorithmConfig = algorithmConfig
+    )
+  }
+
+//  def forTopics(
+//    name: String,
+//    timeout: FiniteDuration,
+//    isQuorum: IsQuorum,
+//    reduce: ReduceOutliers,
+//    algorithms: Set[Symbol],
+//    algorithmConfig: Config,
+//    extractTopic: ExtractTopic,
+//    topics: String*
+//  ): OutlierPlan = {
+//    OutlierPlan(
+//      name = name,
+//      appliesTo = appliesToTopics( topics.map{ Topic(_) }.toSet, extractTopic ),
+//      algorithms = algorithms,
+//      timeout = timeout,
+//      isQuorum = isQuorum,
+//      reduce = reduce,
+//      algorithmConfig = algorithmConfig
+//    )
+//  }
+
+  def forRegex(
+    name: String,
+    timeout: FiniteDuration,
+    isQuorum: IsQuorum,
+    reduce: ReduceOutliers,
+    algorithms: Set[Symbol],
+    algorithmConfig: Config,
+    extractTopic: ExtractTopic,
+    regex: Regex
+  ): OutlierPlan = {
+    OutlierPlan(
+      name = name,
+      appliesTo = appliesToRegex( regex, extractTopic ),
+      algorithms = algorithms,
+      timeout = timeout,
+      isQuorum = isQuorum,
+      reduce = reduce,
+      algorithmConfig = algorithmConfig
+    )
+  }
+
+  def default(
+    name: String,
+    timeout: FiniteDuration,
+    isQuorum: IsQuorum,
+    reduce: ReduceOutliers,
+    algorithms: Set[Symbol],
+    algorithmConfig: Config = ConfigFactory.empty
+  ): OutlierPlan = {
+    OutlierPlan(
+      name = name,
+      appliesTo = defaultAppliesTo,
+      algorithms = algorithms,
+      timeout = timeout,
+      isQuorum = isQuorum,
+      reduce = reduce,
+      algorithmConfig = algorithmConfig
+    )
+  }
+
+  private def appliesToPF( pf: PartialFunction[Any, Boolean] ): AppliesTo = (message: Any) => {
+    trace.briefBlock( s"appliesToPF($message)" ) {
+      if ( pf isDefinedAt message ) pf( message ) else false
+    }
+  }
+
+  private def appliesToTopics( topics: Set[Topic], extractTopic: ExtractTopic ): AppliesTo = {
+    (message: Any) => {
+      trace.block( s"appliesToTopics(${message.getClass.safeSimpleName}(${extractTopic(message)}))" ){
+        trace( s"""topics:[${topics.mkString(",")}]""" )
+        if ( extractTopic isDefinedAt message ) extractTopic( message ) map { topics contains _ } getOrElse { false }
+        else false
+      }
+    }
+  }
+
+  private def appliesToRegex( regex: Regex, extractTopic: ExtractTopic ): AppliesTo = {
+    (message: Any) => {
+      trace.block( s"appliesToRegex(${message.getClass.safeSimpleName}(${extractTopic(message)}))" ){
+        trace( s"""regex:[${regex}]""" )
+
+        if ( !extractTopic.isDefinedAt(message) ) false
+        else {
+          val result = extractTopic( message ) flatMap { t => regex findFirstMatchIn t.toString }
+          result.isDefined
+        }
+      }
+    }
+  }
+
+  private val defaultAppliesTo: AppliesTo = (message: Any) => { trace.briefBlock(s"defaultAppliesTo($message)"){ true } }
 }
 
+
+
+//case class OutlierPlan(
+//  name: String,
+//  algorithms: Set[Symbol],
+//  timeout: FiniteDuration,
+//  isQuorum: IsQuorum,
+//  reduce: ReduceOutliers,
+//  algorithmProperties: Map[String, Any] = Map()
+//) {
+//  override def toString: String = s"${getClass.safeSimpleName}($name)"
+//}
+//
+//object OutlierPlan {
+//  val nameLens: Lens[OutlierPlan, String] = lens[OutlierPlan] >> 'name
+//  val algorithmsLens: Lens[OutlierPlan, Set[Symbol]] = lens[OutlierPlan] >> 'algorithms
+//  val timeoutLens: Lens[OutlierPlan, FiniteDuration] = lens[OutlierPlan] >> 'timeout
+//  val isQuorumLens: Lens[OutlierPlan, IsQuorum] = lens[OutlierPlan] >> 'isQuorum
+//  val reduceLens: Lens[OutlierPlan, ReduceOutliers] = lens[OutlierPlan] >> 'reduce
+//  val algorithmPropertiesLens: Lens[OutlierPlan, Map[String, Any]] = lens[OutlierPlan] >> 'algorithmProperties
+//}
 
 
 //trait OutlierPlan extends Entity {

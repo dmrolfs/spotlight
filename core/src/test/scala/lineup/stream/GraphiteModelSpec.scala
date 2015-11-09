@@ -1,6 +1,8 @@
 package lineup.stream
 
 import java.util.concurrent.atomic.AtomicInteger
+import com.typesafe.config.ConfigFactory
+
 import scala.concurrent.{ Future, Await }
 import scala.concurrent.duration._
 import scala.util.Failure
@@ -91,7 +93,7 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
       result mustBe expected
     }
 
-    "read sliding window" taggedAs(WIP) in { f: Fixture =>
+    "read sliding window" in { f: Fixture =>
       import f._
       import system.dispatcher
 
@@ -121,26 +123,28 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
     }
 
 
-    "detect Outliers" in { f: Fixture =>
+    "detect Outliers" taggedAs (WIP) in { f: Fixture =>
       import f._
       import system.dispatcher
 
       val algos = Set( DBSCANAnalyzer.algorithm )
-      val defaultPlan = OutlierPlan(
+      val defaultPlan = OutlierPlan.default(
         name = "DEFAULT_PLAN",
         algorithms = algos,
         timeout = 500.millis,
         isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = algos.size, triggerPoint = 1 ),
         reduce = GraphiteModel.demoReduce,
-        algorithmProperties = Map(
-          DBSCANAnalyzer.EPS -> 5.0,
-          DBSCANAnalyzer.MIN_DENSITY_CONNECTED_POINTS -> 3
+        algorithmConfig = ConfigFactory.parseString(
+          s"""
+             |${DBSCANAnalyzer.EPS}: 5.0
+             |${DBSCANAnalyzer.MIN_DENSITY_CONNECTED_POINTS}: 3
+          """.stripMargin
         )
       )
 
       val router = system.actorOf( DetectionAlgorithmRouter.props, "router" )
       val dbscan = system.actorOf( DBSCANAnalyzer.props(router), "dbscan" )
-      val detector = system.actorOf( OutlierDetection.props(router, Map(), Some(defaultPlan)), "detectOutliers" )
+      val detector = system.actorOf( OutlierDetection.props(router, Seq(defaultPlan)), "detectOutliers" )
 
       val now = joda.DateTime.now
       val dp1 = makeDataPoints( points, start = now, period = 1.millis )
@@ -160,37 +164,11 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
       val detectFlow = OutlierDetection.detectOutlier( detector, maxAllowedWait = 2.seconds, parallelism = 4 )
 
       val flowUnderTest = graphiteFlow via detectFlow
-//      val flowUnderTest: Flow[ByteString, Outliers, Unit] = {
-//        Flow[ByteString]
-//        .via(
-//          Framing.delimiter(
-//            delimiter = ByteString("]"),
-//            maximumFrameLength = scala.math.pow( 2, 20 ).toInt,
-//            allowTruncation = true
-//          )
-//        )
-//        .map { _.utf8String }
-//        .mapConcat( GraphiteModel.toDataPoints )
-//        .groupBy( _.topic )
-//        .map {
-//          case (topic, seriesStream) => {
-//            seriesStream
-//            .transform { () => SlidingWindow[TimeSeries]( 1.minute ) }
-//            .mapConcat { identity }
-//            .runFold( TimeSeries(topic) ) { (acc, e) =>
-//              implicitly[Merging[TimeSeries]].merge( acc, e ) valueOr { exs => throw exs.head }
-//            }
-//            .map { e => println( s"SUBSTREAM: ${e}" ); e }
-//          }
-//        }
-//        .mapAsync( 4 ) { identity }
-//        .via( OutlierDetection.detectOutlier(detector, 2.seconds, 4) )
-//      }
 
       val topics = List( "foo", "bar", "foo" )
       val pickles = topics.zip(dp1 :: Nil).map{ pickled }.mkString( "\n" )
-//      val pickles = topics.zip(dp1 :: dp2 :: dp3 :: Nil).map{ pickled }.mkString( "\n" )
-      val future = Source( Future.successful(ByteString(pickles)) ).via( stringFlow ).via( flowUnderTest ).runWith( Sink.head )
+
+      val future = Source( Future.successful(ByteString(pickles)) ).via( stringFlow ).via(status("BEFORE")).via( flowUnderTest ).via(status("AFTER")).runWith( Sink.head )
       val result = Await.result( future, 2.seconds )
       result mustBe expected
     }
