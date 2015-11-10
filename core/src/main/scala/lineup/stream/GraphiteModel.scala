@@ -134,18 +134,15 @@ object GraphiteModel extends LazyLogging {
     .map { e =>
       try {
         val r = plans.find{ _ appliesTo e }
-        println( s"Found plan for ${e.topic}:$r [${r.isDefined}]" )
+        logger info s"""Plan for ${e.topic}: ${r getOrElse "NONE"}"""
       } catch {
-        case ex: Throwable => {
-          println( s"\n\nEXCEPTION: $ex" )
-          println( s" STACK: ${ex.printStackTrace()}\n\n" )
-        }
+        case ex: Throwable => logger error( s"\n\nEXCEPTION: ${ex}\nSTACK: ${ex.printStackTrace()}\n\n" )
       }
 
       e
     }
     .filter { ts => plans.find{ _ appliesTo ts }.isDefined }
-    .groupedWithin( n = numTopics * windowSize.toMillis.toInt, d = windowSize )// max elems = 1 per milli; duration = windowSize
+    .groupedWithin( n = numTopics * windowSize.toMillis.toInt, d = windowSize ) // max elems = 1 per milli; duration = windowSize
     .map {
       _.groupBy{ _.topic }
       .map { case (topic, tss) =>
@@ -181,11 +178,6 @@ object GraphiteModel extends LazyLogging {
       }
     }
   }
-//    new ReduceOutliers {
-//    override def apply( results: SeriesOutlierResults, source: TimeSeriesBase): Outliers = {
-//      results.headOption map { _._2 } getOrElse NoOutliers( algorithms = Set(DBSCANAnalyzer.algorithm), source = source )
-//    }
-//  }
 
 
   def status[T]( label: String ): Flow[T, T, Unit] = Flow[T].map { e => logger info s"\n$label:${e.toString}"; e }
@@ -221,7 +213,7 @@ object GraphiteModel extends LazyLogging {
         val TOPICS = "topics"
         val REGEX = "regex"
 
-        val ( timeout, algorithms, algorithmConfig) = pullCommonPlanFacets( spec )
+        val ( timeout, algorithms ) = pullCommonPlanFacets( spec )
 
         if ( spec.hasPath( IS_DEFAULT ) && spec.getBoolean( IS_DEFAULT ) ) {
           Some(
@@ -273,13 +265,12 @@ object GraphiteModel extends LazyLogging {
   }
 
 
-  private def pullCommonPlanFacets( spec: Config ): (FiniteDuration, Set[Symbol], Config) = {
+  private def pullCommonPlanFacets( spec: Config ): (FiniteDuration, Set[Symbol]) = {
     import scala.collection.JavaConversions._
 
     (
       FiniteDuration( spec.getDuration("timeout").toNanos, NANOSECONDS ),
-      spec.getStringList("algorithms").toSet.map{ a: String => Symbol(a) },
-      spec.getConfig( "algorithm-config" )
+      spec.getStringList("algorithms").toSet.map{ a: String => Symbol(a) }
     )
   }
 
@@ -294,7 +285,7 @@ object GraphiteModel extends LazyLogging {
   object Settings {
     val SOURCE_HOST = "lineup.source.host"
     val SOURCE_PORT = "lineup.source.port"
-    val SOURCE_WINDOW_SIZE = "lineup.source.windowSize"
+    val SOURCE_WINDOW_SIZE = "lineup.source.window-size"
 
     def zero: Settings = Settings( )
 
