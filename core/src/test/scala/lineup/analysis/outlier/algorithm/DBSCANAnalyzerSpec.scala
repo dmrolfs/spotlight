@@ -1,5 +1,7 @@
 package lineup.analysis.outlier.algorithm
 
+import com.typesafe.config.ConfigFactory
+
 import scala.concurrent.duration._
 import java.util.concurrent.atomic.AtomicInteger
 import akka.event.EventStream
@@ -56,7 +58,12 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
           'dbscan,
           aggregator.ref,
           DetectOutliersInSeries( TimeSeries("series", points) ),
-          Map( DBSCANAnalyzer.EPS -> 5.0, DBSCANAnalyzer.MIN_DENSITY_CONNECTED_POINTS -> 3 )
+          ConfigFactory.parseString(
+            s"""
+               |${DBSCANAnalyzer.EPS}: 5.0
+               |${DBSCANAnalyzer.MIN_DENSITY_CONNECTED_POINTS}: 3
+             """.stripMargin
+          )
         )
       )
     }
@@ -68,7 +75,13 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       val expectedValues = Row( 18.8, 25.2, 31.5, 22.0, 24.1, 39.2 )
       val expected = points filter { expectedValues contains _.value } sortBy { _.timestamp }
 
-      val algProps: Map[String, Any] = Map( DBSCANAnalyzer.EPS -> 5.0, DBSCANAnalyzer.MIN_DENSITY_CONNECTED_POINTS -> 3 )
+      val algProps = ConfigFactory.parseString(
+        s"""
+           |${DBSCANAnalyzer.EPS}: 5.0
+           |${DBSCANAnalyzer.MIN_DENSITY_CONNECTED_POINTS}: 3
+        """.stripMargin
+      )
+
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered )
       analyzer.receive( DetectUsing( 'dbscan, aggregator.ref, DetectOutliersInSeries(series), algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "detect" ) {
@@ -116,7 +129,13 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
 
       val series = TimeSeries( "series", myPoints )
 
-      val algProps: Map[String, Any] = Map( DBSCANAnalyzer.EPS -> 5.0, DBSCANAnalyzer.MIN_DENSITY_CONNECTED_POINTS -> 3 )
+      val algProps = ConfigFactory.parseString(
+        s"""
+           |${DBSCANAnalyzer.EPS}: 5.0
+           |${DBSCANAnalyzer.MIN_DENSITY_CONNECTED_POINTS}: 3
+        """.stripMargin
+      )
+
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered )
       analyzer.receive( DetectUsing( 'dbscan, aggregator.ref, DetectOutliersInSeries(series), algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "detect" ) {
@@ -144,7 +163,13 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       val series4 = tweakSeries( TimeSeries("series.four", pointsB), range )
       val cohort = TimeSeriesCohort( Row(series1, series2, series3, series4) )
 
-      val algProps: Map[String, Any] = Map( DBSCANAnalyzer.EPS -> 5.0, DBSCANAnalyzer.MIN_DENSITY_CONNECTED_POINTS -> 2 )
+      val algProps = ConfigFactory.parseString(
+        s"""
+           |${DBSCANAnalyzer.EPS}: 5.0
+           |${DBSCANAnalyzer.MIN_DENSITY_CONNECTED_POINTS}: 2
+        """.stripMargin
+      )
+
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered )
       analyzer.receive( DetectUsing( 'dbscan, aggregator.ref, DetectOutliersInCohort(cohort), algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "detect" ) {
@@ -178,7 +203,13 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       val series4 = tweakSeries( TimeSeries("series.four", pointsB), range )
       val cohort = TimeSeriesCohort( Row(series1, series2, series3, series4) )
 
-      val algProps: Map[String, Any] = Map( DBSCANAnalyzer.EPS -> 5.0, DBSCANAnalyzer.MIN_DENSITY_CONNECTED_POINTS -> 2 )
+      val algProps = ConfigFactory.parseString(
+        s"""
+           |${DBSCANAnalyzer.EPS}: 5.0
+           |${DBSCANAnalyzer.MIN_DENSITY_CONNECTED_POINTS}: 2
+        """.stripMargin
+      )
+
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered )
       analyzer.receive( DetectUsing( 'dbscan, aggregator.ref, DetectOutliersInCohort(cohort), algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "detect" ) {

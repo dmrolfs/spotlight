@@ -3,20 +3,21 @@ package lineup.stream
 import java.net.InetAddress
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.concurrent.duration._
+import scala.util.matching.Regex
 import scala.util.{ Failure, Success }
 import akka.actor.{ ActorRef, ActorSystem }
 import akka.stream.io.Framing
 import akka.stream.scaladsl._
 import akka.stream.{ ActorMaterializer, Materializer }
 import akka.util.ByteString
-import com.typesafe.config.{ Config, ConfigFactory }
+import com.typesafe.config.{ ConfigObject, Config, ConfigFactory }
 import com.typesafe.scalalogging.LazyLogging
 import org.joda.{ time => joda }
 import lineup.analysis.outlier.algorithm.DBSCANAnalyzer
 import lineup.analysis.outlier.{ DetectionAlgorithmRouter, OutlierDetection }
 import lineup.model.outlier._
 import lineup.model.timeseries.TimeSeriesBase.Merging
-import lineup.model.timeseries.{ DataPoint, TimeSeries, TimeSeriesBase }
+import lineup.model.timeseries.{ Topic, DataPoint, TimeSeries, TimeSeriesBase }
 
 
 /**
@@ -24,21 +25,19 @@ import lineup.model.timeseries.{ DataPoint, TimeSeries, TimeSeriesBase }
  */
 object GraphiteModel extends LazyLogging {
   def main( args: Array[String] ): Unit = {
-    Usage.makeUsageConfig.parse( args, Usage.zero ) match {
+    Settings.makeUsageConfig.parse( args, Settings.zero ) match {
       case None => System exit -1
 
       case Some( usage ) => {
         val config = ConfigFactory.load
 
-        val (timeout, host, port, windowSize, dbscanEPS, dbscanDensity) = getConfiguration( usage, config )
+        val (host, port, windowSize, plans) = getConfiguration( usage, config )
         println(
           s"""
              |Running Lineup using the following configuation:
-             |\ttimeout       : ${timeout.toCoarsest}
              |\tbinding       : ${host}:${port}
              |\twindow        : ${windowSize.toCoarsest}
-             |\tDBSCAN EPS    : ${dbscanEPS}
-             |\tDBSCAN Density: ${dbscanDensity}
+             |\tplans         : [${plans.zipWithIndex.map{ case (p,i) => f"${i}%2d: ${p}"}.mkString("\n","\n","\n")}]
            """.stripMargin
         )
 
@@ -50,21 +49,9 @@ object GraphiteModel extends LazyLogging {
         val router = system.actorOf( DetectionAlgorithmRouter.props, "router" )
         val dbscan = system.actorOf( DBSCANAnalyzer.props( router ), "dbscan" )
 
-        val plan = OutlierPlan(
-          name = "default-plan",
-          algorithms = Set( DBSCANAnalyzer.algorithm ),
-          timeout = timeout,
-          isQuorum = IsQuorum.AtLeastQuorumSpecification( 1, 1 ),
-          reduce = demoReduce,
-          algorithmProperties = Map(
-            DBSCANAnalyzer.EPS -> dbscanEPS,
-            DBSCANAnalyzer.MIN_DENSITY_CONNECTED_POINTS -> dbscanDensity
-          )
-        )
+        val detector = system.actorOf( OutlierDetection.props(router, plans) )
 
-        val detector = system.actorOf( OutlierDetection.props(router, plans = Map(), default = Some(plan)) )
-
-        streamGraphiteOutliers( host, port, windowSize, detector ) onComplete {
+        streamGraphiteOutliers( host, port, windowSize, detector, plans ) onComplete {
           case Success(_) => system.terminate()
           case Failure( e ) => {
             println( "Failure: " + e.getMessage )
@@ -79,7 +66,8 @@ object GraphiteModel extends LazyLogging {
     host: InetAddress,
     port: Int,
     windowSize: FiniteDuration,
-    detector: ActorRef
+    detector: ActorRef,
+    plans: Seq[OutlierPlan]
   )(
     implicit system: ActorSystem,
     materializer: Materializer
@@ -104,7 +92,19 @@ object GraphiteModel extends LazyLogging {
           .map { _.utf8String }
         )
 
-        val timeSeries = b.add( graphiteTimeSeries( windowSize = windowSize ) )
+//        val invalidateCacheAndReset = b.add(
+//          Flow[String] collect {
+//            case "reset" => {
+//              println( "RESETTING STREAM CONFIGURATION")
+//              ConfigFactory.invalidateCaches()
+//              throw new IllegalStateException( "RESETTING STREAM" )
+//            }
+//
+//            case e => e
+//          }
+//        )
+
+        val timeSeries = b.add( graphiteTimeSeries( windowSize = windowSize, plans = plans ) )
         val detectOutlier = b.add( OutlierDetection.detectOutlier(detector, 1.second, 4) )
         val tap = b.add( Flow[Outliers].mapAsyncUnordered(parallelism = 4){ o => Future { System.out.println( o.toString); o } } )
         val last = b.add( Flow[Outliers] map { o => ByteString(o.toString) } )
@@ -120,7 +120,8 @@ object GraphiteModel extends LazyLogging {
 
   def graphiteTimeSeries(
     parallelism: Int = 4,
-    windowSize: FiniteDuration = 1.minute
+    windowSize: FiniteDuration = 1.minute,
+    plans: Seq[OutlierPlan]
   )(
     implicit ec: ExecutionContext,
     tsMerging: Merging[TimeSeries],
@@ -130,7 +131,18 @@ object GraphiteModel extends LazyLogging {
 
     Flow[String]
     .mapConcat { toDataPoints }
-    .groupedWithin( n = numTopics * windowSize.toMillis.toInt, d = windowSize )// max elems = 1 per milli; duration = windowSize
+    .map { e =>
+      try {
+        val r = plans.find{ _ appliesTo e }
+        logger info s"""Plan for ${e.topic}: ${r getOrElse "NONE"}"""
+      } catch {
+        case ex: Throwable => logger error( s"\n\nEXCEPTION: ${ex}\nSTACK: ${ex.printStackTrace()}\n\n" )
+      }
+
+      e
+    }
+    .filter { ts => plans.find{ _ appliesTo ts }.isDefined }
+    .groupedWithin( n = numTopics * windowSize.toMillis.toInt, d = windowSize ) // max elems = 1 per milli; duration = windowSize
     .map {
       _.groupBy{ _.topic }
       .map { case (topic, tss) =>
@@ -155,8 +167,15 @@ object GraphiteModel extends LazyLogging {
 
 
   val demoReduce = new ReduceOutliers {
-    override def apply(results: SeriesOutlierResults, source: TimeSeriesBase): Outliers = {
-      results.headOption map { _._2 } getOrElse NoOutliers( algorithms = Set(DBSCANAnalyzer.algorithm), source = source )
+    override def apply(
+      results: SeriesOutlierResults,
+      source: TimeSeriesBase
+    )(
+      implicit ec: ExecutionContext
+    ): Future[Outliers] = {
+      Future {
+        results.headOption map { _._2 } getOrElse { NoOutliers( algorithms = Set(DBSCANAnalyzer.algorithm), source = source ) }
+      }
     }
   }
 
@@ -164,74 +183,117 @@ object GraphiteModel extends LazyLogging {
   def status[T]( label: String ): Flow[T, T, Unit] = Flow[T].map { e => logger info s"\n$label:${e.toString}"; e }
 
 
-  def getConfiguration( usage: Usage, config: Config ): (FiniteDuration, InetAddress, Int, FiniteDuration, Double, Int) = {
-    val timeout: FiniteDuration = usage.timeout getOrElse {
-      if ( config hasPath Usage.DETECTION_TIMEOUT ) {
-        FiniteDuration( config.getDuration(Usage.DETECTION_TIMEOUT).toNanos, NANOSECONDS )
-      } else {
-        500.millis
-      }
-    }
-
+  def getConfiguration(usage: Settings, config: Config ): (InetAddress, Int, FiniteDuration, Seq[OutlierPlan]) = {
     val host = usage.sourceHost getOrElse {
-      if ( config hasPath Usage.SOURCE_HOST ) InetAddress getByName config.getString( Usage.SOURCE_HOST )
+      if ( config hasPath Settings.SOURCE_HOST ) InetAddress getByName config.getString( Settings.SOURCE_HOST )
       else InetAddress.getLocalHost
     }
 
-    val port = usage.sourcePort getOrElse { config getInt Usage.SOURCE_PORT }
+    val port = usage.sourcePort getOrElse { config getInt Settings.SOURCE_PORT }
 
     val windowSize = usage.windowSize getOrElse {
-      if ( config hasPath Usage.SOURCE_WINDOW_SIZE ) {
-        FiniteDuration( config.getDuration(Usage.SOURCE_WINDOW_SIZE).toNanos, NANOSECONDS )
+      if ( config hasPath Settings.SOURCE_WINDOW_SIZE ) {
+        FiniteDuration( config.getDuration( Settings.SOURCE_WINDOW_SIZE ).toNanos, NANOSECONDS )
       } else {
         1.minute
       }
     }
 
-    val dbscanEPS = usage.dbscanEps getOrElse config.getDouble( Usage.DBSCAN_EPS )
-    val dbscanDensity = usage.dbscanMinDensityConnectedPoints getOrElse {
-      config.getInt( Usage.DBSCAN_MIN_DENSITY_CONNECTED_POINTS )
-    }
+    val plans = makePlans( config.getConfig( "lineup.detection-plans" ))
 
-    ( timeout, host, port, windowSize, dbscanEPS, dbscanDensity )
+    ( host, port, windowSize, plans )
   }
 
-  case class Usage(
-    timeout: Option[FiniteDuration] = None,
+  private def makePlans( planSpecifications: Config ): Seq[OutlierPlan] = {
+    import scala.collection.JavaConversions._
+
+    val result = planSpecifications.root.collect{ case (n, s: ConfigObject) => (n, s.toConfig) }.toSeq.map {
+      case (name, spec) => {
+        val IS_DEFAULT = "is-default"
+        val TOPICS = "topics"
+        val REGEX = "regex"
+
+        val ( timeout, algorithms ) = pullCommonPlanFacets( spec )
+
+        if ( spec.hasPath( IS_DEFAULT ) && spec.getBoolean( IS_DEFAULT ) ) {
+          Some(
+            OutlierPlan.default(
+              name = name,
+              timeout = timeout,
+              isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = algorithms.size, triggerPoint = 1 ),
+              reduce = demoReduce,
+              algorithms = algorithms,
+              specification = spec
+            )
+          )
+        } else if ( spec hasPath TOPICS ) {
+          import scala.collection.JavaConverters._
+          println( s"TOPIC SPEC Origin: ${spec.origin()} LINE:${spec.origin().lineNumber()}")
+
+          Some(
+            OutlierPlan.forTopics(
+              name = name,
+              timeout = timeout,
+              isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = algorithms.size, triggerPoint = 1 ),
+              reduce = demoReduce,
+              algorithms = algorithms,
+              specification = spec,
+              extractTopic = OutlierDetection.extractOutlierDetectionTopic,
+              topics = spec.getStringList(TOPICS).asScala.map{ Topic(_) }.toSet
+            )
+          )
+        } else if ( spec hasPath REGEX ) {
+          Some(
+            OutlierPlan.forRegex(
+              name = name,
+              timeout = timeout,
+              isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = algorithms.size, triggerPoint = 1 ),
+              reduce = demoReduce,
+              algorithms = algorithms,
+              specification = spec,
+              extractTopic = OutlierDetection.extractOutlierDetectionTopic,
+              regex = new Regex( spec.getString(REGEX) )
+            )
+          )
+        } else {
+          None
+        }
+      }
+    }
+
+    result.flatten.sorted
+  }
+
+
+  private def pullCommonPlanFacets( spec: Config ): (FiniteDuration, Set[Symbol]) = {
+    import scala.collection.JavaConversions._
+
+    (
+      FiniteDuration( spec.getDuration("timeout").toNanos, NANOSECONDS ),
+      spec.getStringList("algorithms").toSet.map{ a: String => Symbol(a) }
+    )
+  }
+
+
+  case class Settings(
     sourceHost: Option[InetAddress] = None,
     sourcePort: Option[Int] = None,
     windowSize: Option[FiniteDuration] = None,
-    dbscanEps: Option[Double] = None, //todo: change to tolerance value independent of axis scaling effects
-    dbscanMinDensityConnectedPoints: Option[Int] = None
+    plans: Seq[OutlierPlan] = Seq.empty[OutlierPlan]
   )
 
-  object Usage {
-    val DETECTION_TIMEOUT = "lineup.timeout"
+  object Settings {
     val SOURCE_HOST = "lineup.source.host"
     val SOURCE_PORT = "lineup.source.port"
-    val SOURCE_WINDOW_SIZE = "lineup.source.windowSize"
-    val DBSCAN_EPS = "lineup.dbscan.eps"
-    val DBSCAN_MIN_DENSITY_CONNECTED_POINTS = "lineup.dbscan.minDensityConnectedPoints"
+    val SOURCE_WINDOW_SIZE = "lineup.source.window-size"
 
-    def zero: Usage = Usage()
+    def zero: Settings = Settings( )
 
-    def makeUsageConfig = new scopt.OptionParser[Usage]( "lineup" ) {
+    def makeUsageConfig = new scopt.OptionParser[Settings]( "lineup" ) {
       //todo remove once release is current with corresponding dev
       implicit val inetAddressRead: scopt.Read[InetAddress] = scopt.Read.reads { InetAddress.getByName(_) }
 
       head( "lineup", "0.1.a" )
-
-      opt[Long]( 't', "timeout" ) action { (e, c) =>
-        c.copy( timeout = Some(FiniteDuration(e, MILLISECONDS)) )
-      } text( "timeout budget (in milliseconds) for outlier detection. Default is 500ms." )
-
-      opt[Double]( 'e', "eps" ) action { (e, c) =>
-        c.copy( dbscanEps = Some(e) )
-      } text( "dbscan eps parameter" )
-
-      opt[Int]( 'd', "density" ) action { (e, c) =>
-        c.copy( dbscanMinDensityConnectedPoints = Some(e) )
-      } text( "dbscan minimum density for conntected points" )
 
       opt[InetAddress]( 'h', "host" ) action { (e, c) =>
         c.copy( sourceHost = Some(e) )

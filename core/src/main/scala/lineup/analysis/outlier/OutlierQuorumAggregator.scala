@@ -50,9 +50,9 @@ class OutlierQuorumAggregator( plan: OutlierPlan, source: TimeSeriesBase ) exten
 
   def process( m: Outliers ): Unit = trace.block( s"process($m)" ) {
     if ( plan isQuorum fulfilled ) {
-      val result = plan.reduce( fulfilled, source )
-//todo stream enveloping: context.parent !+ result
-      context.parent ! result
+      import akka.pattern.pipe
+      //todo stream enveloping: context.parent !+ result
+      plan.reduce( fulfilled, source ) pipeTo context.parent
       context stop self
     }
   }
