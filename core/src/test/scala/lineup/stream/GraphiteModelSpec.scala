@@ -43,6 +43,22 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
         )
       )
       .map { _.utf8String }
+
+    val plans = Seq(
+      OutlierPlan.default(
+        name = "DEFAULT_PLAN",
+        algorithms = Set(DBSCANAnalyzer.algorithm),
+        timeout = 500.millis,
+        isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = 1, triggerPoint = 1 ),
+        reduce = GraphiteModel.demoReduce,
+        specification = ConfigFactory.parseString(
+        s"""
+         |algorithm-config.${DBSCANAnalyzer.EPS}: 5.0
+         |algorithm-config.${DBSCANAnalyzer.MIN_DENSITY_CONNECTED_POINTS}: 3
+        """.stripMargin
+        )
+      )
+    )
   }
 
   object Fixture {
@@ -108,7 +124,7 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
       )
 
 
-      val flowUnderTest = GraphiteModel.graphiteTimeSeries( parallelism = 4, windowSize = 1.second )
+      val flowUnderTest = GraphiteModel.graphiteTimeSeries( parallelism = 4, windowSize = 1.second, plans = plans )
       val topics = List( "foo", "bar", "foo" )
       val pickles = topics.zip(List(dp1, dp2, dp3)).map{ pickled }.mkString( "\n" )
 
@@ -134,10 +150,10 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
         timeout = 500.millis,
         isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = algos.size, triggerPoint = 1 ),
         reduce = GraphiteModel.demoReduce,
-        algorithmConfig = ConfigFactory.parseString(
+        specification = ConfigFactory.parseString(
           s"""
-             |${DBSCANAnalyzer.EPS}: 5.0
-             |${DBSCANAnalyzer.MIN_DENSITY_CONNECTED_POINTS}: 3
+             |algorithm-config.${DBSCANAnalyzer.EPS}: 5.0
+             |algorithm-config.${DBSCANAnalyzer.MIN_DENSITY_CONNECTED_POINTS}: 3
           """.stripMargin
         )
       )
@@ -160,7 +176,7 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
       )
 //      val expected = TimeSeries( "foo", (dp1 ++ dp3).sortBy( _.timestamp ) )
 
-      val graphiteFlow = GraphiteModel.graphiteTimeSeries( parallelism = 4, windowSize = 20.millis )
+      val graphiteFlow = GraphiteModel.graphiteTimeSeries( parallelism = 4, windowSize = 20.millis, plans = plans )
       val detectFlow = OutlierDetection.detectOutlier( detector, maxAllowedWait = 2.seconds, parallelism = 4 )
 
       val flowUnderTest = graphiteFlow via detectFlow

@@ -42,7 +42,7 @@ class OutlierQuorumAggregatorSpec extends ParallelAkkaSpec with MockitoSugar {
       isQuorum = IsQuorum.AtLeastQuorumSpecification( 1, 1 ),
       reduce = demoReduce,
       algorithms = Set( 'foobar ),
-      algorithmConfig = ConfigFactory.empty
+      specification = ConfigFactory.empty
     )
 
   }

@@ -29,7 +29,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
         isQuorum = isQuorumA,
         reduce = reduceA,
         algorithms = Set( 'foo, 'bar ),
-        algorithmConfig = ConfigFactory.empty,
+        specification = ConfigFactory.empty,
         extractTopic = OutlierDetection.extractOutlierDetectionTopic,
         topics = Set( Topic("metric") )
       )
@@ -107,7 +107,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
         isQuorum = isQuorumA,
         reduce = reduceA,
         algorithms = Set( 'foo, 'bar ),
-        algorithmConfig = ConfigFactory.empty
+        specification = ConfigFactory.empty
       )
 
       val detect = TestActorRef[OutlierDetection]( OutlierDetection.props( router.ref, plans :+ defaultPlan ) )

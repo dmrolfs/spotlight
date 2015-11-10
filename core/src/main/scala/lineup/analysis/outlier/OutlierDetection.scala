@@ -7,7 +7,7 @@ import akka.stream.scaladsl.Flow
 import peds.akka.envelope._
 import peds.commons.identifier.ShortUUID
 import peds.commons.log.Trace
-import lineup.model.timeseries.TimeSeriesBase
+import lineup.model.timeseries.{Topic, TimeSeriesBase}
 import lineup.model.outlier.{ Outliers, OutlierPlan }
 
 
@@ -30,7 +30,11 @@ object OutlierDetection {
 
   def props( router: ActorRef, plans: Seq[OutlierPlan] ): Props = Props( new OutlierDetection( router, plans) )
 
-  val extractOutlierDetectionTopic: OutlierPlan.ExtractTopic = { case m: OutlierDetectionMessage => Some(m.topic) }
+  val extractOutlierDetectionTopic: OutlierPlan.ExtractTopic = {
+    case m: OutlierDetectionMessage => Some(m.topic)
+    case ts: TimeSeriesBase => Some(ts.topic)
+    case t: Topic => Some(t)
+  }
 }
 
 

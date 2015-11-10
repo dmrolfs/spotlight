@@ -37,7 +37,7 @@ object GraphiteModel extends LazyLogging {
              |Running Lineup using the following configuation:
              |\tbinding       : ${host}:${port}
              |\twindow        : ${windowSize.toCoarsest}
-             |\tplans         : [${plans.mkString("\n",",","\n")}]
+             |\tplans         : [${plans.zipWithIndex.map{ case (p,i) => f"${i}%2d: ${p}"}.mkString("\n","\n","\n")}]
            """.stripMargin
         )
 
@@ -51,7 +51,7 @@ object GraphiteModel extends LazyLogging {
 
         val detector = system.actorOf( OutlierDetection.props(router, plans) )
 
-        streamGraphiteOutliers( host, port, windowSize, detector ) onComplete {
+        streamGraphiteOutliers( host, port, windowSize, detector, plans ) onComplete {
           case Success(_) => system.terminate()
           case Failure( e ) => {
             println( "Failure: " + e.getMessage )
@@ -66,7 +66,8 @@ object GraphiteModel extends LazyLogging {
     host: InetAddress,
     port: Int,
     windowSize: FiniteDuration,
-    detector: ActorRef
+    detector: ActorRef,
+    plans: Seq[OutlierPlan]
   )(
     implicit system: ActorSystem,
     materializer: Materializer
@@ -91,7 +92,19 @@ object GraphiteModel extends LazyLogging {
           .map { _.utf8String }
         )
 
-        val timeSeries = b.add( graphiteTimeSeries( windowSize = windowSize ) )
+//        val invalidateCacheAndReset = b.add(
+//          Flow[String] collect {
+//            case "reset" => {
+//              println( "RESETTING STREAM CONFIGURATION")
+//              ConfigFactory.invalidateCaches()
+//              throw new IllegalStateException( "RESETTING STREAM" )
+//            }
+//
+//            case e => e
+//          }
+//        )
+
+        val timeSeries = b.add( graphiteTimeSeries( windowSize = windowSize, plans = plans ) )
         val detectOutlier = b.add( OutlierDetection.detectOutlier(detector, 1.second, 4) )
         val tap = b.add( Flow[Outliers].mapAsyncUnordered(parallelism = 4){ o => Future { System.out.println( o.toString); o } } )
         val last = b.add( Flow[Outliers] map { o => ByteString(o.toString) } )
@@ -107,7 +120,8 @@ object GraphiteModel extends LazyLogging {
 
   def graphiteTimeSeries(
     parallelism: Int = 4,
-    windowSize: FiniteDuration = 1.minute
+    windowSize: FiniteDuration = 1.minute,
+    plans: Seq[OutlierPlan]
   )(
     implicit ec: ExecutionContext,
     tsMerging: Merging[TimeSeries],
@@ -117,6 +131,20 @@ object GraphiteModel extends LazyLogging {
 
     Flow[String]
     .mapConcat { toDataPoints }
+    .map { e =>
+      try {
+        val r = plans.find{ _ appliesTo e }
+        println( s"Found plan for ${e.topic}:$r [${r.isDefined}]" )
+      } catch {
+        case ex: Throwable => {
+          println( s"\n\nEXCEPTION: $ex" )
+          println( s" STACK: ${ex.printStackTrace()}\n\n" )
+        }
+      }
+
+      e
+    }
+    .filter { ts => plans.find{ _ appliesTo ts }.isDefined }
     .groupedWithin( n = numTopics * windowSize.toMillis.toInt, d = windowSize )// max elems = 1 per milli; duration = windowSize
     .map {
       _.groupBy{ _.topic }
@@ -187,60 +215,61 @@ object GraphiteModel extends LazyLogging {
   private def makePlans( planSpecifications: Config ): Seq[OutlierPlan] = {
     import scala.collection.JavaConversions._
 
-    val result = planSpecifications.root.collect{ case (n, s: ConfigObject) => (n, s.toConfig) }.toSeq.map{ ns =>
-      val (name, spec) = ns
+    val result = planSpecifications.root.collect{ case (n, s: ConfigObject) => (n, s.toConfig) }.toSeq.map {
+      case (name, spec) => {
+        val IS_DEFAULT = "is-default"
+        val TOPICS = "topics"
+        val REGEX = "regex"
 
-      val IS_DEFAULT = "is-default"
-      val TOPICS = "topics"
-      val REGEX = "regex"
+        val ( timeout, algorithms, algorithmConfig) = pullCommonPlanFacets( spec )
 
-      val ( timeout, algorithms, algorithmConfig) = pullCommonPlanFacets( spec )
-
-      if ( spec.hasPath( IS_DEFAULT ) && spec.getBoolean( IS_DEFAULT ) ) {
-        Some(
-          OutlierPlan.default(
-            name = name,
-            timeout = timeout,
-            isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = algorithms.size, triggerPoint = 1 ),
-            reduce = demoReduce,
-            algorithms = algorithms,
-            algorithmConfig = algorithmConfig
+        if ( spec.hasPath( IS_DEFAULT ) && spec.getBoolean( IS_DEFAULT ) ) {
+          Some(
+            OutlierPlan.default(
+              name = name,
+              timeout = timeout,
+              isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = algorithms.size, triggerPoint = 1 ),
+              reduce = demoReduce,
+              algorithms = algorithms,
+              specification = spec
+            )
           )
-        )
-      } else if ( spec hasPath TOPICS ) {
-        import scala.collection.JavaConverters._
+        } else if ( spec hasPath TOPICS ) {
+          import scala.collection.JavaConverters._
+          println( s"TOPIC SPEC Origin: ${spec.origin()} LINE:${spec.origin().lineNumber()}")
 
-        Some(
-          OutlierPlan.forTopics(
-            name = name,
-            timeout = timeout,
-            isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = algorithms.size, triggerPoint = 1 ),
-            reduce = demoReduce,
-            algorithms = algorithms,
-            algorithmConfig = algorithmConfig,
-            extractTopic = OutlierDetection.extractOutlierDetectionTopic,
-            topics = spec.getStringList(TOPICS).asScala.map{ Topic(_) }.toSet
+          Some(
+            OutlierPlan.forTopics(
+              name = name,
+              timeout = timeout,
+              isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = algorithms.size, triggerPoint = 1 ),
+              reduce = demoReduce,
+              algorithms = algorithms,
+              specification = spec,
+              extractTopic = OutlierDetection.extractOutlierDetectionTopic,
+              topics = spec.getStringList(TOPICS).asScala.map{ Topic(_) }.toSet
+            )
           )
-        )
-      } else if ( spec hasPath REGEX ) {
-        Some(
-          OutlierPlan.forRegex(
-            name = name,
-            timeout = timeout,
-            isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = algorithms.size, triggerPoint = 1 ),
-            reduce = demoReduce,
-            algorithms = algorithms,
-            algorithmConfig = algorithmConfig,
-            extractTopic = OutlierDetection.extractOutlierDetectionTopic,
-            regex = new Regex( spec.getString(REGEX) )
+        } else if ( spec hasPath REGEX ) {
+          Some(
+            OutlierPlan.forRegex(
+              name = name,
+              timeout = timeout,
+              isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = algorithms.size, triggerPoint = 1 ),
+              reduce = demoReduce,
+              algorithms = algorithms,
+              specification = spec,
+              extractTopic = OutlierDetection.extractOutlierDetectionTopic,
+              regex = new Regex( spec.getString(REGEX) )
+            )
           )
-        )
-      } else {
-        None
+        } else {
+          None
+        }
       }
     }
 
-    result.flatten
+    result.flatten.sorted
   }
 
 
