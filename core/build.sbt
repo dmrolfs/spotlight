@@ -64,9 +64,9 @@ dockerfile in docker := {
 }
 
 imageNames in docker := Seq(
-  ImageName( s"${organization.value}/${name.value}:latest" ), // Sets the latest tag
+  ImageName( s"dmrolfs/${name.value}:latest" ), // Sets the latest tag
   ImageName(
-    namespace = Some( organization.value ),
+    namespace = Some( "dmrolfs" ),
     repository = name.value,
     tag = Some( "v" + version.value )
   ) // Sets a name with a tag that contains the project version
