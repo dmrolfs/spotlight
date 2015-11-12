@@ -1,6 +1,8 @@
 package lineup.stream
 
 import java.net.InetAddress
+import org.slf4j.LoggerFactory
+
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.concurrent.duration._
 import scala.util.matching.Regex
@@ -11,7 +13,8 @@ import akka.stream.scaladsl._
 import akka.stream.{ ActorMaterializer, Materializer }
 import akka.util.ByteString
 import com.typesafe.config.{ ConfigObject, Config, ConfigFactory }
-import com.typesafe.scalalogging.LazyLogging
+import com.typesafe.scalalogging.{Logger, LazyLogging}
+
 import org.joda.{ time => joda }
 import lineup.analysis.outlier.algorithm.DBSCANAnalyzer
 import lineup.analysis.outlier.{ DetectionAlgorithmRouter, OutlierDetection }
@@ -76,6 +79,8 @@ object GraphiteModel extends LazyLogging {
 
     val serverBinding: Source[Tcp.IncomingConnection, Future[Tcp.ServerBinding]] = Tcp().bind( host.getHostAddress, port )
 
+    val statsLogger = Logger( LoggerFactory getLogger "RawStats" )
+
     serverBinding runForeach { connection =>
       val detection = Flow() { implicit b =>
         import FlowGraph.Implicits._
@@ -90,6 +95,10 @@ object GraphiteModel extends LazyLogging {
             )
           )
           .map { _.utf8String }
+          .map { e =>
+            statsLogger info e
+            e
+          }
         )
 
 //        val invalidateCacheAndReset = b.add(
@@ -106,7 +115,8 @@ object GraphiteModel extends LazyLogging {
 
         val timeSeries = b.add( graphiteTimeSeries( windowSize = windowSize, plans = plans ) )
         val detectOutlier = b.add( OutlierDetection.detectOutlier(detector, 1.second, 4) )
-        val tap = b.add( Flow[Outliers].mapAsyncUnordered(parallelism = 4){ o => Future { System.out.println( o.toString); o } } )
+        val tap = b.add( Flow[Outliers].mapAsyncUnordered(parallelism = 4){ o => Future { logger.info( o.toString ); o } } )
+//        val tap = b.add( Flow[Outliers].mapAsyncUnordered(parallelism = 4){ o => Future { System.out.println( o.toString ); o } } )
         val last = b.add( Flow[Outliers] map { o => ByteString(o.toString) } )
 
         framing ~> timeSeries ~> detectOutlier ~> tap ~> last

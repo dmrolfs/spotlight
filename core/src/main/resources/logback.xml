@@ -10,7 +10,7 @@
   <timestamp key="bySecond" datePattern="yyyyMMdd'T'HHmmss"/>
 
   <appender name="FILE" class="ch.qos.logback.core.FileAppender">
-    <file>log/testFile-${bySecond}.log</file>
+    <file>/var/log/testFile-${bySecond}.log</file>
     <append>true</append>
     <!-- encoders are assigned the type
          ch.qos.logback.classic.encoder.PatternLayoutEncoder by default -->
@@ -19,6 +19,20 @@
       <pattern>[%-5level] [%-4relative] [%thread] [%logger{35}] %msg%n</pattern>
     </encoder>
   </appender>
+
+  <appender name="STATS_DUMP" class="ch.qos.logback.core.FileAppender">
+    <file>/var/log/stats-${bySecond}.log</file>
+    <append>true</append>
+    <!-- encoders are assigned the type
+         ch.qos.logback.classic.encoder.PatternLayoutEncoder by default -->
+    <encoder>
+      <pattern>%msg%n</pattern>
+    </encoder>
+  </appender>
+
+  <logger name="RawStats" level="INFO" additivity="false">
+    <appender-ref ref="STATS_DUMP" />
+  </logger>
 
   <!--<root level="WARN">-->
   <root level="INFO">
