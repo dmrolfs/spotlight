@@ -50,13 +50,15 @@ assemblyMergeStrategy in assembly := {
   case _ => MergeStrategy.deduplicate
 }
 
-docker <<= (docker dependsOn assembly)
+docker <<= ( docker dependsOn assembly )
 
 dockerfile in docker := {
   val artifact = ( assemblyOutputPath in assembly ).value
   val artifactTargetPath = s"/app/${artifact.name}"
   new Dockerfile {
     from( "java:8" )
+    run( "apt-get", "update" )
+    run( "apt-get", "-y", "install", "tmux" )
     copy( artifact, artifactTargetPath )
     entryPoint( "java", "-jar", artifactTargetPath )
     expose( 2004 )
