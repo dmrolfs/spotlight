@@ -25,7 +25,13 @@ object BuildSettings {
       // "-Ywarn-adapted-args",
       "-Xfatal-warnings"
     ),
-    javacOptions ++= Seq( "-source", "1.8", "-target", "1.8" ),
+    javacOptions ++= Seq(
+      "-source", "1.8",
+      "-target", "1.8"
+    ),
+    javaOptions ++= Seq(
+      "-Dconfig.trace=loads"
+    ),
     homepage := Some( url("http://github.com/dmrolfs/bellwether") ),
     // licenses := Seq("Apache 2.0" -> url("http://www.apache.org/licenses/LICENSE-2.0.html")),
     conflictManager := ConflictManager.latestRevision,
@@ -68,7 +74,9 @@ object BuildSettings {
         .getMethod( "getLogger", classLoader.loadClass("java.lang.String") )
         .invoke( null, "ROOT" )
     ),
-
+    triggeredMessage in ThisBuild := Watched.clearWhenTriggered,
+    cancelable in Global := true,
+  
     publishTo <<= version { (v: String) =>
       // val nexus = "http://utility.allenai.org:8081/nexus/content/repositories/"
       val nexus = "http://utility.allenai.org:8081/nexus/content/repositories/"
