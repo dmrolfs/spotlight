@@ -35,15 +35,14 @@ object GraphiteModel extends LazyLogging {
         val config = ConfigFactory.load
 
         val (host, port, windowSize, plans) = getConfiguration( usage, config )
-        println(
-          s"""
-             |Running Lineup using the following configuation:
-             |\tbinding       : ${host}:${port}
-             |\twindow        : ${windowSize.toCoarsest}
-             |\tplans         : [${plans.zipWithIndex.map{ case (p,i) => f"${i}%2d: ${p}"}.mkString("\n","\n","\n")}]
-           """.stripMargin
-        )
+        val usageMessage = s"""
+          |\nRunning Lineup using the following configuation:
+          |\tbinding       : ${host}:${port}
+          |\twindow        : ${windowSize.toCoarsest}
+          |\tplans         : [${plans.zipWithIndex.map{ case (p,i) => f"${i}%2d: ${p}"}.mkString("\n","\n","\n")}]
+        """.stripMargin
 
+        logger info usageMessage
 
         implicit val system = ActorSystem( "Monitor" )
         implicit val materializer: Materializer = ActorMaterializer()
@@ -87,6 +86,7 @@ object GraphiteModel extends LazyLogging {
 
         val framing = b.add(
           Flow[ByteString]
+          .map { e => logger info ( "\n" + e.utf8String + "\n"); e }
           .via(
             Framing.delimiter(
               delimiter = ByteString( "\n" ),
