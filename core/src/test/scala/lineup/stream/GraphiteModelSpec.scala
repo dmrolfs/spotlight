@@ -34,7 +34,7 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
   class Fixture extends AkkaFixture {
     def status[T]( label: String ): Flow[T, T, Unit] = Flow[T].map { e => logger info s"\n$label:${e.toString}"; e }
 
-    val stringFlow: Flow[ByteString, String, Unit] = Flow[ByteString]
+    val stringFlow: Flow[ByteString, ByteString, Unit] = Flow[ByteString]
       .via(
         Framing.delimiter(
           delimiter = ByteString("\n"),
@@ -42,7 +42,6 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
           allowTruncation = true
         )
       )
-      .map { _.utf8String }
 
     val plans = Seq(
       OutlierPlan.default(
@@ -79,13 +78,13 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
       val dp = makeDataPoints( points, start = now ).take(5)
       val expected = TimeSeries( "foobar", dp )
 
-      val flowUnderTest = Flow[String].mapConcat( GraphiteModel.toDataPoints )
-      val future = Source( Future.successful(pickled(dp)) ).via( flowUnderTest ).runWith( Sink.head )
+      val flowUnderTest = Flow[ByteString].mapConcat( GraphiteModel.PickleProtocol.toDataPoints )
+      val future = Source( Future.successful(ByteString(pickled(dp))) ).via( flowUnderTest ).runWith( Sink.head )
       val result = Await.result( future, 100.millis )
       result mustBe expected
     }
 
-    "convert pickles from framed ByteStream" in { f: Fixture =>
+    "convert pickles from framed ByteStream" taggedAs (WIP) in { f: Fixture =>
       import f._
       val now = joda.DateTime.now
       val dp1 = makeDataPoints( points, start = now ).take(5)
@@ -97,13 +96,15 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
         .via(
           Framing.delimiter(
             delimiter = ByteString("]"),
-            maximumFrameLength = scala.math.pow( 2, 20 ).toInt
+            maximumFrameLength = scala.math.pow( 2, 20 ).toInt,
+            allowTruncation = true
           )
         )
-        .map { _.utf8String }
-        .mapConcat( GraphiteModel.toDataPoints )
+        .mapConcat( GraphiteModel.PickleProtocol.toDataPoints )
 
       val pickles = List( dp1, dp2 ).map{ pickled }.mkString( "\n" )
+      trace( s"pickles = $pickles" )
+      trace( s"byte-pickles = ${ByteString(pickles)}" )
       val future = Source( Future.successful(ByteString(pickles)) ).via( flowUnderTest ).runWith( Sink.head )
       val result = Await.result( future, 100.millis )
       result mustBe expected
@@ -124,7 +125,7 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
       )
 
 
-      val flowUnderTest = GraphiteModel.graphiteTimeSeries( parallelism = 4, windowSize = 1.second, plans = plans )
+      val flowUnderTest = GraphiteModel.graphiteTimeSeries( plans = plans, windowSize = 1.second, parallelism = 4 )
       val topics = List( "foo", "bar", "foo" )
       val pickles = topics.zip(List(dp1, dp2, dp3)).map{ pickled }.mkString( "\n" )
 
@@ -139,7 +140,7 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
     }
 
 
-    "detect Outliers" taggedAs (WIP) in { f: Fixture =>
+    "detect Outliers" in { f: Fixture =>
       import f._
       import system.dispatcher
 

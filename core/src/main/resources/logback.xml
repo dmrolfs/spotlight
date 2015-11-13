@@ -11,6 +11,7 @@
 
   <appender name="FILE" class="ch.qos.logback.core.FileAppender">
     <file>/var/log/testFile-${bySecond}.log</file>
+    <!--<file>log/testFile-${bySecond}.log</file>-->
     <append>true</append>
     <!-- encoders are assigned the type
          ch.qos.logback.classic.encoder.PatternLayoutEncoder by default -->
@@ -22,6 +23,7 @@
 
   <appender name="STATS_DUMP" class="ch.qos.logback.core.FileAppender">
     <file>/var/log/stats-${bySecond}.log</file>
+    <!--<file>log/stats-${bySecond}.log</file>-->
     <append>true</append>
     <!-- encoders are assigned the type
          ch.qos.logback.classic.encoder.PatternLayoutEncoder by default -->

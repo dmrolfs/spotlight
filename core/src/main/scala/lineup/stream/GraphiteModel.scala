@@ -10,7 +10,7 @@ import scala.util.{ Failure, Success }
 import akka.actor.{ ActorRef, ActorSystem }
 import akka.stream.io.Framing
 import akka.stream.scaladsl._
-import akka.stream.{ ActorMaterializer, Materializer }
+import akka.stream.{ActorMaterializerSettings, Supervision, ActorMaterializer, Materializer}
 import akka.util.ByteString
 import com.typesafe.config.{ ConfigObject, Config, ConfigFactory }
 import com.typesafe.scalalogging.{Logger, LazyLogging}
@@ -34,10 +34,12 @@ object GraphiteModel extends LazyLogging {
       case Some( usage ) => {
         val config = ConfigFactory.load
 
-        val (host, port, windowSize, plans) = getConfiguration( usage, config )
+        val (host, port, maxFrameLength, protocol, windowSize, plans) = getConfiguration( usage, config )
         val usageMessage = s"""
           |\nRunning Lineup using the following configuation:
           |\tbinding       : ${host}:${port}
+          |\tmax frame size: ${maxFrameLength}
+          |\tprotocol      : ${protocol}
           |\twindow        : ${windowSize.toCoarsest}
           |\tplans         : [${plans.zipWithIndex.map{ case (p,i) => f"${i}%2d: ${p}"}.mkString("\n","\n","\n")}]
         """.stripMargin
@@ -45,7 +47,7 @@ object GraphiteModel extends LazyLogging {
         logger info usageMessage
 
         implicit val system = ActorSystem( "Monitor" )
-        implicit val materializer: Materializer = ActorMaterializer()
+        implicit val materializer = ActorMaterializer( ActorMaterializerSettings(system).withSupervisionStrategy(decider) )
         implicit val ec = system.dispatcher
 
         val router = system.actorOf( DetectionAlgorithmRouter.props, "router" )
@@ -53,7 +55,7 @@ object GraphiteModel extends LazyLogging {
 
         val detector = system.actorOf( OutlierDetection.props(router, plans) )
 
-        streamGraphiteOutliers( host, port, windowSize, detector, plans ) onComplete {
+        streamGraphiteOutliers( host, port, maxFrameLength, protocol, windowSize, detector, plans ) onComplete {
           case Success(_) => system.terminate()
           case Failure( e ) => {
             println( "Failure: " + e.getMessage )
@@ -64,9 +66,18 @@ object GraphiteModel extends LazyLogging {
     }
   }
 
+  val decider: Supervision.Decider = {
+    case ex => {
+      logger error ex.getMessage
+      Supervision.Stop
+    }
+  }
+
   def streamGraphiteOutliers(
     host: InetAddress,
     port: Int,
+    maxFrameLength: Int,
+    protocol: SerializationProtocol,
     windowSize: FiniteDuration,
     detector: ActorRef,
     plans: Seq[OutlierPlan]
@@ -94,9 +105,8 @@ object GraphiteModel extends LazyLogging {
               allowTruncation = true
             )
           )
-          .map { _.utf8String }
           .map { e =>
-            statsLogger info e
+            statsLogger info e.utf8String
             e
           }
         )
@@ -113,10 +123,9 @@ object GraphiteModel extends LazyLogging {
 //          }
 //        )
 
-        val timeSeries = b.add( graphiteTimeSeries( windowSize = windowSize, plans = plans ) )
+        val timeSeries = b.add( graphiteTimeSeries( plans = plans, protocol = protocol, windowSize = windowSize ) )
         val detectOutlier = b.add( OutlierDetection.detectOutlier(detector, 1.second, 4) )
         val tap = b.add( Flow[Outliers].mapAsyncUnordered(parallelism = 4){ o => Future { logger.info( o.toString ); o } } )
-//        val tap = b.add( Flow[Outliers].mapAsyncUnordered(parallelism = 4){ o => Future { System.out.println( o.toString ); o } } )
         val last = b.add( Flow[Outliers] map { o => ByteString(o.toString) } )
 
         framing ~> timeSeries ~> detectOutlier ~> tap ~> last
@@ -129,26 +138,22 @@ object GraphiteModel extends LazyLogging {
   }
 
   def graphiteTimeSeries(
-    parallelism: Int = 4,
+    plans: Seq[OutlierPlan],
+    protocol: SerializationProtocol = PickleProtocol,
     windowSize: FiniteDuration = 1.minute,
-    plans: Seq[OutlierPlan]
+    parallelism: Int = 4
   )(
     implicit ec: ExecutionContext,
     tsMerging: Merging[TimeSeries],
     materializer: Materializer
-  ): Flow[String, TimeSeries, Unit] = {
+  ): Flow[ByteString, TimeSeries, Unit] = {
     val numTopics = 1
-
-    Flow[String]
-    .mapConcat { toDataPoints }
+//todo: address framing by length is not handled and data points will get clipped off.
+    Flow[ByteString]
+    .mapConcat { protocol.toDataPoints }
     .map { e =>
-      try {
-        val r = plans.find{ _ appliesTo e }
-        logger info s"""Plan for ${e.topic}: ${r getOrElse "NONE"}"""
-      } catch {
-        case ex: Throwable => logger error( s"\n\nEXCEPTION: ${ex}\nSTACK: ${ex.printStackTrace()}\n\n" )
-      }
-
+      val r = plans.find{ _ appliesTo e }
+      logger info s"""Plan for ${e.topic}: ${r getOrElse "NONE"}"""
       e
     }
     .filter { ts => plans.find{ _ appliesTo ts }.isDefined }
@@ -163,17 +168,30 @@ object GraphiteModel extends LazyLogging {
   }
 
 
-  def toDataPoints( pickles: String ): List[TimeSeries] = {
-    val pickle = """\s*\(\s*([^(),]+)\s*,\s*\(\s*([^(),]+)\s*,\s*([^(),]+)\s*\)\s*\)\s*,?""".r
-
-    pickle
-    .findAllMatchIn( pickles )
-    .toIndexedSeq
-    .map { p => ( p.group(1), DataPoint( timestamp = new joda.DateTime(p.group(2).toLong), value = p.group(3).toDouble ) ) }
-    .groupBy { _._1 }
-    .map { np => TimeSeries( topic = np._1, points = np._2 map { _._2 } ) }
-    .toList
+  sealed trait SerializationProtocol {
+    def toDataPoints( bytes: ByteString ): List[TimeSeries]
   }
+
+  case object PickleProtocol extends SerializationProtocol {
+    override def toDataPoints( bytes: ByteString ): List[TimeSeries] = {
+      val pickle = """\s*\(\s*([^(),]+)\s*,\s*\(\s*([^(),]+)\s*,\s*([^(),]+)\s*\)\s*\)\s*,?""".r
+
+      val pickles = pickle.findAllMatchIn( bytes.utf8String ).toIndexedSeq
+      if ( pickles.isEmpty ) throw new IllegalArgumentException( s"No pickles found in: [${bytes.utf8String}]" )
+
+      pickles.map { p => ( p.group(1), DataPoint( timestamp = new joda.DateTime(p.group(2).toLong), value = p.group(3).toDouble ) ) }
+      .groupBy { _._1 }
+      .map { np => TimeSeries( topic = np._1, points = np._2 map { _._2 } ) }
+      .toList
+    }
+  }
+
+//  case object MessagePackProtocol extends SerializationProtocol {
+//    override def toDataPoints( bytes: ByteString ): List[TimeSeriesBase] = {
+//      import org.msgpack.ScalaMessagePack._
+//
+//    }
+//  }
 
 
   val demoReduce = new ReduceOutliers {
@@ -192,14 +210,20 @@ object GraphiteModel extends LazyLogging {
 
   def status[T]( label: String ): Flow[T, T, Unit] = Flow[T].map { e => logger info s"\n$label:${e.toString}"; e }
 
-
-  def getConfiguration(usage: Settings, config: Config ): (InetAddress, Int, FiniteDuration, Seq[OutlierPlan]) = {
+  def getConfiguration( usage: Settings, config: Config ): (InetAddress, Int, Int, SerializationProtocol, FiniteDuration, Seq[OutlierPlan]) = {
     val host = usage.sourceHost getOrElse {
       if ( config hasPath Settings.SOURCE_HOST ) InetAddress getByName config.getString( Settings.SOURCE_HOST )
       else InetAddress.getLocalHost
     }
 
     val port = usage.sourcePort getOrElse { config getInt Settings.SOURCE_PORT }
+
+    val maxFrameLength = {
+      if ( config hasPath Settings.SOURCE_MAX_FRAME_LENGTH) config getInt Settings.SOURCE_MAX_FRAME_LENGTH
+      else scala.math.pow( 2, 20 ).toInt // from graphite documentation
+    }
+
+    val protocol = PickleProtocol
 
     val windowSize = usage.windowSize getOrElse {
       if ( config hasPath Settings.SOURCE_WINDOW_SIZE ) {
@@ -211,7 +235,7 @@ object GraphiteModel extends LazyLogging {
 
     val plans = makePlans( config.getConfig( "lineup.detection-plans" ))
 
-    ( host, port, windowSize, plans )
+    ( host, port, maxFrameLength, protocol, windowSize, plans )
   }
 
   private def makePlans( planSpecifications: Config ): Seq[OutlierPlan] = {
@@ -238,7 +262,7 @@ object GraphiteModel extends LazyLogging {
           )
         } else if ( spec hasPath TOPICS ) {
           import scala.collection.JavaConverters._
-          println( s"TOPIC SPEC Origin: ${spec.origin()} LINE:${spec.origin().lineNumber()}")
+          println( s"TOPIC [$name] SPEC Origin: ${spec.origin} LINE:${spec.origin.lineNumber}")
 
           Some(
             OutlierPlan.forTopics(
@@ -295,6 +319,7 @@ object GraphiteModel extends LazyLogging {
   object Settings {
     val SOURCE_HOST = "lineup.source.host"
     val SOURCE_PORT = "lineup.source.port"
+    val SOURCE_MAX_FRAME_LENGTH = "lineup.source.max-frame-length"
     val SOURCE_WINDOW_SIZE = "lineup.source.window-size"
 
     def zero: Settings = Settings( )
