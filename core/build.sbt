@@ -39,7 +39,7 @@ mainClass in assembly := Some("lineup.stream.GraphiteModel")
 
 assemblyJarName in assembly := s"${organizationName.value}-${name.value}-${version.value}.jar"
 
-test in assembly := {}  //DMR: REMOVE ONCE JYTHON FIXED
+// test in assembly := {}  //DMR: REMOVE ONCE JYTHON FIXED
 
 assemblyMergeStrategy in assembly := {
   case x if Assembly.isConfigFile(x) => MergeStrategy.concat
