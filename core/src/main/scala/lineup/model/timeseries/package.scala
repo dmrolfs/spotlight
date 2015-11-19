@@ -8,7 +8,9 @@ import peds.commons.V
 
 
 package object timeseries {
-  case class DataPoint( timestamp: joda.DateTime, value: Double )
+  case class DataPoint( timestamp: joda.DateTime, value: Double ) {
+    override def toString: String = s"(${timestamp.getMillis}, ${value})"
+  }
 
   object DataPoint {
     implicit def toDoublePoint( dp: DataPoint ): ml.DoublePoint = {

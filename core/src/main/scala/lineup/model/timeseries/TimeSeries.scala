@@ -5,11 +5,13 @@ import shapeless.Lens
 import org.joda.{ time => joda }
 import com.github.nscala_time.time.Imports._
 import peds.commons.V
+import peds.commons.util._
 
 
 sealed trait TimeSeries extends TimeSeriesBase {
   def contains( ts: DateTime ): Boolean = points exists { _.timestamp == ts }
   def points: Row[DataPoint]
+  override def toString: String = s"""${getClass.safeSimpleName}:${topic}[${points.mkString(",")}]"""
 }
 
 object TimeSeries {
