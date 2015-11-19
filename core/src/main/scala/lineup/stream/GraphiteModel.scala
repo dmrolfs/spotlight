@@ -180,6 +180,7 @@ object GraphiteModel extends LazyLogging {
   }
 
   case object PickleProtocol extends SerializationProtocol {
+    final case class PickleException private[stream]( message: String ) extends Exception( message )
 
     val GraphiteMaximumFrameLength = scala.math.pow( 2, 20 ).toInt
 
@@ -201,32 +202,58 @@ object GraphiteModel extends LazyLogging {
 
       case class Metric( topic: Topic, timestamp: joda.DateTime, value: Double )
 
-      val in = new ByteArrayInputStream( bytes.toArray )
-      val fin = new PyFile( in )
-      val u = cPickle.Unpickler( fin )
-      val pickles = try {
-        u.load().asInstanceOf[PyList]
-      } finally {
-        fin.close()
-      }
+      logger.info( s"PARSING BYTES: [\n${bytes}\n]" )
 
-      val metrics = for {
-        p <- pickles
-      } yield {
-        val tuple = p.asInstanceOf[PyTuple]
-        val topic = tuple.get( 0 ).asInstanceOf[String]
-        val dp = tuple.get(1).asInstanceOf[PyTuple]
-        val ts = dp.get(0).asInstanceOf[BigInteger].longValue
-        val v = dp.get(1).asInstanceOf[Double]
-        Metric( topic = topic, timestamp = new joda.DateTime(ts), value = v )
-      }
+      if ( bytes.isEmpty ) throw PickleException( "stream pushing with empty bytes" )
+      else {
+        val in = new ByteArrayInputStream( bytes.toArray )
+        val fin = new PyFile( in )
+        val u = cPickle.Unpickler( fin )
+        val pickles = try {
+          u.load().asInstanceOf[PyList]
+        } finally {
+          fin.close()
+        }
 
-      val result = metrics groupBy { _.topic } map { case (t, ms) =>
-        val points = ms map { m => DataPoint( timestamp = m.timestamp, value = m.value ) }
-        TimeSeries( topic = t, points = points.toIndexedSeq )
-      }
+        val metrics = for {
+          p <- pickles
+        } yield {
+          val tuple = p.asInstanceOf[PyTuple]
+          val dp = tuple.get(1).asInstanceOf[PyTuple]
 
-      result.toList
+          val topic: String = tuple.get( 0 ).asInstanceOf[Any] match {
+            case s: String => s
+            case ps: PyString => ps.asString
+            case unknown => throw PickleException( s"failed to parse topic [$unknown] type not handled [${unknown.getClass}]" )
+          }
+
+          val ts: Long = dp.get(0).asInstanceOf[Any] match {
+            case l: Long => l
+            case i: Int => i.toLong
+            case bi: BigInteger => bi.longValue
+            case d: Double => d.toLong
+            case unknown => throw PickleException( s"failed to parse timestamp [$unknown] type not handled [${unknown.getClass}]" )
+          }
+
+          val v: Double = dp.get(1).asInstanceOf[Any] match {
+            case d: Double => d
+            case f: Float => f.toDouble
+            case bd: BigDecimal => bd.doubleValue
+            case i: Int => i.toDouble
+            case l: Long => l.toDouble
+            case unknown => throw PickleException( s"failed to parse value [$unknown] type not handled [${unknown.getClass}]" )
+          }
+
+          Metric( topic = topic, timestamp = new joda.DateTime(ts), value = v )
+        }
+
+        val result = metrics groupBy { _.topic } map { case (t, ms) =>
+          val points = ms map { m => DataPoint( timestamp = m.timestamp, value = m.value ) }
+          TimeSeries( topic = t, points = points.toIndexedSeq )
+        }
+
+        result.toList
+      }
     }
   }
 
