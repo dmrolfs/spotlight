@@ -29,6 +29,7 @@ package object timeseries {
 
   trait TimeSeriesBase {
     def topic: Topic
+    def size: Int
     def start: Option[joda.DateTime]
     def end: Option[joda.DateTime]
     def interval: Option[joda.Interval] = {

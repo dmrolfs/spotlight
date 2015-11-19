@@ -98,7 +98,7 @@ object GraphiteModel extends LazyLogging {
 
     val serverBinding: Source[Tcp.IncomingConnection, Future[Tcp.ServerBinding]] = Tcp().bind( host.getHostAddress, port )
 
-    val statsLogger = Logger( LoggerFactory getLogger "RawStats" )
+    val outlierLogger = Logger( LoggerFactory getLogger "Outliers" )
 
     val dumpId = new AtomicInteger()
 
@@ -106,33 +106,27 @@ object GraphiteModel extends LazyLogging {
       val detection = Flow() { implicit b =>
         import FlowGraph.Implicits._
 
-        val framing = b.add(
-          Flow[ByteString]
-          .via( protocol.framingFlow( maxFrameLength ) )
-          .map { e =>
-            statsLogger info e.decodeString( protocol.charset )
-            e
-          }
-        )
-
+        val framing = b.add( protocol.framingFlow( maxFrameLength ) )
         val timeSeries = b.add( graphiteTimeSeries( plans = plans, protocol = protocol, windowSize = windowSize ) )
         val detectOutlier = b.add( OutlierDetection.detectOutlier(detector, 1.second, 4) )
-        val tap = b.add( Flow[Outliers].mapAsyncUnordered(parallelism = 4){ o => Future { logger.info( o.toString ); o } } )
+        val tap = b.add( Flow[Outliers].mapAsyncUnordered(parallelism = 4){ o => Future { outlierLogger info o.toString; o } } )
         val last = b.add( Flow[Outliers] map { o => ByteString(o.toString) } )
 
-        val broadcast = b.add( Broadcast[ByteString](outputPorts = 2, eagerCancel = false) )
-        val counter = b.add( Flow[ByteString] map { e => (dumpId.incrementAndGet(), e) } )
-        val dump = Sink.foreach[(Int, ByteString)] { case (c, e) =>
-          import better.files._
-          val out = "/var/log"/s"dump-${c}.obj"
-          out.newOutputStream.autoClosed foreach { sout =>
-            sout write e.toArray
-            sout.flush()
-          }
-        }
+        framing ~> timeSeries ~> detectOutlier ~> tap ~> last
 
-        framing ~> broadcast ~> timeSeries ~> detectOutlier ~> tap ~> last
-                   broadcast ~> Flow[ByteString].take(50) ~> counter ~> dump
+//        val broadcast = b.add( Broadcast[ByteString](outputPorts = 2, eagerCancel = false) )
+//        val counter = b.add( Flow[ByteString] map { e => (dumpId.incrementAndGet(), e) } )
+//        val dump = Sink.foreach[(Int, ByteString)] { case (c, e) =>
+//          import better.files._
+//          val out = "/var/log"/s"dump-${c}.obj"
+//          out.newOutputStream.autoClosed foreach { sout =>
+//            sout write e.toArray
+//            sout.flush()
+//          }
+//        }
+//
+//        framing ~> broadcast ~> timeSeries ~> detectOutlier ~> tap ~> last
+//                   broadcast ~> Flow[ByteString].take(50) ~> counter ~> dump
 
         ( framing.inlet, last.outlet )
       }
@@ -152,14 +146,15 @@ object GraphiteModel extends LazyLogging {
     materializer: Materializer
   ): Flow[ByteString, TimeSeries, Unit] = {
     val numTopics = 1
-//todo: address framing by length is not handled and data points will get clipped off.
+    val metricsLogger = Logger( LoggerFactory getLogger "Metrics" )
+
     Flow[ByteString]
     .via( protocol.loadTimeSeriesData )
-    .map { e =>
-      val r = plans.find{ _ appliesTo e }
-      logger info s"""Plan for ${e.topic}: ${r getOrElse "NONE"}"""
-      e
-    }
+//    .map { e =>
+//      val r = plans.find{ _ appliesTo e }
+//      logger info s"""Plan for ${e.topic}: ${r getOrElse "NONE"}"""
+//      e
+//    }
     .filter { ts => plans exists { _ appliesTo ts } }
     .groupedWithin( n = numTopics * windowSize.toMillis.toInt, d = windowSize ) // max elems = 1 per milli; duration = windowSize
     .map {
@@ -169,6 +164,7 @@ object GraphiteModel extends LazyLogging {
       }
     }
     .mapConcat { identity }
+    .mapAsyncUnordered( parallelism = 4 ) { e => Future { metricsLogger info e.toString; e } }
   }
 
 
@@ -187,12 +183,14 @@ object GraphiteModel extends LazyLogging {
     override def charset: String = "ISO-8859-1"
 
     override def framingFlow( maximumFrameLength: Int = GraphiteMaximumFrameLength ): Flow[ByteString, ByteString, Unit] = {
+      val FieldLength = 4
+
       Framing.lengthField(
-        fieldLength = 4,
+        fieldLength = FieldLength,
         fieldOffset = 0,
         maximumFrameLength = maximumFrameLength,
         byteOrder = ByteOrder.BIG_ENDIAN
-      ).map { _ drop 4 }
+      ).map { _ drop FieldLength }
     }
 
     override def toDataPoints( bytes: ByteString ): List[TimeSeries] = trace.block( "toDataPoints" ) {
@@ -201,8 +199,6 @@ object GraphiteModel extends LazyLogging {
       import scala.collection.JavaConversions._
 
       case class Metric( topic: Topic, timestamp: joda.DateTime, value: Double )
-
-      logger.info( s"PARSING BYTES: [\n${bytes}\n]" )
 
       if ( bytes.isEmpty ) throw PickleException( "stream pushing with empty bytes" )
       else {

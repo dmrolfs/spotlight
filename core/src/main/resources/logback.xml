@@ -21,8 +21,8 @@
     </encoder>
   </appender>
 
-  <appender name="STATS_DUMP" class="ch.qos.logback.core.FileAppender">
-    <file>/var/log/stats-${bySecond}.log</file>
+  <appender name="OUTLIER_FILE" class="ch.qos.logback.core.FileAppender">
+    <file>/var/log/outliers-${bySecond}.log</file>
     <!--<file>log/stats-${bySecond}.log</file>-->
     <append>true</append>
     <!-- encoders are assigned the type
@@ -32,8 +32,24 @@
     </encoder>
   </appender>
 
-  <logger name="RawStats" level="INFO" additivity="false">
-    <appender-ref ref="STATS_DUMP" />
+  <logger name="Outliers" level="INFO" additivity="false">
+    <appender-ref ref="OUTLIER_FILE" />
+    <appender-ref ref="STDOUT" />
+  </logger>
+
+  <appender name="METRIC_FILE" class="ch.qos.logback.core.FileAppender">
+    <file>/var/log/metrics-${bySecond}.log</file>
+    <!--<file>log/stats-${bySecond}.log</file>-->
+    <append>true</append>
+    <!-- encoders are assigned the type
+         ch.qos.logback.classic.encoder.PatternLayoutEncoder by default -->
+    <encoder>
+      <pattern>%msg%n</pattern>
+    </encoder>
+  </appender>
+
+  <logger name="Metrics" level="INFO" additivity="false">
+    <appender-ref ref="METRIC_FILE" />
   </logger>
 
   <!--<root level="WARN">-->
