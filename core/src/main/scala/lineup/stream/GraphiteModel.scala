@@ -1,32 +1,41 @@
 package lineup.stream
 
+import java.io.ByteArrayInputStream
+import java.math.BigInteger
 import java.net.InetAddress
-import org.slf4j.LoggerFactory
+import java.nio.ByteOrder
+import java.util.concurrent.atomic.AtomicInteger
+import peds.commons.log.Trace
 
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.concurrent.duration._
 import scala.util.matching.Regex
 import scala.util.{ Failure, Success }
+
 import akka.actor.{ ActorRef, ActorSystem }
 import akka.stream.io.Framing
 import akka.stream.scaladsl._
-import akka.stream.{ActorMaterializerSettings, Supervision, ActorMaterializer, Materializer}
+import akka.stream.{ ActorMaterializerSettings, Supervision, ActorMaterializer, Materializer }
 import akka.util.ByteString
+
 import com.typesafe.config.{ ConfigObject, Config, ConfigFactory }
-import com.typesafe.scalalogging.{Logger, LazyLogging}
+import com.typesafe.scalalogging.{ Logger, LazyLogging }
+import org.slf4j.LoggerFactory
 
 import org.joda.{ time => joda }
 import lineup.analysis.outlier.algorithm.DBSCANAnalyzer
 import lineup.analysis.outlier.{ DetectionAlgorithmRouter, OutlierDetection }
 import lineup.model.outlier._
 import lineup.model.timeseries.TimeSeriesBase.Merging
-import lineup.model.timeseries.{ Topic, DataPoint, TimeSeries, TimeSeriesBase }
+import lineup.model.timeseries._
 
 
 /**
  * Created by rolfsd on 10/21/15.
  */
 object GraphiteModel extends LazyLogging {
+  val trace = Trace[GraphiteModel.type]
+
   def main( args: Array[String] ): Unit = {
     Settings.makeUsageConfig.parse( args, Settings.zero ) match {
       case None => System exit -1
@@ -58,7 +67,7 @@ object GraphiteModel extends LazyLogging {
         streamGraphiteOutliers( host, port, maxFrameLength, protocol, windowSize, detector, plans ) onComplete {
           case Success(_) => system.terminate()
           case Failure( e ) => {
-            println( "Failure: " + e.getMessage )
+            logger.error( "Failure:", e )
             system.terminate()
           }
         }
@@ -68,7 +77,7 @@ object GraphiteModel extends LazyLogging {
 
   val decider: Supervision.Decider = {
     case ex => {
-      logger error ex.getMessage
+      logger.error( "Error caught by Supervisor:", ex )
       Supervision.Stop
     }
   }
@@ -89,46 +98,35 @@ object GraphiteModel extends LazyLogging {
 
     val serverBinding: Source[Tcp.IncomingConnection, Future[Tcp.ServerBinding]] = Tcp().bind( host.getHostAddress, port )
 
-    val statsLogger = Logger( LoggerFactory getLogger "RawStats" )
+    val outlierLogger = Logger( LoggerFactory getLogger "Outliers" )
+
+    val dumpId = new AtomicInteger()
 
     serverBinding runForeach { connection =>
       val detection = Flow() { implicit b =>
         import FlowGraph.Implicits._
 
-        val framing = b.add(
-          Flow[ByteString]
-          .map { e => logger info ( "\n" + e.utf8String + "\n"); e }
-          .via(
-            Framing.delimiter(
-              delimiter = ByteString( "\n" ),
-              maximumFrameLength = scala.math.pow( 2, 20 ).toInt, // from graphite documentation
-              allowTruncation = true
-            )
-          )
-          .map { e =>
-            statsLogger info e.utf8String
-            e
-          }
-        )
-
-//        val invalidateCacheAndReset = b.add(
-//          Flow[String] collect {
-//            case "reset" => {
-//              println( "RESETTING STREAM CONFIGURATION")
-//              ConfigFactory.invalidateCaches()
-//              throw new IllegalStateException( "RESETTING STREAM" )
-//            }
-//
-//            case e => e
-//          }
-//        )
-
+        val framing = b.add( protocol.framingFlow( maxFrameLength ) )
         val timeSeries = b.add( graphiteTimeSeries( plans = plans, protocol = protocol, windowSize = windowSize ) )
         val detectOutlier = b.add( OutlierDetection.detectOutlier(detector, 1.second, 4) )
-        val tap = b.add( Flow[Outliers].mapAsyncUnordered(parallelism = 4){ o => Future { logger.info( o.toString ); o } } )
+        val tap = b.add( Flow[Outliers].mapAsyncUnordered(parallelism = 4){ o => Future { outlierLogger info o.toString; o } } )
         val last = b.add( Flow[Outliers] map { o => ByteString(o.toString) } )
 
         framing ~> timeSeries ~> detectOutlier ~> tap ~> last
+
+//        val broadcast = b.add( Broadcast[ByteString](outputPorts = 2, eagerCancel = false) )
+//        val counter = b.add( Flow[ByteString] map { e => (dumpId.incrementAndGet(), e) } )
+//        val dump = Sink.foreach[(Int, ByteString)] { case (c, e) =>
+//          import better.files._
+//          val out = "/var/log"/s"dump-${c}.obj"
+//          out.newOutputStream.autoClosed foreach { sout =>
+//            sout write e.toArray
+//            sout.flush()
+//          }
+//        }
+//
+//        framing ~> broadcast ~> timeSeries ~> detectOutlier ~> tap ~> last
+//                   broadcast ~> Flow[ByteString].take(50) ~> counter ~> dump
 
         ( framing.inlet, last.outlet )
       }
@@ -148,15 +146,16 @@ object GraphiteModel extends LazyLogging {
     materializer: Materializer
   ): Flow[ByteString, TimeSeries, Unit] = {
     val numTopics = 1
-//todo: address framing by length is not handled and data points will get clipped off.
+    val metricsLogger = Logger( LoggerFactory getLogger "Metrics" )
+
     Flow[ByteString]
-    .mapConcat { protocol.toDataPoints }
-    .map { e =>
-      val r = plans.find{ _ appliesTo e }
-      logger info s"""Plan for ${e.topic}: ${r getOrElse "NONE"}"""
-      e
-    }
-    .filter { ts => plans.find{ _ appliesTo ts }.isDefined }
+    .via( protocol.loadTimeSeriesData )
+//    .map { e =>
+//      val r = plans.find{ _ appliesTo e }
+//      logger info s"""Plan for ${e.topic}: ${r getOrElse "NONE"}"""
+//      e
+//    }
+    .filter { ts => plans exists { _ appliesTo ts } }
     .groupedWithin( n = numTopics * windowSize.toMillis.toInt, d = windowSize ) // max elems = 1 per milli; duration = windowSize
     .map {
       _.groupBy{ _.topic }
@@ -165,33 +164,116 @@ object GraphiteModel extends LazyLogging {
       }
     }
     .mapConcat { identity }
+    .mapAsyncUnordered( parallelism = 4 ) { e => Future { metricsLogger info e.toString; e } }
   }
 
 
   sealed trait SerializationProtocol {
+    def charset: String = ByteString.UTF_8
+    def framingFlow( maximumFrameLength: Int ): Flow[ByteString, ByteString, Unit]
+    def loadTimeSeriesData: Flow[ByteString, TimeSeries, Unit] = Flow[ByteString] mapConcat { toDataPoints }
     def toDataPoints( bytes: ByteString ): List[TimeSeries]
   }
 
   case object PickleProtocol extends SerializationProtocol {
-    override def toDataPoints( bytes: ByteString ): List[TimeSeries] = {
-      val pickle = """\s*\(\s*([^(),]+)\s*,\s*\(\s*([^(),]+)\s*,\s*([^(),]+)\s*\)\s*\)\s*,?""".r
+    final case class PickleException private[stream]( message: String ) extends Exception( message )
 
-      val pickles = pickle.findAllMatchIn( bytes.utf8String ).toIndexedSeq
-      if ( pickles.isEmpty ) throw new IllegalArgumentException( s"No pickles found in: [${bytes.utf8String}]" )
+    val GraphiteMaximumFrameLength = scala.math.pow( 2, 20 ).toInt
 
-      pickles.map { p => ( p.group(1), DataPoint( timestamp = new joda.DateTime(p.group(2).toLong), value = p.group(3).toDouble ) ) }
-      .groupBy { _._1 }
-      .map { np => TimeSeries( topic = np._1, points = np._2 map { _._2 } ) }
-      .toList
+    override def charset: String = "ISO-8859-1"
+
+    override def framingFlow( maximumFrameLength: Int = GraphiteMaximumFrameLength ): Flow[ByteString, ByteString, Unit] = {
+      val FieldLength = 4
+
+      Framing.lengthField(
+        fieldLength = FieldLength,
+        fieldOffset = 0,
+        maximumFrameLength = maximumFrameLength,
+        byteOrder = ByteOrder.BIG_ENDIAN
+      ).map { _ drop FieldLength }
+    }
+
+    override def toDataPoints( bytes: ByteString ): List[TimeSeries] = trace.block( "toDataPoints" ) {
+      import org.python.core._
+      import org.python.modules.cPickle
+      import scala.collection.JavaConversions._
+
+      case class Metric( topic: Topic, timestamp: joda.DateTime, value: Double )
+
+      if ( bytes.isEmpty ) throw PickleException( "stream pushing with empty bytes" )
+      else {
+        val in = new ByteArrayInputStream( bytes.toArray )
+        val fin = new PyFile( in )
+        val u = cPickle.Unpickler( fin )
+        val pickles = try {
+          u.load().asInstanceOf[PyList]
+        } finally {
+          fin.close()
+        }
+
+        val metrics = for {
+          p <- pickles
+        } yield {
+          val tuple = p.asInstanceOf[PyTuple]
+          val dp = tuple.get(1).asInstanceOf[PyTuple]
+
+          val topic: String = tuple.get( 0 ).asInstanceOf[Any] match {
+            case s: String => s
+            case ps: PyString => ps.asString
+            case unknown => throw PickleException( s"failed to parse topic [$unknown] type not handled [${unknown.getClass}]" )
+          }
+
+          val unixEpochSeconds: Long = dp.get(0).asInstanceOf[Any] match {
+            case l: Long => l
+            case i: Int => i.toLong
+            case bi: BigInteger => bi.longValue
+            case d: Double => d.toLong
+            case unknown => throw PickleException( s"failed to parse timestamp [$unknown] type not handled [${unknown.getClass}]" )
+          }
+
+          val v: Double = dp.get(1).asInstanceOf[Any] match {
+            case d: Double => d
+            case f: Float => f.toDouble
+            case bd: BigDecimal => bd.doubleValue
+            case i: Int => i.toDouble
+            case l: Long => l.toDouble
+            case unknown => throw PickleException( s"failed to parse value [$unknown] type not handled [${unknown.getClass}]" )
+          }
+
+          Metric( topic = topic, timestamp = new joda.DateTime(unixEpochSeconds * 1000L), value = v )
+        }
+
+        val result = metrics groupBy { _.topic } map { case (t, ms) =>
+          val points = ms map { m => DataPoint( timestamp = m.timestamp, value = m.value ) }
+          TimeSeries( topic = t, points = points.toIndexedSeq )
+        }
+
+        result.toList
+      }
     }
   }
 
-//  case object MessagePackProtocol extends SerializationProtocol {
-//    override def toDataPoints( bytes: ByteString ): List[TimeSeriesBase] = {
-//      import org.msgpack.ScalaMessagePack._
-//
-//    }
-//  }
+  case object MessagePackProtocol extends SerializationProtocol {
+
+    override def framingFlow(maximumFrameLength: Int): Flow[ByteString, ByteString, Unit] = ???
+
+    override def toDataPoints( bytes: ByteString ): List[TimeSeries] = {
+      import org.velvia.MsgPack
+      import org.json4s._
+      import org.json4s.jackson.JsonMethods._
+      import com.fasterxml.jackson.databind.SerializationFeature
+      org.json4s.jackson.JsonMethods.mapper.configure( SerializationFeature.CLOSE_CLOSEABLE, false )
+
+      import org.velvia.msgpack.Json4sCodecs._
+      logger info "unpacking..."
+      val payload = MsgPack unpack bytes.toArray
+      logger info "...unpacked"
+      logger error s"payload class: ${payload.getClass}"
+      logger error s"payload: $payload"
+      throw new IllegalArgumentException( s"UNPACKED: [[${payload}]]" )
+//      List.empty[TimeSeries]
+    }
+  }
 
 
   val demoReduce = new ReduceOutliers {
@@ -223,7 +305,17 @@ object GraphiteModel extends LazyLogging {
       else scala.math.pow( 2, 20 ).toInt // from graphite documentation
     }
 
-    val protocol = PickleProtocol
+    val protocol = {
+      if ( config hasPath Settings.SOURCE_PROTOCOL ) {
+        config.getString(Settings.SOURCE_PROTOCOL).toLowerCase match {
+          case "messagepack" | "message-pack" => MessagePackProtocol
+          case "pickle" => PickleProtocol
+          case _ => PickleProtocol
+        }
+      } else {
+        PickleProtocol
+      }
+    }
 
     val windowSize = usage.windowSize getOrElse {
       if ( config hasPath Settings.SOURCE_WINDOW_SIZE ) {
@@ -320,6 +412,7 @@ object GraphiteModel extends LazyLogging {
     val SOURCE_HOST = "lineup.source.host"
     val SOURCE_PORT = "lineup.source.port"
     val SOURCE_MAX_FRAME_LENGTH = "lineup.source.max-frame-length"
+    val SOURCE_PROTOCOL = "lineup.source.protocol"
     val SOURCE_WINDOW_SIZE = "lineup.source.window-size"
 
     def zero: Settings = Settings( )

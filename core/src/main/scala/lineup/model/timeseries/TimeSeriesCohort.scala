@@ -11,6 +11,7 @@ import peds.commons.math.Interpolator
 
 
 trait TimeSeriesCohort extends TimeSeriesBase {
+  override def size: Int = data.size
   def data: Row[TimeSeries]
   def precision: TimeUnit
   def toMatrix: Matrix[(joda.DateTime, Double)]

@@ -32,4 +32,7 @@ project/plugins/project/
 *.sublime-project
 *.sublime-workspace
 
+log/
+*.obj
 docs/
+tmp/
