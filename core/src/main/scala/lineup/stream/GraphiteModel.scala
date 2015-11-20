@@ -223,7 +223,7 @@ object GraphiteModel extends LazyLogging {
             case unknown => throw PickleException( s"failed to parse topic [$unknown] type not handled [${unknown.getClass}]" )
           }
 
-          val ts: Long = dp.get(0).asInstanceOf[Any] match {
+          val unixEpochSeconds: Long = dp.get(0).asInstanceOf[Any] match {
             case l: Long => l
             case i: Int => i.toLong
             case bi: BigInteger => bi.longValue
@@ -240,7 +240,7 @@ object GraphiteModel extends LazyLogging {
             case unknown => throw PickleException( s"failed to parse value [$unknown] type not handled [${unknown.getClass}]" )
           }
 
-          Metric( topic = topic, timestamp = new joda.DateTime(ts), value = v )
+          Metric( topic = topic, timestamp = new joda.DateTime(unixEpochSeconds * 1000L), value = v )
         }
 
         val result = metrics groupBy { _.topic } map { case (t, ms) =>
