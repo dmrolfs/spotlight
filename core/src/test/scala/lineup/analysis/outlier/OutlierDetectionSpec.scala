@@ -1,8 +1,8 @@
 package lineup.analysis.outlier
 
 import akka.actor.UnhandledMessage
+import com.typesafe.config.ConfigFactory
 import lineup.model.timeseries._
-import org.joda.{ time => joda }
 import scala.concurrent.duration._
 import akka.testkit._
 import org.mockito.Mockito._
@@ -22,13 +22,16 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
 
     val metric = Topic( "metric.a" )
 
-    val plans: Map[Topic, OutlierPlan] = Map(
-      metric -> OutlierPlan(
+    val plans: Seq[OutlierPlan] = Seq(
+      OutlierPlan.forTopics(
         name = "plan-a",
-        algorithms = Set( 'foo, 'bar ),
         timeout = 2.seconds,
         isQuorum = isQuorumA,
-        reduce = reduceA
+        reduce = reduceA,
+        algorithms = Set( 'foo, 'bar ),
+        specification = ConfigFactory.empty,
+        extractTopic = OutlierDetection.extractOutlierDetectionTopic,
+        topics = Set( Topic("metric") )
       )
     )
   }
@@ -60,15 +63,15 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
     "apply default plan if no other plan is assigned" in { f: Fixture =>
       import f._
 
-      val defaultPlan = OutlierPlan(
+      val defaultPlan = OutlierPlan.default(
         name = "DEFAULT_PLAN",
-        algorithms = Set( 'foo, 'bar ),
         timeout = 2.seconds,
+        algorithms = Set( 'foo, 'bar ),
         isQuorum = isQuorumA,
         reduce = reduceA
       )
 
-      val detect = TestActorRef[OutlierDetection]( OutlierDetection.props( router.ref, plans, Some(defaultPlan) ) )
+      val detect = TestActorRef[OutlierDetection]( OutlierDetection.props( router.ref, Seq(defaultPlan) ) )
 
       val msg = OutlierDetectionMessage( TimeSeries( topic = "dummy", points = Row.empty[DataPoint] ) )
 
@@ -79,7 +82,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
           m.topic mustBe Topic("dummy")
           algo must equal('foo)
           payload mustBe msg
-          properties mustBe Map.empty[String, Any]
+          properties mustBe ConfigFactory.empty
         }
       }
 
@@ -88,7 +91,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
           m.topic mustBe Topic("dummy")
           algo must equal('bar)
           payload mustBe msg
-          properties mustBe Map.empty[String, Any]
+          properties mustBe ConfigFactory.empty
         }
       }
 
@@ -98,10 +101,16 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
     "apply plan if assigned" in { f: Fixture =>
       import f._
 
-      val defaultPlan = mock[OutlierPlan]
-      when( defaultPlan.algorithms ) thenReturn Set( 'dummy )
+      val defaultPlan = OutlierPlan.default(
+        name = "dummy",
+        timeout = 2.seconds,
+        isQuorum = isQuorumA,
+        reduce = reduceA,
+        algorithms = Set( 'foo, 'bar ),
+        specification = ConfigFactory.empty
+      )
 
-      val detect = TestActorRef[OutlierDetection]( OutlierDetection.props( router.ref, plans, Some(defaultPlan) ) )
+      val detect = TestActorRef[OutlierDetection]( OutlierDetection.props( router.ref, plans :+ defaultPlan ) )
 
       val msg = OutlierDetectionMessage( TimeSeries( topic = metric, points = Row.empty[DataPoint] ) )
 
@@ -112,7 +121,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
           m.topic mustBe metric
           algo must equal('foo)
           payload mustBe msg
-          properties mustBe Map.empty[String, Any]
+          properties mustBe ConfigFactory.empty
         }
       }
 
@@ -121,19 +130,17 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
           m.topic mustBe metric
           algo must equal('bar)
           payload mustBe msg
-          properties mustBe Map.empty[String, Any]
+          properties mustBe ConfigFactory.empty
         }
       }
 
       router expectNoMsg 1.second.dilated
-
-      verify( defaultPlan, never() ).algorithms
     }
 
     "apply default plan if nameExtractor does not apply and no other plan is assigned" in { f: Fixture =>
       import f._
 
-      val defaultPlan = OutlierPlan(
+      val defaultPlan = OutlierPlan.default(
         name = "DEFAULT_PLAN",
         algorithms = Set( 'zed ),
         timeout = 2.seconds,
@@ -141,10 +148,8 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
         reduce = reduceA
       )
 
-      val emptyExtractId: OutlierDetection.ExtractId = peds.commons.util.emptyBehavior[Any, Topic]
-
       val detect = TestActorRef[OutlierDetection](
-        OutlierDetection.props( router.ref, plans, Some(defaultPlan), emptyExtractId )
+        OutlierDetection.props( router.ref, plans :+ defaultPlan )
       )
 
       val msgForDefault = OutlierDetectionMessage( TimeSeries( topic = "dummy", points = Row.empty[DataPoint] ) )
@@ -156,7 +161,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
           m.topic mustBe Topic( "dummy" )
           algo must equal('zed)
           payload mustBe msgForDefault
-          properties mustBe Map.empty[String, Any]
+          properties mustBe ConfigFactory.empty
         }
       }
 
@@ -169,7 +174,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
           m.topic mustBe metric
           algo must equal('zed)
           payload mustBe metricMsg
-          properties mustBe Map.empty[String, Any]
+          properties mustBe ConfigFactory.empty
         }
       }
 

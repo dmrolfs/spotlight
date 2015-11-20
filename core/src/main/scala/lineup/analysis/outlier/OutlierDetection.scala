@@ -28,61 +28,64 @@ object OutlierDetection {
     }
   }
 
-  def props(
-    router: ActorRef,
-    plans: Map[Topic, OutlierPlan],
-    default: Option[OutlierPlan] = None,
-    extractId: ExtractId = topicExtractId
-  ): Props = {
-    Props( new OutlierDetection( router, plans, default, extractId ) )
-  }
+  def props( router: ActorRef, plans: Seq[OutlierPlan] ): Props = Props( new OutlierDetection( router, plans) )
 
-  type ExtractId = PartialFunction[Any, Topic]
-  val topicExtractId: ExtractId = { case m: OutlierDetectionMessage => m.topic }
+  val extractOutlierDetectionTopic: OutlierPlan.ExtractTopic = {
+    case m: OutlierDetectionMessage => Some(m.topic)
+    case ts: TimeSeriesBase => Some(ts.topic)
+    case t: Topic => Some(t)
+  }
 }
 
-class OutlierDetection(
-  router: ActorRef,
-  plans: Map[Topic, OutlierPlan],
-  default: Option[OutlierPlan] = None,
-  extractId: OutlierDetection.ExtractId = OutlierDetection.topicExtractId
-) extends EnvelopingActor with ActorLogging {
+
+class OutlierDetection( router: ActorRef, plans: Seq[OutlierPlan] ) extends EnvelopingActor with ActorLogging {
   override val trace = Trace[OutlierDetection]
 
-  val fullExtractId: OutlierDetection.ExtractId = extractId orElse { case _ => "!null-id!" }
-
-  type AggregatorRequesters = Map[ActorRef, ActorRef]
+  type AggregatorSubscribers = Map[ActorRef, ActorRef]
   override def receive: Receive = around( detection( Map.empty[ActorRef, ActorRef] ) )
 
-  def detection( outstanding: AggregatorRequesters ): Receive = LoggingReceive {
-    case m: OutlierDetectionMessage if default.isDefined && extractId.isDefinedAt(m) => {
+  def detection( outstanding: AggregatorSubscribers ): Receive = LoggingReceive {
+    case m: OutlierDetectionMessage if planDefinedAt( m ) => {
       val requester = sender()
-      val aggregator = dispatch( m, plans.getOrElse(extractId(m), default.get) )
-      context become around(detection(outstanding + (aggregator -> requester)))
-    }
-
-    case m: OutlierDetectionMessage if default.isDefined => {
-      val requester = sender()
-      val aggregator = dispatch( m, default.get )
-      context become around(detection(outstanding + (aggregator -> requester)))
+      val aggregator = dispatch( m, findPlanFor(m).get )
+      val newOutstanding = outstanding + (aggregator -> requester)
+      trace( s"new-outstanding[${newOutstanding.contains(aggregator)}] = $newOutstanding" )
+      context become around( detection(newOutstanding) )
     }
 
     case result: Outliers if outstanding.contains( sender() ) => {
-      log info s"outlier detection result topic [${result.topic}] has-anomalies[${result.hasAnomalies}}] algorithms[${result.algorithms}] interval[${result.source.interval})"
-      outstanding( sender() ) ! result
+      val aggregator = sender()
+      outstanding( aggregator ) ! result
+      context become around( detection(outstanding - aggregator) )
     }
+
+//    case result: Outliers => {
+//      log error s"OUTLIER RESULT MISFIRE?\nresult:[$result]\noutstanding:[$outstanding]\naggregator:[${sender()}]"
+//    }
   }
 
-  def dispatch( m: OutlierDetectionMessage, p: OutlierPlan ): ActorRef = trace.block( s"dispatch($m, $p)" ) {
-    log info s"outlier detection request topic [${m.topic}] size[${m.source}}] interval[${m.source.interval})"
-    val aggregatorName = s"quorum-${p.name}-${fullExtractId(m)}-${ShortUUID()}"
+
+  override def unhandled(message: Any): Unit = trace.block( s"unhandled" ) {
+    trace( s"sender = ${sender().path}" )
+    trace( s"message = $message" )
+    super.unhandled(message)
+  }
+
+  def dispatch( m: OutlierDetectionMessage, p: OutlierPlan ): ActorRef = {
+    val aggregatorName = s"quorum-${p.name}-${fullExtractId(m) getOrElse "!NULL-ID!"}-${ShortUUID()}"
     val aggregator = context.actorOf( OutlierQuorumAggregator.props( p, m.source ), aggregatorName )
 
     p.algorithms foreach { a =>
       //todo stream enveloping: router !+ DetectUsing( algorithm = a, destination = aggregator, payload = m, p.algorithmProperties )
-      router ! DetectUsing( algorithm = a, aggregator = aggregator, payload = m, p.algorithmProperties )
+      router ! DetectUsing( algorithm = a, aggregator = aggregator, payload = m, p.algorithmConfig )
     }
 
     aggregator
   }
+
+  def planDefinedAt( msg: OutlierDetectionMessage ): Boolean = trace.block( s"planDefinedAt($msg)" ) { findPlanFor( msg ).isDefined }
+
+  def findPlanFor( msg: OutlierDetectionMessage ): Option[OutlierPlan] = trace.block( s"findPlanFor(${msg.topic})" ) { plans find { _ appliesTo msg } }
+
+  val fullExtractId: OutlierPlan.ExtractTopic = OutlierDetection.extractOutlierDetectionTopic orElse { case _ => None }
 }

@@ -1,10 +1,10 @@
 package lineup.analysis.outlier.algorithm
 
-import scala.collection.JavaConversions._
 import akka.actor.{ ActorRef, Props }
 import akka.event.LoggingReceive
 import org.apache.commons.math3.stat.{ descriptive => stat }
 import org.apache.commons.math3.ml
+import com.typesafe.config.Config
 import peds.commons.log.Trace
 import peds.akka.envelope._
 import lineup.model.timeseries.{ Matrix, DataPoint }
@@ -20,8 +20,8 @@ object DBSCANAnalyzer {
 
   val algorithm = 'dbscan
 
-  val EPS = "eps"
-  val MIN_DENSITY_CONNECTED_POINTS = "MinDensityConnectedPoints"
+  val EPS = algorithm.name + ".eps"
+  val MIN_DENSITY_CONNECTED_POINTS = algorithm.name + ".minDensityConnectedPoints"
 
   val defaultDistanceMeasure: ml.distance.DistanceMeasure = new ml.distance.EuclideanDistance
 }
@@ -32,12 +32,12 @@ class DBSCANAnalyzer( override val router: ActorRef ) extends AlgorithmActor {
   override val algorithm: Symbol = DBSCANAnalyzer.algorithm
 
   override val detect: Receive = LoggingReceive {
-    case s @ DetectUsing( _, aggregator, payload: DetectOutliersInSeries, algorithmContext ) => trace.block( s"receive.DetectUsing:Series($s)" ) {
+    case s @ DetectUsing( _, aggregator, payload: DetectOutliersInSeries, algorithmConfig ) => trace.block( s"receive.DetectUsing:Series($s)" ) {
       def pointsFromSeries( underlying: DetectOutliersInSeries ): Seq[ml.clustering.DoublePoint] = trace.briefBlock( s"pointsFromSeries($underlying)" ) {
         underlying.data.points map { dp => new ml.clustering.DoublePoint( Array(dp.timestamp.getMillis.toDouble, dp.value) )}
       }
 
-      val clusters = cluster( pointsFromSeries(payload), algorithmContext )
+      val clusters = cluster( pointsFromSeries(payload), algorithmConfig )
       val isOutlier = outlierTest( clusters )
       val outliers = payload.data.points collect { case dp if isOutlier( dp ) => dp }
       val result = {
@@ -49,7 +49,7 @@ class DBSCANAnalyzer( override val router: ActorRef ) extends AlgorithmActor {
       aggregator ! result
     }
 
-    case c @ DetectUsing( algo, aggregator, payload: DetectOutliersInCohort, algorithmContext ) => trace.block( s"receive.DetectUsing:Cohort($c)" ) {
+    case c @ DetectUsing( algo, aggregator, payload: DetectOutliersInCohort, algorithmConfig ) => trace.block( s"receive.DetectUsing:Cohort($c)" ) {
       def cohortDistances( underlying: DetectOutliersInCohort ): Matrix[DataPoint] = trace.block( s"cohortDistances(${underlying.data.topic})" ) {
         for {
           frame <- underlying.data.toMatrix
@@ -63,7 +63,7 @@ class DBSCANAnalyzer( override val router: ActorRef ) extends AlgorithmActor {
       val outlierMarks = for {
         frameDistances <- cohortDistances( payload )
         points = frameDistances map { dp => new ml.clustering.DoublePoint( Array(dp.timestamp.getMillis.toDouble, dp.value) ) }
-        clusters = cluster( points, algorithmContext )
+        clusters = cluster( points, algorithmConfig )
         isOutlier = outlierTest( clusters )
       } yield frameDistances.zipWithIndex collect { case (fd, i) if isOutlier( fd ) => i }
 
@@ -89,18 +89,20 @@ class DBSCANAnalyzer( override val router: ActorRef ) extends AlgorithmActor {
 
   def cluster(
     payload: Seq[ml.clustering.DoublePoint],
-    algorithmContext: Map[String, Any]
+    algorithmConfig: Config
   ): Seq[ml.clustering.Cluster[ml.clustering.DoublePoint]] = trace.block( s"cluster" ) {
     implicit val algo = algorithm
-    val eps = algorithmContext.property[Double]( EPS )
-    val minDensityConnectedPoints = algorithmContext.property[Int]( MIN_DENSITY_CONNECTED_POINTS )
+    val eps = algorithmConfig.getDouble( EPS )
+    val minDensityConnectedPoints = algorithmConfig.getInt( MIN_DENSITY_CONNECTED_POINTS )
 
     import scala.collection.JavaConversions._
     val transformer = new ml.clustering.DBSCANClusterer[ml.clustering.DoublePoint]( eps, minDensityConnectedPoints, defaultDistanceMeasure )
-    transformer cluster payload
+    transformer.cluster( payload )
   }
 
   def outlierTest( clusters: Seq[ml.clustering.Cluster[ml.clustering.DoublePoint]] ): DataPoint => Boolean = {
+    import scala.collection.JavaConversions._
+
     if ( clusters.isEmpty ) (pt: DataPoint) => { false }
     else {
       val largestCluster = clusters.maxBy( _.getPoints.size ).getPoints.toSet

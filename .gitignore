@@ -31,3 +31,8 @@ project/plugins/project/
 .scala_dependencies
 *.sublime-project
 *.sublime-workspace
+
+log/
+*.obj
+docs/
+tmp/

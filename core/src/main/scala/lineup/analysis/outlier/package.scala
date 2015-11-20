@@ -1,6 +1,7 @@
 package lineup.analysis
 
 import akka.actor.ActorRef
+import com.typesafe.config.{ ConfigFactory, Config }
 import lineup.model.timeseries.{ Topic, TimeSeriesBase, TimeSeriesCohort, TimeSeries }
 
 
@@ -39,7 +40,7 @@ package object outlier {
     algorithm: Symbol,
     aggregator: ActorRef,
     payload: OutlierDetectionMessage,
-    properties: Map[String, Any] = Map()
+    properties: Config = ConfigFactory.empty()
   ) extends OutlierDetectionMessage {
     override def topic: Topic = payload.topic
     override type Source = payload.Source
