@@ -36,3 +36,5 @@ log/
 *.obj
 docs/
 tmp/
+*.hprof
+*.hprof.*
