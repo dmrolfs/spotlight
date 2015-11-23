@@ -16,7 +16,7 @@ addSbtPlugin( "io.spray" % "sbt-revolver" % "0.7.1" )
 
 addSbtPlugin("org.scoverage" % "sbt-scoverage" % "latest.integration")
 
-addSbtPlugin("com.eed3si9n" % "sbt-assembly" % "0.14.0")
+addSbtPlugin("com.eed3si9n" % "sbt-assembly" % "0.14.1")
 
 addSbtPlugin("com.typesafe.sbt" % "sbt-multi-jvm" % "0.3.11")
 
