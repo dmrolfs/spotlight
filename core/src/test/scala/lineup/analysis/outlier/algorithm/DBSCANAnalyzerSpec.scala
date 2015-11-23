@@ -60,8 +60,8 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
           DetectOutliersInSeries( TimeSeries("series", points) ),
           ConfigFactory.parseString(
             s"""
-               |${DBSCANAnalyzer.EPS}: 5.0
-               |${DBSCANAnalyzer.MIN_DENSITY_CONNECTED_POINTS}: 3
+               |${DBSCANAnalyzer.Eps}: 5.0
+               |${DBSCANAnalyzer.MinDensityConnectedPoints}: 3
              """.stripMargin
           )
         )
@@ -77,8 +77,8 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
 
       val algProps = ConfigFactory.parseString(
         s"""
-           |${DBSCANAnalyzer.EPS}: 5.0
-           |${DBSCANAnalyzer.MIN_DENSITY_CONNECTED_POINTS}: 3
+           |${DBSCANAnalyzer.Eps}: 5.0
+           |${DBSCANAnalyzer.MinDensityConnectedPoints}: 3
         """.stripMargin
       )
 
@@ -131,8 +131,8 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
 
       val algProps = ConfigFactory.parseString(
         s"""
-           |${DBSCANAnalyzer.EPS}: 5.0
-           |${DBSCANAnalyzer.MIN_DENSITY_CONNECTED_POINTS}: 3
+           |${DBSCANAnalyzer.Eps}: 5.0
+           |${DBSCANAnalyzer.MinDensityConnectedPoints}: 3
         """.stripMargin
       )
 
@@ -165,8 +165,8 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
 
       val algProps = ConfigFactory.parseString(
         s"""
-           |${DBSCANAnalyzer.EPS}: 5.0
-           |${DBSCANAnalyzer.MIN_DENSITY_CONNECTED_POINTS}: 2
+           |${DBSCANAnalyzer.Eps}: 5.0
+           |${DBSCANAnalyzer.MinDensityConnectedPoints}: 2
         """.stripMargin
       )
 
@@ -205,8 +205,8 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
 
       val algProps = ConfigFactory.parseString(
         s"""
-           |${DBSCANAnalyzer.EPS}: 5.0
-           |${DBSCANAnalyzer.MIN_DENSITY_CONNECTED_POINTS}: 2
+           |${DBSCANAnalyzer.Eps}: 5.0
+           |${DBSCANAnalyzer.MinDensityConnectedPoints}: 2
         """.stripMargin
       )
 

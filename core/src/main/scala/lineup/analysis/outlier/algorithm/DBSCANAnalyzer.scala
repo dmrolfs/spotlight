@@ -18,18 +18,18 @@ import lineup.analysis.outlier.{ DetectUsing, DetectOutliersInSeries, DetectOutl
 object DBSCANAnalyzer {
   def props( router: ActorRef ): Props = Props( new DBSCANAnalyzer( router ) )
 
-  val algorithm = 'dbscan
+  val Algorithm = 'dbscan
 
-  val EPS = algorithm.name + ".eps"
-  val MIN_DENSITY_CONNECTED_POINTS = algorithm.name + ".minDensityConnectedPoints"
+  val Eps = Algorithm.name + ".eps"
+  val MinDensityConnectedPoints = Algorithm.name + ".minDensityConnectedPoints"
 
-  val defaultDistanceMeasure: ml.distance.DistanceMeasure = new ml.distance.EuclideanDistance
+  val DefaultDistanceMeasure: ml.distance.DistanceMeasure = new ml.distance.EuclideanDistance
 }
 
 class DBSCANAnalyzer( override val router: ActorRef ) extends AlgorithmActor {
   import DBSCANAnalyzer._
   override val trace: Trace[_] = Trace[DBSCANAnalyzer]
-  override val algorithm: Symbol = DBSCANAnalyzer.algorithm
+  override val algorithm: Symbol = DBSCANAnalyzer.Algorithm
 
   override val detect: Receive = LoggingReceive {
     case s @ DetectUsing( _, aggregator, payload: DetectOutliersInSeries, algorithmConfig ) => trace.block( s"receive.DetectUsing:Series($s)" ) {
@@ -92,11 +92,11 @@ class DBSCANAnalyzer( override val router: ActorRef ) extends AlgorithmActor {
     algorithmConfig: Config
   ): Seq[ml.clustering.Cluster[ml.clustering.DoublePoint]] = trace.block( s"cluster" ) {
     implicit val algo = algorithm
-    val eps = algorithmConfig.getDouble( EPS )
-    val minDensityConnectedPoints = algorithmConfig.getInt( MIN_DENSITY_CONNECTED_POINTS )
+    val eps = algorithmConfig.getDouble( Eps )
+    val minDensityConnectedPoints = algorithmConfig.getInt( MinDensityConnectedPoints )
 
     import scala.collection.JavaConversions._
-    val transformer = new ml.clustering.DBSCANClusterer[ml.clustering.DoublePoint]( eps, minDensityConnectedPoints, defaultDistanceMeasure )
+    val transformer = new ml.clustering.DBSCANClusterer[ml.clustering.DoublePoint]( eps, minDensityConnectedPoints, DefaultDistanceMeasure )
     transformer.cluster( payload )
   }
 
