@@ -1,6 +1,5 @@
 package lineup.stream
 
-import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicInteger
 import com.typesafe.config.ConfigFactory
@@ -44,14 +43,14 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
     val plans = Seq(
       OutlierPlan.default(
         name = "DEFAULT_PLAN",
-        algorithms = Set(DBSCANAnalyzer.algorithm),
+        algorithms = Set(DBSCANAnalyzer.Algorithm ),
         timeout = 500.millis,
         isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = 1, triggerPoint = 1 ),
         reduce = GraphiteModel.demoReduce,
         specification = ConfigFactory.parseString(
         s"""
-         |algorithm-config.${DBSCANAnalyzer.EPS}: 5.0
-         |algorithm-config.${DBSCANAnalyzer.MIN_DENSITY_CONNECTED_POINTS}: 3
+         |algorithm-config.${DBSCANAnalyzer.Eps}: 5.0
+         |algorithm-config.${DBSCANAnalyzer.MinDensityConnectedPoints}: 3
         """.stripMargin
         )
       )
@@ -69,8 +68,9 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
 
   override def makeAkkaFixture(): Fixture = new Fixture
 
-  val MOO = Tag( "moo" )
+  val NEXT = Tag( "next" )
   val DONE = Tag( "done" )
+
   "GraphiteModel" should {
     "convert pickle to TimeSeries" taggedAs (DONE) in { f: Fixture =>
       import f._
@@ -115,7 +115,9 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
       val dp1 = makeDataPoints( points, start = now ).take( 5 )
       val dp2 = makeDataPoints( pointsA, start = now+7 ).take( 5 )
 
-      val expected = TimeSeries.seriesMerging.merge( TimeSeries("foobar", dp1), TimeSeries("foobar", dp2) ).toOption.get
+//      val expected = TimeSeries.seriesMerging.merge( TimeSeries("foobar", dp1), TimeSeries("foobar", dp2) ).toOption.get
+      val expected = TimeSeries( "foobar", dp1 ++ dp2 )
+      trace( s"expected = $expected" )
 
       val flowUnderTest = Flow[ByteString]
         .via( GraphiteModel.PickleProtocol.framingFlow() )
@@ -163,7 +165,7 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
       import f._
       import system.dispatcher
 
-      val algos = Set( DBSCANAnalyzer.algorithm )
+      val algos = Set( DBSCANAnalyzer.Algorithm )
       val defaultPlan = OutlierPlan.default(
         name = "DEFAULT_PLAN",
         algorithms = algos,
@@ -172,8 +174,8 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
         reduce = GraphiteModel.demoReduce,
         specification = ConfigFactory.parseString(
           s"""
-             |algorithm-config.${DBSCANAnalyzer.EPS}: 5.0
-             |algorithm-config.${DBSCANAnalyzer.MIN_DENSITY_CONNECTED_POINTS}: 3
+             |algorithm-config.${DBSCANAnalyzer.Eps}: 5000
+             |algorithm-config.${DBSCANAnalyzer.MinDensityConnectedPoints}: 9
           """.stripMargin
         )
       )
@@ -182,15 +184,33 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
       val dbscan = system.actorOf( DBSCANAnalyzer.props(router), "dbscan" )
       val detector = system.actorOf( OutlierDetection.props(router, Seq(defaultPlan)), "detectOutliers" )
 
-      val now = joda.DateTime.now
-      val dp1 = makeDataPoints( points, start = now, period = 1.millis )
+      val now = new joda.DateTime( joda.DateTime.now.getMillis / 1000L * 1000L )
+      val dp1 = makeDataPoints( points, start = now, period = 1.seconds )
 //      val dp2 = makeDataPoints( pointsA, start = joda.DateTime.now )
 //      val dp3 = makeDataPoints( pointsB, start = joda.DateTime.now )
 
-      val expectedValues = Row( 18.8, 25.2, 31.5, 22.0, 24.1, 39.2 )
-      val expectedPoints = dp1 filter { expectedValues contains _.value } sortBy { _.timestamp }
+//      val expectedValues = Row( 18.8, 25.2, 31.5, 22.0, 24.1, 39.2 )
+//      val expectedPoints = dp1 filter { expectedValues contains _.value } sortBy { _.timestamp }
+      val largestCluster = Row(
+        DataPoint( new joda.DateTime(now.getMillis + 10000L), 8.58),
+        DataPoint( new joda.DateTime(now.getMillis + 11000L), 8.36),
+        DataPoint( new joda.DateTime(now.getMillis + 12000L), 8.58),
+        DataPoint( new joda.DateTime(now.getMillis + 13000L), 7.5),
+        DataPoint( new joda.DateTime(now.getMillis + 14000L), 7.1),
+        DataPoint( new joda.DateTime(now.getMillis + 15000L), 7.3),
+        DataPoint( new joda.DateTime(now.getMillis + 16000L), 7.71),
+        DataPoint( new joda.DateTime(now.getMillis + 17000L), 8.14),
+        DataPoint( new joda.DateTime(now.getMillis + 18000L), 8.14),
+        DataPoint( new joda.DateTime(now.getMillis + 19000L), 7.1),
+        DataPoint( new joda.DateTime(now.getMillis + 20000L), 7.5),
+        DataPoint( new joda.DateTime(now.getMillis + 21000L), 7.1),
+        DataPoint( new joda.DateTime(now.getMillis + 22000L), 7.1),
+        DataPoint( new joda.DateTime(now.getMillis + 23000L), 7.3)
+      )
+      val expectedPoints = dp1 filterNot { largestCluster contains _ }
+
       val expected = SeriesOutliers(
-        algorithms = Set(DBSCANAnalyzer.algorithm),
+        algorithms = Set(DBSCANAnalyzer.Algorithm ),
         source = TimeSeries("foo", dp1),
         outliers = expectedPoints
       )
@@ -389,20 +409,26 @@ object GraphiteModelSpec {
       (topic, points) = metric
       p <- points
     } {
-      val item = new PyTuple( new PyString(topic), new PyTuple( new PyLong(p.timestamp.getMillis), new PyFloat(p.value) ) )
+      val item = new PyTuple( new PyString(topic), new PyTuple(new PyLong(p.timestamp.getMillis / 1000L), new PyFloat(p.value)) )
       data add item
     }
     trace( s"data = $data")
 
-    val out = new ByteArrayOutputStream()
-    val fout = new PyFile( out )
-    val p = cPickle.Pickler( fout, 2 )
-    p dump data
-    fout.close()
+    val out = cPickle.dumps( data, 2 ).asString
+//    val out = new ByteArrayOutputStream()
+//    val fout = new PyFile( out )
+//    try {
+//      val p = cPickle.Pickler( fout, 2 )
+//      p dump data
+//    } finally {
+//      fout.close()
+//    }
 
     trace( s"payloads[${out.size}] = ${cPickle.dumps(data)}" )
-    trace( s"""payload[${out.size}] = ${out.toString("ISO-8859-1")}""" )
-    ByteString( out.toByteArray )
+    trace( s"""payload[${out.size}] = ${out.toString}""" )
+//    trace( s"""payload[${out.size}] = ${out.toString("ISO-8859-1")}""" )
+    ByteString( out.getBytes( "ISO-8859-1" ) )
+//    ByteString( out.toByteArray )
   }
 
   def makeDataPoints(
@@ -411,6 +437,8 @@ object GraphiteModelSpec {
     period: FiniteDuration = 1.second,
     wiggleFactor: (Double, Double) = (1.0, 1.0)
   ): Row[DataPoint] = {
+    val secs = start.getMillis / 1000L
+    val epochStart = new joda.DateTime( secs * 1000L )
     val random = new RandomDataGenerator
     def nextFactor: Double = {
       if ( wiggleFactor._1 == wiggleFactor._2 ) wiggleFactor._1
@@ -420,7 +448,7 @@ object GraphiteModelSpec {
     values.zipWithIndex map { vi =>
       val (v, i) = vi
       val adj = (i * nextFactor) * period
-      val ts = start + adj.toJodaDuration
+      val ts = epochStart + adj.toJodaDuration
       DataPoint( timestamp = ts, value = v )
     }
   }

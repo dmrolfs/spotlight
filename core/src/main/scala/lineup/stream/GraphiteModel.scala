@@ -150,11 +150,11 @@ object GraphiteModel extends LazyLogging {
 
     Flow[ByteString]
     .via( protocol.loadTimeSeriesData )
-//    .map { e =>
-//      val r = plans.find{ _ appliesTo e }
-//      logger info s"""Plan for ${e.topic}: ${r getOrElse "NONE"}"""
-//      e
-//    }
+    .map { e =>
+      val r = plans.find{ _ appliesTo e }
+      logger info s"""Plan for ${e.topic}: ${r getOrElse "NONE"}"""
+      e
+    }
     .filter { ts => plans exists { _ appliesTo ts } }
     .groupedWithin( n = numTopics * windowSize.toMillis.toInt, d = windowSize ) // max elems = 1 per milli; duration = windowSize
     .map {
@@ -202,14 +202,16 @@ object GraphiteModel extends LazyLogging {
 
       if ( bytes.isEmpty ) throw PickleException( "stream pushing with empty bytes" )
       else {
-        val in = new ByteArrayInputStream( bytes.toArray )
-        val fin = new PyFile( in )
-        val u = cPickle.Unpickler( fin )
-        val pickles = try {
-          u.load().asInstanceOf[PyList]
-        } finally {
-          fin.close()
-        }
+        val pickles = cPickle.loads( new PyString(bytes.decodeString("ISO-8859-1")) ).asInstanceOf[PyList]
+//        val in = new ByteArrayInputStream( bytes.toArray )
+//        val fin = new PyFile( in )
+//        val u = cPickle.Unpickler( fin )
+//        val pickles = try {
+//          u.load().asInstanceOf[PyList]
+//        } finally {
+//          fin.close()
+//          in.close()
+//        }
 
         val metrics = for {
           p <- pickles
@@ -284,7 +286,7 @@ object GraphiteModel extends LazyLogging {
       implicit ec: ExecutionContext
     ): Future[Outliers] = {
       Future {
-        results.headOption map { _._2 } getOrElse { NoOutliers( algorithms = Set(DBSCANAnalyzer.algorithm), source = source ) }
+        results.headOption map { _._2 } getOrElse { NoOutliers( algorithms = Set(DBSCANAnalyzer.Algorithm ), source = source ) }
       }
     }
   }
@@ -302,7 +304,7 @@ object GraphiteModel extends LazyLogging {
 
     val maxFrameLength = {
       if ( config hasPath Settings.SOURCE_MAX_FRAME_LENGTH) config getInt Settings.SOURCE_MAX_FRAME_LENGTH
-      else scala.math.pow( 2, 20 ).toInt // from graphite documentation
+      else 4 + scala.math.pow( 2, 20 ).toInt // from graphite documentation
     }
 
     val protocol = {
