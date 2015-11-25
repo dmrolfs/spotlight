@@ -20,8 +20,8 @@
     </encoder>
   </appender>
 
-  <appender name="OUTLIER_FILE" class="ch.qos.logback.core.FileAppender">
-    <file>${LOG_HOME}/stats-${bySecond}.log</file>
+  <appender name="METRIC_FILE" class="ch.qos.logback.core.FileAppender">
+    <file>${LOG_HOME}/metrics-${bySecond}.log</file>
     <append>true</append>
     <encoder>
       <pattern>%msg%n</pattern>
@@ -29,17 +29,9 @@
   </appender>
 
   <logger name="Outliers" level="INFO" additivity="false">
-    <appender-ref ref="OUTLIER_FILE" />
+    <appender-ref ref="METRIC_FILE" />
     <appender-ref ref="STDOUT" />
   </logger>
-
-  <appender name="METRIC_FILE" class="ch.qos.logback.core.FileAppender">
-    <file>${LOG_HOME}/stats-${bySecond}.log</file>
-    <append>true</append>
-    <encoder>
-      <pattern>%msg%n</pattern>
-    </encoder>
-  </appender>
 
   <logger name="Metrics" level="INFO" additivity="false">
     <appender-ref ref="METRIC_FILE" />
