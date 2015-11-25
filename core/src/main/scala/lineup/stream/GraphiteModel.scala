@@ -1,11 +1,9 @@
 package lineup.stream
 
-import java.io.ByteArrayInputStream
 import java.math.BigInteger
 import java.net.InetAddress
 import java.nio.ByteOrder
 import java.util.concurrent.atomic.AtomicInteger
-import peds.commons.log.Trace
 
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.concurrent.duration._
@@ -21,8 +19,9 @@ import akka.util.ByteString
 import com.typesafe.config.{ ConfigObject, Config, ConfigFactory }
 import com.typesafe.scalalogging.{ Logger, LazyLogging }
 import org.slf4j.LoggerFactory
-
 import org.joda.{ time => joda }
+import peds.commons.log.Trace
+
 import lineup.analysis.outlier.algorithm.DBSCANAnalyzer
 import lineup.analysis.outlier.{ DetectionAlgorithmRouter, OutlierDetection }
 import lineup.model.outlier._
@@ -45,7 +44,7 @@ object GraphiteModel extends LazyLogging {
 
         val (host, port, maxFrameLength, protocol, windowSize, plans) = getConfiguration( usage, config )
         val usageMessage = s"""
-          |\nRunning Lineup using the following configuation:
+          |\nRunning Lineup using the following configuration:
           |\tbinding       : ${host}:${port}
           |\tmax frame size: ${maxFrameLength}
           |\tprotocol      : ${protocol}
@@ -105,6 +104,8 @@ object GraphiteModel extends LazyLogging {
     serverBinding runForeach { connection =>
       val detection = Flow() { implicit b =>
         import FlowGraph.Implicits._
+
+        logger debug s"received connection remote[${connection.remoteAddress}] -> local[${connection.localAddress}]"
 
         val framing = b.add( protocol.framingFlow( maxFrameLength ) )
         val timeSeries = b.add( graphiteTimeSeries( plans = plans, protocol = protocol, windowSize = windowSize ) )
@@ -193,39 +194,37 @@ object GraphiteModel extends LazyLogging {
       ).map { _ drop FieldLength }
     }
 
-    override def toDataPoints( bytes: ByteString ): List[TimeSeries] = trace.block( "toDataPoints" ) {
-      import org.python.core._
-      import org.python.modules.cPickle
-      import scala.collection.JavaConversions._
+    override def toDataPoints( bytes: ByteString ): List[TimeSeries] = trace.briefBlock( "toDataPoints" ) {
+      import net.razorvine.pickle.Unpickler
+
+      import scala.collection.convert.wrapAll._
+      import scala.collection.mutable
 
       case class Metric( topic: Topic, timestamp: joda.DateTime, value: Double )
 
       if ( bytes.isEmpty ) throw PickleException( "stream pushing with empty bytes" )
       else {
-        val pickles = cPickle.loads( new PyString(bytes.decodeString("ISO-8859-1")) ).asInstanceOf[PyList]
-//        val in = new ByteArrayInputStream( bytes.toArray )
-//        val fin = new PyFile( in )
-//        val u = cPickle.Unpickler( fin )
-//        val pickles = try {
-//          u.load().asInstanceOf[PyList]
-//        } finally {
-//          fin.close()
-//          in.close()
+        val unpickler = new Unpickler
+        val pck = unpickler.loads( bytes.toArray )
+//        trace( s"UNPICKLED CLASS = ${pck.getClass}" )
+//        trace.block( s"UNPICKLED DUMP" ) {
+//          pck.asInstanceOf[java.util.ArrayList[Array[AnyRef]]].foreach( p => trace( s"Class[${p.getClass}]: $p" ) )
 //        }
+
+        val pickles: mutable.Buffer[Array[AnyRef]] = pck.asInstanceOf[java.util.ArrayList[Array[AnyRef]]]
 
         val metrics = for {
           p <- pickles
         } yield {
-          val tuple = p.asInstanceOf[PyTuple]
-          val dp = tuple.get(1).asInstanceOf[PyTuple]
+          val tuple = p
+          val dp = tuple(1).asInstanceOf[Array[AnyRef]]
 
-          val topic: String = tuple.get( 0 ).asInstanceOf[Any] match {
+          val topic: String = tuple( 0 ).asInstanceOf[Any] match {
             case s: String => s
-            case ps: PyString => ps.asString
             case unknown => throw PickleException( s"failed to parse topic [$unknown] type not handled [${unknown.getClass}]" )
           }
 
-          val unixEpochSeconds: Long = dp.get(0).asInstanceOf[Any] match {
+          val unixEpochSeconds: Long = dp(0).asInstanceOf[Any] match {
             case l: Long => l
             case i: Int => i.toLong
             case bi: BigInteger => bi.longValue
@@ -233,7 +232,7 @@ object GraphiteModel extends LazyLogging {
             case unknown => throw PickleException( s"failed to parse timestamp [$unknown] type not handled [${unknown.getClass}]" )
           }
 
-          val v: Double = dp.get(1).asInstanceOf[Any] match {
+          val v: Double = dp(1).asInstanceOf[Any] match {
             case d: Double => d
             case f: Float => f.toDouble
             case bd: BigDecimal => bd.doubleValue

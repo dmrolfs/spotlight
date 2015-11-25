@@ -3,8 +3,6 @@ package lineup.stream
 import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicInteger
 import com.typesafe.config.ConfigFactory
-import org.python.core._
-import org.python.modules.cPickle
 import org.scalatest.Tag
 import peds.commons.log.Trace
 
@@ -94,7 +92,7 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
       result mustBe expected
     }
 
-    "framed flow convert graphite pickle into TimeSeries" taggedAs (DONE) in { f: Fixture =>
+    "framed flow convert graphite pickle into TimeSeries" taggedAs (WIP) in { f: Fixture =>
       import f._
       val now = joda.DateTime.now
       val dp = makeDataPoints( points, start = now ).take( 5 )
@@ -105,11 +103,11 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
         .via( GraphiteModel.PickleProtocol.loadTimeSeriesData )
 
       val future = Source( Future.successful(withHeader(pickled(dp))) ).via( flowUnderTest ).runWith( Sink.head )
-      val result = Await.result( future, 100.millis.dilated )
+      val result = Await.result( future, 1.second.dilated )
       result mustBe expected
     }
 
-    "convert pickles from framed ByteStream" taggedAs (DONE) in { f: Fixture =>
+    "convert pickles from framed ByteStream" taggedAs (NEXT) in { f: Fixture =>
       import f._
       val now = joda.DateTime.now
       val dp1 = makeDataPoints( points, start = now ).take( 5 )
@@ -127,7 +125,7 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
       trace( s"pickles = ${pickles.utf8String}" )
       trace( s"byte-pickles = ${pickles}" )
       val future = Source( Future.successful(pickles) ).via( flowUnderTest ).runWith( Sink.head )
-      val result = Await.result( future, 100.millis.dilated )
+      val result = Await.result( future, 1.second.dilated )
       result mustBe expected
     }
 
@@ -156,12 +154,12 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
                    .grouped( 10 )
                    .runWith( Sink.head )
 
-      val result = Await.result( future, 2.seconds.dilated )
+      val result = Await.result( future, 1.second.dilated )
       result.toSet mustBe expected
     }
 
 
-    "detect Outliers" taggedAs (WIP) in { f: Fixture =>
+    "detect Outliers" taggedAs (NEXT) in { f: Fixture =>
       import f._
       import system.dispatcher
 
@@ -315,7 +313,7 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
       val cancellable = sourceUnderTest.to( Sink.actorRef(probe.ref, "completed") ).run()
 
       probe.expectMsg( 1.second, Tick )
-      probe.expectNoMsg( 200.millis )
+      probe.expectNoMsg( 175.millis )
       probe.expectMsg( 200.millis.dilated, Tick )
       cancellable.cancel()
       probe.expectMsg( 200.millis.dilated, "completed" )
@@ -403,32 +401,26 @@ object GraphiteModelSpec {
   def pickled( dp: Row[DataPoint] ): ByteString = pickled( Seq(("foobar", dp)) )
 
   def pickled(metrics: Seq[(String, Row[DataPoint])] ): ByteString = trace.block( s"pickled($metrics)" ) {
-    val data = new PyList
+    import net.razorvine.pickle.Pickler
+    import scala.collection.convert.wrapAll._
+
+    val data = new java.util.LinkedList[AnyRef]
     for {
       metric <- metrics
       (topic, points) = metric
       p <- points
     } {
-      val item = new PyTuple( new PyString(topic), new PyTuple(new PyLong(p.timestamp.getMillis / 1000L), new PyFloat(p.value)) )
-      data add item
+      val dp: Array[Any] = Array( p.timestamp.getMillis / 1000L, p.value )
+      val metric: Array[AnyRef] = Array( topic, dp )
+      data add metric
     }
     trace( s"data = $data")
 
-    val out = cPickle.dumps( data, 2 ).asString
-//    val out = new ByteArrayOutputStream()
-//    val fout = new PyFile( out )
-//    try {
-//      val p = cPickle.Pickler( fout, 2 )
-//      p dump data
-//    } finally {
-//      fout.close()
-//    }
+    val pickler = new Pickler( false )
+    val out = pickler dumps data
 
-    trace( s"payloads[${out.size}] = ${cPickle.dumps(data)}" )
-    trace( s"""payload[${out.size}] = ${out.toString}""" )
-//    trace( s"""payload[${out.size}] = ${out.toString("ISO-8859-1")}""" )
-    ByteString( out.getBytes( "ISO-8859-1" ) )
-//    ByteString( out.toByteArray )
+    trace( s"""payload[${out.size}] = ${ByteString(out).decodeString("ISO-8859-1")}""" )
+    ByteString( out )
   }
 
   def makeDataPoints(
