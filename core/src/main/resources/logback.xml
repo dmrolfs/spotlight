@@ -10,8 +10,7 @@
   <timestamp key="bySecond" datePattern="yyyyMMdd'T'HHmmss"/>
 
   <appender name="FILE" class="ch.qos.logback.core.FileAppender">
-    <file>/var/log/testFile-${bySecond}.log</file>
-    <!--<file>log/testFile-${bySecond}.log</file>-->
+    <file>${LOG_HOME}/testFile-${bySecond}.log</file>
     <append>true</append>
     <!-- encoders are assigned the type
          ch.qos.logback.classic.encoder.PatternLayoutEncoder by default -->
@@ -22,11 +21,8 @@
   </appender>
 
   <appender name="OUTLIER_FILE" class="ch.qos.logback.core.FileAppender">
-    <file>/var/log/outliers-${bySecond}.log</file>
-    <!--<file>log/stats-${bySecond}.log</file>-->
+    <file>${LOG_HOME}/stats-${bySecond}.log</file>
     <append>true</append>
-    <!-- encoders are assigned the type
-         ch.qos.logback.classic.encoder.PatternLayoutEncoder by default -->
     <encoder>
       <pattern>%msg%n</pattern>
     </encoder>
@@ -38,11 +34,8 @@
   </logger>
 
   <appender name="METRIC_FILE" class="ch.qos.logback.core.FileAppender">
-    <file>/var/log/metrics-${bySecond}.log</file>
-    <!--<file>log/stats-${bySecond}.log</file>-->
+    <file>${LOG_HOME}/stats-${bySecond}.log</file>
     <append>true</append>
-    <!-- encoders are assigned the type
-         ch.qos.logback.classic.encoder.PatternLayoutEncoder by default -->
     <encoder>
       <pattern>%msg%n</pattern>
     </encoder>
@@ -53,8 +46,8 @@
   </logger>
 
   <!--<root level="WARN">-->
-  <root level="INFO">
-  <!--<root level="DEBUG">-->
+  <!--<root level="INFO">-->
+  <root level="DEBUG">
     <appender-ref ref="STDOUT" />
     <appender-ref ref="FILE" />
   </root>

@@ -13,7 +13,6 @@ libraryDependencies ++= commonDependencies ++ Seq(
   akkaModule( "actor" ),
   akkaModule( "testkit" ) % "test",
   peds( "akka" ),
-//  "net.razorvine" % "pyrolite" % "4.10",
   //  "com.github.melrief" %% "pureconfig" % "0.1.2",
   "com.typesafe.akka" % "akka-stream-experimental_2.11" % "1.0",
   "org.apache.commons" % "commons-math3" % "3.5",
@@ -25,9 +24,9 @@ libraryDependencies ++= commonDependencies ++ Seq(
   "com.github.marklister" %% "product-collections" % "1.4.2" % "test"
 )
 
-libraryDependencies += ( "org.python" % "jython" % "2.7.0" )
-//                       .exclude( "com.google.guava", "guava" )
-//                       .exclude( "org.fusesource.hawtjni", "hawtjni-runtime" )
+libraryDependencies += ( "net.razorvine" % "pyrolite" % "4.10" )
+
+libraryDependencies += ( "com.jsuereth" %% "scala-arm" % "2.0.0-M1" )
 
 resolvers += "velvia maven" at "http://dl.bintray.com/velvia/maven"
 
@@ -39,16 +38,10 @@ mainClass in assembly := Some("lineup.stream.GraphiteModel")
 
 assemblyJarName in assembly := s"${organizationName.value}-${name.value}-${version.value}.jar"
 
-// test in assembly := {}  //DMR: REMOVE ONCE JYTHON FIXED
-
 assemblyMergeStrategy in assembly := {
   case x if Assembly.isConfigFile(x) => MergeStrategy.concat
 
   case PathList(ps @ _*) if Assembly.isReadme(ps.last) || Assembly.isLicenseFile(ps.last) => MergeStrategy.rename
-
-
-  case PathList( "META-INF", "maven", "com.google.guava", "guava", "pom.properties" ) => MergeStrategy.filterDistinctLines
-  case PathList( "META-INF", "maven", "com.google.guava", "guava", "pom.xml" ) => MergeStrategy.filterDistinctLines
 
   case PathList("META-INF", xs @ _*) => {
     (xs map {_.toLowerCase}) match {
@@ -66,13 +59,6 @@ assemblyMergeStrategy in assembly := {
   case _ => MergeStrategy.deduplicate
 }
 
-assemblyShadeRules in assembly := Seq(
-  ShadeRule.zap( "org.fusesource.hawtjni.runtime.Callback" ).inLibrary( "org.python" % "jython" % "2.7.0"),
-  ShadeRule.zap( "org.fusesource.hawtjni.runtime.JNIEnv" ).inLibrary( "org.python" % "jython" % "2.7.0"),
-  ShadeRule.zap( "org.fusesource.hawtjni.runtime.Library" ).inLibrary( "org.python" % "jython" % "2.7.0"),
-  ShadeRule.zap( "org.fusesource.hawtjni.runtime.PointerMath" ).inLibrary( "org.python" % "jython" % "2.7.0")
-)
-
 docker <<= ( docker dependsOn assembly )
 
 dockerfile in docker := {
@@ -83,8 +69,26 @@ dockerfile in docker := {
     run( "apt-get", "update" )
     run( "apt-get", "-y", "install", "tmux" )
     copy( artifact, artifactTargetPath )
-    entryPoint( "java", "-jar", artifactTargetPath )
+
+    entryPoint(
+      "java",
+//      "-Dcom.sun.management.jmxremote",
+//      "-Dcom.sun.management.jmxremote.ssl=false",
+//      "-Dcom.sun.management.jmxremote.authenticate=false",
+//      "-Dcom.sun.management.jmxremote.port=9010",
+//      "-Dcom.sun.management.jmxremote.rmi.port=9110",
+//      "-Dcom.sun.management.jmxremote.local.only=false",
+////      "-Djava.rmi.server.hostname='192.168.99.100'",
+      "-jar",
+      artifactTargetPath
+    )
+
+    env( "LOG_HOME", "/var/log" )
     expose( 2004 )
+
+    expose( 22 )
+//    expose( 9010 )
+//    expose( 9110 )
   }
 }
 
