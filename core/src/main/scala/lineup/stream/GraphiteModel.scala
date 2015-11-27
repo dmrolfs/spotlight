@@ -85,7 +85,7 @@ object GraphiteModel extends LazyLogging {
     host: InetAddress,
     port: Int,
     maxFrameLength: Int,
-    protocol: SerializationProtocol,
+    protocol: GraphiteSerializationProtocol,
     windowSize: FiniteDuration,
     detector: ActorRef,
     plans: Seq[OutlierPlan]
@@ -108,26 +108,23 @@ object GraphiteModel extends LazyLogging {
         logger debug s"received connection remote[${connection.remoteAddress}] -> local[${connection.localAddress}]"
 
         val framing = b.add( protocol.framingFlow( maxFrameLength ) )
-        val timeSeries = b.add( graphiteTimeSeries( plans = plans, protocol = protocol, windowSize = windowSize ) )
+        val timeSeries = b.add( protocol.loadTimeSeriesData )
+        val planned = b.add(
+          Flow[TimeSeries]
+          .map { e =>
+            val r = plans.find{ _ appliesTo e }
+            logger info s"""Plan for ${e.topic}: ${r getOrElse "NONE"}"""
+            e
+          }
+          .filter { ts => plans exists { _ appliesTo ts } }
+        )
+
+        val batch = b.add( batchSeries( windowSize ) )
         val detectOutlier = b.add( OutlierDetection.detectOutlier(detector, 1.second, 4) )
         val tap = b.add( Flow[Outliers].mapAsyncUnordered(parallelism = 4){ o => Future { outlierLogger info o.toString; o } } )
         val last = b.add( Flow[Outliers] map { o => ByteString(o.toString) } )
 
-        framing ~> timeSeries ~> detectOutlier ~> tap ~> last
-
-//        val broadcast = b.add( Broadcast[ByteString](outputPorts = 2, eagerCancel = false) )
-//        val counter = b.add( Flow[ByteString] map { e => (dumpId.incrementAndGet(), e) } )
-//        val dump = Sink.foreach[(Int, ByteString)] { case (c, e) =>
-//          import better.files._
-//          val out = "/var/log"/s"dump-${c}.obj"
-//          out.newOutputStream.autoClosed foreach { sout =>
-//            sout write e.toArray
-//            sout.flush()
-//          }
-//        }
-//
-//        framing ~> broadcast ~> timeSeries ~> detectOutlier ~> tap ~> last
-//                   broadcast ~> Flow[ByteString].take(50) ~> counter ~> dump
+        framing ~> timeSeries ~> planned ~> batch ~> detectOutlier ~> tap ~> last
 
         ( framing.inlet, last.outlet )
       }
@@ -136,27 +133,19 @@ object GraphiteModel extends LazyLogging {
     }
   }
 
-  def graphiteTimeSeries(
-    plans: Seq[OutlierPlan],
-    protocol: SerializationProtocol = PickleProtocol,
+  def batchSeries(
     windowSize: FiniteDuration = 1.minute,
     parallelism: Int = 4
   )(
     implicit ec: ExecutionContext,
     tsMerging: Merging[TimeSeries],
     materializer: Materializer
-  ): Flow[ByteString, TimeSeries, Unit] = {
+  ): Flow[TimeSeries, TimeSeries, Unit] = {
     val numTopics = 1
     val metricsLogger = Logger( LoggerFactory getLogger "Metrics" )
 
-    Flow[ByteString]
-    .via( protocol.loadTimeSeriesData )
-    .map { e =>
-      val r = plans.find{ _ appliesTo e }
-      logger info s"""Plan for ${e.topic}: ${r getOrElse "NONE"}"""
-      e
-    }
-    .filter { ts => plans exists { _ appliesTo ts } }
+    Flow[TimeSeries]
+    .via( status[TimeSeries]("BEFORE") )
     .groupedWithin( n = numTopics * windowSize.toMillis.toInt, d = windowSize ) // max elems = 1 per milli; duration = windowSize
     .map {
       _.groupBy{ _.topic }
@@ -164,115 +153,14 @@ object GraphiteModel extends LazyLogging {
         tss.tail.foldLeft( tss.head ){ (acc, e) => tsMerging.merge( acc, e ) valueOr { exs => throw exs.head } }
       }
     }
+    .via( status("AFTER") )
     .mapConcat { identity }
-    .mapAsyncUnordered( parallelism = 4 ) { e => Future { metricsLogger info e.toString; e } }
-  }
-
-
-  sealed trait SerializationProtocol {
-    def charset: String = ByteString.UTF_8
-    def framingFlow( maximumFrameLength: Int ): Flow[ByteString, ByteString, Unit]
-    def loadTimeSeriesData: Flow[ByteString, TimeSeries, Unit] = Flow[ByteString] mapConcat { toDataPoints }
-    def toDataPoints( bytes: ByteString ): List[TimeSeries]
-  }
-
-  case object PickleProtocol extends SerializationProtocol {
-    final case class PickleException private[stream]( message: String ) extends Exception( message )
-
-    val GraphiteMaximumFrameLength = scala.math.pow( 2, 20 ).toInt
-
-    override def charset: String = "ISO-8859-1"
-
-    override def framingFlow( maximumFrameLength: Int = GraphiteMaximumFrameLength ): Flow[ByteString, ByteString, Unit] = {
-      val FieldLength = 4
-
-      Framing.lengthField(
-        fieldLength = FieldLength,
-        fieldOffset = 0,
-        maximumFrameLength = maximumFrameLength,
-        byteOrder = ByteOrder.BIG_ENDIAN
-      ).map { _ drop FieldLength }
-    }
-
-    override def toDataPoints( bytes: ByteString ): List[TimeSeries] = trace.briefBlock( "toDataPoints" ) {
-      import net.razorvine.pickle.Unpickler
-
-      import scala.collection.convert.wrapAll._
-      import scala.collection.mutable
-
-      case class Metric( topic: Topic, timestamp: joda.DateTime, value: Double )
-
-      if ( bytes.isEmpty ) throw PickleException( "stream pushing with empty bytes" )
-      else {
-        val unpickler = new Unpickler
-        val pck = unpickler.loads( bytes.toArray )
-//        trace( s"UNPICKLED CLASS = ${pck.getClass}" )
-//        trace.block( s"UNPICKLED DUMP" ) {
-//          pck.asInstanceOf[java.util.ArrayList[Array[AnyRef]]].foreach( p => trace( s"Class[${p.getClass}]: $p" ) )
-//        }
-
-        val pickles: mutable.Buffer[Array[AnyRef]] = pck.asInstanceOf[java.util.ArrayList[Array[AnyRef]]]
-
-        val metrics = for {
-          p <- pickles
-        } yield {
-          val tuple = p
-          val dp = tuple(1).asInstanceOf[Array[AnyRef]]
-
-          val topic: String = tuple( 0 ).asInstanceOf[Any] match {
-            case s: String => s
-            case unknown => throw PickleException( s"failed to parse topic [$unknown] type not handled [${unknown.getClass}]" )
-          }
-
-          val unixEpochSeconds: Long = dp(0).asInstanceOf[Any] match {
-            case l: Long => l
-            case i: Int => i.toLong
-            case bi: BigInteger => bi.longValue
-            case d: Double => d.toLong
-            case unknown => throw PickleException( s"failed to parse timestamp [$unknown] type not handled [${unknown.getClass}]" )
-          }
-
-          val v: Double = dp(1).asInstanceOf[Any] match {
-            case d: Double => d
-            case f: Float => f.toDouble
-            case bd: BigDecimal => bd.doubleValue
-            case i: Int => i.toDouble
-            case l: Long => l.toDouble
-            case unknown => throw PickleException( s"failed to parse value [$unknown] type not handled [${unknown.getClass}]" )
-          }
-
-          Metric( topic = topic, timestamp = new joda.DateTime(unixEpochSeconds * 1000L), value = v )
-        }
-
-        val result = metrics groupBy { _.topic } map { case (t, ms) =>
-          val points = ms map { m => DataPoint( timestamp = m.timestamp, value = m.value ) }
-          TimeSeries( topic = t, points = points.toIndexedSeq )
-        }
-
-        result.toList
+    .mapAsyncUnordered( parallelism = 4 ) { e =>
+      Future {
+//todo      WORK HERE to pull together descriptive stats on time series
+        metricsLogger info e.toString
+        e
       }
-    }
-  }
-
-  case object MessagePackProtocol extends SerializationProtocol {
-
-    override def framingFlow(maximumFrameLength: Int): Flow[ByteString, ByteString, Unit] = ???
-
-    override def toDataPoints( bytes: ByteString ): List[TimeSeries] = {
-      import org.velvia.MsgPack
-      import org.json4s._
-      import org.json4s.jackson.JsonMethods._
-      import com.fasterxml.jackson.databind.SerializationFeature
-      org.json4s.jackson.JsonMethods.mapper.configure( SerializationFeature.CLOSE_CLOSEABLE, false )
-
-      import org.velvia.msgpack.Json4sCodecs._
-      logger info "unpacking..."
-      val payload = MsgPack unpack bytes.toArray
-      logger info "...unpacked"
-      logger error s"payload class: ${payload.getClass}"
-      logger error s"payload: $payload"
-      throw new IllegalArgumentException( s"UNPACKED: [[${payload}]]" )
-//      List.empty[TimeSeries]
     }
   }
 
@@ -293,7 +181,7 @@ object GraphiteModel extends LazyLogging {
 
   def status[T]( label: String ): Flow[T, T, Unit] = Flow[T].map { e => logger info s"\n$label:${e.toString}"; e }
 
-  def getConfiguration( usage: Settings, config: Config ): (InetAddress, Int, Int, SerializationProtocol, FiniteDuration, Seq[OutlierPlan]) = {
+  def getConfiguration( usage: Settings, config: Config ): (InetAddress, Int, Int, GraphiteSerializationProtocol, FiniteDuration, Seq[OutlierPlan]) = {
     val host = usage.sourceHost getOrElse {
       if ( config hasPath Settings.SOURCE_HOST ) InetAddress getByName config.getString( Settings.SOURCE_HOST )
       else InetAddress.getLocalHost
@@ -310,11 +198,11 @@ object GraphiteModel extends LazyLogging {
       if ( config hasPath Settings.SOURCE_PROTOCOL ) {
         config.getString(Settings.SOURCE_PROTOCOL).toLowerCase match {
           case "messagepack" | "message-pack" => MessagePackProtocol
-          case "pickle" => PickleProtocol
-          case _ => PickleProtocol
+          case "pickle" => PythonPickleProtocol
+          case _ => PythonPickleProtocol
         }
       } else {
-        PickleProtocol
+        PythonPickleProtocol
       }
     }
 
