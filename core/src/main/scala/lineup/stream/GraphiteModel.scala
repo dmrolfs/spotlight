@@ -5,6 +5,9 @@ import java.net.InetAddress
 import java.nio.ByteOrder
 import java.util.concurrent.atomic.AtomicInteger
 
+import org.apache.commons.math3.linear.MatrixUtils
+import peds.commons.math.MahalanobisDistance
+
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.concurrent.duration._
 import scala.util.matching.Regex
@@ -97,9 +100,7 @@ object GraphiteModel extends LazyLogging {
 
     val serverBinding: Source[Tcp.IncomingConnection, Future[Tcp.ServerBinding]] = Tcp().bind( host.getHostAddress, port )
 
-    val outlierLogger = Logger( LoggerFactory getLogger "Outliers" )
-
-    val dumpId = new AtomicInteger()
+    val elementsSeen = new AtomicInteger()
 
     serverBinding runForeach { connection =>
       val detection = Flow() { implicit b =>
@@ -121,15 +122,75 @@ object GraphiteModel extends LazyLogging {
 
         val batch = b.add( batchSeries( windowSize ) )
         val detectOutlier = b.add( OutlierDetection.detectOutlier(detector, 1.second, 4) )
-        val tap = b.add( Flow[Outliers].mapAsyncUnordered(parallelism = 4){ o => Future { outlierLogger info o.toString; o } } )
         val last = b.add( Flow[Outliers] map { o => ByteString(o.toString) } )
 
-        framing ~> timeSeries ~> planned ~> batch ~> detectOutlier ~> tap ~> last
+        val broadcast = b.add( Broadcast[Outliers](outputPorts = 2, eagerCancel = false) )
+        val countSeen = b.add( Flow[Outliers] map { e => (elementsSeen.incrementAndGet(), e) } )
+        val record = b.add( recordStats )
 
+        framing ~> timeSeries ~> planned ~> batch ~> detectOutlier ~> broadcast ~> last
+                                                                      broadcast ~> countSeen ~> record
         ( framing.inlet, last.outlet )
       }
 
       connection.handleWith( detection )
+    }
+  }
+
+  val recordStats: Sink[(Int, Outliers), Future[Unit]] = {
+    import org.apache.commons.math3.stat.descriptive._
+
+    val outlierLogger = Logger( LoggerFactory getLogger "Outliers" )
+
+    Sink foreach { case (i, o) =>
+      val (stats, euclidean, mahalanobis, eucOutliers, mahalOutliers) = o.source match {
+        case s: TimeSeries => {
+          val valueStats = new DescriptiveStatistics
+          s.points foreach { valueStats addValue _.value }
+
+          val data = s.points map { p => Array(p.timestamp.getMillis.toDouble, p.value) }
+
+          val euclideanDistance = new org.apache.commons.math3.ml.distance.EuclideanDistance
+          val mahalanobisDistance = MahalanobisDistance( MatrixUtils.createRealMatrix(data.toArray) )
+          val edStats = new DescriptiveStatistics//acc euclidean stats
+          val mdStats = new DescriptiveStatistics //acc mahalanobis stats
+
+          val distances = data.take(data.size - 1).zip(data.drop(1)) map { case (l, r) =>
+            val e = euclideanDistance.compute( l, r )
+            val m = mahalanobisDistance.compute( l, r )
+            edStats addValue e
+            mdStats addValue m
+            (e, m)
+          }
+
+          val (ed, md) = distances.unzip
+          val edOutliers = ed count { _ > edStats.getPercentile(95) }
+          val mdOutliers = md count { _ > mdStats.getPercentile(95) }
+          ( valueStats, edStats, mdStats, edOutliers, mdOutliers )
+        }
+
+        case c: TimeSeriesCohort => {
+          val st = new DescriptiveStatistics
+          for {
+            s <- c.data
+            p <- s.points
+          } { st addValue p.value }
+
+          ( st, new DescriptiveStatistics, new DescriptiveStatistics, 0, 0 )
+        }
+      }
+      outlierLogger info
+        s"""
+           |${i}:\t${o.toString}
+           |${i}:\tsource:[${o.source.toString}]
+           |${i}:\tValue ${stats.toString}
+           |${i}:\tEuclidean ${euclidean.toString}
+           |${i}:\tEuclidean Percentiles: 95th:[${euclidean.getPercentile(95)}] 99th:[${euclidean.getPercentile(99)}]
+           |${i}:\tEuclidean Outliers >95%:[${eucOutliers}]
+           |${i}:\tMahalanobis ${mahalanobis.toString}
+           |${i}:\tMahalanobis Percentiles: 95th:[${mahalanobis.getPercentile(95)}] 99th:[${mahalanobis.getPercentile(99)}]
+           |${i}:\tMahalanobis Outliers >95%:[${mahalOutliers}]
+         """.stripMargin
     }
   }
 
@@ -145,7 +206,6 @@ object GraphiteModel extends LazyLogging {
     val metricsLogger = Logger( LoggerFactory getLogger "Metrics" )
 
     Flow[TimeSeries]
-    .via( status[TimeSeries]("BEFORE") )
     .groupedWithin( n = numTopics * windowSize.toMillis.toInt, d = windowSize ) // max elems = 1 per milli; duration = windowSize
     .map {
       _.groupBy{ _.topic }
@@ -153,7 +213,6 @@ object GraphiteModel extends LazyLogging {
         tss.tail.foldLeft( tss.head ){ (acc, e) => tsMerging.merge( acc, e ) valueOr { exs => throw exs.head } }
       }
     }
-    .via( status("AFTER") )
     .mapConcat { identity }
     .mapAsyncUnordered( parallelism = 4 ) { e =>
       Future {
