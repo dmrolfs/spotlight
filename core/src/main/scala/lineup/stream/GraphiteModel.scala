@@ -1,28 +1,22 @@
 package lineup.stream
 
-import java.math.BigInteger
 import java.net.InetAddress
-import java.nio.ByteOrder
 import java.util.concurrent.atomic.AtomicInteger
-
-import org.apache.commons.math3.linear.MatrixUtils
-import peds.commons.math.MahalanobisDistance
-
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.concurrent.duration._
 import scala.util.matching.Regex
 import scala.util.{ Failure, Success }
 
 import akka.actor.{ ActorRef, ActorSystem }
-import akka.stream.io.Framing
 import akka.stream.scaladsl._
-import akka.stream.{ ActorMaterializerSettings, Supervision, ActorMaterializer, Materializer }
+import akka.stream._
 import akka.util.ByteString
 
 import com.typesafe.config.{ ConfigObject, Config, ConfigFactory }
-import com.typesafe.scalalogging.{ Logger, LazyLogging }
+import com.typesafe.scalalogging.{ StrictLogging, Logger }
 import org.slf4j.LoggerFactory
-import org.joda.{ time => joda }
+import org.apache.commons.math3.linear.MatrixUtils
+import peds.commons.math.MahalanobisDistance
 import peds.commons.log.Trace
 
 import lineup.analysis.outlier.algorithm.DBSCANAnalyzer
@@ -35,7 +29,10 @@ import lineup.model.timeseries._
 /**
  * Created by rolfsd on 10/21/15.
  */
-object GraphiteModel extends LazyLogging {
+object GraphiteModel extends StrictLogging {
+
+  override protected val logger: Logger = Logger( LoggerFactory.getLogger("Graphite") )
+
   val trace = Trace[GraphiteModel.type]
 
   def main( args: Array[String] ): Unit = {
@@ -64,7 +61,7 @@ object GraphiteModel extends LazyLogging {
         val router = system.actorOf( DetectionAlgorithmRouter.props, "router" )
         val dbscan = system.actorOf( DBSCANAnalyzer.props( router ), "dbscan" )
 
-        val detector = system.actorOf( OutlierDetection.props(router, plans) )
+        val detector = system.actorOf( OutlierDetection.props(router, plans), "outlierDetector" )
 
         streamGraphiteOutliers( host, port, maxFrameLength, protocol, windowSize, detector, plans ) onComplete {
           case Success(_) => system.terminate()
@@ -100,49 +97,92 @@ object GraphiteModel extends LazyLogging {
 
     val serverBinding: Source[Tcp.IncomingConnection, Future[Tcp.ServerBinding]] = Tcp().bind( host.getHostAddress, port )
 
-    val elementsSeen = new AtomicInteger()
-
     serverBinding runForeach { connection =>
       val detection = Flow() { implicit b =>
         import FlowGraph.Implicits._
 
-        logger debug s"received connection remote[${connection.remoteAddress}] -> local[${connection.localAddress}]"
+        log( logger, 'info )( s"received connection remote[${connection.remoteAddress}] -> local[${connection.localAddress}]" )
 
-        val framing = b.add( protocol.framingFlow( maxFrameLength ) )
-        val timeSeries = b.add( protocol.loadTimeSeriesData )
+        val framing = b.add( Monitor.source("framing").watch( protocol.framingFlow( maxFrameLength ) ) )
+        val timeSeries = b.add( Monitor.source("timeseries").watch( protocol.loadTimeSeriesData ) )
         val planned = b.add(
-          Flow[TimeSeries]
-          .map { e =>
-            val r = plans.find{ _ appliesTo e }
-            logger info s"""Plan for ${e.topic}: ${r getOrElse "NONE"}"""
-            e
-          }
-          .filter { ts => plans exists { _ appliesTo ts } }
+          Monitor.flow("planned").watch(
+            Flow[TimeSeries]
+            .map { e =>
+              log( logger, 'debug )( s"""Plan for ${e.topic}: ${plans.find{ _ appliesTo e }.getOrElse{"NONE"}}""" )
+              e
+            }
+            .filter { ts => plans exists { _ appliesTo ts } }
+          )
         )
 
-        val batch = b.add( batchSeries( windowSize ) )
-        val detectOutlier = b.add( OutlierDetection.detectOutlier(detector, 1.second, 4) )
-        val last = b.add( Flow[Outliers] map { o => ByteString(o.toString) } )
+        val batch = Monitor.sink("batch").watch( batchSeries( windowSize ) )
+
+        val buffer = b.add(
+          Monitor.source("groups").watch(
+            Flow[TimeSeries]
+            .via(
+              Monitor.flow("buffer").watch(
+                Flow[TimeSeries].buffer(1000, OverflowStrategy.backpressure)
+              )
+            )
+          )
+        )
+
+        val detectOutlier = Monitor.flow("detect").watch(
+          OutlierDetection.detectOutlier( detector, 15.seconds, Runtime.getRuntime.availableProcessors() * 3 )
+        )
 
         val broadcast = b.add( Broadcast[Outliers](outputPorts = 2, eagerCancel = false) )
-        val countSeen = b.add( Flow[Outliers] map { e => (elementsSeen.incrementAndGet(), e) } )
-        val record = b.add( recordStats )
+        val tcpOut = b.add( Monitor.sink("tcpOut").watch( Flow[Outliers] map { _ => ByteString() } ) )
+        val stats = Monitor.sink("stats").watch( recordStats )
+        val term = b.add( Sink.ignore )
 
-        framing ~> timeSeries ~> planned ~> batch ~> detectOutlier ~> broadcast ~> last
-                                                                      broadcast ~> countSeen ~> record
-        ( framing.inlet, last.outlet )
+        framing ~> timeSeries ~> planned ~> batch ~> buffer ~> detectOutlier ~> broadcast ~> tcpOut
+                                                                                broadcast ~> stats ~> term
+
+        ( framing.inlet, tcpOut.outlet )
       }
 
       connection.handleWith( detection )
     }
   }
 
-  val recordStats: Sink[(Int, Outliers), Future[Unit]] = {
+  /**
+    * Limit downstream rate to one element every 'interval' by applying back-pressure on upstream.
+    * @param interval time interval to send one element downstream
+    * @tparam A
+    * @return
+    */
+  def rateLimiter[A]( interval: FiniteDuration ): Flow[A, A, Unit] = {
+    case object Tick
+
+    val flow = Flow() { implicit builder =>
+      import FlowGraph.Implicits._
+
+      val rateLimiter = Source.apply( 0.second, interval, Tick )
+
+      val zip = builder add Zip[A, Tick.type]()
+
+      rateLimiter ~> zip.in1
+
+      ( zip.in0, zip.out.map(_._1).outlet )
+    }
+
+    // We need to limit input buffer to 1 to guarantee the rate limiting feature
+    flow.withAttributes( Attributes.inputBuffer(initial = 1, max = 64) )
+  }
+
+
+  def recordStats( implicit system: ActorSystem ): Flow[Outliers, Outliers, Unit] = {
     import org.apache.commons.math3.stat.descriptive._
 
     val outlierLogger = Logger( LoggerFactory getLogger "Outliers" )
+    val elementsSeen = new AtomicInteger()
 
-    Sink foreach { case (i, o) =>
+    Flow[Outliers].
+    map { e => (elementsSeen.incrementAndGet(), e) }
+    .map { case (i, o) =>
       val (stats, euclidean, mahalanobis, eucOutliers, mahalOutliers) = o.source match {
         case s: TimeSeries => {
           val valueStats = new DescriptiveStatistics
@@ -179,7 +219,8 @@ object GraphiteModel extends LazyLogging {
           ( st, new DescriptiveStatistics, new DescriptiveStatistics, 0, 0 )
         }
       }
-      outlierLogger info
+
+      log( outlierLogger, 'info ){
         s"""
            |${i}:\t${o.toString}
            |${i}:\tsource:[${o.source.toString}]
@@ -190,7 +231,10 @@ object GraphiteModel extends LazyLogging {
            |${i}:\tMahalanobis ${mahalanobis.toString}
            |${i}:\tMahalanobis Percentiles: 95th:[${mahalanobis.getPercentile(95)}] 99th:[${mahalanobis.getPercentile(99)}]
            |${i}:\tMahalanobis Outliers >95%:[${mahalOutliers}]
-         """.stripMargin
+       """.stripMargin
+      }
+
+      o
     }
   }
 
@@ -198,14 +242,19 @@ object GraphiteModel extends LazyLogging {
     windowSize: FiniteDuration = 1.minute,
     parallelism: Int = 4
   )(
-    implicit ec: ExecutionContext,
+    implicit system: ActorSystem,
     tsMerging: Merging[TimeSeries],
     materializer: Materializer
   ): Flow[TimeSeries, TimeSeries, Unit] = {
     val numTopics = 1
-    val metricsLogger = Logger( LoggerFactory getLogger "Metrics" )
+//    val metricsLogger = Logger( LoggerFactory getLogger "Metrics" )
+//    val metricsSeen = new AtomicInteger()
 
     Flow[TimeSeries]
+//    .map { e =>
+//      log( metricsLogger, 'info ){ s"${metricsSeen.incrementAndGet()}:${e.toString}" }
+//      e
+//    }
     .groupedWithin( n = numTopics * windowSize.toMillis.toInt, d = windowSize ) // max elems = 1 per milli; duration = windowSize
     .map {
       _.groupBy{ _.topic }
@@ -214,13 +263,6 @@ object GraphiteModel extends LazyLogging {
       }
     }
     .mapConcat { identity }
-    .mapAsyncUnordered( parallelism = 4 ) { e =>
-      Future {
-//todo      WORK HERE to pull together descriptive stats on time series
-        metricsLogger info e.toString
-        e
-      }
-    }
   }
 
 
@@ -238,9 +280,25 @@ object GraphiteModel extends LazyLogging {
   }
 
 
-  def status[T]( label: String ): Flow[T, T, Unit] = Flow[T].map { e => logger info s"\n$label:${e.toString}"; e }
+  def loggerDispatcher( system: ActorSystem ): ExecutionContext = system.dispatchers lookup "logger-dispatcher"
 
-  def getConfiguration( usage: Settings, config: Config ): (InetAddress, Int, Int, GraphiteSerializationProtocol, FiniteDuration, Seq[OutlierPlan]) = {
+  def log( logr: Logger, level: Symbol )( msg: => String )( implicit system: ActorSystem ): Future[Unit] = {
+    Future {
+      level match {
+        case 'debug => logr debug msg
+        case 'info => logr info msg
+        case 'warn => logr warn msg
+        case 'error => logr error msg
+        case _ => logr error msg
+      }
+    }( loggerDispatcher(system) )
+  }
+
+
+  def getConfiguration(
+    usage: Settings,
+    config: Config
+  ): (InetAddress, Int, Int, GraphiteSerializationProtocol, FiniteDuration, Seq[OutlierPlan]) = {
     val host = usage.sourceHost getOrElse {
       if ( config hasPath Settings.SOURCE_HOST ) InetAddress getByName config.getString( Settings.SOURCE_HOST )
       else InetAddress.getLocalHost
