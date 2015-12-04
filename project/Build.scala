@@ -8,13 +8,13 @@ import BuildSettings._
 
 
 object LineupBuild extends Build {
-  lazy val root = (project in file(".")).
-  settings( defaultBuildSettings:_* ).
-  aggregate( core )
-
   lazy val core = (project in file("core")).
-  settings( defaultBuildSettings:_* ).
-  enablePlugins( DockerPlugin )
+                  settings( defaultBuildSettings ).
+                  enablePlugins( DockerPlugin )
+
+  lazy val root = (project in file(".")).
+                  settings( defaultBuildSettings:_* ).
+                  aggregate( core )
 
 //  lazy val root = Project(
 //           id = "lineup-root",
