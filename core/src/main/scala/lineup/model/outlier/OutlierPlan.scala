@@ -185,7 +185,7 @@ object OutlierPlan {
     override private[outlier] val origin: ConfigOrigin,
     override private[outlier] val typeOrder: Int
   ) extends OutlierPlan {
-    override def toString: String = {
+    override val toString: String = {
       getClass.safeSimpleName + "(" +
         s"""name:[$name], ${appliesTo.toString} timeout:[${timeout.toCoarsest}], """ +
         s"""algorithms:[${algorithms.mkString(",")}], algorithm-config:[${algorithmConfig.root}]""" +
@@ -199,12 +199,12 @@ object OutlierPlan {
   private object AppliesTo {
     def function( f: (Any) => Boolean ): AppliesTo = new AppliesTo {
       override def apply( message: Any ): Boolean = f( message )
-      override def toString(): String = "AppliesTo.function"
+      override val toString: String = "AppliesTo.function"
     }
 
     def partialFunction( pf: PartialFunction[Any, Boolean] ): AppliesTo = new AppliesTo {
       override def apply( message: Any ): Boolean = if ( pf isDefinedAt message ) pf( message ) else false
-      override def toString(): String = "AppliesTo.partialFunction"
+      override val toString: String = "AppliesTo.partialFunction"
     }
 
     def topics( topics: Set[Topic], extractTopic: ExtractTopic ): AppliesTo = new AppliesTo {
@@ -213,7 +213,7 @@ object OutlierPlan {
         else false
       }
 
-      override def toString(): String = s"""AppliesTo.topics[${topics.mkString(",")}]"""
+      override val toString: String = s"""AppliesTo.topics[${topics.mkString(",")}]"""
     }
 
     def regex( regex: Regex, extractTopic: ExtractTopic ): AppliesTo = new AppliesTo {
@@ -225,12 +225,12 @@ object OutlierPlan {
         }
       }
 
-      override def toString(): String = s"AppliesTo.regex[$regex]"
+      override val toString: String = s"AppliesTo.regex[$regex]"
     }
 
     val all: AppliesTo = new AppliesTo {
       override def apply( message: Any ): Boolean = true
-      override def toString(): String = "AppliesTo.all"
+      override val toString: String = "AppliesTo.all"
     }
   }
 

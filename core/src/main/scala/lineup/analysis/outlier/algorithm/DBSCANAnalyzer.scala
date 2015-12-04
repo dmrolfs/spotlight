@@ -32,8 +32,8 @@ class DBSCANAnalyzer( override val router: ActorRef ) extends AlgorithmActor {
   override val algorithm: Symbol = DBSCANAnalyzer.Algorithm
 
   override val detect: Receive = LoggingReceive {
-    case s @ DetectUsing( _, aggregator, payload: DetectOutliersInSeries, algorithmConfig ) => trace.block( s"receive.DetectUsing:Series($s)" ) {
-      def pointsFromSeries( underlying: DetectOutliersInSeries ): Seq[ml.clustering.DoublePoint] = trace.briefBlock( s"pointsFromSeries($underlying)" ) {
+    case s @ DetectUsing( _, aggregator, payload: DetectOutliersInSeries, algorithmConfig ) => {
+      def pointsFromSeries( underlying: DetectOutliersInSeries ): Seq[ml.clustering.DoublePoint] = {
         underlying.data.points map { dp => new ml.clustering.DoublePoint( Array(dp.timestamp.getMillis.toDouble, dp.value) )}
       }
 
@@ -49,8 +49,8 @@ class DBSCANAnalyzer( override val router: ActorRef ) extends AlgorithmActor {
       aggregator ! result
     }
 
-    case c @ DetectUsing( algo, aggregator, payload: DetectOutliersInCohort, algorithmConfig ) => trace.block( s"receive.DetectUsing:Cohort($c)" ) {
-      def cohortDistances( underlying: DetectOutliersInCohort ): Matrix[DataPoint] = trace.block( s"cohortDistances(${underlying.data.topic})" ) {
+    case c @ DetectUsing( algo, aggregator, payload: DetectOutliersInCohort, algorithmConfig ) => {
+      def cohortDistances( underlying: DetectOutliersInCohort ): Matrix[DataPoint] = {
         for {
           frame <- underlying.data.toMatrix
           timestamp = frame.head._1 // all of frame's _1 better be the same!!!
@@ -90,7 +90,7 @@ class DBSCANAnalyzer( override val router: ActorRef ) extends AlgorithmActor {
   def cluster(
     payload: Seq[ml.clustering.DoublePoint],
     algorithmConfig: Config
-  ): Seq[ml.clustering.Cluster[ml.clustering.DoublePoint]] = trace.block( s"cluster" ) {
+  ): Seq[ml.clustering.Cluster[ml.clustering.DoublePoint]] = {
     implicit val algo = algorithm
     val eps = algorithmConfig.getDouble( Eps )
     val minDensityConnectedPoints = algorithmConfig.getInt( MinDensityConnectedPoints )

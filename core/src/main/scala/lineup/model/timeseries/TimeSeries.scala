@@ -12,7 +12,7 @@ sealed trait TimeSeries extends TimeSeriesBase {
   override def size: Int = points.size
   def contains( ts: DateTime ): Boolean = points exists { _.timestamp == ts }
   def points: Row[DataPoint]
-  override def toString: String = s"""${getClass.safeSimpleName}:${topic}[${points.mkString(",")}]"""
+  override def toString: String = s"""${getClass.safeSimpleName}:"${topic}"[${points.mkString(",")}]"""
 }
 
 object TimeSeries {

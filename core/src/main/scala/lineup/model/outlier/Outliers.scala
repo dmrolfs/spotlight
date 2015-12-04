@@ -30,7 +30,7 @@ case class NoOutliers(
   override val hasAnomalies: Boolean = false
 
   override def toString: String = {
-    s"""${getClass.safeSimpleName}:${topic}[size:[${source.size}] interval:[${source.interval getOrElse "No Interval"}]"""
+    s"""${getClass.safeSimpleName}:"${topic}"[size:[${source.size}] interval:[${source.interval getOrElse "No Interval"}]"""
   }
 }
 
@@ -77,7 +77,7 @@ case class SeriesOutliers(
   }
 
   override def toString: String = {
-    s"""${getClass.safeSimpleName}:${topic}[size:[${outliers.size}] outliers:[${outliers.mkString(",")}]]"""
+    s"""${getClass.safeSimpleName}:"${topic}"[size:[${outliers.size}] outliers:[${outliers.mkString(",")}]]"""
   }
 }
 
@@ -91,5 +91,5 @@ case class CohortOutliers(
   override val topic: Topic = source.topic
   override val hasAnomalies: Boolean = outliers.nonEmpty
 
-  override def toString: String = s"""${getClass.safeSimpleName}:${topic}[${outliers.mkString(",")}]"""
+  override def toString: String = s"""${getClass.safeSimpleName}:"${topic}"[${outliers.mkString(",")}]"""
 }

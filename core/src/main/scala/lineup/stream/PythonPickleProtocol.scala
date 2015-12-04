@@ -2,13 +2,12 @@ package lineup.stream
 
 import java.math.BigInteger
 import java.nio.ByteOrder
-
 import akka.stream.io.Framing
 import akka.stream.scaladsl.Flow
 import akka.util.ByteString
-import lineup.model.timeseries.{DataPoint, Topic, TimeSeries}
 import org.joda.{ time => joda }
 import peds.commons.log.Trace
+import lineup.model.timeseries.{ DataPoint, Topic, TimeSeries }
 
 
 /**
@@ -17,12 +16,13 @@ import peds.commons.log.Trace
 case object PythonPickleProtocol extends GraphiteSerializationProtocol {
   val trace = Trace[PythonPickleProtocol.type]
 
-  final case class PickleException private[stream]( message: String ) extends Exception( message )
+  final case class PickleException private[stream]( part: String, value: Any )
+  extends Exception( s"failed to parse ${part} for [${value.toString}] of type [${value.getClass.getName}]" )
+  with GraphiteSerializationProtocol.ProtocolException
+
 
   val SizeFieldLength = 4
   val GraphiteMaximumFrameLength = SizeFieldLength + scala.math.pow( 2, 20 ).toInt
-
-  override val charset: String = "ISO-8859-1"
 
   override def framingFlow( maximumFrameLength: Int = GraphiteMaximumFrameLength ): Flow[ByteString, ByteString, Unit] = {
     Framing.lengthField(
@@ -35,11 +35,11 @@ case object PythonPickleProtocol extends GraphiteSerializationProtocol {
 
   case class Metric( topic: Topic, timestamp: joda.DateTime, value: Double )
 
-  override def toDataPoints( bytes: ByteString ): List[TimeSeries] = trace.briefBlock( "toDataPoints" ) {
+  override def toDataPoints( bytes: ByteString ): List[TimeSeries] = {
     import scala.collection.convert.wrapAll._
     import net.razorvine.pickle.Unpickler
 
-    if ( bytes.isEmpty ) throw PickleException( "stream pushing with empty bytes" )
+    if ( bytes.isEmpty ) throw PickleException( part = "all", value = bytes )
     else {
       val unpickler = new Unpickler
       val pck = unpickler.loads( bytes.toArray )
@@ -53,7 +53,7 @@ case object PythonPickleProtocol extends GraphiteSerializationProtocol {
 
         val topic: String = tuple( 0 ).asInstanceOf[Any] match {
           case s: String => s
-          case unknown => throw PickleException( s"failed to parse topic [$unknown] type not handled [${unknown.getClass}]" )
+          case unknown => throw PickleException( part = "topic", value = unknown )
         }
 
         val unixEpochSeconds: Long = dp(0).asInstanceOf[Any] match {
@@ -61,7 +61,8 @@ case object PythonPickleProtocol extends GraphiteSerializationProtocol {
           case i: Int => i.toLong
           case bi: BigInteger => bi.longValue
           case d: Double => d.toLong
-          case unknown => throw PickleException( s"failed to parse timestamp [$unknown] type not handled [${unknown.getClass}]" )
+          case s: String => s.toLong
+          case unknown => throw PickleException( part = "timestamp", value = unknown )
         }
 
         val v: Double = dp(1).asInstanceOf[Any] match {
@@ -70,7 +71,8 @@ case object PythonPickleProtocol extends GraphiteSerializationProtocol {
           case bd: BigDecimal => bd.doubleValue
           case i: Int => i.toDouble
           case l: Long => l.toDouble
-          case unknown => throw PickleException( s"failed to parse value [$unknown] type not handled [${unknown.getClass}]" )
+          case s: String =>s.toDouble
+          case unknown => throw PickleException( part = "value", value = unknown )
         }
 
         Metric( topic = topic, timestamp = new joda.DateTime(unixEpochSeconds * 1000L), value = v )

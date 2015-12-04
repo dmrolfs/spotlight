@@ -2,7 +2,15 @@ import sbt.Keys._
 import sbt._
 
 object Dependencies {
-  val commonDependencies = Seq(
+  val logbackVersion = "1.1.3"
+
+  val loggingDependencies = Seq(
+    "org.slf4j" % "slf4j-api" % "1.7.13",
+    "ch.qos.logback" % "logback-core" % logbackVersion,
+    "ch.qos.logback" % "logback-classic" % logbackVersion
+  )
+
+  val commonDependencies = loggingDependencies ++ Seq(
     "com.eaio.uuid" % "uuid" % "3.4",
     "com.typesafe" % "config" % "1.3.0",
     "com.typesafe.scala-logging" %% "scala-logging" % "3.1.0",
@@ -24,16 +32,10 @@ object Dependencies {
     "org.scalatest" %% "scalatest" % "2.2.4" % "test",
     "org.mockito" % "mockito-core" % "1.10.19" % "test"
   )
-  
-  val defaultDependencyOverrides = Set(
-      "org.scalaz" %% "scalaz-core" % "7.1.4"
-    )
 
-  // val slf4j = "org.slf4j" % "slf4j-api" % "1.7.7"
-  // val logbackVersion = "1.1.2"
-  // val logbackCore = "ch.qos.logback" % "logback-core" % logbackVersion
-  // val logbackClassic = "ch.qos.logback" % "logback-classic" % logbackVersion
-  // val loggingImplementations = Seq( logbackCore, logbackClassic )
+  val defaultDependencyOverrides = Set(
+    "org.scalaz" %% "scalaz-core" % "7.1.4"
+  )
 
   val sprayJson = "io.spray" %% "spray-json" % "1.3.1"
 
