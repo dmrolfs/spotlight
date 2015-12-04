@@ -25,7 +25,10 @@ case object MessagePackProtocol extends GraphiteSerializationProtocol with LazyL
     logger info "...unpacked"
     logger error s"payload class: ${payload.getClass}"
     logger error s"payload: $payload"
-    throw new IllegalArgumentException( s"UNPACKED: [[${payload}]]" )
+    throw new Exception( s"UNPACKED: [[${payload}]]" ) with GraphiteSerializationProtocol.ProtocolException {
+      override def part: String = "METRIC-DUMP"
+      override def value: Any = payload
+    }
     //      List.empty[TimeSeries]
   }
 }
