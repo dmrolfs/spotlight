@@ -28,9 +28,16 @@
     </encoder>
   </appender>
 
+  <appender name="OUTLIER_FILE" class="ch.qos.logback.core.FileAppender">
+    <file>${LOG_HOME}/outliers-${bySecond}.log</file>
+    <append>true</append>
+    <encoder>
+      <pattern>%msg%n</pattern>
+    </encoder>
+  </appender>
+
   <logger name="Outliers" level="INFO" additivity="false">
-    <appender-ref ref="METRIC_FILE" />
-    <appender-ref ref="STDOUT" />
+    <appender-ref ref="OUTLIER_FILE" />
   </logger>
 
   <logger name="Metrics" level="INFO" additivity="false">
@@ -38,8 +45,8 @@
   </logger>
 
   <!--<root level="WARN">-->
-  <!--<root level="INFO">-->
-  <root level="DEBUG">
+  <!--<root level="DEBUG">-->
+  <root level="INFO">
     <appender-ref ref="STDOUT" />
     <appender-ref ref="FILE" />
   </root>
