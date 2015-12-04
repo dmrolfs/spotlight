@@ -223,9 +223,9 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
       val data: List[TimeSeries] = topics.zip(List(dp1)).map{ case (t,p) => TimeSeries(t, p) }
 
       val future = Source( data )
-                   .via(status("BEFORE"))
+//                   .via(status("BEFORE"))
                    .via( flowUnderTest )
-                   .via(status("AFTER"))
+//                   .via(status("AFTER"))
                    .runWith( Sink.head )
       val result = Await.result( future, 2.seconds.dilated )
       result mustBe expected
