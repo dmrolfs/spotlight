@@ -54,7 +54,7 @@ object GraphiteModel extends StrictLogging {
 
         logger info usageMessage
 
-        implicit val system = ActorSystem( "Monitor" )
+        implicit val system = ActorSystem( "Graphite" )
         implicit val materializer = ActorMaterializer( ActorMaterializerSettings(system).withSupervisionStrategy(decider) )
         implicit val ec = system.dispatcher
 
@@ -103,10 +103,10 @@ object GraphiteModel extends StrictLogging {
 
         log( logger, 'info )( s"received connection remote[${connection.remoteAddress}] -> local[${connection.localAddress}]" )
 
-        val framing = b.add( Monitor.source("framing").watch( protocol.framingFlow( maxFrameLength ) ) )
-        val timeSeries = b.add( Monitor.source("timeseries").watch( protocol.loadTimeSeriesData ) )
+        val framing = b.add( Monitor.source('framing).watch( protocol.framingFlow( maxFrameLength ) ) )
+        val timeSeries = b.add( Monitor.source('timeseries).watch( protocol.loadTimeSeriesData ) )
         val planned = b.add(
-          Monitor.flow("planned").watch(
+          Monitor.flow('planned).watch(
             Flow[TimeSeries]
             .map { e =>
               log( logger, 'debug )( s"""Plan for ${e.topic}: ${plans.find{ _ appliesTo e }.getOrElse{"NONE"}}""" )
@@ -116,27 +116,29 @@ object GraphiteModel extends StrictLogging {
           )
         )
 
-        val batch = Monitor.sink("batch").watch( batchSeries( windowSize ) )
+        val batch = Monitor.sink('batch).watch( batchSeries( windowSize ) )
 
         val buffer = b.add(
-          Monitor.source("groups").watch(
+          Monitor.source('groups).watch(
             Flow[TimeSeries]
             .via(
-              Monitor.flow("buffer").watch(
+              Monitor.flow('buffer).watch(
                 Flow[TimeSeries].buffer(1000, OverflowStrategy.backpressure)
               )
             )
           )
         )
 
-        val detectOutlier = Monitor.flow("detect").watch(
+        val detectOutlier = Monitor.flow('detect).watch(
           OutlierDetection.detectOutlier( detector, 15.seconds, Runtime.getRuntime.availableProcessors() * 3 )
         )
 
         val broadcast = b.add( Broadcast[Outliers](outputPorts = 2, eagerCancel = false) )
-        val tcpOut = b.add( Monitor.sink("tcpOut").watch( Flow[Outliers] map { _ => ByteString() } ) )
-        val stats = Monitor.sink("stats").watch( recordStats )
+        val tcpOut = b.add( Monitor.sink('tcpOut).watch( Flow[Outliers] map { _ => ByteString() } ) )
+        val stats = Monitor.sink('stats).watch( recordOutlierStats )
         val term = b.add( Sink.ignore )
+
+        Monitor.set( 'framing, 'timeseries, 'planned, 'batch, 'groups, 'buffer, 'detect, 'tcpOut, 'stats )
 
         framing ~> timeSeries ~> planned ~> batch ~> buffer ~> detectOutlier ~> broadcast ~> tcpOut
                                                                                 broadcast ~> stats ~> term
@@ -150,6 +152,7 @@ object GraphiteModel extends StrictLogging {
 
   /**
     * Limit downstream rate to one element every 'interval' by applying back-pressure on upstream.
+ *
     * @param interval time interval to send one element downstream
     * @tparam A
     * @return
@@ -174,7 +177,7 @@ object GraphiteModel extends StrictLogging {
   }
 
 
-  def recordStats( implicit system: ActorSystem ): Flow[Outliers, Outliers, Unit] = {
+  def recordOutlierStats(implicit system: ActorSystem ): Flow[Outliers, Outliers, Unit] = {
     import org.apache.commons.math3.stat.descriptive._
 
     val outlierLogger = Logger( LoggerFactory getLogger "Outliers" )
