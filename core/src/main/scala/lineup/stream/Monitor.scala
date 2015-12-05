@@ -41,28 +41,40 @@ trait Monitor {
 
 object Monitor extends StrictLogging {
   def source( label: String ): Monitor = {
-    val m = SourceMonitor( label )
-    all :+= m
-    m
+    if ( notEnabled ) SilentMonitor
+    else {
+      val m = SourceMonitor( label )
+      all :+= m
+      m
+    }
   }
 
   def flow( label: String ): Monitor = {
-    val m = FlowMonitor( label )
-    all :+= m
-    m
+    if ( notEnabled ) SilentMonitor
+    else {
+      val m = FlowMonitor( label )
+      all :+= m
+      m
+    }
   }
 
   def sink( label: String ): Monitor = {
-    val m = SinkMonitor( label )
-    all :+= m
-    m
+    if ( notEnabled ) SilentMonitor
+    else {
+      val m = SinkMonitor( label )
+      all :+= m
+      m
+    }
   }
 
   def publish: Unit = logger info all.mkString( "\t" )
 
+  def isEnabled: Boolean = logger.underlying.isInfoEnabled
+  @inline def notEnabled: Boolean = !isEnabled
 
   private var all: Seq[Monitor] = Seq.empty[Monitor]
 
+  
   final case class SourceMonitor private[stream]( override val label: String ) extends Monitor {
     private val count = new AtomicInteger( 0 )
     override def inProgress: Int = count.intValue
@@ -85,5 +97,13 @@ object Monitor extends StrictLogging {
     override def enter: Int = count.incrementAndGet()
     override def exit: Int = count.intValue
     override def toString: String = f"""$label[>${inProgress}]"""
+  }
+
+  final case object SilentMonitor extends Monitor {
+    override val label: String = "silent"
+    override val enter: Int = 0
+    override val exit: Int = 0
+    override val inProgress: Int = 0
+    override val toString: String = f"""$label[${inProgress}]"""
   }
 }
