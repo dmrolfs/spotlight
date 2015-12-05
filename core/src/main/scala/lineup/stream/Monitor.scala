@@ -17,23 +17,32 @@ trait Monitor {
   def watch[I, O]( flow: Flow[I, O, Unit] ): Flow[I, O, Unit] = {
     Flow[I]
     .map { e =>
-      enter
-      Monitor.publish
+      if ( Monitor.isEnabled ) {
+        enter
+        Monitor.publish
+      }
+
       e
     }
     .via( flow )
     .map { e =>
-      exit
-      Monitor.publish
+      if ( Monitor.isEnabled ) {
+        exit
+        Monitor.publish
+      }
+
       e
     }
   }
 
   def block[R]( b: () => R ): R = {
-    enter
-    val result = b()
-    exit
-    result
+    if ( Monitor.notEnabled ) b()
+    else {
+      enter
+      val result = b()
+      exit
+      result
+    }
   }
 
   override def toString: String = f"""$label[${inProgress}]"""
@@ -74,7 +83,7 @@ object Monitor extends StrictLogging {
 
   private var all: Seq[Monitor] = Seq.empty[Monitor]
 
-  
+
   final case class SourceMonitor private[stream]( override val label: String ) extends Monitor {
     private val count = new AtomicInteger( 0 )
     override def inProgress: Int = count.intValue
