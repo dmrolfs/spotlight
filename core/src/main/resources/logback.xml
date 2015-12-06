@@ -81,7 +81,7 @@
     </triggeringPolicy>
   </appender>
 
-  <logger name="Metrics" level="OFF" additivity="false">
+  <logger name="Metrics" level="INFO" additivity="false">
     <appender-ref ref="METRIC_FILE" />
   </logger>
 
