@@ -198,13 +198,94 @@ object GraphiteModel extends StrictLogging {
   def recordOutlierStats(implicit system: ActorSystem ): Flow[Outliers, Outliers, Unit] = {
     import org.apache.commons.math3.stat.descriptive._
 
+    object SeriesOutlierAnalysisStats {
+      def header: String = {
+        "metric" + "," +
+        "points_N" + "," +
+        "points_Min" + "," +
+        "points_Max" + "," +
+        "points_Mean" + "," +
+        "points_StandardDeviation" + "," +
+        "points_Median" + "," +
+        "points_Skewness" + "," +
+        "points_Kurtosis" + "," +
+        "mahalanobis_N" + "," +
+        "mahalanobis_Min" + "," +
+        "mahalanobis_Max" + "," +
+        "mahalanobis_Mean" + "," +
+        "mahalanobis_StandardDeviation" + "," +
+        "mahalanobis_Median" + "," +
+        "mahalanobis_Skewness" + "," +
+        "mahalanobis_Kurtosis" + "," +
+        "mahalanobis_95th" + "," +
+        "mahalanobis_99th" + "," +
+        "mahalanobis_Outliers" + "," +
+        "euclidean_N" + "," +
+        "euclidean_Min" + "," +
+        "euclidean_Max" + "," +
+        "euclidean_Mean" + "," +
+        "euclidean_StandardDeviation" + "," +
+        "euclidean_Median" + "," +
+        "euclidean_Skewness" + "," +
+        "euclidean_Kurtosis" + "," +
+        "euclidean_95th" + "," +
+        "euclidean_99th" + "," +
+        "euclidean_Outliers"
+      }
+    }
+
+    case class SeriesOutlierAnalysisStats(
+      source: Topic,
+      points: DescriptiveStatistics,
+      mahalanobis: DescriptiveStatistics,
+      euclidean: DescriptiveStatistics,
+      mahalanobisOutliers: Int,
+      euclideanOutliers: Int
+    ) {
+      override def toString: String = {
+        source.name + "," +
+        points.getN + "," +
+        points.getMin + "," +
+        points.getMax + "," +
+        points.getMean + "," +
+        points.getStandardDeviation + "," +
+        points.getPercentile(50) + "," +
+        points.getSkewness + "," +
+        points.getKurtosis + "," +
+        mahalanobis.getN + "," +
+        mahalanobis.getMin + "," +
+        mahalanobis.getMax + "," +
+        mahalanobis.getMean + "," +
+        mahalanobis.getStandardDeviation + "," +
+        mahalanobis.getPercentile(50) + "," +
+        mahalanobis.getSkewness + "," +
+        mahalanobis.getKurtosis + "," +
+        mahalanobis.getPercentile(95) + "," +
+        mahalanobis.getPercentile(99) + "," +
+        mahalanobisOutliers + "," +
+        euclidean.getN + "," +
+        euclidean.getMin + "," +
+        euclidean.getMax + "," +
+        euclidean.getMean + "," +
+        euclidean.getStandardDeviation + "," +
+        euclidean.getPercentile(50) + "," +
+        euclidean.getSkewness + "," +
+        euclidean.getKurtosis + "," +
+        euclidean.getPercentile(95) + "," +
+        euclidean.getPercentile(99) + "," +
+        euclideanOutliers
+      }
+    }
+
     val outlierLogger = Logger( LoggerFactory getLogger "Outliers" )
+    outlierLogger info SeriesOutlierAnalysisStats.header
+
     val elementsSeen = new AtomicInteger()
 
     Flow[Outliers].
     map { e => (elementsSeen.incrementAndGet(), e) }
     .map { case (i, o) =>
-      val (stats, euclidean, mahalanobis, eucOutliers, mahalOutliers) = o.source match {
+      val stats  = o.source match {
         case s: TimeSeries => {
           val valueStats = new DescriptiveStatistics
           s.points foreach { valueStats addValue _.value }
@@ -227,7 +308,15 @@ object GraphiteModel extends StrictLogging {
           val (ed, md) = distances.unzip
           val edOutliers = ed count { _ > edStats.getPercentile(95) }
           val mdOutliers = md count { _ > mdStats.getPercentile(95) }
-          ( valueStats, edStats, mdStats, edOutliers, mdOutliers )
+
+          SeriesOutlierAnalysisStats(
+            source = s.topic,
+            points = valueStats,
+            mahalanobis = mdStats,
+            euclidean = edStats,
+            mahalanobisOutliers = mdOutliers,
+            euclideanOutliers = edOutliers
+          )
         }
 
         case c: TimeSeriesCohort => {
@@ -237,23 +326,29 @@ object GraphiteModel extends StrictLogging {
             p <- s.points
           } { st addValue p.value }
 
-          ( st, new DescriptiveStatistics, new DescriptiveStatistics, 0, 0 )
+          SeriesOutlierAnalysisStats(
+            source = c.topic,
+            points = st,
+            mahalanobis = new DescriptiveStatistics,
+            euclidean = new DescriptiveStatistics,
+            mahalanobisOutliers = 0,
+            euclideanOutliers = 0
+          )
         }
       }
 
-      log( outlierLogger, 'info ){
-        s"""
-           |${i}:\t${o.toString}
-           |${i}:\tsource:[${o.source.toString}]
-           |${i}:\tValue ${stats.toString}
-           |${i}:\tEuclidean ${euclidean.toString}
-           |${i}:\tEuclidean Percentiles: 95th:[${euclidean.getPercentile(95)}] 99th:[${euclidean.getPercentile(99)}]
-           |${i}:\tEuclidean Outliers >95%:[${eucOutliers}]
-           |${i}:\tMahalanobis ${mahalanobis.toString}
-           |${i}:\tMahalanobis Percentiles: 95th:[${mahalanobis.getPercentile(95)}] 99th:[${mahalanobis.getPercentile(99)}]
-           |${i}:\tMahalanobis Outliers >95%:[${mahalOutliers}]
-       """.stripMargin
-      }
+      log( outlierLogger, 'info ){ stats.toString }
+//      s"""
+//         |${i}:\t${o.toString}
+//         |${i}:\tsource:[${o.source.toString}]
+//         |${i}:\tValue ${stats.toString}
+//         |${i}:\tEuclidean ${euclidean.toString}
+//         |${i}:\tEuclidean Percentiles: 95th:[${euclidean.getPercentile(95)}] 99th:[${euclidean.getPercentile(99)}]
+//         |${i}:\tEuclidean Outliers >95%:[${eucOutliers}]
+//         |${i}:\tMahalanobis ${mahalanobis.toString}
+//         |${i}:\tMahalanobis Percentiles: 95th:[${mahalanobis.getPercentile(95)}] 99th:[${mahalanobis.getPercentile(99)}]
+//         |${i}:\tMahalanobis Outliers >95%:[${mahalOutliers}]
+//       """.stripMargin
 
       o
     }
