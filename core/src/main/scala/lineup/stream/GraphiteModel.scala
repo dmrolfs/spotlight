@@ -2,6 +2,9 @@ package lineup.stream
 
 import java.net.InetAddress
 import java.util.concurrent.atomic.AtomicInteger
+import akka.stream.stage.{SyncDirective, Context, PushStage}
+import peds.commons.collection.BloomFilter
+
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.concurrent.duration._
 import scala.util.matching.Regex
@@ -42,7 +45,8 @@ object GraphiteModel extends StrictLogging {
       case Some( usage ) => {
         val config = ConfigFactory.load
 
-        val (host, port, maxFrameLength, protocol, windowSize, plans) = getConfiguration( usage, config )
+        val (host, port, maxFrameLength, protocol, windowSize) = getConfiguration( usage, config )
+        val plans = makePlans( config.getConfig( "lineup.detection-plans" ) )
         val usageMessage = s"""
           |\nRunning Lineup using the following configuration:
           |\tbinding       : ${host}:${port}
@@ -63,7 +67,7 @@ object GraphiteModel extends StrictLogging {
 
         val detector = system.actorOf( OutlierDetection.props(router, plans), "outlierDetector" )
 
-        streamGraphiteOutliers( host, port, maxFrameLength, protocol, windowSize, detector, plans ) onComplete {
+        streamGraphiteOutliers( host, port, maxFrameLength, protocol, detector, windowSize, config, plans ) onComplete {
           case Success(_) => system.terminate()
           case Failure( e ) => {
             logger.error( "Failure:", e )
@@ -81,19 +85,48 @@ object GraphiteModel extends StrictLogging {
     }
   }
 
+  def filterPlanned( plans: Seq[OutlierPlan] )( implicit system: ActorSystem ): Flow[TimeSeries, TimeSeries, Unit] = {
+    def logMetric: PushStage[TimeSeries, TimeSeries] = new PushStage[TimeSeries, TimeSeries] {
+      val count = new AtomicInteger( 0 )
+      var bloom = BloomFilter[Topic]( maxFalsePosProbability = 0.001, 500000 )
+      val metricLogger = Logger( LoggerFactory getLogger "Metrics" )
+
+      override def onPush( elem: TimeSeries, ctx: Context[TimeSeries] ): SyncDirective = {
+        if ( bloom has_? elem.topic ) ctx push elem
+        else {
+          bloom += elem.topic
+          log( metricLogger, 'debug ){
+            s"""[${count.incrementAndGet}] Plan for ${elem.topic}: ${plans.find{ _ appliesTo elem }.getOrElse{"NONE"}}"""
+          }
+          ctx push elem
+        }
+      }
+    }
+
+    Flow[TimeSeries]
+    .transform( () => logMetric )
+    .filter { ts => plans exists { _ appliesTo ts } }
+  }
+
   def streamGraphiteOutliers(
     host: InetAddress,
     port: Int,
     maxFrameLength: Int,
     protocol: GraphiteSerializationProtocol,
-    windowSize: FiniteDuration,
     detector: ActorRef,
+    windowSize: FiniteDuration,
+    config: Config,
     plans: Seq[OutlierPlan]
   )(
     implicit system: ActorSystem,
     materializer: Materializer
   ): Future[Unit] = {
     implicit val dispatcher = system.dispatcher
+
+    val tcpInBufferSize = config.getInt( "lineup.source.buffer" )
+    val workflowBufferSize = config.getInt( "lineup.workflow.buffer" )
+    val detectTimeout = FiniteDuration( config.getDuration( "lineup.workflow.detect.timeout", MILLISECONDS ), MILLISECONDS )
+    log( logger, 'info )( s"detect outlier timeout = [${detectTimeout.toCoarsest}]" )
 
     val serverBinding: Source[Tcp.IncomingConnection, Future[Tcp.ServerBinding]] = Tcp().bind( host.getHostAddress, port )
 
@@ -105,43 +138,33 @@ object GraphiteModel extends StrictLogging {
 
         val framing = b.add( Monitor.source('framing).watch( protocol.framingFlow( maxFrameLength ) ) )
         val timeSeries = b.add( Monitor.source('timeseries).watch( protocol.loadTimeSeriesData ) )
-        val planned = b.add(
-          Monitor.flow('planned).watch(
-            Flow[TimeSeries]
-            .map { e =>
-              log( logger, 'debug )( s"""Plan for ${e.topic}: ${plans.find{ _ appliesTo e }.getOrElse{"NONE"}}""" )
-              e
-            }
-            .filter { ts => plans exists { _ appliesTo ts } }
-          )
-        )
+        val planned = b.add( Monitor.flow('planned).watch( filterPlanned(plans) ) )
 
         val batch = Monitor.sink('batch).watch( batchSeries( windowSize ) )
 
-        val buffer = b.add(
+        val buf1 = b.add(Monitor.flow('buffer1).watch(Flow[ByteString].buffer(tcpInBufferSize, OverflowStrategy.backpressure)))
+
+        val buf2 = b.add(
           Monitor.source('groups).watch(
             Flow[TimeSeries]
-            .via(
-              Monitor.flow('buffer).watch(
-                Flow[TimeSeries].buffer(1000, OverflowStrategy.backpressure)
-              )
-            )
+            .via( Monitor.flow('buffer2).watch( Flow[TimeSeries].buffer(workflowBufferSize, OverflowStrategy.backpressure) ) )
           )
         )
 
         val detectOutlier = Monitor.flow('detect).watch(
-          OutlierDetection.detectOutlier( detector, 15.seconds, Runtime.getRuntime.availableProcessors() * 3 )
+          OutlierDetection.detectOutlier( detector, detectTimeout, Runtime.getRuntime.availableProcessors() * 3 )
         )
 
         val broadcast = b.add( Broadcast[Outliers](outputPorts = 2, eagerCancel = false) )
+        val publish = b.add( Monitor.flow('publish).watch(publishOutliers) )
         val tcpOut = b.add( Monitor.sink('tcpOut).watch( Flow[Outliers] map { _ => ByteString() } ) )
-        val stats = Monitor.sink('stats).watch( recordOutlierStats )
+        val train = Monitor.sink('train).watch( TrainOutlierAnalysis.feedOutlierTraining )
         val term = b.add( Sink.ignore )
 
-        Monitor.set( 'framing, 'timeseries, 'planned, 'batch, 'groups, 'buffer, 'detect, 'tcpOut, 'stats )
+        Monitor.set( 'framing, 'buffer1, 'timeseries, 'planned, 'batch, 'groups, 'buffer2, 'detect, 'publish, 'tcpOut, 'train )
 
-        framing ~> timeSeries ~> planned ~> batch ~> buffer ~> detectOutlier ~> broadcast ~> tcpOut
-                                                                                broadcast ~> stats ~> term
+        framing ~> buf1 ~> timeSeries ~> planned ~> batch ~> buf2 ~> detectOutlier ~> broadcast ~> publish ~> tcpOut
+                                                                                      broadcast ~> train ~> term
 
         ( framing.inlet, tcpOut.outlet )
       }
@@ -150,9 +173,20 @@ object GraphiteModel extends StrictLogging {
     }
   }
 
+  def publishOutliers( implicit system: ActorSystem ): Flow[Outliers, Outliers, Unit] = {
+    val outlierLogger = Logger( LoggerFactory getLogger "Outliers" )
+    implicit val ec = loggerDispatcher( system )
+
+    Flow[Outliers]
+    .mapAsync( 8 ){ e =>
+      log( outlierLogger, 'info ){ e.toString } map { _ => e }
+    }
+    .log( "Outlier Analysis: " )
+  }
+
   /**
     * Limit downstream rate to one element every 'interval' by applying back-pressure on upstream.
- *
+    *
     * @param interval time interval to send one element downstream
     * @tparam A
     * @return
@@ -164,9 +198,7 @@ object GraphiteModel extends StrictLogging {
       import FlowGraph.Implicits._
 
       val rateLimiter = Source.apply( 0.second, interval, Tick )
-
       val zip = builder add Zip[A, Tick.type]()
-
       rateLimiter ~> zip.in1
 
       ( zip.in0, zip.out.map(_._1).outlet )
@@ -174,71 +206,6 @@ object GraphiteModel extends StrictLogging {
 
     // We need to limit input buffer to 1 to guarantee the rate limiting feature
     flow.withAttributes( Attributes.inputBuffer(initial = 1, max = 64) )
-  }
-
-
-  def recordOutlierStats(implicit system: ActorSystem ): Flow[Outliers, Outliers, Unit] = {
-    import org.apache.commons.math3.stat.descriptive._
-
-    val outlierLogger = Logger( LoggerFactory getLogger "Outliers" )
-    val elementsSeen = new AtomicInteger()
-
-    Flow[Outliers].
-    map { e => (elementsSeen.incrementAndGet(), e) }
-    .map { case (i, o) =>
-      val (stats, euclidean, mahalanobis, eucOutliers, mahalOutliers) = o.source match {
-        case s: TimeSeries => {
-          val valueStats = new DescriptiveStatistics
-          s.points foreach { valueStats addValue _.value }
-
-          val data = s.points map { p => Array(p.timestamp.getMillis.toDouble, p.value) }
-
-          val euclideanDistance = new org.apache.commons.math3.ml.distance.EuclideanDistance
-          val mahalanobisDistance = MahalanobisDistance( MatrixUtils.createRealMatrix(data.toArray) )
-          val edStats = new DescriptiveStatistics//acc euclidean stats
-          val mdStats = new DescriptiveStatistics //acc mahalanobis stats
-
-          val distances = data.take(data.size - 1).zip(data.drop(1)) map { case (l, r) =>
-            val e = euclideanDistance.compute( l, r )
-            val m = mahalanobisDistance.compute( l, r )
-            edStats addValue e
-            mdStats addValue m
-            (e, m)
-          }
-
-          val (ed, md) = distances.unzip
-          val edOutliers = ed count { _ > edStats.getPercentile(95) }
-          val mdOutliers = md count { _ > mdStats.getPercentile(95) }
-          ( valueStats, edStats, mdStats, edOutliers, mdOutliers )
-        }
-
-        case c: TimeSeriesCohort => {
-          val st = new DescriptiveStatistics
-          for {
-            s <- c.data
-            p <- s.points
-          } { st addValue p.value }
-
-          ( st, new DescriptiveStatistics, new DescriptiveStatistics, 0, 0 )
-        }
-      }
-
-      log( outlierLogger, 'info ){
-        s"""
-           |${i}:\t${o.toString}
-           |${i}:\tsource:[${o.source.toString}]
-           |${i}:\tValue ${stats.toString}
-           |${i}:\tEuclidean ${euclidean.toString}
-           |${i}:\tEuclidean Percentiles: 95th:[${euclidean.getPercentile(95)}] 99th:[${euclidean.getPercentile(99)}]
-           |${i}:\tEuclidean Outliers >95%:[${eucOutliers}]
-           |${i}:\tMahalanobis ${mahalanobis.toString}
-           |${i}:\tMahalanobis Percentiles: 95th:[${mahalanobis.getPercentile(95)}] 99th:[${mahalanobis.getPercentile(99)}]
-           |${i}:\tMahalanobis Outliers >95%:[${mahalOutliers}]
-       """.stripMargin
-      }
-
-      o
-    }
   }
 
   def batchSeries(
@@ -250,15 +217,11 @@ object GraphiteModel extends StrictLogging {
     materializer: Materializer
   ): Flow[TimeSeries, TimeSeries, Unit] = {
     val numTopics = 1
-//    val metricsLogger = Logger( LoggerFactory getLogger "Metrics" )
-//    val metricsSeen = new AtomicInteger()
 
+    val n = if ( numTopics * windowSize.toMicros.toInt < 0 ) { numTopics * windowSize.toMicros.toInt } else { Int.MaxValue }
+    logger info s"n = [${n}] for windowSize=[${windowSize.toCoarsest}]"
     Flow[TimeSeries]
-//    .map { e =>
-//      log( metricsLogger, 'info ){ s"${metricsSeen.incrementAndGet()}:${e.toString}" }
-//      e
-//    }
-    .groupedWithin( n = numTopics * windowSize.toMillis.toInt, d = windowSize ) // max elems = 1 per milli; duration = windowSize
+    .groupedWithin( n, d = windowSize ) // max elems = 1 per micro; duration = windowSize
     .map {
       _.groupBy{ _.topic }
       .map { case (topic, tss) =>
@@ -301,7 +264,7 @@ object GraphiteModel extends StrictLogging {
   def getConfiguration(
     usage: Settings,
     config: Config
-  ): (InetAddress, Int, Int, GraphiteSerializationProtocol, FiniteDuration, Seq[OutlierPlan]) = {
+  ): (InetAddress, Int, Int, GraphiteSerializationProtocol, FiniteDuration ) = {
     val host = usage.sourceHost getOrElse {
       if ( config hasPath Settings.SOURCE_HOST ) InetAddress getByName config.getString( Settings.SOURCE_HOST )
       else InetAddress.getLocalHost
@@ -334,9 +297,7 @@ object GraphiteModel extends StrictLogging {
       }
     }
 
-    val plans = makePlans( config.getConfig( "lineup.detection-plans" ))
-
-    ( host, port, maxFrameLength, protocol, windowSize, plans )
+    ( host, port, maxFrameLength, protocol, windowSize )
   }
 
   private def makePlans( planSpecifications: Config ): Seq[OutlierPlan] = {
@@ -363,7 +324,7 @@ object GraphiteModel extends StrictLogging {
           )
         } else if ( spec hasPath TOPICS ) {
           import scala.collection.JavaConverters._
-          println( s"TOPIC [$name] SPEC Origin: ${spec.origin} LINE:${spec.origin.lineNumber}")
+          logger info s"topic[$name] plan origin: ${spec.origin} line:${spec.origin.lineNumber}"
 
           Some(
             OutlierPlan.forTopics(
