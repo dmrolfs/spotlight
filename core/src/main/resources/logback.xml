@@ -30,6 +30,26 @@
     </rollingPolicy>
   </appender>
 
+  <appender name="OUTLIERS_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+    <file>${LOG_HOME}/outliers.log</file>
+    <append>true</append>
+    <!-- encoders are assigned the type
+         ch.qos.logback.classic.encoder.PatternLayoutEncoder by default -->
+    <encoder>
+      <!--<pattern>%-4relative [%thread] %-5level %logger{35} - %msg%n</pattern>-->
+      <pattern>%msg%n</pattern>
+    </encoder>
+    <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+      <!-- rollover daily -->
+      <fileNamePattern>${LOG_HOME}/outliers-%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+      <timeBasedFileNamingAndTriggeringPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
+        <!-- or whenever the file size reaches 100MB -->
+        <maxFileSize>1GB</maxFileSize>
+        <minIndex>1</minIndex>
+      </timeBasedFileNamingAndTriggeringPolicy>
+    </rollingPolicy>
+  </appender>
+
   <appender name="METRIC_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
     <file>${LOG_HOME}/metrics.txt</file>
     <append>true</append>
@@ -48,15 +68,15 @@
     </rollingPolicy>
   </appender>
 
-  <appender name="OUTLIER_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
-    <file>${LOG_HOME}/outliers.csv</file>
+  <appender name="TRAINING_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+    <file>${LOG_HOME}/training.csv</file>
     <append>true</append>
     <encoder>
       <pattern>%msg%n</pattern>
     </encoder>
     <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
       <!-- rollover daily -->
-      <fileNamePattern>${LOG_HOME}/outliers-%d{yyyy-MM-dd}.%i.csv.gz</fileNamePattern>
+      <fileNamePattern>${LOG_HOME}/training-%d{yyyy-MM-dd}.%i.csv.gz</fileNamePattern>
       <timeBasedFileNamingAndTriggeringPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
         <!-- or whenever the file size reaches 100MB -->
         <maxFileSize>1GB</maxFileSize>
@@ -81,16 +101,20 @@
     </triggeringPolicy>
   </appender>
 
-  <logger name="Metrics" level="INFO" additivity="false">
+  <logger name="Metrics" level="DEBUG" additivity="false">
     <appender-ref ref="METRIC_FILE" />
   </logger>
 
-  <logger name="Outliers" level="INFO" additivity="false">
-    <appender-ref ref="OUTLIER_FILE" />
+  <logger name="Training" level="DEBUG" additivity="false">
+    <appender-ref ref="TRAINING_FILE" />
   </logger>
 
-  <logger name="Monitor" level="INFO" additivity="false">
+  <logger name="Monitor" level="DEBUG" additivity="false">
     <appender-ref ref="MONITOR_FILE" />
+  </logger>
+
+  <logger name="Outliers" level="DEBUG" additivity="false">
+    <appender-ref ref="OUTLIERS_FILE" />
   </logger>
 
   <!--<root level="WARN">-->
