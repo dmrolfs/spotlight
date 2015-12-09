@@ -18,8 +18,6 @@ import akka.util.ByteString
 import com.typesafe.config.{ ConfigObject, Config, ConfigFactory }
 import com.typesafe.scalalogging.{ StrictLogging, Logger }
 import org.slf4j.LoggerFactory
-import org.apache.commons.math3.linear.MatrixUtils
-import peds.commons.math.MahalanobisDistance
 import peds.commons.log.Trace
 
 import lineup.analysis.outlier.algorithm.DBSCANAnalyzer
@@ -44,7 +42,6 @@ object GraphiteModel extends StrictLogging {
 
       case Some( usage ) => {
         val config = ConfigFactory.load
-
         val (host, port, maxFrameLength, protocol, windowSize) = getConfiguration( usage, config )
         val plans = makePlans( config.getConfig( "lineup.detection-plans" ) )
         val usageMessage = s"""
@@ -65,9 +62,9 @@ object GraphiteModel extends StrictLogging {
         val router = system.actorOf( DetectionAlgorithmRouter.props, "router" )
         val dbscan = system.actorOf( DBSCANAnalyzer.props( router ), "dbscan" )
 
-        val detector = system.actorOf( OutlierDetection.props(router, plans), "outlierDetector" )
+        val detector = system.actorOf( OutlierDetection.props(router, plans), "outlierDetector" ) //todo:
 
-        streamGraphiteOutliers( host, port, maxFrameLength, protocol, detector, windowSize, config, plans ) onComplete {
+        streamGraphiteOutliers( host, port, maxFrameLength, protocol, detector, windowSize, plans ) onComplete {
           case Success(_) => system.terminate()
           case Failure( e ) => {
             logger.error( "Failure:", e )
@@ -115,7 +112,6 @@ object GraphiteModel extends StrictLogging {
     protocol: GraphiteSerializationProtocol,
     detector: ActorRef,
     windowSize: FiniteDuration,
-    config: Config,
     plans: Seq[OutlierPlan]
   )(
     implicit system: ActorSystem,
@@ -123,14 +119,24 @@ object GraphiteModel extends StrictLogging {
   ): Future[Unit] = {
     implicit val dispatcher = system.dispatcher
 
-    val tcpInBufferSize = config.getInt( "lineup.source.buffer" )
-    val workflowBufferSize = config.getInt( "lineup.workflow.buffer" )
-    val detectTimeout = FiniteDuration( config.getDuration( "lineup.workflow.detect.timeout", MILLISECONDS ), MILLISECONDS )
-    log( logger, 'info )( s"detect outlier timeout = [${detectTimeout.toCoarsest}]" )
-
     val serverBinding: Source[Tcp.IncomingConnection, Future[Tcp.ServerBinding]] = Tcp().bind( host.getHostAddress, port )
 
     serverBinding runForeach { connection =>
+      ConfigFactory.invalidateCaches()
+      val config = ConfigFactory.load
+      val tcpInBufferSize = config.getInt( "lineup.source.buffer" )
+      val workflowBufferSize = config.getInt( "lineup.workflow.buffer" )
+      val detectTimeout = FiniteDuration( config.getDuration("lineup.workflow.detect.timeout", MILLISECONDS), MILLISECONDS )
+      log( logger, 'info ){
+        s"""
+           |\nConnection made using the following configuration:
+           |\tTCP-In Buffer Size   : ${tcpInBufferSize}
+           |\tWorkflow Buffer Size : ${workflowBufferSize}
+           |\tDetect Timeout       : ${detectTimeout.toCoarsest}
+           |\tplans                : [${plans.zipWithIndex.map{ case (p,i) => f"${i}%2d: ${p}"}.mkString("\n","\n","\n")}]
+        """.stripMargin
+      }
+
       val detection = Flow() { implicit b =>
         import FlowGraph.Implicits._
 
@@ -176,12 +182,7 @@ object GraphiteModel extends StrictLogging {
   def publishOutliers( implicit system: ActorSystem ): Flow[Outliers, Outliers, Unit] = {
     val outlierLogger = Logger( LoggerFactory getLogger "Outliers" )
     implicit val ec = loggerDispatcher( system )
-
-    Flow[Outliers]
-    .mapAsync( 8 ){ e =>
-      log( outlierLogger, 'info ){ e.toString } map { _ => e }
-    }
-    .log( "Outlier Analysis: " )
+    Flow[Outliers].mapAsync( 8 ){ e => log( outlierLogger, 'info ){ e.toString } map { _ => e } }
   }
 
   /**

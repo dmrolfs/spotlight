@@ -2,6 +2,8 @@ package lineup.analysis.outlier.algorithm
 
 import akka.actor.{ ActorRef, Props }
 import akka.event.LoggingReceive
+import org.apache.commons.math3.linear.MatrixUtils
+import org.apache.commons.math3.ml.distance.DistanceMeasure
 import org.apache.commons.math3.stat.{ descriptive => stat }
 import org.apache.commons.math3.ml
 import com.typesafe.config.Config
@@ -10,6 +12,7 @@ import peds.akka.envelope._
 import lineup.model.timeseries.{ Matrix, DataPoint }
 import lineup.model.outlier.{ CohortOutliers, NoOutliers, SeriesOutliers }
 import lineup.analysis.outlier.{ DetectUsing, DetectOutliersInSeries, DetectOutliersInCohort }
+import peds.commons.math.MahalanobisDistance
 
 
 /**
@@ -22,8 +25,7 @@ object DBSCANAnalyzer {
 
   val Eps = Algorithm.name + ".eps"
   val MinDensityConnectedPoints = Algorithm.name + ".minDensityConnectedPoints"
-
-  val DefaultDistanceMeasure: ml.distance.DistanceMeasure = new ml.distance.EuclideanDistance
+  val Distance = Algorithm.name + ".distance"
 }
 
 class DBSCANAnalyzer( override val router: ActorRef ) extends AlgorithmActor {
@@ -87,6 +89,16 @@ class DBSCANAnalyzer( override val router: ActorRef ) extends AlgorithmActor {
     }
   }
 
+  def outlierTest( clusters: Seq[ml.clustering.Cluster[ml.clustering.DoublePoint]] ): DataPoint => Boolean = {
+    import scala.collection.JavaConversions._
+
+    if ( clusters.isEmpty ) (pt: DataPoint) => { false }
+    else {
+      val largestCluster = clusters.maxBy( _.getPoints.size ).getPoints.toSet
+      ( pt: DataPoint ) => { !largestCluster.contains( pt ) }
+    }
+  }
+
   def cluster(
     payload: Seq[ml.clustering.DoublePoint],
     algorithmConfig: Config
@@ -96,17 +108,24 @@ class DBSCANAnalyzer( override val router: ActorRef ) extends AlgorithmActor {
     val minDensityConnectedPoints = algorithmConfig.getInt( MinDensityConnectedPoints )
 
     import scala.collection.JavaConversions._
-    val transformer = new ml.clustering.DBSCANClusterer[ml.clustering.DoublePoint]( eps, minDensityConnectedPoints, DefaultDistanceMeasure )
+    val distance = distanceMeasure( algorithmConfig, payload )
+    val transformer = new ml.clustering.DBSCANClusterer[ml.clustering.DoublePoint]( eps, minDensityConnectedPoints, distance )
     transformer.cluster( payload )
   }
 
-  def outlierTest( clusters: Seq[ml.clustering.Cluster[ml.clustering.DoublePoint]] ): DataPoint => Boolean = {
-    import scala.collection.JavaConversions._
+  def distanceMeasure( algorithmConfig: Config, payload: Seq[ml.clustering.DoublePoint] ): DistanceMeasure = {
+    if ( algorithmConfig.hasPath(Distance) ) {
+      algorithmConfig.getString( Distance ).toLowerCase match {
+        case "euclidean" | "euclid" =>  new ml.distance.EuclideanDistance
 
-    if ( clusters.isEmpty ) (pt: DataPoint) => { false }
-    else {
-      val largestCluster = clusters.maxBy( _.getPoints.size ).getPoints.toSet
-      ( pt: DataPoint ) => { !largestCluster.contains( pt ) }
+        case "mahalanobis" | "mahal" | _ => {
+          val points = payload.map{ _.getPoint }.toArray
+          MahalanobisDistance( MatrixUtils.createRealMatrix(points) )
+        }
+      }
+    } else {
+      val points = payload.map{ _.getPoint }.toArray
+      MahalanobisDistance( MatrixUtils.createRealMatrix(points) )
     }
   }
 }
