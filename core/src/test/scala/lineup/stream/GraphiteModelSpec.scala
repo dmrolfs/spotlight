@@ -129,7 +129,7 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
       result mustBe expected
     }
 
-    "read sliding window" taggedAs (WIP) in { f: Fixture =>
+    "read sliding window" taggedAs (DONE) in { f: Fixture =>
       import f._
       import system.dispatcher
 
@@ -159,7 +159,7 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
     }
 
 
-    "detect Outliers" taggedAs (NEXT) in { f: Fixture =>
+    "detect Outliers" taggedAs (WIP) in { f: Fixture =>
       import f._
       import system.dispatcher
 
@@ -174,6 +174,7 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
           s"""
              |algorithm-config.${DBSCANAnalyzer.Eps}: 5000
              |algorithm-config.${DBSCANAnalyzer.MinDensityConnectedPoints}: 9
+             |algorithm-config.${DBSCANAnalyzer.Distance}: Euclidean
           """.stripMargin
         )
       )

@@ -79,6 +79,7 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
         s"""
            |${DBSCANAnalyzer.Eps}: 5.0
            |${DBSCANAnalyzer.MinDensityConnectedPoints}: 3
+           |${DBSCANAnalyzer.Distance}: Euclidean
         """.stripMargin
       )
 
