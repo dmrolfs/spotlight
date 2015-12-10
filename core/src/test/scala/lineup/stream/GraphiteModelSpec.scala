@@ -21,7 +21,7 @@ import org.joda.{ time => joda }
 import com.github.nscala_time.time.OrderingImplicits._
 import com.github.nscala_time.time.Imports.{ richSDuration, richDateTime }
 import lineup.testkit.ParallelAkkaSpec
-import lineup.analysis.outlier.{ DetectionAlgorithmRouter, OutlierDetection }
+import lineup.analysis.outlier.{OutlierDetectionMessage, DetectionAlgorithmRouter, OutlierDetection}
 import lineup.analysis.outlier.algorithm.DBSCANAnalyzer
 import lineup.model.outlier.{ SeriesOutliers, IsQuorum, OutlierPlan }
 import lineup.model.timeseries.{ TimeSeries, DataPoint, Row }
@@ -33,10 +33,17 @@ import lineup.model.timeseries.{ TimeSeries, DataPoint, Row }
 class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
   import GraphiteModelSpec._
 
-  class Fixture extends AkkaFixture {
+  class Fixture extends AkkaFixture { fixture =>
     def status[T]( label: String ): Flow[T, T, Unit] = Flow[T].map { e => logger info s"\n$label:${e.toString}"; e }
 
     val stringFlow: Flow[ByteString, ByteString, Unit] = Flow[ByteString].via( PythonPickleProtocol.framingFlow() )
+
+    trait TestPlanPolicy extends OutlierDetection.PlanPolicy{
+      def plans: Seq[OutlierPlan] = fixture.plans
+      override def planFor(m: OutlierDetectionMessage): Option[OutlierPlan] = plans find { _ appliesTo m }
+      override def invalidateCaches(): Unit = { }
+      override def refreshInterval: FiniteDuration = 5.minutes
+    }
 
     val plans = Seq(
       OutlierPlan.default(
@@ -181,7 +188,14 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
 
       val router = system.actorOf( DetectionAlgorithmRouter.props, "router" )
       val dbscan = system.actorOf( DBSCANAnalyzer.props(router), "dbscan" )
-      val detector = system.actorOf( OutlierDetection.props(router, Seq(defaultPlan)), "detectOutliers" )
+      val detector = system.actorOf(
+        OutlierDetection.props(router) { r =>
+          new OutlierDetection( r ) with TestPlanPolicy {
+            override def plans: Seq[OutlierPlan] = Seq( defaultPlan )
+          }
+        },
+        "detectOutliers"
+      )
 
       val now = new joda.DateTime( joda.DateTime.now.getMillis / 1000L * 1000L )
       val dp1 = makeDataPoints( points, start = now, period = 1.seconds )
