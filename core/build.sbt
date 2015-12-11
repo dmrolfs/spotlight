@@ -19,6 +19,7 @@ libraryDependencies ++= commonDependencies ++ Seq(
   "com.github.scopt" %% "scopt" % "3.3.0",
   "com.github.dmrolfs" %% "demesne-core" % "0.8.0-SNAPSHOT" % "compile" changing(),
   "com.github.pathikrit" %% "better-files" % "2.13.0",
+  "com.github.pathikrit" %% "better-files-akka" % "2.13.0",
   "org.parboiled" %% "parboiled" % "2.1.0",
   "com.typesafe.akka" % "akka-stream-testkit-experimental_2.11" % "1.0" % "test",
   "com.github.dmrolfs" %% "demesne-testkit" % "0.8.0-SNAPSHOT" % "test" changing(),
@@ -65,6 +66,8 @@ docker <<= ( docker dependsOn assembly )
 dockerfile in docker := {
   val artifact = ( assemblyOutputPath in assembly ).value
   val artifactTargetPath = s"/app/${artifact.name}"
+  val mainclass = mainClass.in( Compile, run ).value.getOrElse( sys.error("Expected exactly one main class") )
+
   new Dockerfile {
     from( "java:8" )
     run( "apt-get", "update" )
@@ -80,11 +83,12 @@ dockerfile in docker := {
 //      "-Dcom.sun.management.jmxremote.rmi.port=9110",
 //      "-Dcom.sun.management.jmxremote.local.only=false",
 ////      "-Djava.rmi.server.hostname='192.168.99.100'",
-      "-jar",
-      artifactTargetPath
+      "-cp", "/etc/lineup:" + artifactTargetPath,
+      mainclass
     )
 
     env( "LOG_HOME", "/var/log" )
+    env( "CONFIG_HOME", "/etc/lineup" )
     expose( 2004 )
 
     expose( 22 )

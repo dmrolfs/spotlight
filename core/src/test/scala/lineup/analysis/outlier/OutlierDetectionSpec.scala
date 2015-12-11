@@ -15,12 +15,19 @@ import lineup.testkit.ParallelAkkaSpec
  * Created by rolfsd on 10/20/15.
  */
 class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
-  class Fixture extends AkkaFixture {
+  class Fixture extends AkkaFixture { fixture =>
     val router = TestProbe()
     val isQuorumA = mock[IsQuorum]
     val reduceA = mock[ReduceOutliers]
 
     val metric = Topic( "metric.a" )
+
+    trait TestPlanPolicy extends OutlierDetection.PlanPolicy{
+      def plans: Seq[OutlierPlan] = fixture.plans
+      override def planFor(m: OutlierDetectionMessage): Option[OutlierPlan] = plans find { _ appliesTo m }
+      override def invalidateCaches(): Unit = { }
+      override def refreshInterval: FiniteDuration = 5.minutes
+    }
 
     val plans: Seq[OutlierPlan] = Seq(
       OutlierPlan.forTopics(
@@ -43,7 +50,9 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
       import f._
       val probe = TestProbe()
       system.eventStream.subscribe( probe.ref, classOf[UnhandledMessage] )
-      val detect = TestActorRef[OutlierDetection]( OutlierDetection.props( router.ref, plans ) )
+      val detect = TestActorRef[OutlierDetection](
+        OutlierDetection.props( router.ref ){ r => new OutlierDetection(r) with TestPlanPolicy }
+      )
 
       val msg = mock[OutlierDetectionMessage]
       when( msg.topic ) thenReturn Topic("dummy")
@@ -71,7 +80,13 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
         reduce = reduceA
       )
 
-      val detect = TestActorRef[OutlierDetection]( OutlierDetection.props( router.ref, Seq(defaultPlan) ) )
+      val detect = TestActorRef[OutlierDetection](
+        OutlierDetection.props( router.ref ){ r =>
+          new OutlierDetection(r) with TestPlanPolicy {
+            override def plans: Seq[OutlierPlan] = Seq(defaultPlan)
+          }
+        }
+      )
 
       val msg = OutlierDetectionMessage( TimeSeries( topic = "dummy", points = Row.empty[DataPoint] ) )
 
@@ -110,7 +125,13 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
         specification = ConfigFactory.empty
       )
 
-      val detect = TestActorRef[OutlierDetection]( OutlierDetection.props( router.ref, plans :+ defaultPlan ) )
+      val detect = TestActorRef[OutlierDetection](
+        OutlierDetection.props( router.ref ) { r =>
+          new OutlierDetection(r) with TestPlanPolicy {
+            override def plans: Seq[OutlierPlan] = f.plans :+ defaultPlan
+          }
+        }
+      )
 
       val msg = OutlierDetectionMessage( TimeSeries( topic = metric, points = Row.empty[DataPoint] ) )
 
@@ -149,7 +170,11 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
       )
 
       val detect = TestActorRef[OutlierDetection](
-        OutlierDetection.props( router.ref, plans :+ defaultPlan )
+        OutlierDetection.props( router.ref ) { r =>
+          new OutlierDetection(r) with TestPlanPolicy {
+            override def plans: Seq[OutlierPlan] = f.plans :+ defaultPlan
+          }
+        }
       )
 
       val msgForDefault = OutlierDetectionMessage( TimeSeries( topic = "dummy", points = Row.empty[DataPoint] ) )

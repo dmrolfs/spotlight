@@ -3,19 +3,20 @@ package lineup.stream
 import java.net.InetAddress
 import java.util.concurrent.atomic.AtomicInteger
 import akka.stream.stage.{SyncDirective, Context, PushStage}
+import better.files._
 import peds.commons.collection.BloomFilter
 
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.concurrent.duration._
 import scala.util.matching.Regex
-import scala.util.{ Failure, Success }
+import scala.util.{Try, Failure, Success}
 
 import akka.actor.{ ActorRef, ActorSystem }
 import akka.stream.scaladsl._
 import akka.stream._
 import akka.util.ByteString
 
-import com.typesafe.config.{ ConfigObject, Config, ConfigFactory }
+import com.typesafe.config._
 import com.typesafe.scalalogging.{ StrictLogging, Logger }
 import org.slf4j.LoggerFactory
 import peds.commons.log.Trace
@@ -43,28 +44,63 @@ object GraphiteModel extends StrictLogging {
       case Some( usage ) => {
         val config = ConfigFactory.load
         val (host, port, maxFrameLength, protocol, windowSize) = getConfiguration( usage, config )
-        val plans = makePlans( config.getConfig( "lineup.detection-plans" ) )
-        val usageMessage = s"""
-          |\nRunning Lineup using the following configuration:
-          |\tbinding       : ${host}:${port}
-          |\tmax frame size: ${maxFrameLength}
-          |\tprotocol      : ${protocol}
-          |\twindow        : ${windowSize.toCoarsest}
-          |\tplans         : [${plans.zipWithIndex.map{ case (p,i) => f"${i}%2d: ${p}"}.mkString("\n","\n","\n")}]
-        """.stripMargin
 
-        logger info usageMessage
+        val PlanConfigPath = "lineup.detection-plans"
+        val plansFn: () => Try[Seq[OutlierPlan]] = () => Try {
+          ConfigFactory.invalidateCaches()
+          makePlans( ConfigFactory.load.getConfig(PlanConfigPath) )
+        }
+
+        plansFn() foreach { plans =>
+          val usageMessage = s"""
+            |\nRunning Lineup using the following configuration:
+            |\tbinding       : ${host}:${port}
+            |\tmax frame size: ${maxFrameLength}
+            |\tprotocol      : ${protocol}
+            |\twindow        : ${windowSize.toCoarsest}
+            |\tplans         : [${plans.zipWithIndex.map{ case (p,i) => f"${i}%2d: ${p}"}.mkString("\n","\n","\n")}]
+          """.stripMargin
+
+          logger info usageMessage
+        }
 
         implicit val system = ActorSystem( "Graphite" )
         implicit val materializer = ActorMaterializer( ActorMaterializerSettings(system).withSupervisionStrategy(decider) )
         implicit val ec = system.dispatcher
 
+        import java.nio.file.{ StandardWatchEventKinds => Events }
+        import better.files.FileWatcher._
+
         val router = system.actorOf( DetectionAlgorithmRouter.props, "router" )
         val dbscan = system.actorOf( DBSCANAnalyzer.props( router ), "dbscan" )
 
-        val detector = system.actorOf( OutlierDetection.props(router, plans), "outlierDetector" ) //todo:
+        val detector = system.actorOf(
+          props = OutlierDetection.props(router ){ r =>
+            new OutlierDetection(r) with OutlierDetection.ConfigPlanPolicy {
+              override def getPlans: () => Try[Seq[OutlierPlan]] = plansFn
+              override def refreshInterval: FiniteDuration = 15.minutes
+            }
+          },
+          name = "outlierDetector"
+        )
 
-        streamGraphiteOutliers( host, port, maxFrameLength, protocol, detector, windowSize, plans ) onComplete {
+        val configOrigin = config.getConfig( PlanConfigPath ).origin
+        logger info s"origin for ${PlanConfigPath}: [${configOrigin}]"
+
+        determineConfigFileComponents( configOrigin ) foreach { filename =>
+          // note: attempting to watch a shared file wrt VirtualBox will not work (https://www.virtualbox.org/ticket/9069)
+          // so dev testing of watching should be done by running the Java locally
+          logger info s"watching for changes in ${filename}"
+          val configWatcher = File( filename ).newWatcher( true )
+          configWatcher ! on( Events.ENTRY_MODIFY ) {
+            case _ => {
+              logger info s"config file watcher sending reload command due to change in ${configOrigin.description()}"
+              detector ! OutlierDetection.ReloadPlans
+            }
+          }
+        }
+
+        streamGraphiteOutliers( host, port, maxFrameLength, protocol, detector, windowSize, PlanConfigPath ) onComplete {
           case Success(_) => system.terminate()
           case Failure( e ) => {
             logger.error( "Failure:", e )
@@ -74,6 +110,12 @@ object GraphiteModel extends StrictLogging {
       }
     }
   }
+
+  def determineConfigFileComponents(origin: ConfigOrigin ): List[String] = {
+    val path = "@\\s+file:(.*):\\s+\\d+,".r
+    path.findAllMatchIn( origin.toString ).map{ _ group 1 }.toList
+  }
+
 
   val decider: Supervision.Decider = {
     case ex => {
@@ -112,7 +154,7 @@ object GraphiteModel extends StrictLogging {
     protocol: GraphiteSerializationProtocol,
     detector: ActorRef,
     windowSize: FiniteDuration,
-    plans: Seq[OutlierPlan]
+    planConfigPath: String
   )(
     implicit system: ActorSystem,
     materializer: Materializer
@@ -127,6 +169,7 @@ object GraphiteModel extends StrictLogging {
       val tcpInBufferSize = config.getInt( "lineup.source.buffer" )
       val workflowBufferSize = config.getInt( "lineup.workflow.buffer" )
       val detectTimeout = FiniteDuration( config.getDuration("lineup.workflow.detect.timeout", MILLISECONDS), MILLISECONDS )
+      val plans = makePlans( config.getConfig(planConfigPath) )
       log( logger, 'info ){
         s"""
            |\nConnection made using the following configuration:
