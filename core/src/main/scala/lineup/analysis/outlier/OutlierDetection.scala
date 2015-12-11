@@ -1,22 +1,19 @@
 package lineup.analysis.outlier
 
-import com.typesafe.scalalogging.LazyLogging
-
 import scala.concurrent.duration._
 import scala.util.{ Failure, Success, Try }
 import akka.actor.{ ActorRef, ActorLogging, Props }
 import akka.event.LoggingReceive
 import akka.stream.scaladsl.Flow
+import com.typesafe.scalalogging.StrictLogging
 import peds.akka.envelope._
 import peds.commons.identifier.ShortUUID
 import peds.commons.log.Trace
 import lineup.model.timeseries.{ Topic, TimeSeriesBase }
 import lineup.model.outlier.{ Outliers, OutlierPlan }
-import lineup.analysis.outlier.OutlierDetection.ReloadPlans
 
 
-
-object OutlierDetection extends LazyLogging {
+object OutlierDetection extends StrictLogging {
   def detectOutlier(
     detector: ActorRef,
     maxAllowedWait: FiniteDuration,
@@ -25,15 +22,33 @@ object OutlierDetection extends LazyLogging {
     import akka.pattern.ask
     import akka.util.Timeout
 
-    Flow[TimeSeriesBase].mapAsync( parallelism ) { ts: TimeSeriesBase =>
-      //todo: the actor introduces a bottleneck, so might want to assign a dedicated dispatcher
+  //todo: refactor this to a FanOutShape with recognized and unrecognized outs.
+    Flow[TimeSeriesBase]
+    .mapAsync( parallelism ) { ts: TimeSeriesBase =>
       implicit val triggerTimeout = Timeout( maxAllowedWait )
       val result = detector ? OutlierDetectionMessage( ts )
       result.mapTo[Outliers]
     }
+    .filter {
+      case e: UnrecognizedTopic => false
+      case e => true
+    }
   }
 
   def props( router: ActorRef )( makeDetector: ActorRef => OutlierDetection ): Props = Props( makeDetector(router) )
+
+  trait DetectionProtocol
+  case object ReloadPlans extends DetectionProtocol
+
+  //todo: refactor with FanOutShape with recognized and unrecognized outs.
+  case class UnrecognizedTopic( override val topic: Topic ) extends DetectionProtocol with Outliers {
+    override type Source = TimeSeriesBase
+    override def hasAnomalies: Boolean = false
+    override def source: Source = null
+    override def algorithms: Set[Symbol] = Set.empty[Symbol]
+
+  }
+
 
   val extractOutlierDetectionTopic: OutlierPlan.ExtractTopic = {
     case m: OutlierDetectionMessage => Some(m.topic)
@@ -48,8 +63,6 @@ object OutlierDetection extends LazyLogging {
     def invalidateCaches(): Unit
   }
 
-  object ReloadPlans
-
 
   trait ConfigPlanPolicy extends OutlierDetection.PlanPolicy {
     def getPlans: () => Try[Seq[OutlierPlan]]
@@ -58,7 +71,7 @@ object OutlierDetection extends LazyLogging {
       getPlans() match {
         case Success(ps) => ps
         case Failure(ex) => {
-          logger warn s"failed to load detection plans in policy: $ex"
+          logger warn s"Detector failed to load policy detection plans: $ex"
           default
         }
       }
@@ -94,6 +107,12 @@ class OutlierDetection( router: ActorRef ) extends EnvelopingActor with ActorLog
   override def receive: Receive = around( detection( Map.empty[ActorRef, ActorRef] ) )
 
   def detection(outstanding: AggregatorSubscribers, inRetry: Boolean = false ): Receive = LoggingReceive {
+    case result: Outliers if outstanding.contains( sender() ) => {
+      val aggregator = sender()
+      outstanding( aggregator ) ! result
+      context become around( detection(outstanding - aggregator, inRetry) )
+    }
+
     case m: OutlierDetectionMessage if outer.definedAt( m ) => {
       log debug s"plan for topic [${m.topic}]: [${outer.planFor(m)}]"
       val requester = sender()
@@ -104,20 +123,19 @@ class OutlierDetection( router: ActorRef ) extends EnvelopingActor with ActorLog
     }
 
     case m: OutlierDetectionMessage if inRetry == false && outer.definedAt( m ) == false => {
-      log info s"unrecognized topic [${m.topic}] retrying after reload"
+      log debug s"unrecognized topic [${m.topic}] retrying after reload"
       // try reloading invalidating caches and retry on first miss only
       outer.invalidateCaches()
-      self ! m
+      self forward m
       context become around( detection(outstanding, inRetry = true) )
     }
 
-    case result: Outliers if outstanding.contains( sender() ) => {
-      val aggregator = sender()
-      outstanding( aggregator ) ! result
-      context become around( detection(outstanding - aggregator, inRetry) )
+    case m: OutlierDetectionMessage => {
+      log debug s"unrecognized topic:[${m.topic}] from sender:[${sender()}]"
+      sender() ! OutlierDetection.UnrecognizedTopic( m.topic )
     }
 
-    case ReloadPlans => {
+    case OutlierDetection.ReloadPlans => {
       // invalidate cache and reset retry if triggered
       outer.invalidateCaches()
       context become around( detection(outstanding, inRetry = false) )

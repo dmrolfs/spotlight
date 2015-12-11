@@ -6,8 +6,8 @@ import peds.commons.log.Trace
 import peds.commons.util._
 import lineup.model.timeseries._
 
-
-sealed trait Outliers {
+//todo re-seal with FanOutShape Outlier Detection
+/*sealed*/ trait Outliers {
   type Source <: TimeSeriesBase
   def topic: Topic
   def algorithms: Set[Symbol]

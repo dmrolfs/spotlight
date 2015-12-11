@@ -22,7 +22,7 @@ import org.slf4j.LoggerFactory
 import peds.commons.log.Trace
 
 import lineup.analysis.outlier.algorithm.DBSCANAnalyzer
-import lineup.analysis.outlier.{OutlierDetectionMessage, DetectionAlgorithmRouter, OutlierDetection}
+import lineup.analysis.outlier.{ DetectionAlgorithmRouter, OutlierDetection }
 import lineup.model.outlier._
 import lineup.model.timeseries.TimeSeriesBase.Merging
 import lineup.model.timeseries._
