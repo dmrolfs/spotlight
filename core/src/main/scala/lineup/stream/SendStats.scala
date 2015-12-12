@@ -1,27 +1,22 @@
 package lineup.stream
 
+import scala.concurrent.duration._
+import scala.util.{ Try, Success }
 import java.io.{ File => JFile, _ }
 import java.net.Socket
-import java.nio.ByteBuffer
-
-import akka.util.ByteString
-import lineup.stream.SendStats.Grammar.DataParser
 import org.parboiled2._
-
-import scala.concurrent.duration._
-import com.typesafe.scalalogging.LazyLogging
-import lineup.model.timeseries._
 import org.apache.commons.math3.random.RandomDataGenerator
+import com.typesafe.scalalogging.LazyLogging
 import org.joda.{ time => joda }
 import better.files._
+import resource._
+import scopt.OptionParser
 import com.github.nscala_time.time.OrderingImplicits._
 import com.github.nscala_time.time.Imports.{ richSDuration, richDateTime }
-import scopt.OptionParser
 import peds.commons.log.Trace
+import lineup.stream.SendStats.Grammar.DataParser
+import lineup.model.timeseries._
 
-import resource._
-
-import scala.util.{Failure, Try, Success}
 
 /**
   * Created by rolfsd on 11/23/15.
@@ -49,16 +44,16 @@ object SendStats extends LazyLogging {
       for {
         connection <- managed( new Socket(settings.host, settings.port) )
         outStream <- managed( connection.getOutputStream )
-        out = new PrintWriter( new BufferedWriter( new OutputStreamWriter(outStream) ) )
       } {
         logger.info(
           s"Sending to ${settings.host}:${settings.port} [${source.collect{case Success(d) => d.points.size}.sum}] data points"
         )
 
+        import PythonPickleProtocol.{ PickleMessage, pickle }
         for {
           line <- source
           data <- line
-          message = withHeader( pickled(data) )
+          message = pickle( data ).withHeader
         } {
           outStream write message.toArray
           outStream.flush
@@ -146,40 +141,6 @@ object SendStats extends LazyLogging {
     }
   }
 
-
-  def withHeader( body: ByteString ): ByteString = {
-    val result = ByteBuffer.allocate( 4 + body.size )
-    result putInt body.size
-    result put body.toArray
-    result.flip()
-    ByteString( result )
-  }
-
-  def pickled( dp: Row[DataPoint] ): ByteString = pickled( Seq(("foobar", dp)) )
-
-  def pickled( ts: TimeSeries ): ByteString = pickled( Seq( (ts.topic.name, ts.points) ) )
-
-  def pickled(metrics: Seq[(String, Row[DataPoint])] ): ByteString = {
-    import net.razorvine.pickle.Pickler
-    import scala.collection.convert.wrapAll._
-
-    val data = new java.util.LinkedList[AnyRef]
-    for {
-      metric <- metrics
-      (topic, points) = metric
-      p <- points
-    } {
-      val dp: Array[Any] = Array( p.timestamp.getMillis / 1000L, p.value )
-      val metric: Array[AnyRef] = Array( topic, dp )
-      data add metric
-    }
-
-    val pickler = new Pickler( false )
-    val out = pickler dumps data
-
-//    trace( s"""payload[${out.size}] = ${ByteString(out).decodeString("ISO-8859-1")}""" )
-    ByteString( out )
-  }
 
   def makeDataPoints(
     values: Row[Double],
