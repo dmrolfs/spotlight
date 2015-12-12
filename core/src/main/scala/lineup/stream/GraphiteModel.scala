@@ -1,15 +1,16 @@
 package lineup.stream
 
-import java.net.InetAddress
+import java.io.OutputStream
+import java.net.{ Socket, InetAddress }
 import java.util.concurrent.atomic.AtomicInteger
-import akka.stream.stage.{SyncDirective, Context, PushStage}
-import better.files._
-import peds.commons.collection.BloomFilter
+import akka.stream.stage.{ SyncDirective, Context, PushStage }
+import better.files.{ ManagedResource => _, _ }
+import resource._
 
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.concurrent.duration._
 import scala.util.matching.Regex
-import scala.util.{Try, Failure, Success}
+import scala.util.{ Try, Failure, Success }
 
 import akka.actor.{ ActorRef, ActorSystem }
 import akka.stream.scaladsl._
@@ -20,6 +21,7 @@ import com.typesafe.config._
 import com.typesafe.scalalogging.{ StrictLogging, Logger }
 import org.slf4j.LoggerFactory
 import peds.commons.log.Trace
+import peds.commons.collection.BloomFilter
 
 import lineup.analysis.outlier.algorithm.DBSCANAnalyzer
 import lineup.analysis.outlier.{ DetectionAlgorithmRouter, OutlierDetection }
@@ -37,13 +39,32 @@ object GraphiteModel extends StrictLogging {
 
   val trace = Trace[GraphiteModel.type]
 
+  case class UsageConfiguration(
+    sourceHostPort: (InetAddress, Int),
+    maxFrameLength: Int,
+    protocol: GraphiteSerializationProtocol,
+    windowDuration: FiniteDuration,
+    graphiteHostPort: Option[(InetAddress, Int)]
+  ) {
+    def serverBinding( implicit system: ActorSystem ): Source[Tcp.IncomingConnection, Future[Tcp.ServerBinding]] = {
+      val (host, port) = sourceHostPort
+      Tcp().bind( host.getHostAddress, port )
+    }
+
+    def graphiteStream: Option[ManagedResource[OutputStream]] = {
+      graphiteHostPort flatMap {
+        case (h, p) => { Try { managed( new Socket(h, p) ) flatMap { socket => managed( socket.getOutputStream ) } }.toOption }
+      }
+    }
+  }
+
   def main( args: Array[String] ): Unit = {
     Settings.makeUsageConfig.parse( args, Settings.zero ) match {
       case None => System exit -1
 
       case Some( usage ) => {
         val config = ConfigFactory.load
-        val (host, port, maxFrameLength, protocol, windowSize) = getConfiguration( usage, config )
+        val uconfig = getConfiguration( usage, config )
 
         val PlanConfigPath = "lineup.detection-plans"
         val plansFn: () => Try[Seq[OutlierPlan]] = () => Try {
@@ -54,14 +75,21 @@ object GraphiteModel extends StrictLogging {
         plansFn() foreach { plans =>
           val usageMessage = s"""
             |\nRunning Lineup using the following configuration:
-            |\tbinding       : ${host}:${port}
-            |\tmax frame size: ${maxFrameLength}
-            |\tprotocol      : ${protocol}
-            |\twindow        : ${windowSize.toCoarsest}
+            |\tbinding       : ${uconfig.sourceHostPort._1}:${uconfig.sourceHostPort._2}
+            |\tmax frame size: ${uconfig.maxFrameLength}
+            |\tprotocol      : ${uconfig.protocol}
+            |\twindow        : ${uconfig.windowDuration.toCoarsest}
             |\tplans         : [${plans.zipWithIndex.map{ case (p,i) => f"${i}%2d: ${p}"}.mkString("\n","\n","\n")}]
           """.stripMargin
 
           logger info usageMessage
+        }
+
+        val decider: Supervision.Decider = {
+          case ex => {
+            logger.error( "Error caught by Supervisor:", ex )
+            Supervision.Stop
+          }
         }
 
         implicit val system = ActorSystem( "Graphite" )
@@ -100,7 +128,7 @@ object GraphiteModel extends StrictLogging {
           }
         }
 
-        streamGraphiteOutliers( host, port, maxFrameLength, protocol, detector, windowSize, PlanConfigPath ) onComplete {
+        streamGraphiteOutliers( uconfig, detector, PlanConfigPath ) onComplete {
           case Success(_) => system.terminate()
           case Failure( e ) => {
             logger.error( "Failure:", e )
@@ -117,10 +145,72 @@ object GraphiteModel extends StrictLogging {
   }
 
 
-  val decider: Supervision.Decider = {
-    case ex => {
-      logger.error( "Error caught by Supervisor:", ex )
-      Supervision.Stop
+  def streamGraphiteOutliers(
+    usageConfig: UsageConfiguration,
+    detector: ActorRef,
+    planConfigPath: String
+  )(
+    implicit system: ActorSystem,
+    materializer: Materializer
+  ): Future[Unit] = {
+    implicit val dispatcher = system.dispatcher
+
+    usageConfig.serverBinding runForeach { connection =>
+      ConfigFactory.invalidateCaches()
+      val config = ConfigFactory.load
+      val tcpInBufferSize = config.getInt( "lineup.source.buffer" )
+      val workflowBufferSize = config.getInt( "lineup.workflow.buffer" )
+      val detectTimeout = FiniteDuration( config.getDuration("lineup.workflow.detect.timeout", MILLISECONDS), MILLISECONDS )
+      val plans = makePlans( config.getConfig(planConfigPath) )
+      log( logger, 'info ){
+        s"""
+           |\nConnection made using the following configuration:
+           |\tTCP-In Buffer Size   : ${tcpInBufferSize}
+           |\tWorkflow Buffer Size : ${workflowBufferSize}
+           |\tDetect Timeout       : ${detectTimeout.toCoarsest}
+           |\tplans                : [${plans.zipWithIndex.map{ case (p,i) => f"${i}%2d: ${p}"}.mkString("\n","\n","\n")}]
+        """.stripMargin
+      }
+
+      val detection = Flow() { implicit b =>
+        import FlowGraph.Implicits._
+
+        log( logger, 'info )( s"received connection remote[${connection.remoteAddress}] -> local[${connection.localAddress}]" )
+
+        val framing = b.add( Monitor.source('framing).watch( usageConfig.protocol.framingFlow(usageConfig.maxFrameLength) ) )
+        val timeSeries = b.add( Monitor.source('timeseries).watch(usageConfig.protocol.loadTimeSeriesData) )
+        val planned = b.add( Monitor.flow('planned).watch( filterPlanned(plans) ) )
+
+        val batch = Monitor.sink('batch).watch( batchSeries(usageConfig.windowDuration) )
+
+        val buf1 = b.add(Monitor.flow('buffer1).watch(Flow[ByteString].buffer(tcpInBufferSize, OverflowStrategy.backpressure)))
+
+        val buf2 = b.add(
+          Monitor.source('groups).watch(
+            Flow[TimeSeries]
+            .via( Monitor.flow('buffer2).watch( Flow[TimeSeries].buffer(workflowBufferSize, OverflowStrategy.backpressure) ) )
+          )
+        )
+
+        val detectOutlier = Monitor.flow('detect).watch(
+          OutlierDetection.detectOutlier( detector, detectTimeout, Runtime.getRuntime.availableProcessors() * 3 )
+        )
+
+        val broadcast = b.add( Broadcast[Outliers](outputPorts = 2, eagerCancel = false) )
+        val publish = b.add( Monitor.flow('publish).watch(publishOutliers(usageConfig.graphiteStream)) )
+        val tcpOut = b.add( Monitor.sink('tcpOut).watch( Flow[Outliers] map { _ => ByteString() } ) )
+        val train = Monitor.sink('train).watch( TrainOutlierAnalysis.feedOutlierTraining )
+        val term = b.add( Sink.ignore )
+
+        Monitor.set( 'framing, 'buffer1, 'timeseries, 'planned, 'batch, 'groups, 'buffer2, 'detect, 'publish, 'tcpOut, 'train )
+
+        framing ~> buf1 ~> timeSeries ~> planned ~> batch ~> buf2 ~> detectOutlier ~> broadcast ~> publish ~> tcpOut
+                                                                                      broadcast ~> train ~> term
+
+        ( framing.inlet, tcpOut.outlet )
+      }
+
+      connection.handleWith( detection )
     }
   }
 
@@ -147,85 +237,51 @@ object GraphiteModel extends StrictLogging {
     .filter { ts => plans exists { _ appliesTo ts } }
   }
 
-  def streamGraphiteOutliers(
-    host: InetAddress,
-    port: Int,
-    maxFrameLength: Int,
-    protocol: GraphiteSerializationProtocol,
-    detector: ActorRef,
-    windowSize: FiniteDuration,
-    planConfigPath: String
+//  def publishOutliers( implicit system: ActorSystem ): Flow[Outliers, Outliers, Unit] = {
+//    val outlierLogger = Logger( LoggerFactory getLogger "Outliers" )
+//    implicit val ec = loggerDispatcher( system )
+//    Flow[Outliers].mapAsync( 8 ){ e => log( outlierLogger, 'info ){ e.toString } map { _ => e } }
+//  }
+
+  def publishOutliers(
+    graphiteStream: Option[ManagedResource[OutputStream]]
   )(
-    implicit system: ActorSystem,
-    materializer: Materializer
-  ): Future[Unit] = {
-    implicit val dispatcher = system.dispatcher
-
-    val serverBinding: Source[Tcp.IncomingConnection, Future[Tcp.ServerBinding]] = Tcp().bind( host.getHostAddress, port )
-
-    serverBinding runForeach { connection =>
-      ConfigFactory.invalidateCaches()
-      val config = ConfigFactory.load
-      val tcpInBufferSize = config.getInt( "lineup.source.buffer" )
-      val workflowBufferSize = config.getInt( "lineup.workflow.buffer" )
-      val detectTimeout = FiniteDuration( config.getDuration("lineup.workflow.detect.timeout", MILLISECONDS), MILLISECONDS )
-      val plans = makePlans( config.getConfig(planConfigPath) )
-      log( logger, 'info ){
-        s"""
-           |\nConnection made using the following configuration:
-           |\tTCP-In Buffer Size   : ${tcpInBufferSize}
-           |\tWorkflow Buffer Size : ${workflowBufferSize}
-           |\tDetect Timeout       : ${detectTimeout.toCoarsest}
-           |\tplans                : [${plans.zipWithIndex.map{ case (p,i) => f"${i}%2d: ${p}"}.mkString("\n","\n","\n")}]
-        """.stripMargin
-      }
-
-      val detection = Flow() { implicit b =>
-        import FlowGraph.Implicits._
-
-        log( logger, 'info )( s"received connection remote[${connection.remoteAddress}] -> local[${connection.localAddress}]" )
-
-        val framing = b.add( Monitor.source('framing).watch( protocol.framingFlow( maxFrameLength ) ) )
-        val timeSeries = b.add( Monitor.source('timeseries).watch( protocol.loadTimeSeriesData ) )
-        val planned = b.add( Monitor.flow('planned).watch( filterPlanned(plans) ) )
-
-        val batch = Monitor.sink('batch).watch( batchSeries( windowSize ) )
-
-        val buf1 = b.add(Monitor.flow('buffer1).watch(Flow[ByteString].buffer(tcpInBufferSize, OverflowStrategy.backpressure)))
-
-        val buf2 = b.add(
-          Monitor.source('groups).watch(
-            Flow[TimeSeries]
-            .via( Monitor.flow('buffer2).watch( Flow[TimeSeries].buffer(workflowBufferSize, OverflowStrategy.backpressure) ) )
-          )
-        )
-
-        val detectOutlier = Monitor.flow('detect).watch(
-          OutlierDetection.detectOutlier( detector, detectTimeout, Runtime.getRuntime.availableProcessors() * 3 )
-        )
-
-        val broadcast = b.add( Broadcast[Outliers](outputPorts = 2, eagerCancel = false) )
-        val publish = b.add( Monitor.flow('publish).watch(publishOutliers) )
-        val tcpOut = b.add( Monitor.sink('tcpOut).watch( Flow[Outliers] map { _ => ByteString() } ) )
-        val train = Monitor.sink('train).watch( TrainOutlierAnalysis.feedOutlierTraining )
-        val term = b.add( Sink.ignore )
-
-        Monitor.set( 'framing, 'buffer1, 'timeseries, 'planned, 'batch, 'groups, 'buffer2, 'detect, 'publish, 'tcpOut, 'train )
-
-        framing ~> buf1 ~> timeSeries ~> planned ~> batch ~> buf2 ~> detectOutlier ~> broadcast ~> publish ~> tcpOut
-                                                                                      broadcast ~> train ~> term
-
-        ( framing.inlet, tcpOut.outlet )
-      }
-
-      connection.handleWith( detection )
-    }
-  }
-
-  def publishOutliers( implicit system: ActorSystem ): Flow[Outliers, Outliers, Unit] = {
+    implicit system: ActorSystem
+  ): Flow[Outliers, Outliers, Unit] = {
     val outlierLogger = Logger( LoggerFactory getLogger "Outliers" )
     implicit val ec = loggerDispatcher( system )
-    Flow[Outliers].mapAsync( 8 ){ e => log( outlierLogger, 'info ){ e.toString } map { _ => e } }
+
+    //todo: after akka stream update: refactor to custom stage/graph to incorporate outlier batching before sending to graphite
+    Flow[Outliers]
+    .mapAsync( Runtime.getRuntime.availableProcessors ) {
+      case o @ SeriesOutliers(_, source, outliers) => {
+        import PythonPickleProtocol._
+        val marks = outliers map { case DataPoint(ts, _) => DataPoint(ts, 1D) }
+
+        val report = pickle( TimeSeries(topic = source.topic, points = marks) ).withHeader
+        Future {
+          outlierLogger info o.toString
+          graphiteStream foreach { gs =>
+            logger error s"SENDING OUTLIER RESULT to graphite: [${o.toString}]"
+            gs foreach { out =>
+              out write report.toArray
+              out.flush
+            }
+          }
+
+          o
+        }
+      }
+
+      case o: Outliers => {
+        val df = Future { logger info s"NOT SENDING: ${o.toString}"}
+        val olf = log( outlierLogger, 'info ){ o.toString } map { _ => o }
+        for {
+          _ <- df
+          _ <- olf
+        } yield { o }
+      }
+    }
   }
 
   /**
@@ -305,16 +361,13 @@ object GraphiteModel extends StrictLogging {
   }
 
 
-  def getConfiguration(
-    usage: Settings,
-    config: Config
-  ): (InetAddress, Int, Int, GraphiteSerializationProtocol, FiniteDuration ) = {
-    val host = usage.sourceHost getOrElse {
+  def getConfiguration( usage: Settings, config: Config ): UsageConfiguration = {
+    val sourceHost = usage.sourceHost getOrElse {
       if ( config hasPath Settings.SOURCE_HOST ) InetAddress getByName config.getString( Settings.SOURCE_HOST )
       else InetAddress.getLocalHost
     }
 
-    val port = usage.sourcePort getOrElse { config getInt Settings.SOURCE_PORT }
+    val sourcePort = usage.sourcePort getOrElse { config getInt Settings.SOURCE_PORT }
 
     val maxFrameLength = {
       if ( config hasPath Settings.SOURCE_MAX_FRAME_LENGTH) config getInt Settings.SOURCE_MAX_FRAME_LENGTH
@@ -341,7 +394,25 @@ object GraphiteModel extends StrictLogging {
       }
     }
 
-    ( host, port, maxFrameLength, protocol, windowSize )
+    val graphiteHost = {
+      if ( config hasPath Settings.GRAPHITE_HOST ) Some( InetAddress getByName config.getString(Settings.GRAPHITE_HOST) )
+      else None
+    }
+
+    val graphitePort = if ( config hasPath Settings.GRAPHITE_PORT ) Some(config getInt Settings.GRAPHITE_PORT) else None
+
+    UsageConfiguration(
+      sourceHostPort = (sourceHost, sourcePort),
+      maxFrameLength,
+      protocol,
+      windowSize,
+      graphiteHostPort = {
+        for {
+          h <- graphiteHost
+          p <- graphitePort
+        } yield (h,p)
+      }
+    )
   }
 
   private def makePlans( planSpecifications: Config ): Seq[OutlierPlan] = {
@@ -428,6 +499,8 @@ object GraphiteModel extends StrictLogging {
     val SOURCE_MAX_FRAME_LENGTH = "lineup.source.max-frame-length"
     val SOURCE_PROTOCOL = "lineup.source.protocol"
     val SOURCE_WINDOW_SIZE = "lineup.source.window-size"
+    val GRAPHITE_HOST = "lineup.graphite.host"
+    val GRAPHITE_PORT = "lineup.graphite.port"
 
     def zero: Settings = Settings( )
 
