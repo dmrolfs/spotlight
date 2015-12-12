@@ -1,13 +1,13 @@
 package lineup.stream
 
 import java.math.BigInteger
-import java.nio.ByteOrder
+import java.nio.{ByteBuffer, ByteOrder}
 import akka.stream.io.Framing
 import akka.stream.scaladsl.Flow
 import akka.util.ByteString
 import org.joda.{ time => joda }
 import peds.commons.log.Trace
-import lineup.model.timeseries.{ DataPoint, Topic, TimeSeries }
+import lineup.model.timeseries._
 
 
 /**
@@ -86,4 +86,42 @@ case object PythonPickleProtocol extends GraphiteSerializationProtocol {
       result.toList
     }
   }
+
+
+  implicit class PickleMessage( val body: ByteString ) extends AnyVal {
+    def withHeader: ByteString = {
+      val result = ByteBuffer.allocate( 4 + body.size )
+      result putInt body.size
+      result put body.toArray
+      result.flip()
+      ByteString( result )
+    }
+  }
+
+  def pickle(dp: Row[DataPoint] ): ByteString = pickle( Seq(("foobar", dp) ) )
+
+  def pickle(ts: TimeSeries ): ByteString = pickle( Seq( (ts.topic.name, ts.points) ) )
+
+  def pickle(metrics: Seq[(String, Row[DataPoint])] ): ByteString = {
+    import net.razorvine.pickle.Pickler
+    import scala.collection.convert.wrapAll._
+
+    val data = new java.util.LinkedList[AnyRef]
+    for {
+      metric <- metrics
+      (topic, points) = metric
+      p <- points
+    } {
+      val dp: Array[Any] = Array( p.timestamp.getMillis / 1000L, p.value )
+      val metric: Array[AnyRef] = Array( topic, dp )
+      data add metric
+    }
+
+    val pickler = new Pickler( false )
+    val out = pickler dumps data
+
+    //    trace( s"""payload[${out.size}] = ${ByteString(out).decodeString("ISO-8859-1")}""" )
+    ByteString( out )
+  }
+
 }
