@@ -1,5 +1,7 @@
 package lineup.analysis.outlier
 
+import lineup.model.outlier.OutlierPlan.{Applies, NoFurtherConsideration}
+
 import scala.concurrent.duration._
 import scala.util.{ Failure, Success, Try }
 import akka.actor.{ ActorRef, ActorLogging, Props }
@@ -78,7 +80,10 @@ object OutlierDetection extends StrictLogging {
     }
 
     var plans: Seq[OutlierPlan] = getPlansWithFallback( Seq.empty[OutlierPlan] )
-    override def planFor( m: OutlierDetectionMessage ): Option[OutlierPlan] = plans find { _ appliesTo m }
+    override def planFor( m: OutlierDetectionMessage ): Option[OutlierPlan] = {
+      val stop = plans indexWhere { _.appliesTo(m) == NoFurtherConsideration }
+      plans.take(stop) find { _ appliesTo m }
+    }
 
     override def invalidateCaches(): Unit = {
       plans = getPlansWithFallback( plans )

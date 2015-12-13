@@ -32,6 +32,52 @@ object OutlierPlan {
 
   type ExtractTopic = PartialFunction[Any, Option[Topic]]
 
+//  def apply(
+//    name: String,
+//    timeout: FiniteDuration,
+//    isQuorum: IsQuorum,
+//    reduce: ReduceOutliers,
+//    algorithms: Set[Symbol],
+//    specification: Config
+//  )(
+//    appliesTo: (Any) => Boolean
+//  ): OutlierPlan = {
+//    SimpleOutlierPlan(
+//      name = name,
+//      appliesTo = AppliesTo.predicate( appliesTo ),
+//      algorithms = algorithms,
+//      timeout = timeout,
+//      isQuorum = isQuorum,
+//      reduce = reduce,
+//      algorithmConfig = getAlgorithmConfig( specification ),
+//      origin = specification.origin,
+//      typeOrder = 3
+//    )
+//  }
+//
+//  def apply(
+//    name: String,
+//    timeout: FiniteDuration,
+//    isQuorum: IsQuorum,
+//    reduce: ReduceOutliers,
+//    algorithms: Set[Symbol],
+//    specification: Config
+//  )(
+//    appliesTo: PartialFunction[Any, Boolean]
+//  ): OutlierPlan = {
+//    SimpleOutlierPlan(
+//      name = name,
+//      appliesTo = AppliesTo.partialPredicate( appliesTo ),
+//      algorithms = algorithms,
+//      timeout = timeout,
+//      isQuorum = isQuorum,
+//      reduce = reduce,
+//      algorithmConfig = getAlgorithmConfig( specification ),
+//      origin = specification.origin,
+//      typeOrder = 3
+//    )
+//  }
+
   def apply(
     name: String,
     timeout: FiniteDuration,
@@ -40,7 +86,7 @@ object OutlierPlan {
     algorithms: Set[Symbol],
     specification: Config
   )(
-    appliesTo: (Any) => Boolean
+    appliesTo: (Any) => Applicability
   ): OutlierPlan = {
     SimpleOutlierPlan(
       name = name,
@@ -63,7 +109,7 @@ object OutlierPlan {
     algorithms: Set[Symbol],
     specification: Config
   )(
-    appliesTo: PartialFunction[Any, Boolean]
+    appliesTo: PartialFunction[Any, Applicability]
   ): OutlierPlan = {
     SimpleOutlierPlan(
       name = name,
@@ -124,6 +170,7 @@ object OutlierPlan {
     )
   }
 
+  //todo: change to blacklist and whitelist and dont forget about precendence between the two (whitelist before blacklist)
   def forRegex(
     name: String,
     timeout: FiniteDuration,
@@ -193,24 +240,43 @@ object OutlierPlan {
     }
   }
 
+  sealed trait Applicability
+  case object Applies extends Applicability
+  case object NotApplicable extends Applicability
+  case object NoFurtherConsideration extends Applicability
+  implicit def booleanToApplicability( isApplicable: Boolean ): Applicability = if ( isApplicable ) Applies else NotApplicable
+  implicit def applicabilityToBoolean( a: Applicability): Boolean = { a == Applies }
 
-  sealed trait AppliesTo extends ((Any) => Boolean)
+  sealed trait AppliesTo extends ((Any) => Applicability)
 
   private object AppliesTo {
-    def function( f: (Any) => Boolean ): AppliesTo = new AppliesTo {
-      override def apply( message: Any ): Boolean = f( message )
+    def predicate( p: (Any) => Boolean ): AppliesTo = new AppliesTo {
+      override def apply( message: Any ): Applicability = p( message )
+      override val toString: String = "AppliesTo.predicate"
+    }
+
+    def partialPredicate( pp: PartialFunction[Any, Boolean] ): AppliesTo = new AppliesTo {
+      override def apply( message: Any ): Applicability = if ( pp.isDefinedAt(message) ) pp(message) else NotApplicable
+      override val toString: String = "AppliesTo.partialPredicate"
+    }
+
+    def function( f: (Any) => Applicability ): AppliesTo = new AppliesTo {
+      override def apply( message: Any ): Applicability = f( message )
       override val toString: String = "AppliesTo.function"
     }
 
-    def partialFunction( pf: PartialFunction[Any, Boolean] ): AppliesTo = new AppliesTo {
-      override def apply( message: Any ): Boolean = if ( pf isDefinedAt message ) pf( message ) else false
+    def partialFunction( pf: PartialFunction[Any, Applicability] ): AppliesTo = new AppliesTo {
+      override def apply( message: Any ): Applicability = if ( pf isDefinedAt message ) pf( message ) else NotApplicable
       override val toString: String = "AppliesTo.partialFunction"
     }
 
     def topics( topics: Set[Topic], extractTopic: ExtractTopic ): AppliesTo = new AppliesTo {
-      override def apply( message: Any ): Boolean = {
-        if ( extractTopic isDefinedAt message ) extractTopic( message ) map { topics contains _ } getOrElse { false }
-        else false
+      override def apply( message: Any ): Applicability = {
+        if ( extractTopic isDefinedAt message ) {
+          extractTopic( message ) map { t => booleanToApplicability( topics.contains(t) ) } getOrElse NotApplicable
+        } else {
+          NotApplicable
+        }
       }
 
       override val toString: String = s"""AppliesTo.topics[${topics.mkString(",")}]"""
@@ -218,7 +284,7 @@ object OutlierPlan {
 
     //todo: change to blacklist and whitelist and dont forget about precendence between the two (whitelist before blacklist)
     def regex( regex: Regex, extractTopic: ExtractTopic ): AppliesTo = new AppliesTo {
-      override def apply( message: Any ): Boolean = {
+      override def apply( message: Any ): Applicability = {
         if ( !extractTopic.isDefinedAt(message) ) false
         else {
           val result = extractTopic( message ) flatMap { t => regex findFirstMatchIn t.toString }
@@ -230,7 +296,7 @@ object OutlierPlan {
     }
 
     val all: AppliesTo = new AppliesTo {
-      override def apply( message: Any ): Boolean = true
+      override def apply( message: Any ): Applicability = Applies
       override val toString: String = "AppliesTo.all"
     }
   }
