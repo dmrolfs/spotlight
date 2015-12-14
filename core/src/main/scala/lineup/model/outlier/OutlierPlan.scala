@@ -29,8 +29,8 @@ object OutlierPlan {
 
   val AlgorithmConfig = "algorithm-config"
 
-
   type ExtractTopic = PartialFunction[Any, Option[Topic]]
+
 
   def apply(
     name: String,
@@ -216,7 +216,6 @@ object OutlierPlan {
       override val toString: String = s"""AppliesTo.topics[${topics.mkString(",")}]"""
     }
 
-    //todo: change to blacklist and whitelist and dont forget about precendence between the two (whitelist before blacklist)
     def regex( regex: Regex, extractTopic: ExtractTopic ): AppliesTo = new AppliesTo {
       override def apply( message: Any ): Boolean = {
         if ( !extractTopic.isDefinedAt(message) ) false

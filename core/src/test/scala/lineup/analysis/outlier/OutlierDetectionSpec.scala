@@ -2,6 +2,7 @@ package lineup.analysis.outlier
 
 import akka.actor.UnhandledMessage
 import com.typesafe.config.ConfigFactory
+import lineup.analysis.outlier.OutlierDetection.UnrecognizedTopic
 import lineup.model.timeseries._
 import scala.concurrent.duration._
 import akka.testkit._
@@ -46,7 +47,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
   override def makeAkkaFixture(): Fixture = new Fixture
 
   "OutlierDetection" should {
-    "ignore detect message if no plan and no default" in { f: Fixture =>
+    "ignore detect message if no plan and no default" taggedAs (WIP) in { f: Fixture =>
       import f._
       val probe = TestProbe()
       system.eventStream.subscribe( probe.ref, classOf[UnhandledMessage] )
@@ -57,12 +58,11 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
       val msg = mock[OutlierDetectionMessage]
       when( msg.topic ) thenReturn Topic("dummy")
 
-      detect receive msg
+      detect.receive( msg, probe.ref )
 
-      probe.expectMsgPF( 2.seconds.dilated, "unhandled message" ) {
-        case UnhandledMessage( m, _, r ) => {
-          m mustBe msg
-          r mustBe detect
+      probe.expectMsgPF( 2.seconds.dilated, "unrecognized message" ) {
+        case UnrecognizedTopic( t ) => {
+          t mustBe Topic("dummy")
         }
       }
 

@@ -35,6 +35,8 @@ import lineup.model.timeseries._
  */
 object GraphiteModel extends StrictLogging {
 
+  val OutlierGaugeSuffix = ".outlier"
+
   override protected val logger: Logger = Logger( LoggerFactory.getLogger("Graphite") )
 
   val trace = Trace[GraphiteModel.type]
@@ -140,8 +142,8 @@ object GraphiteModel extends StrictLogging {
   }
 
   def determineConfigFileComponents(origin: ConfigOrigin ): List[String] = {
-    val path = "@\\s+file:(.*):\\s+\\d+,".r
-    path.findAllMatchIn( origin.toString ).map{ _ group 1 }.toList
+    val Path = "@\\s+file:(.*):\\s+\\d+,".r
+    Path.findAllMatchIn( origin.toString ).map{ _ group 1 }.toList
   }
 
 
@@ -197,7 +199,7 @@ object GraphiteModel extends StrictLogging {
         )
 
         val broadcast = b.add( Broadcast[Outliers](outputPorts = 2, eagerCancel = false) )
-        val publish = b.add( Monitor.flow('publish).watch(publishOutliers(usageConfig.graphiteStream)) )
+        val publish = b.add( Monitor.flow('publish).watch( publishOutliers(usageConfig.graphiteStream) ) )
         val tcpOut = b.add( Monitor.sink('tcpOut).watch( Flow[Outliers] map { _ => ByteString() } ) )
         val train = Monitor.sink('train).watch( TrainOutlierAnalysis.feedOutlierTraining )
         val term = b.add( Sink.ignore )
@@ -234,14 +236,8 @@ object GraphiteModel extends StrictLogging {
 
     Flow[TimeSeries]
     .transform( () => logMetric )
-    .filter { ts => plans exists { _ appliesTo ts } }
+    .filter { ts => !ts.topic.name.endsWith( OutlierGaugeSuffix ) && plans.exists{ _ appliesTo ts } }
   }
-
-//  def publishOutliers( implicit system: ActorSystem ): Flow[Outliers, Outliers, Unit] = {
-//    val outlierLogger = Logger( LoggerFactory getLogger "Outliers" )
-//    implicit val ec = loggerDispatcher( system )
-//    Flow[Outliers].mapAsync( 8 ){ e => log( outlierLogger, 'info ){ e.toString } map { _ => e } }
-//  }
 
   def publishOutliers(
     graphiteStream: Option[ManagedResource[OutputStream]]
@@ -258,7 +254,7 @@ object GraphiteModel extends StrictLogging {
         import PythonPickleProtocol._
         val marks = outliers map { case DataPoint(ts, _) => DataPoint(ts, 1D) }
 
-        val report = pickle( TimeSeries(topic = source.topic, points = marks) ).withHeader
+        val report = pickle( TimeSeries(topic = source.topic + OutlierGaugeSuffix, points = marks) ).withHeader
         Future {
           outlierLogger info o.toString
           graphiteStream foreach { gs =>
