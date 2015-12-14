@@ -142,8 +142,8 @@ object GraphiteModel extends StrictLogging {
   }
 
   def determineConfigFileComponents(origin: ConfigOrigin ): List[String] = {
-    val path = "@\\s+file:(.*):\\s+\\d+,".r
-    path.findAllMatchIn( origin.toString ).map{ _ group 1 }.toList
+    val Path = "@\\s+file:(.*):\\s+\\d+,".r
+    Path.findAllMatchIn( origin.toString ).map{ _ group 1 }.toList
   }
 
 
@@ -238,12 +238,6 @@ object GraphiteModel extends StrictLogging {
     .transform( () => logMetric )
     .filter { ts => !ts.topic.name.endsWith( OutlierGaugeSuffix ) && plans.exists{ _ appliesTo ts } }
   }
-
-//  def publishOutliers( implicit system: ActorSystem ): Flow[Outliers, Outliers, Unit] = {
-//    val outlierLogger = Logger( LoggerFactory getLogger "Outliers" )
-//    implicit val ec = loggerDispatcher( system )
-//    Flow[Outliers].mapAsync( 8 ){ e => log( outlierLogger, 'info ){ e.toString } map { _ => e } }
-//  }
 
   def publishOutliers(
     graphiteStream: Option[ManagedResource[OutputStream]]
@@ -425,7 +419,6 @@ object GraphiteModel extends StrictLogging {
         val IS_DEFAULT = "is-default"
         val TOPICS = "topics"
         val REGEX = "regex"
-        val BLOCK = "block"
 
         val ( timeout, algorithms ) = pullCommonPlanFacets( spec )
 
@@ -467,15 +460,6 @@ object GraphiteModel extends StrictLogging {
               specification = spec,
               extractTopic = OutlierDetection.extractOutlierDetectionTopic,
               regex = new Regex( spec.getString(REGEX) )
-            )
-          )
-        } else if ( spec hasPath BLOCK ) {
-          Some(
-            OutlierPlan.forBlock(
-              name = name,
-              specification = spec,
-              extractTopic = OutlierDetection.extractOutlierDetectionTopic,
-              regex = new Regex(spec.getString(BLOCK))
             )
           )
         } else {

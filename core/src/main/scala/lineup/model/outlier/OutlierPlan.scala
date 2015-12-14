@@ -1,10 +1,9 @@
 package lineup.model.outlier
 
-import scala.concurrent.{ Future, ExecutionContext }
 import scala.concurrent.duration._
 import scala.util.matching.Regex
 import com.typesafe.config.{ ConfigOrigin, ConfigFactory, Config }
-import lineup.model.timeseries.{TimeSeriesBase, Topic}
+import lineup.model.timeseries.Topic
 import peds.commons.log.Trace
 import peds.commons.util._
 
@@ -30,54 +29,8 @@ object OutlierPlan {
 
   val AlgorithmConfig = "algorithm-config"
 
-
   type ExtractTopic = PartialFunction[Any, Option[Topic]]
 
-//  def apply(
-//    name: String,
-//    timeout: FiniteDuration,
-//    isQuorum: IsQuorum,
-//    reduce: ReduceOutliers,
-//    algorithms: Set[Symbol],
-//    specification: Config
-//  )(
-//    appliesTo: (Any) => Boolean
-//  ): OutlierPlan = {
-//    SimpleOutlierPlan(
-//      name = name,
-//      appliesTo = AppliesTo.predicate( appliesTo ),
-//      algorithms = algorithms,
-//      timeout = timeout,
-//      isQuorum = isQuorum,
-//      reduce = reduce,
-//      algorithmConfig = getAlgorithmConfig( specification ),
-//      origin = specification.origin,
-//      typeOrder = 3
-//    )
-//  }
-//
-//  def apply(
-//    name: String,
-//    timeout: FiniteDuration,
-//    isQuorum: IsQuorum,
-//    reduce: ReduceOutliers,
-//    algorithms: Set[Symbol],
-//    specification: Config
-//  )(
-//    appliesTo: PartialFunction[Any, Boolean]
-//  ): OutlierPlan = {
-//    SimpleOutlierPlan(
-//      name = name,
-//      appliesTo = AppliesTo.partialPredicate( appliesTo ),
-//      algorithms = algorithms,
-//      timeout = timeout,
-//      isQuorum = isQuorum,
-//      reduce = reduce,
-//      algorithmConfig = getAlgorithmConfig( specification ),
-//      origin = specification.origin,
-//      typeOrder = 3
-//    )
-//  }
 
   def apply(
     name: String,
@@ -87,7 +40,7 @@ object OutlierPlan {
     algorithms: Set[Symbol],
     specification: Config
   )(
-    appliesTo: (Any) => Applicability
+    appliesTo: (Any) => Boolean
   ): OutlierPlan = {
     SimpleOutlierPlan(
       name = name,
@@ -110,7 +63,7 @@ object OutlierPlan {
     algorithms: Set[Symbol],
     specification: Config
   )(
-    appliesTo: PartialFunction[Any, Applicability]
+    appliesTo: PartialFunction[Any, Boolean]
   ): OutlierPlan = {
     SimpleOutlierPlan(
       name = name,
@@ -171,7 +124,6 @@ object OutlierPlan {
     )
   }
 
-  //todo: change to blacklist and whitelist and dont forget about precendence between the two (whitelist before blacklist)
   def forRegex(
     name: String,
     timeout: FiniteDuration,
@@ -192,16 +144,6 @@ object OutlierPlan {
       algorithmConfig = getAlgorithmConfig( specification ),
       origin = specification.origin,
       typeOrder = 2
-    )
-  }
-
-  def forBlock( name: String, specification: Config, extractTopic: ExtractTopic, regex: Regex ): OutlierPlan = {
-    BlockingPlan(
-      name = name,
-      appliesTo = AppliesTo.block( regex, extractTopic ),
-      algorithmConfig = getAlgorithmConfig( specification ),
-      origin = specification.origin,
-      typeOrder = Int.MaxValue - 1
     )
   }
 
@@ -251,77 +193,31 @@ object OutlierPlan {
     }
   }
 
-  final case class BlockingPlan private[outlier](
-    override val name: String,
-    override val appliesTo: OutlierPlan.AppliesTo,
-    override val algorithmConfig: Config,
-    override private[outlier] val origin: ConfigOrigin,
-    override private[outlier] val typeOrder: Int
-  ) extends OutlierPlan {
-    override def algorithms: Set[Symbol] = Set.empty[Symbol]
 
-    override def reduce: ReduceOutliers = new ReduceOutliers {
-      override def apply(
-        results: SeriesOutlierResults,
-        source: TimeSeriesBase
-      )(
-        implicit ec: ExecutionContext
-      ): Future[Outliers] = Future { NoOutliers(algorithms, source) }
-    }
-
-    override def isQuorum: IsQuorum = new IsQuorum {
-      override def totalIssued: Int = 0
-      override def apply( results: SeriesOutlierResults ): Boolean = false
-    }
-
-    override def timeout: FiniteDuration = 1.second
-  }
-
-
-  sealed trait Applicability
-  case object Applies extends Applicability
-  case object NotApplicable extends Applicability
-  case object NoFurtherConsideration extends Applicability
-  implicit def booleanToApplicability( isApplicable: Boolean ): Applicability = if ( isApplicable ) Applies else NotApplicable
-  implicit def applicabilityToBoolean( a: Applicability): Boolean = { a == Applies }
-
-  sealed trait AppliesTo extends ((Any) => Applicability)
+  sealed trait AppliesTo extends ((Any) => Boolean)
 
   private object AppliesTo {
-    def predicate( p: (Any) => Boolean ): AppliesTo = new AppliesTo {
-      override def apply( message: Any ): Applicability = p( message )
-      override val toString: String = "AppliesTo.predicate"
-    }
-
-    def partialPredicate( pp: PartialFunction[Any, Boolean] ): AppliesTo = new AppliesTo {
-      override def apply( message: Any ): Applicability = if ( pp.isDefinedAt(message) ) pp(message) else NotApplicable
-      override val toString: String = "AppliesTo.partialPredicate"
-    }
-
-    def function( f: (Any) => Applicability ): AppliesTo = new AppliesTo {
-      override def apply( message: Any ): Applicability = f( message )
+    def function( f: (Any) => Boolean ): AppliesTo = new AppliesTo {
+      override def apply( message: Any ): Boolean = f( message )
       override val toString: String = "AppliesTo.function"
     }
 
-    def partialFunction( pf: PartialFunction[Any, Applicability] ): AppliesTo = new AppliesTo {
-      override def apply( message: Any ): Applicability = if ( pf isDefinedAt message ) pf( message ) else NotApplicable
+    def partialFunction( pf: PartialFunction[Any, Boolean] ): AppliesTo = new AppliesTo {
+      override def apply( message: Any ): Boolean = if ( pf isDefinedAt message ) pf( message ) else false
       override val toString: String = "AppliesTo.partialFunction"
     }
 
     def topics( topics: Set[Topic], extractTopic: ExtractTopic ): AppliesTo = new AppliesTo {
-      override def apply( message: Any ): Applicability = {
-        if ( extractTopic isDefinedAt message ) {
-          extractTopic( message ) map { t => booleanToApplicability( topics.contains(t) ) } getOrElse NotApplicable
-        } else {
-          NotApplicable
-        }
+      override def apply( message: Any ): Boolean = {
+        if ( extractTopic isDefinedAt message ) extractTopic( message ) map { topics contains _ } getOrElse { false }
+        else false
       }
 
       override val toString: String = s"""AppliesTo.topics[${topics.mkString(",")}]"""
     }
 
     def regex( regex: Regex, extractTopic: ExtractTopic ): AppliesTo = new AppliesTo {
-      override def apply( message: Any ): Applicability = {
+      override def apply( message: Any ): Boolean = {
         if ( !extractTopic.isDefinedAt(message) ) false
         else {
           val result = extractTopic( message ) flatMap { t => regex findFirstMatchIn t.toString }
@@ -332,20 +228,8 @@ object OutlierPlan {
       override val toString: String = s"AppliesTo.regex[$regex]"
     }
 
-    def block( regex: Regex, extractTopic: ExtractTopic ): AppliesTo = new AppliesTo {
-      override def apply( message: Any ): Applicability = {
-        if ( !extractTopic.isDefinedAt(message) ) NotApplicable
-        else {
-          val result = extractTopic( message ) flatMap { t => regex findFirstMatchIn t.toString }
-          if ( result.isDefined ) NoFurtherConsideration else NotApplicable
-        }
-      }
-
-      override val toString: String = s"AppliesTo.regex[$regex]"
-    }
-
     val all: AppliesTo = new AppliesTo {
-      override def apply( message: Any ): Applicability = Applies
+      override def apply( message: Any ): Boolean = true
       override val toString: String = "AppliesTo.all"
     }
   }
