@@ -2,6 +2,7 @@ package lineup.stream
 
 import java.io.OutputStream
 import java.net.{ Socket, InetAddress }
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import akka.stream.stage.{ SyncDirective, Context, PushStage }
 import better.files.{ ManagedResource => _, _ }
@@ -66,7 +67,7 @@ object GraphiteModel extends StrictLogging {
 
       case Some( usage ) => {
         val config = ConfigFactory.load
-        val uconfig = getConfiguration( usage, config )
+        val usageConfig = getConfiguration( usage, config )
 
         val PlanConfigPath = "lineup.detection-plans"
         val plansFn: () => Try[Seq[OutlierPlan]] = () => Try {
@@ -77,10 +78,10 @@ object GraphiteModel extends StrictLogging {
         plansFn() foreach { plans =>
           val usageMessage = s"""
             |\nRunning Lineup using the following configuration:
-            |\tbinding       : ${uconfig.sourceHostPort._1}:${uconfig.sourceHostPort._2}
-            |\tmax frame size: ${uconfig.maxFrameLength}
-            |\tprotocol      : ${uconfig.protocol}
-            |\twindow        : ${uconfig.windowDuration.toCoarsest}
+            |\tbinding       : ${usageConfig.sourceHostPort._1}:${usageConfig.sourceHostPort._2}
+            |\tmax frame size: ${usageConfig.maxFrameLength}
+            |\tprotocol      : ${usageConfig.protocol}
+            |\twindow        : ${usageConfig.windowDuration.toCoarsest}
             |\tplans         : [${plans.zipWithIndex.map{ case (p,i) => f"${i}%2d: ${p}"}.mkString("\n","\n","\n")}]
           """.stripMargin
 
@@ -93,6 +94,17 @@ object GraphiteModel extends StrictLogging {
             Supervision.Stop
           }
         }
+
+        val graphiteHost = config getString "lineup.graphite.host"
+        val graphitePort = config getInt "lineup.graphite.port"
+        val publishFrequency = if ( config hasPath "lineup.graphite.publish-frequency" ) {
+          config getDuration "lineup.graphite.publish-frequency"
+        } else {
+          java.time.Duration.ofSeconds( 10 )
+        }
+
+        val reporter = Monitor.makeGraphiteReporter( graphiteHost, graphitePort )
+        reporter.start( publishFrequency.toMillis, TimeUnit.MILLISECONDS )
 
         implicit val system = ActorSystem( "Graphite" )
         implicit val materializer = ActorMaterializer( ActorMaterializerSettings(system).withSupervisionStrategy(decider) )
@@ -130,7 +142,7 @@ object GraphiteModel extends StrictLogging {
           }
         }
 
-        streamGraphiteOutliers( uconfig, detector, PlanConfigPath ) onComplete {
+        streamGraphiteOutliers( usageConfig, detector, PlanConfigPath ) onComplete {
           case Success(_) => system.terminate()
           case Failure( e ) => {
             logger.error( "Failure:", e )

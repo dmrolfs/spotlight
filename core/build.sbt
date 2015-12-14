@@ -21,6 +21,9 @@ libraryDependencies ++= commonDependencies ++ Seq(
   "com.github.pathikrit" %% "better-files" % "2.13.0",
   "com.github.pathikrit" %% "better-files-akka" % "2.13.0",
   "org.parboiled" %% "parboiled" % "2.1.0",
+  "io.dropwizard.metrics" % "metrics-core" % "3.1.0",
+  "io.dropwizard.metrics" % "metrics-graphite" % "3.1.0",
+  "nl.grons" %% "metrics-scala" % "3.5.2_a2.3",
   "com.typesafe.akka" % "akka-stream-testkit-experimental_2.11" % "1.0" % "test",
   "com.github.dmrolfs" %% "demesne-testkit" % "0.8.0-SNAPSHOT" % "test" changing(),
   "com.github.marklister" %% "product-collections" % "1.4.2" % "test"

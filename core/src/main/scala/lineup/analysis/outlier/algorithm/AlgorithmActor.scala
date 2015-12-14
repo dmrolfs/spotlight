@@ -18,7 +18,10 @@ abstract class AlgorithmActor extends EnvelopingActor with ActorLogging {
   override def receive: Receive = around( quiescent )
 
   def quiescent: Receive = LoggingReceive {
-    case DetectionAlgorithmRouter.AlgorithmRegistered => context.become( around(detect) )
+    case DetectionAlgorithmRouter.AlgorithmRegistered => {
+      log info s"${self.path} registered with ${sender().path}"
+      context.become( around(detect) )
+    }
 
     case m: DetectUsing => throw AlgorithmActor.AlgorithmUsedBeforeRegistrationError( algorithm, self.path )
   }
