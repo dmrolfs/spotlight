@@ -35,6 +35,8 @@ import lineup.model.timeseries._
  */
 object GraphiteModel extends StrictLogging {
 
+  val OutlierGaugeSuffix = ".outlier"
+
   override protected val logger: Logger = Logger( LoggerFactory.getLogger("Graphite") )
 
   val trace = Trace[GraphiteModel.type]
@@ -197,7 +199,7 @@ object GraphiteModel extends StrictLogging {
         )
 
         val broadcast = b.add( Broadcast[Outliers](outputPorts = 2, eagerCancel = false) )
-        val publish = b.add( Monitor.flow('publish).watch(publishOutliers(usageConfig.graphiteStream)) )
+        val publish = b.add( Monitor.flow('publish).watch( publishOutliers(usageConfig.graphiteStream) ) )
         val tcpOut = b.add( Monitor.sink('tcpOut).watch( Flow[Outliers] map { _ => ByteString() } ) )
         val train = Monitor.sink('train).watch( TrainOutlierAnalysis.feedOutlierTraining )
         val term = b.add( Sink.ignore )
@@ -234,7 +236,7 @@ object GraphiteModel extends StrictLogging {
 
     Flow[TimeSeries]
     .transform( () => logMetric )
-    .filter { ts => plans exists { _ appliesTo ts } }
+    .filter { ts => !ts.topic.name.endsWith( OutlierGaugeSuffix ) && plans.exists{ _ appliesTo ts } }
   }
 
 //  def publishOutliers( implicit system: ActorSystem ): Flow[Outliers, Outliers, Unit] = {
@@ -258,7 +260,7 @@ object GraphiteModel extends StrictLogging {
         import PythonPickleProtocol._
         val marks = outliers map { case DataPoint(ts, _) => DataPoint(ts, 1D) }
 
-        val report = pickle( TimeSeries(topic = source.topic, points = marks) ).withHeader
+        val report = pickle( TimeSeries(topic = source.topic + OutlierGaugeSuffix, points = marks) ).withHeader
         Future {
           outlierLogger info o.toString
           graphiteStream foreach { gs =>
@@ -423,6 +425,7 @@ object GraphiteModel extends StrictLogging {
         val IS_DEFAULT = "is-default"
         val TOPICS = "topics"
         val REGEX = "regex"
+        val BLOCK = "block"
 
         val ( timeout, algorithms ) = pullCommonPlanFacets( spec )
 
@@ -464,6 +467,15 @@ object GraphiteModel extends StrictLogging {
               specification = spec,
               extractTopic = OutlierDetection.extractOutlierDetectionTopic,
               regex = new Regex( spec.getString(REGEX) )
+            )
+          )
+        } else if ( spec hasPath BLOCK ) {
+          Some(
+            OutlierPlan.forBlock(
+              name = name,
+              specification = spec,
+              extractTopic = OutlierDetection.extractOutlierDetectionTopic,
+              regex = new Regex(spec.getString(BLOCK))
             )
           )
         } else {

@@ -1,9 +1,10 @@
 package lineup.model.outlier
 
+import scala.concurrent.{ Future, ExecutionContext }
 import scala.concurrent.duration._
 import scala.util.matching.Regex
 import com.typesafe.config.{ ConfigOrigin, ConfigFactory, Config }
-import lineup.model.timeseries.Topic
+import lineup.model.timeseries.{TimeSeriesBase, Topic}
 import peds.commons.log.Trace
 import peds.commons.util._
 
@@ -194,6 +195,16 @@ object OutlierPlan {
     )
   }
 
+  def forBlock( name: String, specification: Config, extractTopic: ExtractTopic, regex: Regex ): OutlierPlan = {
+    BlockingPlan(
+      name = name,
+      appliesTo = AppliesTo.block( regex, extractTopic ),
+      algorithmConfig = getAlgorithmConfig( specification ),
+      origin = specification.origin,
+      typeOrder = Int.MaxValue - 1
+    )
+  }
+
   def default(
     name: String,
     timeout: FiniteDuration,
@@ -240,6 +251,33 @@ object OutlierPlan {
     }
   }
 
+  final case class BlockingPlan private[outlier](
+    override val name: String,
+    override val appliesTo: OutlierPlan.AppliesTo,
+    override val algorithmConfig: Config,
+    override private[outlier] val origin: ConfigOrigin,
+    override private[outlier] val typeOrder: Int
+  ) extends OutlierPlan {
+    override def algorithms: Set[Symbol] = Set.empty[Symbol]
+
+    override def reduce: ReduceOutliers = new ReduceOutliers {
+      override def apply(
+        results: SeriesOutlierResults,
+        source: TimeSeriesBase
+      )(
+        implicit ec: ExecutionContext
+      ): Future[Outliers] = Future { NoOutliers(algorithms, source) }
+    }
+
+    override def isQuorum: IsQuorum = new IsQuorum {
+      override def totalIssued: Int = 0
+      override def apply( results: SeriesOutlierResults ): Boolean = false
+    }
+
+    override def timeout: FiniteDuration = 1.second
+  }
+
+
   sealed trait Applicability
   case object Applies extends Applicability
   case object NotApplicable extends Applicability
@@ -282,13 +320,24 @@ object OutlierPlan {
       override val toString: String = s"""AppliesTo.topics[${topics.mkString(",")}]"""
     }
 
-    //todo: change to blacklist and whitelist and dont forget about precendence between the two (whitelist before blacklist)
     def regex( regex: Regex, extractTopic: ExtractTopic ): AppliesTo = new AppliesTo {
       override def apply( message: Any ): Applicability = {
         if ( !extractTopic.isDefinedAt(message) ) false
         else {
           val result = extractTopic( message ) flatMap { t => regex findFirstMatchIn t.toString }
           result.isDefined
+        }
+      }
+
+      override val toString: String = s"AppliesTo.regex[$regex]"
+    }
+
+    def block( regex: Regex, extractTopic: ExtractTopic ): AppliesTo = new AppliesTo {
+      override def apply( message: Any ): Applicability = {
+        if ( !extractTopic.isDefinedAt(message) ) NotApplicable
+        else {
+          val result = extractTopic( message ) flatMap { t => regex findFirstMatchIn t.toString }
+          if ( result.isDefined ) NoFurtherConsideration else NotApplicable
         }
       }
 
