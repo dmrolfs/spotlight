@@ -1,14 +1,16 @@
 package lineup.analysis.outlier
 
+import akka.pattern.AskTimeoutException
+import akka.stream.{ActorAttributes, Supervision}
+
 import scala.concurrent.duration._
 import scala.util.{ Failure, Success, Try }
-import akka.actor.{ ActorRef, ActorLogging, Props }
+import akka.actor.{Actor, ActorRef, ActorLogging, Props}
 import akka.event.LoggingReceive
 import akka.stream.scaladsl.Flow
 import com.typesafe.scalalogging.StrictLogging
-import peds.akka.envelope._
+import peds.akka.metrics.InstrumentedActor
 import peds.commons.identifier.ShortUUID
-import peds.commons.log.Trace
 import lineup.model.timeseries.{ Topic, TimeSeriesBase }
 import lineup.model.outlier.{ Outliers, OutlierPlan }
 
@@ -28,12 +30,22 @@ object OutlierDetection extends StrictLogging {
       implicit val triggerTimeout = Timeout( maxAllowedWait )
       val result = detector ? OutlierDetectionMessage( ts )
       result.mapTo[Outliers]
-    }
+    }.withAttributes( ActorAttributes.supervisionStrategy(decider) )
     .filter {
       case e: UnrecognizedTopic => false
       case e => true
     }
   }
+
+  private val decider: Supervision.Decider = {
+    case ex: AskTimeoutException => {
+      logger error s"Detection stage timed out on [${ex.getMessage}]"
+      Supervision.Resume
+    }
+
+    case _ => Supervision.Stop
+  }
+
 
   def props( router: ActorRef )( makeDetector: ActorRef => OutlierDetection ): Props = Props( makeDetector(router) )
 
@@ -88,11 +100,10 @@ object OutlierDetection extends StrictLogging {
 }
 
 
-class OutlierDetection( router: ActorRef ) extends EnvelopingActor with ActorLogging { outer: OutlierDetection.PlanPolicy =>
+class OutlierDetection( router: ActorRef ) extends Actor with InstrumentedActor with ActorLogging {
+  outer: OutlierDetection.PlanPolicy =>
 
-  override val trace = Trace[OutlierDetection]
-
-  val scheduleEC = context.system.dispatchers.lookup( "schdedule-dispatcher" )
+  val scheduleEC = context.system.dispatchers.lookup( "schedule-dispatcher" )
 
   val reloader = context.system.scheduler.schedule(
     outer.refreshInterval,
@@ -104,7 +115,7 @@ class OutlierDetection( router: ActorRef ) extends EnvelopingActor with ActorLog
   override def postStop(): Unit = reloader.cancel()
 
   type AggregatorSubscribers = Map[ActorRef, ActorRef]
-  override def receive: Receive = around( detection( Map.empty[ActorRef, ActorRef] ) )
+  override def receive: Receive = around( detection(Map.empty[ActorRef, ActorRef]) )
 
   def detection(outstanding: AggregatorSubscribers, inRetry: Boolean = false ): Receive = LoggingReceive {
     case result: Outliers if outstanding.contains( sender() ) => {
@@ -133,6 +144,12 @@ class OutlierDetection( router: ActorRef ) extends EnvelopingActor with ActorLog
     case m: OutlierDetectionMessage => {
       log debug s"unrecognized topic:[${m.topic}] from sender:[${sender()}]"
       sender() ! OutlierDetection.UnrecognizedTopic( m.topic )
+    }
+
+    case to: OutlierQuorumAggregator.AnalysisTimedOut => {
+      log error s"quorum was not reached in time: [$to]"
+      val updated = outstanding - sender()
+      context become around( detection(updated, inRetry) )
     }
 
     case OutlierDetection.ReloadPlans => {

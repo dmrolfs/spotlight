@@ -1,11 +1,12 @@
 package lineup.analysis.outlier
 
-import akka.actor.{ ActorLogging, Props }
+import scala.concurrent.duration.FiniteDuration
+import akka.actor.{ Cancellable, Actor, ActorLogging, Props }
 import akka.event.LoggingReceive
-import lineup.model.timeseries.TimeSeriesBase
-import peds.akka.envelope._
+import peds.akka.metrics.InstrumentedActor
 import peds.commons.log.Trace
 import lineup.model.outlier._
+import lineup.model.timeseries.{ Topic, TimeSeriesBase }
 
 
 object OutlierQuorumAggregator {
@@ -13,45 +14,66 @@ object OutlierQuorumAggregator {
 
   def props( plan: OutlierPlan, source: TimeSeriesBase ): Props = Props( new OutlierQuorumAggregator(plan, source) )
 
-  case object AnalysisTimedOut
+  case class AnalysisTimedOut( topic: Topic, plan: OutlierPlan )
 }
 
 /**
  * Created by rolfsd on 9/28/15.
  */
-class OutlierQuorumAggregator( plan: OutlierPlan, source: TimeSeriesBase ) extends EnvelopingActor with ActorLogging {
+class OutlierQuorumAggregator( plan: OutlierPlan, source: TimeSeriesBase ) extends Actor with InstrumentedActor with ActorLogging {
   import OutlierQuorumAggregator._
+
+  val attemptTimeout: FiniteDuration = plan.timeout / 3L
 
   implicit val ec = context.system.dispatcher
 
-  val pendingWhistle = context.system.scheduler.scheduleOnce( plan.timeout, self, AnalysisTimedOut )
-  override def postStop(): Unit = pendingWhistle.cancel()
+  var pendingWhistle: Option[Cancellable] = None
+  scheduleWhistle()
 
-  override val trace = Trace[OutlierQuorumAggregator]
+  def scheduleWhistle( duration: FiniteDuration = attemptTimeout ): Unit = {
+    cancelWhistle()
+    pendingWhistle = Some( context.system.scheduler.scheduleOnce(duration, self, AnalysisTimedOut(source.topic, plan)) )
+  }
+
+  def cancelWhistle(): Unit = {
+    pendingWhistle foreach { _.cancel() }
+    pendingWhistle = None
+  }
+
+  override def postStop(): Unit = cancelWhistle()
 
   type AnalysisFulfillment = Map[Symbol, Outliers]
   var fulfilled: AnalysisFulfillment = Map()
 
-  override def receive: Receive = around( quorum )
+  override def receive: Receive = around( quorum() )
 
-  val quorum: Receive = LoggingReceive {
+  def quorum( retries: Int = 3 ): Receive = LoggingReceive {
     case m: Outliers => {
       val source = sender()
       fulfilled ++= m.algorithms map { _ -> m }
       process( m )
     }
 
-    case AnalysisTimedOut => {
-//todo stream enveloping: context.parent !+ AnalysisTimedOut
-      context.parent ! AnalysisTimedOut
+    //todo: this whole retry approach is wrong; should simply increase timeout
+    case _: AnalysisTimedOut if retries > 0 => {
+      val retriesLeft = retries - 1
+
+      log warning s"quorum not reached for topic:[${source.topic}] tries-left:[$retriesLeft] " +
+                  s"""received:[${fulfilled.keys.mkString(",")}] plan:[${plan.summary}]"""
+
+      scheduleWhistle()
+      context become around( quorum(retriesLeft) )
+    }
+
+    case timeout: AnalysisTimedOut => {
+      context.parent ! timeout
       context.stop( self )
     }
   }
 
-  def process( m: Outliers ): Unit = trace.block( s"process($m)" ) {
+  def process( m: Outliers ): Unit = {
     if ( plan isQuorum fulfilled ) {
       import akka.pattern.pipe
-      //todo stream enveloping: context.parent !+ result
       plan.reduce( fulfilled, source ) pipeTo context.parent
       context stop self
     }
