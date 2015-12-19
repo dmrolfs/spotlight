@@ -2,8 +2,7 @@ package lineup.analysis.outlier
 
 import akka.actor._
 import akka.event.LoggingReceive
-import peds.akka.envelope._
-import peds.commons.log.Trace
+import peds.akka.metrics.InstrumentedActor
 
 
 /**
@@ -19,10 +18,8 @@ object DetectionAlgorithmRouter {
   def props: Props = Props( new DetectionAlgorithmRouter )
 }
 
-class DetectionAlgorithmRouter extends EnvelopingActor with ActorLogging {
+class DetectionAlgorithmRouter extends Actor with InstrumentedActor with ActorLogging {
   import DetectionAlgorithmRouter._
-  override def trace: Trace[_] = Trace[DetectionAlgorithmRouter]
-
   var routingTable: Map[Symbol, ActorRef] = Map()
 
   override val supervisorStrategy: SupervisorStrategy = SupervisorStrategy.defaultStrategy
@@ -37,7 +34,6 @@ class DetectionAlgorithmRouter extends EnvelopingActor with ActorLogging {
   }
 
   val routing: Receive = LoggingReceive {
-//todo stream enveloping:    case m @ DetectUsing( algorithm, _, _, _ ) if routingTable.contains( algorithm ) => routingTable( algorithm ) sendForward m
     case m @ DetectUsing( algorithm, _, _, _ ) if routingTable.contains( algorithm ) => routingTable( algorithm ) forward m
   }
 }
