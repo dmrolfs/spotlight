@@ -7,8 +7,6 @@ import org.apache.commons.math3.ml.distance.DistanceMeasure
 import org.apache.commons.math3.stat.{ descriptive => stat }
 import org.apache.commons.math3.ml
 import com.typesafe.config.Config
-import peds.commons.log.Trace
-import peds.akka.envelope._
 import lineup.model.timeseries.{ Matrix, DataPoint }
 import lineup.model.outlier.{ CohortOutliers, NoOutliers, SeriesOutliers }
 import lineup.analysis.outlier.{ DetectUsing, DetectOutliersInSeries, DetectOutliersInCohort }
@@ -30,8 +28,10 @@ object DBSCANAnalyzer {
 
 class DBSCANAnalyzer( override val router: ActorRef ) extends AlgorithmActor {
   import DBSCANAnalyzer._
-  override val trace: Trace[_] = Trace[DBSCANAnalyzer]
+
   override val algorithm: Symbol = DBSCANAnalyzer.Algorithm
+
+  override def receive: Receive = around( quiescent )
 
   override val detect: Receive = LoggingReceive {
     case s @ DetectUsing( _, aggregator, payload: DetectOutliersInSeries, algorithmConfig ) => {
@@ -47,7 +47,6 @@ class DBSCANAnalyzer( override val router: ActorRef ) extends AlgorithmActor {
         else NoOutliers( algorithms = Set(algorithm), source = payload.data )
       }
 
-//todo stream enveloping: aggregator !+ result
       aggregator ! result
     }
 
@@ -76,7 +75,6 @@ class DBSCANAnalyzer( override val router: ActorRef ) extends AlgorithmActor {
         else CohortOutliers( algorithms = Set(algorithm), source = payload.data, outliers = outlierSeries )
       }
 
-//todo stream enveloping: aggregator !+ result
       aggregator ! result
 
 //todo: consider sensitivity here and in series!!!

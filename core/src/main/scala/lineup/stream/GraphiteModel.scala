@@ -2,11 +2,9 @@ package lineup.stream
 
 import java.io.OutputStream
 import java.net.{ Socket, InetAddress }
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
-import akka.stream.stage.{ SyncDirective, Context, PushStage }
-import better.files.{ ManagedResource => _, _ }
-import resource._
+
+import peds.akka.metrics.{ StreamMonitor, Reporter, Instrumented }
 
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.concurrent.duration._
@@ -17,7 +15,10 @@ import akka.actor.{ ActorRef, ActorSystem }
 import akka.stream.scaladsl._
 import akka.stream._
 import akka.util.ByteString
+import akka.stream.stage.{ SyncDirective, Context, PushStage }
 
+import better.files.{ ManagedResource => _, _ }
+import resource._
 import com.typesafe.config._
 import com.typesafe.scalalogging.{ StrictLogging, Logger }
 import org.slf4j.LoggerFactory
@@ -34,7 +35,7 @@ import lineup.model.timeseries._
 /**
  * Created by rolfsd on 10/21/15.
  */
-object GraphiteModel extends StrictLogging {
+object GraphiteModel extends Instrumented with StrictLogging {
 
   val OutlierGaugeSuffix = ".outlier"
 
@@ -69,20 +70,22 @@ object GraphiteModel extends StrictLogging {
         val config = ConfigFactory.load
         val usageConfig = getConfiguration( usage, config )
 
+        val detectTimeout = FiniteDuration( config.getDuration("lineup.workflow.detect.timeout", MILLISECONDS), MILLISECONDS )
         val PlanConfigPath = "lineup.detection-plans"
         val plansFn: () => Try[Seq[OutlierPlan]] = () => Try {
           ConfigFactory.invalidateCaches()
-          makePlans( ConfigFactory.load.getConfig(PlanConfigPath) )
+          makePlans( detectTimeout, ConfigFactory.load.getConfig(PlanConfigPath) )
         }
 
         plansFn() foreach { plans =>
           val usageMessage = s"""
             |\nRunning Lineup using the following configuration:
-            |\tbinding       : ${usageConfig.sourceHostPort._1}:${usageConfig.sourceHostPort._2}
-            |\tmax frame size: ${usageConfig.maxFrameLength}
-            |\tprotocol      : ${usageConfig.protocol}
-            |\twindow        : ${usageConfig.windowDuration.toCoarsest}
-            |\tplans         : [${plans.zipWithIndex.map{ case (p,i) => f"${i}%2d: ${p}"}.mkString("\n","\n","\n")}]
+            |\tsource binding : ${usageConfig.sourceHostPort._1}:${usageConfig.sourceHostPort._2}
+            |\tpublish binding: ${usageConfig.graphiteHostPort map { case (h,p) => h.toString + ":" + p.toString }}
+            |\tmax frame size : ${usageConfig.maxFrameLength}
+            |\tprotocol       : ${usageConfig.protocol}
+            |\twindow         : ${usageConfig.windowDuration.toCoarsest}
+            |\tplans          : [${plans.zipWithIndex.map{ case (p,i) => f"${i}%2d: ${p}"}.mkString("\n","\n","\n")}]
           """.stripMargin
 
           logger info usageMessage
@@ -95,16 +98,13 @@ object GraphiteModel extends StrictLogging {
           }
         }
 
-        val graphiteHost = config getString "lineup.graphite.host"
-        val graphitePort = config getInt "lineup.graphite.port"
-        val publishFrequency = if ( config hasPath "lineup.graphite.publish-frequency" ) {
-          config getDuration "lineup.graphite.publish-frequency"
+        if ( config hasPath "lineup.metrics" ) {
+          logger info s"""starting metric reporting with config: [${config getConfig "lineup.metrics"}]"""
+          val reporter = Reporter.startReporter( config getConfig "lineup.metrics" )
+          logger info s"metric reporter: [${reporter}]"
         } else {
-          java.time.Duration.ofSeconds( 10 )
+          logger warn """metric report configuration missing at "lineup.metrics""""
         }
-
-        val reporter = Monitor.makeGraphiteReporter( graphiteHost, graphitePort )
-        reporter.start( publishFrequency.toMillis, TimeUnit.MILLISECONDS )
 
         implicit val system = ActorSystem( "Graphite" )
         implicit val materializer = ActorMaterializer( ActorMaterializerSettings(system).withSupervisionStrategy(decider) )
@@ -136,7 +136,7 @@ object GraphiteModel extends StrictLogging {
           val configWatcher = File( filename ).newWatcher( true )
           configWatcher ! on( Events.ENTRY_MODIFY ) {
             case _ => {
-              logger info s"config file watcher sending reload command due to change in ${configOrigin.description()}"
+              logger info s"config file watcher sending reload command due to change in ${configOrigin.description}"
               detector ! OutlierDetection.ReloadPlans
             }
           }
@@ -175,7 +175,7 @@ object GraphiteModel extends StrictLogging {
       val tcpInBufferSize = config.getInt( "lineup.source.buffer" )
       val workflowBufferSize = config.getInt( "lineup.workflow.buffer" )
       val detectTimeout = FiniteDuration( config.getDuration("lineup.workflow.detect.timeout", MILLISECONDS), MILLISECONDS )
-      val plans = makePlans( config.getConfig(planConfigPath) )
+      val plans = makePlans( detectTimeout, config.getConfig(planConfigPath) )
       log( logger, 'info ){
         s"""
            |\nConnection made using the following configuration:
@@ -191,32 +191,48 @@ object GraphiteModel extends StrictLogging {
 
         log( logger, 'info )( s"received connection remote[${connection.remoteAddress}] -> local[${connection.localAddress}]" )
 
-        val framing = b.add( Monitor.source('framing).watch( usageConfig.protocol.framingFlow(usageConfig.maxFrameLength) ) )
-        val timeSeries = b.add( Monitor.source('timeseries).watch(usageConfig.protocol.loadTimeSeriesData) )
-        val planned = b.add( Monitor.flow('planned).watch( filterPlanned(plans) ) )
+        val framing = b.add( StreamMonitor.source('framing).watch(usageConfig.protocol.framingFlow(usageConfig.maxFrameLength)) )
+        val timeSeries = b.add( StreamMonitor.source('timeseries).watch(usageConfig.protocol.loadTimeSeriesData) )
+        val planned = b.add( StreamMonitor.flow('planned).watch( filterPlanned(plans) ) )
 
-        val batch = Monitor.sink('batch).watch( batchSeries(usageConfig.windowDuration) )
+        val batch = StreamMonitor.sink('batch).watch( batchSeries(usageConfig.windowDuration) )
 
-        val buf1 = b.add(Monitor.flow('buffer1).watch(Flow[ByteString].buffer(tcpInBufferSize, OverflowStrategy.backpressure)))
+        val buf1 = b.add(
+          StreamMonitor.flow('buffer1).watch(Flow[ByteString].buffer(tcpInBufferSize, OverflowStrategy.backpressure))
+        )
 
         val buf2 = b.add(
-          Monitor.source('groups).watch(
+          StreamMonitor.source('groups).watch(
             Flow[TimeSeries]
-            .via( Monitor.flow('buffer2).watch( Flow[TimeSeries].buffer(workflowBufferSize, OverflowStrategy.backpressure) ) )
+            .via(
+              StreamMonitor.flow('buffer2).watch( Flow[TimeSeries].buffer(workflowBufferSize, OverflowStrategy.backpressure) )
+            )
           )
         )
 
-        val detectOutlier = Monitor.flow('detect).watch(
+        val detectOutlier = StreamMonitor.flow('detect).watch(
           OutlierDetection.detectOutlier( detector, detectTimeout, Runtime.getRuntime.availableProcessors() * 3 )
         )
 
         val broadcast = b.add( Broadcast[Outliers](outputPorts = 2, eagerCancel = false) )
-        val publish = b.add( Monitor.flow('publish).watch( publishOutliers(usageConfig.graphiteStream) ) )
-        val tcpOut = b.add( Monitor.sink('tcpOut).watch( Flow[Outliers] map { _ => ByteString() } ) )
-        val train = Monitor.sink('train).watch( TrainOutlierAnalysis.feedOutlierTraining )
+        val publish = b.add( StreamMonitor.flow('publish).watch( publishOutliers(usageConfig.graphiteStream) ) )
+        val tcpOut = b.add( StreamMonitor.sink('tcpOut).watch( Flow[Outliers] map { _ => ByteString() } ) )
+        val train = StreamMonitor.sink('train).watch( TrainOutlierAnalysis.feedOutlierTraining )
         val term = b.add( Sink.ignore )
 
-        Monitor.set( 'framing, 'buffer1, 'timeseries, 'planned, 'batch, 'groups, 'buffer2, 'detect, 'publish, 'tcpOut, 'train )
+        StreamMonitor.set(
+          'framing,
+          'buffer1,
+          'timeseries,
+          'planned,
+          'batch,
+          'groups,
+          'buffer2,
+          'detect,
+          'publish,
+          'tcpOut,
+          'train
+        )
 
         framing ~> buf1 ~> timeSeries ~> planned ~> batch ~> buf2 ~> detectOutlier ~> broadcast ~> publish ~> tcpOut
                                                                                       broadcast ~> train ~> term
@@ -270,7 +286,6 @@ object GraphiteModel extends StrictLogging {
         Future {
           outlierLogger info o.toString
           graphiteStream foreach { gs =>
-            logger error s"SENDING OUTLIER RESULT to graphite: [${o.toString}]"
             gs foreach { out =>
               out write report.toArray
               out.flush
@@ -282,7 +297,7 @@ object GraphiteModel extends StrictLogging {
       }
 
       case o: Outliers => {
-        val df = Future { logger info s"NOT SENDING: ${o.toString}"}
+        val df = Future { logger debug s"not sending: ${o.toString}"}
         val olf = log( outlierLogger, 'info ){ o.toString } map { _ => o }
         for {
           _ <- df
@@ -402,12 +417,17 @@ object GraphiteModel extends StrictLogging {
       }
     }
 
-    val graphiteHost = {
-      if ( config hasPath Settings.GRAPHITE_HOST ) Some( InetAddress getByName config.getString(Settings.GRAPHITE_HOST) )
-      else None
+    val graphiteHost = if ( config hasPath Settings.PUBLISH_GRAPHITE_HOST ) {
+      Some( InetAddress getByName config.getString( Settings.PUBLISH_GRAPHITE_HOST ) )
+    } else {
+      None
     }
 
-    val graphitePort = if ( config hasPath Settings.GRAPHITE_PORT ) Some(config getInt Settings.GRAPHITE_PORT) else None
+    val graphitePort = if ( config hasPath Settings.PUBLISH_GRAPHITE_PORT ) {
+      Some( config getInt Settings.PUBLISH_GRAPHITE_PORT )
+    } else {
+      Some( 2004 )
+    }
 
     UsageConfiguration(
       sourceHostPort = (sourceHost, sourcePort),
@@ -423,7 +443,7 @@ object GraphiteModel extends StrictLogging {
     )
   }
 
-  private def makePlans( planSpecifications: Config ): Seq[OutlierPlan] = {
+  private def makePlans( detectTimeout: FiniteDuration, planSpecifications: Config ): Seq[OutlierPlan] = {
     import scala.collection.JavaConversions._
 
     val result = planSpecifications.root.collect{ case (n, s: ConfigObject) => (n, s.toConfig) }.toSeq.map {
@@ -432,7 +452,7 @@ object GraphiteModel extends StrictLogging {
         val TOPICS = "topics"
         val REGEX = "regex"
 
-        val ( timeout, algorithms ) = pullCommonPlanFacets( spec )
+        val ( timeout, algorithms ) = pullCommonPlanFacets( detectTimeout, spec )
 
         if ( spec.hasPath( IS_DEFAULT ) && spec.getBoolean( IS_DEFAULT ) ) {
           Some(
@@ -484,11 +504,16 @@ object GraphiteModel extends StrictLogging {
   }
 
 
-  private def pullCommonPlanFacets( spec: Config ): (FiniteDuration, Set[Symbol]) = {
+  private def pullCommonPlanFacets( detectTimeout: FiniteDuration, spec: Config ): (FiniteDuration, Set[Symbol]) = {
     import scala.collection.JavaConversions._
 
+    def plannedTimeout( timeoutBudget: FiniteDuration, utilization: Double ): FiniteDuration = {
+      val utilized = timeoutBudget * utilization
+      if ( utilized.isFinite ) utilized.asInstanceOf[FiniteDuration] else timeoutBudget
+    }
+
     (
-      FiniteDuration( spec.getDuration("timeout").toNanos, NANOSECONDS ),
+      plannedTimeout(detectTimeout, 0.8), // FiniteDuration( spec.getDuration("timeout").toNanos, NANOSECONDS ),
       spec.getStringList("algorithms").toSet.map{ a: String => Symbol(a) }
     )
   }
@@ -507,8 +532,8 @@ object GraphiteModel extends StrictLogging {
     val SOURCE_MAX_FRAME_LENGTH = "lineup.source.max-frame-length"
     val SOURCE_PROTOCOL = "lineup.source.protocol"
     val SOURCE_WINDOW_SIZE = "lineup.source.window-size"
-    val GRAPHITE_HOST = "lineup.graphite.host"
-    val GRAPHITE_PORT = "lineup.graphite.port"
+    val PUBLISH_GRAPHITE_HOST = "lineup.publish.graphite.host"
+    val PUBLISH_GRAPHITE_PORT = "lineup.publish.graphite.port"
 
     def zero: Settings = Settings( )
 

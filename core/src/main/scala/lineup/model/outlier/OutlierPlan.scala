@@ -19,6 +19,7 @@ sealed trait OutlierPlan {
   def isQuorum: IsQuorum
   def reduce: ReduceOutliers
   def algorithmConfig: Config
+  def summary: String
 
   private[outlier] def origin: ConfigOrigin
   private[outlier] def typeOrder: Int
@@ -185,6 +186,8 @@ object OutlierPlan {
     override private[outlier] val origin: ConfigOrigin,
     override private[outlier] val typeOrder: Int
   ) extends OutlierPlan {
+    override val summary: String = getClass.safeSimpleName + s"""(${name} ${appliesTo.toString})"""
+
     override val toString: String = {
       getClass.safeSimpleName + "(" +
         s"""name:[$name], ${appliesTo.toString} timeout:[${timeout.toCoarsest}], """ +

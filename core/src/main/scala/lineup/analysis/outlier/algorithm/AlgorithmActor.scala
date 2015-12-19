@@ -1,12 +1,12 @@
 package lineup.analysis.outlier.algorithm
 
-import akka.actor.{ActorPath, ActorRef, ActorLogging}
+import akka.actor.{ Actor, ActorPath, ActorRef, ActorLogging }
 import akka.event.LoggingReceive
-import lineup.analysis.outlier.{DetectUsing, DetectionAlgorithmRouter}
-import peds.akka.envelope.EnvelopingActor
+import peds.akka.metrics.InstrumentedActor
+import lineup.analysis.outlier.{ DetectUsing, DetectionAlgorithmRouter }
 
 
-abstract class AlgorithmActor extends EnvelopingActor with ActorLogging {
+trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
   def algorithm: Symbol
   def router: ActorRef
 
@@ -20,7 +20,7 @@ abstract class AlgorithmActor extends EnvelopingActor with ActorLogging {
   def quiescent: Receive = LoggingReceive {
     case DetectionAlgorithmRouter.AlgorithmRegistered => {
       log info s"${self.path} registered with ${sender().path}"
-      context.become( around(detect) )
+      context become around( detect )
     }
 
     case m: DetectUsing => throw AlgorithmActor.AlgorithmUsedBeforeRegistrationError( algorithm, self.path )
