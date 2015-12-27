@@ -12,7 +12,6 @@ import lineup.model.timeseries.TimeSeries
   * Created by rolfsd on 11/25/15.
   */
 trait GraphiteSerializationProtocol {
-//  def charset: Charset = Charset forName ByteString.UTF_8
   def framingFlow( maximumFrameLength: Int ): Flow[ByteString, ByteString, Unit]
   def toDataPoints( bytes: ByteString ): List[TimeSeries]
   def loadTimeSeriesData: Flow[ByteString, TimeSeries, Unit] = {
@@ -22,7 +21,7 @@ trait GraphiteSerializationProtocol {
   }
 }
 
-object GraphiteSerializationProtocol extends LazyLogging{
+object GraphiteSerializationProtocol extends LazyLogging {
   trait ProtocolException extends Exception {
     def part: String
     def value: Any

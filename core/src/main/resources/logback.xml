@@ -22,7 +22,7 @@
       <!-- rollover daily -->
       <fileNamePattern>${LOG_HOME}/graphite-%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
       <timeBasedFileNamingAndTriggeringPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
-        <!-- or whenever the file size reaches 100MB -->
+        <!-- or whenever the file size reaches 1GB -->
         <maxFileSize>1GB</maxFileSize>
         <minIndex>1</minIndex>
         <maxIndex>10</maxIndex>
@@ -43,9 +43,10 @@
       <!-- rollover daily -->
       <fileNamePattern>${LOG_HOME}/outliers-%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
       <timeBasedFileNamingAndTriggeringPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
-        <!-- or whenever the file size reaches 100MB -->
+        <!-- or whenever the file size reaches 1GB -->
         <maxFileSize>1GB</maxFileSize>
         <minIndex>1</minIndex>
+        <maxIndex>10</maxIndex>
       </timeBasedFileNamingAndTriggeringPolicy>
     </rollingPolicy>
   </appender>
@@ -77,6 +78,8 @@
     <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
       <!-- rollover daily -->
       <fileNamePattern>${LOG_HOME}/training-%d{yyyy-MM-dd}.%i.csv.gz</fileNamePattern>
+      <minIndex>1</minIndex>
+      <maxIndex>10</maxIndex>
       <timeBasedFileNamingAndTriggeringPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
         <!-- or whenever the file size reaches 100MB -->
         <maxFileSize>1GB</maxFileSize>
@@ -84,7 +87,7 @@
     </rollingPolicy>
   </appender>
 
-  <appender name="MONITOR_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+  <appender name="STREAM_MONITOR_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
     <file>${LOG_HOME}/monitor.csv</file>
     <append>false</append>
     <encoder>
@@ -94,7 +97,7 @@
       <fileNamePattern>${LOG_HOME}/monitor-%i.csv.gz</fileNamePattern>
       <cleanHistoryOnStart>true</cleanHistoryOnStart>
       <minIndex>1</minIndex>
-      <maxIndex>10</maxIndex>
+      <maxIndex>3</maxIndex>
     </rollingPolicy>
     <triggeringPolicy class="ch.qos.logback.core.rolling.SizeBasedTriggeringPolicy">
       <maxFileSize>1GB</maxFileSize>
@@ -109,8 +112,8 @@
     <appender-ref ref="TRAINING_FILE" />
   </logger>
 
-  <logger name="Monitor" level="DEBUG" additivity="false">
-    <appender-ref ref="MONITOR_FILE" />
+  <logger name="StreamMonitor" level="DEBUG" additivity="false">
+    <appender-ref ref="STREAM_MONITOR_FILE" />
   </logger>
 
   <logger name="Outliers" level="DEBUG" additivity="false">

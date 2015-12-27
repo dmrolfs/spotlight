@@ -5,6 +5,8 @@ import java.nio.{ByteBuffer, ByteOrder}
 import akka.stream.io.Framing
 import akka.stream.scaladsl.Flow
 import akka.util.ByteString
+import com.typesafe.scalalogging.LazyLogging
+import net.razorvine.pickle.Pickler
 import org.joda.{ time => joda }
 import peds.commons.log.Trace
 import lineup.model.timeseries._
@@ -13,7 +15,7 @@ import lineup.model.timeseries._
 /**
   * Created by rolfsd on 11/25/15.
   */
-case object PythonPickleProtocol extends GraphiteSerializationProtocol {
+case object PythonPickleProtocol extends GraphiteSerializationProtocol with LazyLogging {
   val trace = Trace[PythonPickleProtocol.type]
 
   final case class PickleException private[stream]( part: String, value: Any )
@@ -98,30 +100,30 @@ case object PythonPickleProtocol extends GraphiteSerializationProtocol {
     }
   }
 
-  def pickle(dp: Row[DataPoint] ): ByteString = pickle( Seq(("foobar", dp) ) )
+  def pickle( topic: Topic, dp: Row[DataPoint] ): ByteString = pickle( Seq( (topic.name, dp) ) )
 
-  def pickle(ts: TimeSeries ): ByteString = pickle( Seq( (ts.topic.name, ts.points) ) )
+  def pickle( ts: TimeSeries ): ByteString = pickle( Seq( (ts.topic.name, ts.points) ) )
 
-  def pickle(metrics: Seq[(String, Row[DataPoint])] ): ByteString = {
-    import net.razorvine.pickle.Pickler
-    import scala.collection.convert.wrapAll._
+  private[this] val pickler = new Pickler( false )
 
+  def pickle( metrics: Seq[(String, Row[DataPoint])] ): ByteString = {
+//    import scala.collection.convert.wrapAll._
+//
     val data = new java.util.LinkedList[AnyRef]
     for {
       metric <- metrics
-      (topic, points) = metric
+      (name: String, points) = metric
       p <- points
     } {
-      val dp: Array[Any] = Array( p.timestamp.getMillis / 1000L, p.value )
-      val metric: Array[AnyRef] = Array( topic, dp )
+      val ts: Long = p.timestamp.getMillis / 1000L
+      val v: String = p.value.toString
+      val dp: Array[Any] = Array( ts, v )
+      val metric: Array[AnyRef] = Array( name, dp )
+      logger debug s"""pickling metric: [$name, [${dp.mkString(",")}]]"""
       data add metric
     }
 
-    val pickler = new Pickler( false )
-    val out = pickler dumps data
-
-    //    trace( s"""payload[${out.size}] = ${ByteString(out).decodeString("ISO-8859-1")}""" )
-    ByteString( out )
+    ByteString( pickler dumps data )
   }
 
 }

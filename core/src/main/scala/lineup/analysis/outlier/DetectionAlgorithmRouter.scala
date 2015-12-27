@@ -2,8 +2,8 @@ package lineup.analysis.outlier
 
 import akka.actor._
 import akka.event.LoggingReceive
-import peds.akka.envelope._
-import peds.commons.log.Trace
+import nl.grons.metrics.scala.MetricName
+import peds.akka.metrics.InstrumentedActor
 
 
 /**
@@ -19,11 +19,30 @@ object DetectionAlgorithmRouter {
   def props: Props = Props( new DetectionAlgorithmRouter )
 }
 
-class DetectionAlgorithmRouter extends EnvelopingActor with ActorLogging {
+class DetectionAlgorithmRouter extends Actor with InstrumentedActor with ActorLogging {
   import DetectionAlgorithmRouter._
-  override def trace: Trace[_] = Trace[DetectionAlgorithmRouter]
-
   var routingTable: Map[Symbol, ActorRef] = Map()
+
+
+  override def receiveCounterName: String = {
+//todo remove
+log info s"RECEIVE_COUNTER_NAME: MetricName(getClass):[${MetricName(getClass).name}] full:[${MetricName( getClass ).append( "receiveCounter" ).name}]"
+    MetricName( getClass ).append( "receiveCounter" ).name
+  }
+
+
+  override def receiveExceptionMeterName: String = {
+//todo remove
+log info s"RECEIVE_EXCEPTION_METER_NAME: MetricName(getClass):[${MetricName(getClass).name}] full:[${MetricName( getClass ).append( "receiveExceptionMeter" ).name}]"
+    MetricName( getClass ).append( "receiveExceptionMeter" ).name
+  }
+
+
+  override def receiveTimerName: String = {
+//todo remove
+log info s"RECEIVE_TIMER_NAME: MetricName(getClass):[${MetricName(getClass).name}] full:[${MetricName( getClass ).append( "receiveTimer" ).name}]"
+    MetricName( getClass ).append( "receiveTimer" ).name
+  }
 
   override val supervisorStrategy: SupervisorStrategy = SupervisorStrategy.defaultStrategy
 
@@ -37,7 +56,6 @@ class DetectionAlgorithmRouter extends EnvelopingActor with ActorLogging {
   }
 
   val routing: Receive = LoggingReceive {
-//todo stream enveloping:    case m @ DetectUsing( algorithm, _, _, _ ) if routingTable.contains( algorithm ) => routingTable( algorithm ) sendForward m
     case m @ DetectUsing( algorithm, _, _, _ ) if routingTable.contains( algorithm ) => routingTable( algorithm ) forward m
   }
 }
