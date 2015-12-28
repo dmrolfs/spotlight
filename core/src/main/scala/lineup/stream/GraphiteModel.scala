@@ -177,78 +177,85 @@ object GraphiteModel extends Instrumented with StrictLogging {
     implicit val dispatcher = system.dispatcher
 
     usageConfig.serverBinding runForeach { connection =>
-      ConfigFactory.invalidateCaches()
-      val config = ConfigFactory.load
-      val tcpInBufferSize = config.getInt( "lineup.source.buffer" )
-      val workflowBufferSize = config.getInt( "lineup.workflow.buffer" )
-      val detectTimeout = FiniteDuration( config.getDuration("lineup.workflow.detect.timeout", MILLISECONDS), MILLISECONDS )
-      val plans = makePlans( detectTimeout, config.getConfig(planConfigPath) )
-      log( logger, 'info ){
-        s"""
-           |\nConnection made using the following configuration:
-           |\tTCP-In Buffer Size   : ${tcpInBufferSize}
-           |\tWorkflow Buffer Size : ${workflowBufferSize}
-           |\tDetect Timeout       : ${detectTimeout.toCoarsest}
-           |\tplans                : [${plans.zipWithIndex.map{ case (p,i) => f"${i}%2d: ${p}"}.mkString("\n","\n","\n")}]
-        """.stripMargin
-      }
-
-      val detection = Flow() { implicit b =>
-        import FlowGraph.Implicits._
-
-        log( logger, 'info )( s"received connection remote[${connection.remoteAddress}] -> local[${connection.localAddress}]" )
-
-        val framing = b.add( StreamMonitor.source('framing).watch(usageConfig.protocol.framingFlow(usageConfig.maxFrameLength)) )
-        val timeSeries = b.add( StreamMonitor.source('timeseries).watch(usageConfig.protocol.loadTimeSeriesData) )
-        val planned = b.add( StreamMonitor.flow('planned).watch( filterPlanned(plans) ) )
-
-        val batch = StreamMonitor.sink('batch).watch( batchSeries(usageConfig.windowDuration) )
-
-        val buf1 = b.add(
-          StreamMonitor.flow('buffer1).watch(Flow[ByteString].buffer(tcpInBufferSize, OverflowStrategy.backpressure))
-        )
-
-        val buf2 = b.add(
-          StreamMonitor.source('groups).watch(
-            Flow[TimeSeries]
-            .via(
-              StreamMonitor.flow('buffer2).watch( Flow[TimeSeries].buffer(workflowBufferSize, OverflowStrategy.backpressure) )
-            )
-          )
-        )
-
-        val detectOutlier = StreamMonitor.flow('detect).watch(
-          OutlierDetection.detectOutlier( detector, detectTimeout, Runtime.getRuntime.availableProcessors() * 3 )
-        )
-
-        val broadcast = b.add( Broadcast[Outliers](outputPorts = 2, eagerCancel = false) )
-        val publish = b.add( StreamMonitor.flow('publish).watch( publishOutliers(usageConfig.graphiteStream) ) )
-        val tcpOut = b.add( StreamMonitor.sink('tcpOut).watch( Flow[Outliers] map { _ => ByteString() } ) )
-        val train = StreamMonitor.sink('train).watch( TrainOutlierAnalysis.feedOutlierTraining )
-        val term = b.add( Sink.ignore )
-
-        StreamMonitor.set(
-          'framing,
-          'buffer1,
-          'timeseries,
-          'planned,
-          'batch,
-          'groups,
-          'buffer2,
-          'detect,
-          'publish,
-          'tcpOut,
-          'train
-        )
-
-        framing ~> buf1 ~> timeSeries ~> planned ~> batch ~> buf2 ~> detectOutlier ~> broadcast ~> publish ~> tcpOut
-                                                                                      broadcast ~> train ~> term
-
-        ( framing.inlet, tcpOut.outlet )
-      }
-
-      connection.handleWith( detection )
+      connection.handleWith( detectionWorkflow(detector, usageConfig, planConfigPath) )
     }
+  }
+
+  def detectionWorkflow(
+    detector: ActorRef,
+    usageConfig: UsageConfiguration,
+    planConfigPath: String
+  )(
+    implicit system: ActorSystem,
+    materializer: Materializer
+  ): Flow[ByteString, ByteString, Unit] = {
+    ConfigFactory.invalidateCaches()
+    val config = ConfigFactory.load
+    val tcpInBufferSize = config.getInt( "lineup.source.buffer" )
+    val workflowBufferSize = config.getInt( "lineup.workflow.buffer" )
+    val detectTimeout = FiniteDuration( config.getDuration("lineup.workflow.detect.timeout", MILLISECONDS), MILLISECONDS )
+    val plans = makePlans( detectTimeout, config.getConfig(planConfigPath) )
+    log( logger, 'info ){
+      s"""
+         |\nConnection made using the following configuration:
+         |\tTCP-In Buffer Size   : ${tcpInBufferSize}
+         |\tWorkflow Buffer Size : ${workflowBufferSize}
+         |\tDetect Timeout       : ${detectTimeout.toCoarsest}
+         |\tplans                : [${plans.zipWithIndex.map{ case (p,i) => f"${i}%2d: ${p}"}.mkString("\n","\n","\n")}]
+        """.stripMargin
+    }
+
+    val graph = GraphDSL.create() { implicit b =>
+      import GraphDSL.Implicits._
+
+      val framing = b.add( StreamMonitor.source('framing).watch(usageConfig.protocol.framingFlow(usageConfig.maxFrameLength)) )
+      val timeSeries = b.add( StreamMonitor.source('timeseries).watch(usageConfig.protocol.loadTimeSeriesData) )
+      val planned = b.add( StreamMonitor.flow('planned).watch( filterPlanned(plans) ) )
+
+      val batch = StreamMonitor.sink('batch).watch( batchSeries(usageConfig.windowDuration) )
+
+      val buf1 = b.add(
+        StreamMonitor.flow('buffer1).watch(Flow[ByteString].buffer(tcpInBufferSize, OverflowStrategy.backpressure))
+      )
+
+      val buf2 = b.add(
+        StreamMonitor.source('groups).watch(
+          Flow[TimeSeries]
+          .via( StreamMonitor.flow('buffer2).watch( Flow[TimeSeries].buffer(workflowBufferSize, OverflowStrategy.backpressure) ) )
+        )
+      )
+
+      val detectOutlier = StreamMonitor.flow('detect).watch(
+        OutlierDetection.detectOutlier( detector, detectTimeout, Runtime.getRuntime.availableProcessors() * 3 )
+      )
+
+      val broadcast = b.add( Broadcast[Outliers](outputPorts = 2, eagerCancel = false) )
+      val publish = b.add( StreamMonitor.flow('publish).watch( publishOutliers(usageConfig.graphiteStream) ) )
+      val tcpOut = b.add( StreamMonitor.sink('tcpOut).watch( Flow[Outliers] map { _ => ByteString() } ) )
+      val train = StreamMonitor.sink('train).watch( TrainOutlierAnalysis.feedOutlierTraining )
+      val term = b.add( Sink.ignore )
+
+      StreamMonitor.set(
+        'framing,
+        'buffer1,
+        'timeseries,
+        'planned,
+        'batch,
+        'groups,
+        'buffer2,
+        'detect,
+        'publish,
+        'tcpOut,
+        'train
+      )
+
+      framing ~> buf1 ~> timeSeries ~> planned ~> batch ~> buf2 ~> detectOutlier ~> broadcast ~> publish ~> tcpOut
+                                                                                    broadcast ~> train ~> term
+
+      FlowShape( framing.in, tcpOut.out )
+    }
+
+    Flow.fromGraph( graph )
   }
 
   def filterPlanned( plans: Seq[OutlierPlan] )( implicit system: ActorSystem ): Flow[TimeSeries, TimeSeries, Unit] = {
@@ -342,18 +349,18 @@ if ( ts.topic.name.startsWith( OutlierMetricPrefix ) ) log( logger, 'info ){ s"F
   def rateLimiter[A]( interval: FiniteDuration ): Flow[A, A, Unit] = {
     case object Tick
 
-    val flow = Flow() { implicit builder =>
-      import FlowGraph.Implicits._
+    val graph = GraphDSL.create() { implicit builder =>
+      import GraphDSL.Implicits._
 
-      val rateLimiter = Source.apply( 0.second, interval, Tick )
+      val rateLimiter = Source.tick( 0.second, interval, Tick )
       val zip = builder add Zip[A, Tick.type]()
       rateLimiter ~> zip.in1
 
-      ( zip.in0, zip.out.map(_._1).outlet )
+      FlowShape( zip.in0, zip.out.map{_._1}.outlet )
     }
 
     // We need to limit input buffer to 1 to guarantee the rate limiting feature
-    flow.withAttributes( Attributes.inputBuffer(initial = 1, max = 64) )
+    Flow.fromGraph( graph ).withAttributes( Attributes.inputBuffer(initial = 1, max = 64) )
   }
 
   def batchSeries(

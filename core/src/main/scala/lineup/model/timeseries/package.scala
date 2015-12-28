@@ -51,8 +51,8 @@ package object timeseries {
       def zero( topic: Topic ): T
 
       protected def checkTopic( lhs: Topic, rhs: Topic ): V[Topic] = {
-        if ( lhs == rhs ) lhs.successNel
-        else IncompatibleTopicsError( originalTopic = lhs, newTopic = rhs ).failureNel
+        if ( lhs == rhs ) lhs.successNel[Throwable]
+        else Validation.failureNel( IncompatibleTopicsError(originalTopic = lhs, newTopic = rhs) )
       }
     }
   }
