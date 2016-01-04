@@ -18,10 +18,9 @@ object BuildSettings {
       "-unchecked",
       "-deprecation",
       "-language:implicitConversions",
-      // "-language:postfixOps",
+      "-Xlog-reflective-calls",
       // "-Xlog-implicits",
       // "-Ymacro-debug-verbose",
-      "-Xlog-reflective-calls",
       // "-Ywarn-adapted-args",
       "-Xfatal-warnings"
     ),

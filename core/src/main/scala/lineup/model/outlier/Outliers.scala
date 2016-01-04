@@ -7,7 +7,7 @@ import peds.commons.util._
 import lineup.model.timeseries._
 
 //todo re-seal with FanOutShape Outlier Detection
-/*sealed*/ trait Outliers {
+trait Outliers {
   type Source <: TimeSeriesBase
   def topic: Topic
   def algorithms: Set[Symbol]
@@ -16,6 +16,8 @@ import lineup.model.timeseries._
 }
 
 object Outliers {
+  type OutlierGroups = Map[joda.DateTime, Double]
+
   def unapply( so: Outliers ): Option[(Topic, Set[Symbol], Boolean, so.Source)] = {
     Some( (so.topic, so.algorithms, so.hasAnomalies, so.source) )
   }
@@ -30,7 +32,7 @@ case class NoOutliers(
   override val hasAnomalies: Boolean = false
 
   override def toString: String = {
-    s"""${getClass.safeSimpleName}:"${topic}"[size:[${source.size}] interval:[${source.interval getOrElse "No Interval"}]"""
+    s"""${getClass.safeSimpleName}:"${topic}"[source:[${source.size}] interval:[${source.interval getOrElse "No Interval"}]"""
   }
 }
 
@@ -39,12 +41,12 @@ case class SeriesOutliers(
   override val source: TimeSeries,
   outliers: IndexedSeq[DataPoint]
 ) extends Outliers {
+  import Outliers._
+
   val trace = Trace[SeriesOutliers]
   override type Source = TimeSeries
   override val topic: Topic = source.topic
   override val hasAnomalies: Boolean = outliers.nonEmpty
-
-  type OutlierGroups = Map[joda.DateTime, Double]
 
   def anomalousGroups: Seq[OutlierGroups] = trace.block( "anomalousGroups" ) {
     def nonEmptyAccumulator( acc: List[OutlierGroups] ): List[OutlierGroups] = trace.briefBlock( s"nonEmptyAccumulator" ) {
@@ -77,7 +79,7 @@ case class SeriesOutliers(
   }
 
   override def toString: String = {
-    s"""${getClass.safeSimpleName}:"${topic}"[size:[${outliers.size}] outliers:[${outliers.mkString(",")}]]"""
+    s"""${getClass.safeSimpleName}:"${topic}"[source:[${source.size}] outliers[${outliers.size}]:[${outliers.mkString(",")}]]"""
   }
 }
 
@@ -91,5 +93,5 @@ case class CohortOutliers(
   override val topic: Topic = source.topic
   override val hasAnomalies: Boolean = outliers.nonEmpty
 
-  override def toString: String = s"""${getClass.safeSimpleName}:"${topic}"[${outliers.mkString(",")}]"""
+  override def toString: String = s"""${getClass.safeSimpleName}:"${topic}"[source:[${source.size}] outliers:[${outliers.mkString(",")}]"""
 }

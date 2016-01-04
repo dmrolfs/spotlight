@@ -64,23 +64,23 @@ object OutlierAnnotation {
 
         check flatMap { flex =>
           flex match {
-            case (None, None) => OutlierTimeBoundsError( None, None ).failureNel
-            case (Some(start), None) => OutlierUnboundedAnnotaion( start ).successNel
-            case interval @ (None, Some(_)) => OutlierTimeBoundsError( interval ).failureNel
-            case (Some(s), Some(e)) if s isEqual e => OutlierInstantAnnotation( s ).successNel
-            case interval @ (Some(s), Some(e)) if s isAfter e => OutlierTimeBoundsError( interval ).failureNel
-            case (Some(start), Some(end)) => OutlierIntervalAnnotation( start to end ).successNel
+            case (None, None) => Validation.failureNel( OutlierTimeBoundsError(None, None) )
+            case (Some(start), None) => OutlierUnboundedAnnotaion( start ).successNel[Throwable]
+            case interval @ (None, Some(_)) => Validation.failureNel( OutlierTimeBoundsError(interval) )
+            case (Some(s), Some(e)) if s isEqual e => OutlierInstantAnnotation( s ).successNel[Throwable]
+            case interval @ (Some(s), Some(e)) if s isAfter e => Validation.failureNel( OutlierTimeBoundsError(interval) )
+            case (Some(start), Some(end)) => OutlierIntervalAnnotation( start to end ).successNel[Throwable]
           }
         }
       }
 
       val check: V[FlexInterval] = trace.briefBlock( s"uncertain-check($start, $end)" ) {
         (start, end) match {
-          case (None, None) => OutlierTimeBoundsError( None, None ).failureNel
-          case interval @ (Some(_), None) => interval.successNel
-          case interval @ (None, Some(_)) => interval.successNel
-          case interval @ (Some(s), Some(e)) if s isAfter e => OutlierTimeBoundsError( interval ).failureNel
-          case interval @ (Some(_), Some(_)) => interval.successNel
+          case (None, None) => Validation.failureNel( OutlierTimeBoundsError(None, None) )
+          case interval @ (Some(_), None) => interval.successNel[Throwable]
+          case interval @ (None, Some(_)) => interval.successNel[Throwable]
+          case interval @ (Some(s), Some(e)) if s isAfter e => Validation.failureNel( OutlierTimeBoundsError(interval) )
+          case interval @ (Some(_), Some(_)) => interval.successNel[Throwable]
         }
       }
 
@@ -93,11 +93,11 @@ object OutlierAnnotation {
       s <- start
       e <- end
     } yield {
-      if ( s isAfter e ) OutlierTimeBoundsError( Some(s), Some(e) ).failureNel
-      else ( s to e ).successNel
+      if ( s isAfter e ) Validation.failureNel[Throwable, joda.Interval]( OutlierTimeBoundsError(Some(s), Some(e)) )
+      else ( s to e ).successNel[Throwable]
     }
 
-    result getOrElse OutlierTimeBoundsError( start, end ).failureNel
+    result getOrElse Validation.failureNel[Throwable, joda.Interval]( OutlierTimeBoundsError(start, end) )
   }
 
 

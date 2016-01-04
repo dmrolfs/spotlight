@@ -1,7 +1,10 @@
 package lineup.stream
 
+import java.io.{OutputStreamWriter, ByteArrayOutputStream}
 import java.math.BigInteger
-import java.nio.{ByteBuffer, ByteOrder}
+import java.nio.charset.Charset
+import java.nio.{ ByteBuffer, ByteOrder }
+import java.util
 import akka.stream.io.Framing
 import akka.stream.scaladsl.Flow
 import akka.util.ByteString
@@ -15,16 +18,48 @@ import lineup.model.timeseries._
 /**
   * Created by rolfsd on 11/25/15.
   */
-case object PythonPickleProtocol extends GraphiteSerializationProtocol with LazyLogging {
-  val trace = Trace[PythonPickleProtocol.type]
+object PythonPickleProtocol {
+  val SizeFieldLength = 4
+  val GraphiteMaximumFrameLength = SizeFieldLength + scala.math.pow( 2, 20 ).toInt
+
+  implicit class PickleMessage( val body: ByteString ) extends AnyVal {
+    def withHeader: ByteString = {
+      val result = ByteBuffer.allocate( 4 + body.size )
+      result putInt body.size
+      result put body.toArray
+      result.flip()
+      ByteString( result )
+    }
+  }
+
 
   final case class PickleException private[stream]( part: String, value: Any )
   extends Exception( s"failed to parse ${part} for [${value.toString}] of type [${value.getClass.getName}]" )
   with GraphiteSerializationProtocol.ProtocolException
 
+  private[stream] object Opcodes {
+    val charset = Charset forName "UTF-8"
 
-  val SizeFieldLength = 4
-  val GraphiteMaximumFrameLength = SizeFieldLength + scala.math.pow( 2, 20 ).toInt
+    val MARK = '('
+    val STOP = '.'
+    val LONG = 'L'
+    val STRING = 'S'
+    val APPEND = 'a'
+    val LIST = 'l'
+    val TUPLE = 't'
+    val QUOTE = '\''
+    val LF = '\n'
+  }
+}
+
+class PythonPickleProtocol extends GraphiteSerializationProtocol with LazyLogging {
+  import PythonPickleProtocol._
+
+  val trace = Trace[PythonPickleProtocol]
+
+  // Pickler is not thread safe so protocols need to be instantiated per thread.
+  // If perf is an issue, may consider hand-coding pickler based on dropwizard graphite reporter.
+  val pickler = new Pickler( false )
 
   override def framingFlow( maximumFrameLength: Int = GraphiteMaximumFrameLength ): Flow[ByteString, ByteString, Unit] = {
     Framing.lengthField(
@@ -89,41 +124,75 @@ case object PythonPickleProtocol extends GraphiteSerializationProtocol with Lazy
     }
   }
 
+  type DataPointTuple = (String, Long, String)
 
-  implicit class PickleMessage( val body: ByteString ) extends AnyVal {
-    def withHeader: ByteString = {
-      val result = ByteBuffer.allocate( 4 + body.size )
-      result putInt body.size
-      result put body.toArray
-      result.flip()
-      ByteString( result )
+  def pickle( points: DataPointTuple* )( implicit charset: Charset = Opcodes.charset ): ByteString = {
+    val out = new ByteArrayOutputStream( points.size * 75 ) // Extremely rough estimate of 75 bytes per message
+    val pickled = new OutputStreamWriter( out, charset )
+
+    import Opcodes._
+
+    pickled append MARK
+    pickled append LIST
+
+    points map { case (n, ts, v) =>
+      (sanitize(n), ts, sanitize(v))
+    } foreach { case (name, timestamp, value) =>
+      // start the outer tuple
+      pickled append MARK
+
+      // the metric name is a string.
+      pickled append STRING
+      // the single quotes are to match python's repr("abcd")
+      pickled append QUOTE
+      pickled append name
+      pickled append QUOTE
+      pickled append LF
+
+      // start the inner tuple
+      pickled append MARK
+
+      // timestamp is a long
+      pickled append LONG
+      pickled append timestamp.toString
+      // the trailing L is to match python's repr(long(1234))
+      pickled append LONG
+      pickled append LF
+
+      // and the value is a string.
+      pickled append STRING
+      pickled append QUOTE
+      pickled append value
+      pickled append QUOTE
+      pickled append LF
+
+      pickled append TUPLE // inner close
+      pickled append TUPLE // outer close
+
+      pickled append APPEND
     }
+
+    // every pickle ends with STOP
+    pickled append STOP
+
+    pickled.flush
+
+    return ByteString( out.toByteArray ).withHeader
   }
 
-  def pickle( topic: Topic, dp: Row[DataPoint] ): ByteString = pickle( Seq( (topic.name, dp) ) )
 
-  def pickle( ts: TimeSeries ): ByteString = pickle( Seq( (ts.topic.name, ts.points) ) )
-
-  private[this] val pickler = new Pickler( false )
-
-  def pickle( metrics: Seq[(String, Row[DataPoint])] ): ByteString = {
-//    import scala.collection.convert.wrapAll._
-//
-    val data = new java.util.LinkedList[AnyRef]
-    for {
-      metric <- metrics
-      (name: String, points) = metric
-      p <- points
-    } {
-      val ts: Long = p.timestamp.getMillis / 1000L
-      val v: String = p.value.toString
-      val dp: Array[Any] = Array( ts, v )
-      val metric: Array[AnyRef] = Array( name, dp )
-      logger debug s"""pickling metric: [$name, [${dp.mkString(",")}]]"""
-      data add metric
-    }
-
-    ByteString( pickler dumps data )
+  def pickleFlattenedTimeSeries(
+    points: (String, joda.DateTime, Double)*
+  )(
+    implicit charset: Charset = Opcodes.charset
+  ): ByteString = {
+    pickle( points map { case (name, timestamp, value) => ( name, timestamp.getMillis / 1000L, value.toString ) }:_* )
   }
 
+  def pickleTimeSeries( ts: TimeSeries )( implicit charset: Charset = Opcodes.charset ): ByteString = {
+    pickleFlattenedTimeSeries( ts.points map { dp => ( ts.topic.name, dp.timestamp, dp.value ) }:_* )
+  }
+
+  val Whitespace = "[\\s]+".r
+  def sanitize( s: String ): String = Whitespace.replaceAllIn( s, "-" )
 }

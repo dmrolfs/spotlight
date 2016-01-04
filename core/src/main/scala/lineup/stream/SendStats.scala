@@ -6,7 +6,7 @@ import java.io.{ File => JFile, _ }
 import java.net.Socket
 import org.parboiled2._
 import org.apache.commons.math3.random.RandomDataGenerator
-import com.typesafe.scalalogging.LazyLogging
+import com.typesafe.scalalogging.StrictLogging
 import org.joda.{ time => joda }
 import better.files._
 import resource._
@@ -21,12 +21,12 @@ import lineup.model.timeseries._
 /**
   * Created by rolfsd on 11/23/15.
   */
-object SendStats extends LazyLogging {
+object SendStats extends StrictLogging {
   val trace = Trace[SendStats.type]
 
   def main( args: Array[String] ): Unit = {
     val settings = Settings.parser.parse( args, Settings() ) getOrElse Settings()
-    val sourceFileName = settings.source.map{ _.fullPath } getOrElse "<NO SOURCE>"
+    val sourceFileName = settings.source.map{ f: File => f.toJava.getCanonicalPath } getOrElse "<NO SOURCE>"
     val usageMessage = s"""
       |\nRunning SendStats using the following configuration:
       |\tbinding  : ${settings.host}:${settings.port}
@@ -49,11 +49,13 @@ object SendStats extends LazyLogging {
           s"Sending to ${settings.host}:${settings.port} [${source.collect{case Success(d) => d.points.size}.sum}] data points"
         )
 
-        import PythonPickleProtocol.{ PickleMessage, pickle }
+        import PythonPickleProtocol._
+        val pickler = new PythonPickleProtocol
+
         for {
           line <- source
           data <- line
-          message = pickle( data ).withHeader
+          message = pickler.pickleTimeSeries( data ).withHeader
         } {
           outStream write message.toArray
           outStream.flush
