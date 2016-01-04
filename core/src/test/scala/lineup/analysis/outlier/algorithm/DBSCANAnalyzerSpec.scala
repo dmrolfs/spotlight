@@ -106,7 +106,7 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       import f._
       val analyzer = TestActorRef[DBSCANAnalyzer]( DBSCANAnalyzer.props(router.ref) )
 
-      val myPoints = IndexedSeq(
+      val myPoints = Row(
         DataPoint( new joda.DateTime(448), 8.46 ),
         DataPoint( new joda.DateTime(449), 8.9 ),
         DataPoint( new joda.DateTime(450), 8.58 ),
@@ -238,7 +238,7 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
 object DBSCANAnalyzerSpec {
   val sysId = new AtomicInteger()
 
-  val points = IndexedSeq(
+  val points = Row(
     DataPoint( new joda.DateTime(440), 9.46 ),
     DataPoint( new joda.DateTime(441), 9.9 ),
     DataPoint( new joda.DateTime(442), 11.6 ),
@@ -276,7 +276,7 @@ object DBSCANAnalyzerSpec {
   )
 
 
-  val pointsA = IndexedSeq(
+  val pointsA = Row(
     DataPoint( new joda.DateTime(440), 9.46 ),
     DataPoint( new joda.DateTime(441), 9.9 ),
     DataPoint( new joda.DateTime(442), 11.6 ),
@@ -307,7 +307,7 @@ object DBSCANAnalyzerSpec {
     DataPoint( new joda.DateTime(467), 14.2 )
   )
 
-  val pointsB = IndexedSeq(
+  val pointsB = Row(
     DataPoint( new joda.DateTime(440), 10.1 ),
     DataPoint( new joda.DateTime(441), 10.1 ),
     DataPoint( new joda.DateTime(442), 9.68 ),

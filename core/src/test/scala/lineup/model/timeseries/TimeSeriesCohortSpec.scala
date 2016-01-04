@@ -71,7 +71,7 @@ with TryValues {
           }
         }
 
-        loop( ser.toList, frames.toList, IndexedSeq.fill( frames.size )( IndexedSeq.empty[DataPoint] ) )
+        loop( ser.toList, frames.toList, IndexedSeq.fill( frames.size )( Row.empty[DataPoint] ).toRow )
       }
 
 
@@ -98,7 +98,7 @@ with TryValues {
     }
 
     def row( r: Product4[DataPoint,DataPoint,DataPoint,DataPoint] ): Row[(joda.DateTime, Double)] = {
-      r.productIterator.toIndexedSeq.asInstanceOf[IndexedSeq[DataPoint]].map{ dp => (dp.timestamp, dp.value) }
+      r.productIterator.toSeq.asInstanceOf[Seq[DataPoint]].toRow.map{ dp => (dp.timestamp, dp.value) }
     }
 
 
