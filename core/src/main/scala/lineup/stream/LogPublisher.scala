@@ -1,0 +1,36 @@
+package lineup.stream
+
+import akka.actor.Props
+import akka.event.LoggingReceive
+import com.typesafe.scalalogging.Logger
+import lineup.model.outlier.Outliers
+import org.slf4j.LoggerFactory
+
+
+/**
+  * Created by rolfsd on 12/31/15.
+  */
+object LogPublisher {
+  def props: Props = Props( new LogPublisher )
+}
+
+class LogPublisher extends OutlierPublisher {
+  import OutlierPublisher._
+
+  val outlierLogger = Logger( LoggerFactory getLogger "Outliers" )
+
+  override def receive: Receive = around( publish )
+
+  val publish: Receive = LoggingReceive {
+    case Publish( outliers ) => {
+      publish( outliers )
+      sender() ! Published( outliers )
+    }
+  }
+
+  override def publish( outliers: Outliers ): Unit = {
+    val points = markPoints( outliers )
+//    outlierLogger info s"RECORDING [${points.size}] points for topic [${outliers.topic}] with outliers [${outliers.hasAnomalies}]"
+    outlierLogger info outliers.toString
+  }
+}
