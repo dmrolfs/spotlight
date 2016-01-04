@@ -1,21 +1,22 @@
 package lineup.stream
 
 import java.io.OutputStream
-import java.net.{ Socket, InetAddress }
+import java.net.{InetSocketAddress, Socket, InetAddress}
 import java.util.concurrent.atomic.AtomicInteger
 
-import akka.pattern.CircuitBreaker
-import peds.akka.metrics.{ StreamMonitor, Reporter, Instrumented }
+import peds.akka.stream.Limiter
 
+import scala.annotation.tailrec
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.concurrent.duration._
 import scala.util.matching.Regex
 import scala.util.{ Try, Failure, Success }
 
+import akka.pattern.CircuitBreaker
 import akka.actor.{ ActorRef, ActorSystem }
 import akka.stream.scaladsl._
 import akka.stream._
-import akka.util.ByteString
+import akka.util.{ByteStringBuilder, ByteString}
 import akka.stream.stage.{ SyncDirective, Context, PushStage }
 
 import better.files.{ ManagedResource => _, _ }
@@ -23,7 +24,9 @@ import resource._
 import com.typesafe.config._
 import com.typesafe.scalalogging.{ StrictLogging, Logger }
 import org.slf4j.LoggerFactory
+import org.joda.{ time => joda }
 import nl.grons.metrics.scala.MetricName
+import peds.akka.metrics.{ StreamMonitor, Reporter, Instrumented }
 import peds.commons.log.Trace
 import peds.commons.collection.BloomFilter
 
@@ -58,12 +61,12 @@ object GraphiteModel extends Instrumented with StrictLogging {
       Tcp().bind( host.getHostAddress, port )
     }
 
-    //todo refactor into publish actor which encapsulates circuit breaker with graphite connection reset
-    def graphiteStream: Option[ManagedResource[OutputStream]] = {
-      graphiteHostPort flatMap {
-        case (h, p) => { Try { managed( new Socket(h, p) ) flatMap { socket => managed( socket.getOutputStream ) } }.toOption }
-      }
-    }
+//    //todo refactor into publish actor which encapsulates circuit breaker with graphite connection reset
+//    def graphiteStream: Option[ManagedResource[OutputStream]] = {
+//      graphiteHostPort flatMap {
+//        case (h, p) => { Try { managed( new Socket(h, p) ) flatMap { socket => managed( socket.getOutputStream ) } }.toOption }
+//      }
+//    }
   }
 
   def main( args: Array[String] ): Unit = {
@@ -84,12 +87,13 @@ object GraphiteModel extends Instrumented with StrictLogging {
         plansFn() foreach { plans =>
           val usageMessage = s"""
             |\nRunning Lineup using the following configuration:
-            |\tsource binding : ${usageConfig.sourceHostPort._1}:${usageConfig.sourceHostPort._2}
-            |\tpublish binding: ${usageConfig.graphiteHostPort map { case (h,p) => h.toString + ":" + p.toString }}
-            |\tmax frame size : ${usageConfig.maxFrameLength}
-            |\tprotocol       : ${usageConfig.protocol}
-            |\twindow         : ${usageConfig.windowDuration.toCoarsest}
-            |\tplans          : [${plans.zipWithIndex.map{ case (p,i) => f"${i}%2d: ${p}"}.mkString("\n","\n","\n")}]
+            |\tsource binding  : ${usageConfig.sourceHostPort._1}:${usageConfig.sourceHostPort._2}
+            |\tpublish binding : ${usageConfig.graphiteHostPort map { case (h,p) => h.toString + ":" + p.toString }}
+            |\tmax frame size  : ${usageConfig.maxFrameLength}
+            |\tprotocol        : ${usageConfig.protocol}
+            |\twindow          : ${usageConfig.windowDuration.toCoarsest}
+            |\tAvail Processors: ${Runtime.getRuntime.availableProcessors}
+            |\tplans           : [${plans.zipWithIndex.map{ case (p,i) => f"${i}%2d: ${p}"}.mkString("\n","\n","\n")}]
           """.stripMargin
 
           logger info usageMessage
@@ -103,11 +107,8 @@ object GraphiteModel extends Instrumented with StrictLogging {
         }
 
         if ( config hasPath "lineup.metrics" ) {
-          import scala.collection.JavaConverters._
           logger info s"""starting metric reporting with config: [${config getConfig "lineup.metrics"}]"""
           val reporter = Reporter.startReporter( config getConfig "lineup.metrics" )
-          logger info s"metric base name: [${metricBaseName.name}]"
-          logger info s"""metric registry names: [${metricRegistry.getNames.asScala.mkString(",")}]"""
           logger info s"metric reporter: [${reporter}]"
         } else {
           logger warn """metric report configuration missing at "lineup.metrics""""
@@ -120,12 +121,21 @@ object GraphiteModel extends Instrumented with StrictLogging {
         import java.nio.file.{ StandardWatchEventKinds => Events }
         import better.files.FileWatcher._
 
+        val limiter = system.actorOf( Limiter.props(100, 1.second, 10), "limiter" )
+
+        val publisher = usageConfig.graphiteHostPort map { case (host, port) =>
+          system.actorOf( GraphitePublisher.props( new InetSocketAddress(host, port) ), "graphite-publisher" )
+        } getOrElse {
+          system.actorOf( LogPublisher.props, "log-publisher" )
+        }
+
         val router = system.actorOf( DetectionAlgorithmRouter.props, "router" )
         val dbscan = system.actorOf( DBSCANAnalyzer.props( router ), "dbscan" )
 
         val detector = system.actorOf(
           props = OutlierDetection.props(router ){ r =>
             new OutlierDetection(r) with OutlierDetection.ConfigPlanPolicy {
+              override lazy val metricBaseName = MetricName( classOf[OutlierDetection] )
               override def getPlans: () => Try[Seq[OutlierPlan]] = plansFn
               override def refreshInterval: FiniteDuration = 15.minutes
             }
@@ -149,7 +159,7 @@ object GraphiteModel extends Instrumented with StrictLogging {
           }
         }
 
-        streamGraphiteOutliers( usageConfig, detector, PlanConfigPath ) onComplete {
+        streamGraphiteOutliers( usageConfig, detector, limiter, publisher, PlanConfigPath ) onComplete {
           case Success(_) => system.terminate()
           case Failure( e ) => {
             logger.error( "Failure:", e )
@@ -169,6 +179,8 @@ object GraphiteModel extends Instrumented with StrictLogging {
   def streamGraphiteOutliers(
     usageConfig: UsageConfiguration,
     detector: ActorRef,
+    limiter: ActorRef,
+    publisher: ActorRef,
     planConfigPath: String
   )(
     implicit system: ActorSystem,
@@ -177,12 +189,14 @@ object GraphiteModel extends Instrumented with StrictLogging {
     implicit val dispatcher = system.dispatcher
 
     usageConfig.serverBinding runForeach { connection =>
-      connection.handleWith( detectionWorkflow(detector, usageConfig, planConfigPath) )
+      connection.handleWith( detectionWorkflow(detector, limiter, publisher, usageConfig, planConfigPath) )
     }
   }
 
   def detectionWorkflow(
     detector: ActorRef,
+    limiter: ActorRef,
+    publisher: ActorRef,
     usageConfig: UsageConfiguration,
     planConfigPath: String
   )(
@@ -226,11 +240,11 @@ object GraphiteModel extends Instrumented with StrictLogging {
       )
 
       val detectOutlier = StreamMonitor.flow('detect).watch(
-        OutlierDetection.detectOutlier( detector, detectTimeout, Runtime.getRuntime.availableProcessors() * 3 )
+        OutlierDetection.detectOutlier( detector, detectTimeout, Runtime.getRuntime.availableProcessors * 8 )
       )
 
       val broadcast = b.add( Broadcast[Outliers](outputPorts = 2, eagerCancel = false) )
-      val publish = b.add( StreamMonitor.flow('publish).watch( publishOutliers(usageConfig.graphiteStream) ) )
+      val publish = b.add( StreamMonitor.flow('publish).watch( publishOutliers(limiter, publisher) ) )
       val tcpOut = b.add( StreamMonitor.sink('tcpOut).watch( Flow[Outliers] map { _ => ByteString() } ) )
       val train = StreamMonitor.sink('train).watch( TrainOutlierAnalysis.feedOutlierTraining )
       val term = b.add( Sink.ignore )
@@ -268,9 +282,12 @@ object GraphiteModel extends Instrumented with StrictLogging {
         if ( bloom has_? elem.topic ) ctx push elem
         else {
           bloom += elem.topic
-          log( metricLogger, 'debug ){
-            s"""[${count.incrementAndGet}] Plan for ${elem.topic}: ${plans.find{ _ appliesTo elem }.getOrElse{"NONE"}}"""
+          if ( !elem.topic.name.startsWith(OutlierMetricPrefix) ) {
+            log( metricLogger, 'debug ){
+              s"""[${count.incrementAndGet}] Plan for ${elem.topic}: ${plans.find{ _ appliesTo elem }.getOrElse{"NONE"}}"""
+            }
           }
+
           ctx push elem
         }
       }
@@ -278,66 +295,25 @@ object GraphiteModel extends Instrumented with StrictLogging {
 
     Flow[TimeSeries]
     .transform( () => logMetric )
-    .filter { ts =>
-//todo remove
-if ( ts.topic.name.startsWith( OutlierMetricPrefix ) ) log( logger, 'info ){ s"FILTERING OUT LINEUP received lineup metric: $ts" }
-      !ts.topic.name.startsWith( OutlierMetricPrefix ) && plans.exists{ _ appliesTo ts }
-    }
+    .filter { ts => !ts.topic.name.startsWith( OutlierMetricPrefix ) && plans.exists{ _ appliesTo ts } }
   }
 
   def publishOutliers(
-    graphiteStream: Option[ManagedResource[OutputStream]]
+    limiter: ActorRef,
+    publisher: ActorRef
   )(
     implicit system: ActorSystem
   ): Flow[Outliers, Outliers, Unit] = {
-    val outlierLogger = Logger( LoggerFactory getLogger "Outliers" )
-    implicit val ec = loggerDispatcher( system )
+    import scala.collection.immutable
 
-    val breaker = {
-      new CircuitBreaker(
-        system.scheduler,
-        maxFailures = 5,
-        callTimeout = 10.seconds,
-        resetTimeout = 1.minute
-      )
-      .onOpen( logger warn "graphite connection is down, and circuit breaker will remain open for 1 minute before trying again" )
-      .onHalfOpen( logger info "attempting to publish to graphite and close circuit breaker" )
-      .onClose( logger info "graphite connection established and circuit breaker is closed" )
-    }
+    implicit val ec = system.dispatcher
 
-    //todo: after akka stream update: refactor to custom stage/graph to incorporate outlier batching before sending to graphite
     Flow[Outliers]
-    .mapAsync( Runtime.getRuntime.availableProcessors ) {
-      case o @ SeriesOutliers(_, source, outliers) => {
-        import PythonPickleProtocol._
-        val marks = outliers map { case DataPoint(ts, _) => DataPoint(ts, 1D) }
-
-        val report = pickle( TimeSeries(topic = OutlierMetricPrefix + source.topic, points = marks ) ).withHeader
-        breaker withCircuitBreaker {
-          Future {
-            outlierLogger info o.toString
-            graphiteStream foreach { gs =>
-              gs foreach { out =>
-                out write report.toArray
-                out.flush
-              }
-            }
-
-            o
-          }
-        }
-      }
-
-      case o: Outliers => {
-        val df = Future { logger debug s"not sending: ${o.toString}"}
-        val olf = log( outlierLogger, 'info ){ o.toString } map { _ => o }
-        for {
-          _ <- df
-          _ <- olf
-        } yield { o }
-      }
-    }
+    .conflate( immutable.Seq( _ ) ) { _ :+ _ }
+    .mapConcat( identity )
+    .via( GraphitePublisher.publish( limiter, publisher, 2, 90.seconds ) )
   }
+
 
   /**
     * Limit downstream rate to one element every 'interval' by applying back-pressure on upstream.
@@ -433,11 +409,11 @@ if ( ts.topic.name.startsWith( OutlierMetricPrefix ) ) log( logger, 'info ){ s"F
       if ( config hasPath Settings.SOURCE_PROTOCOL ) {
         config.getString(Settings.SOURCE_PROTOCOL).toLowerCase match {
           case "messagepack" | "message-pack" => MessagePackProtocol
-          case "pickle" => PythonPickleProtocol
-          case _ => PythonPickleProtocol
+          case "pickle" => new PythonPickleProtocol
+          case _ => new PythonPickleProtocol
         }
       } else {
-        PythonPickleProtocol
+        new PythonPickleProtocol
       }
     }
 
