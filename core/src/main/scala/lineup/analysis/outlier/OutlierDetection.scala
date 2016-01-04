@@ -24,9 +24,18 @@ object OutlierDetection extends StrictLogging {
     import akka.pattern.ask
     import akka.util.Timeout
 
+    val decider: Supervision.Decider = {
+      case ex: AskTimeoutException => {
+        logger error s"Detection stage timed out on [${ex.getMessage}]"
+        Supervision.Resume
+      }
+
+      case _ => Supervision.Stop
+    }
+
   //todo: refactor this to a FanOutShape with recognized and unrecognized outs.
     Flow[TimeSeriesBase]
-    .mapAsync( parallelism ) { ts: TimeSeriesBase =>
+    .mapAsyncUnordered( parallelism ) { ts: TimeSeriesBase =>
       implicit val triggerTimeout = Timeout( maxAllowedWait )
       val result = detector ? OutlierDetectionMessage( ts )
       result.mapTo[Outliers]
@@ -37,19 +46,11 @@ object OutlierDetection extends StrictLogging {
     }
   }
 
-  private val decider: Supervision.Decider = {
-    case ex: AskTimeoutException => {
-      logger error s"Detection stage timed out on [${ex.getMessage}]"
-      Supervision.Resume
-    }
-
-    case _ => Supervision.Stop
-  }
 
 
   def props( router: ActorRef )( makeDetector: ActorRef => OutlierDetection ): Props = Props( makeDetector(router) )
 
-  trait DetectionProtocol
+  sealed trait DetectionProtocol
   case object ReloadPlans extends DetectionProtocol
 
   //todo: refactor with FanOutShape with recognized and unrecognized outs.

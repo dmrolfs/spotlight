@@ -40,7 +40,7 @@ class DBSCANAnalyzer( override val router: ActorRef ) extends AlgorithmActor {
       }
 
       val clusters = cluster( pointsFromSeries(payload), algorithmConfig )
-      val isOutlier = outlierTest( clusters )
+      val isOutlier = makeOutlierTest( clusters )
       val outliers = payload.data.points collect { case dp if isOutlier( dp ) => dp }
       val result = {
         if ( outliers.nonEmpty ) SeriesOutliers( algorithms = Set(algorithm), source = payload.data, outliers = outliers )
@@ -65,7 +65,7 @@ class DBSCANAnalyzer( override val router: ActorRef ) extends AlgorithmActor {
         frameDistances <- cohortDistances( payload )
         points = frameDistances map { dp => new ml.clustering.DoublePoint( Array(dp.timestamp.getMillis.toDouble, dp.value) ) }
         clusters = cluster( points, algorithmConfig )
-        isOutlier = outlierTest( clusters )
+        isOutlier = makeOutlierTest( clusters )
       } yield frameDistances.zipWithIndex collect { case (fd, i) if isOutlier( fd ) => i }
 
       val result = if ( outlierMarks.isEmpty ) NoOutliers( algorithms = Set(algorithm), source = payload.data )
@@ -87,7 +87,7 @@ class DBSCANAnalyzer( override val router: ActorRef ) extends AlgorithmActor {
     }
   }
 
-  def outlierTest( clusters: Seq[ml.clustering.Cluster[ml.clustering.DoublePoint]] ): DataPoint => Boolean = {
+  def makeOutlierTest( clusters: Seq[ml.clustering.Cluster[ml.clustering.DoublePoint]] ): DataPoint => Boolean = {
     import scala.collection.JavaConversions._
 
     if ( clusters.isEmpty ) (pt: DataPoint) => { false }
@@ -118,6 +118,7 @@ class DBSCANAnalyzer( override val router: ActorRef ) extends AlgorithmActor {
 
         case "mahalanobis" | "mahal" | _ => {
           val points = payload.map{ _.getPoint }.toArray
+          //todo support mahal dist creation from supplied covariance matrix, which will come from training (into plan)
           MahalanobisDistance( MatrixUtils.createRealMatrix(points) )
         }
       }
