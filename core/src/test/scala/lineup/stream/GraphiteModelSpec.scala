@@ -36,7 +36,8 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
   class Fixture extends AkkaFixture { fixture =>
     def status[T]( label: String ): Flow[T, T, Unit] = Flow[T].map { e => logger info s"\n$label:${e.toString}"; e }
 
-    val stringFlow: Flow[ByteString, ByteString, Unit] = Flow[ByteString].via( PythonPickleProtocol.framingFlow() )
+    val protocol = new PythonPickleProtocol
+    val stringFlow: Flow[ByteString, ByteString, Unit] = Flow[ByteString].via( protocol.framingFlow() )
 
     trait TestPlanPolicy extends OutlierDetection.PlanPolicy{
       def plans: Seq[OutlierPlan] = fixture.plans
@@ -82,7 +83,7 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
       val now = joda.DateTime.now
       val dp = makeDataPoints( points, start = now ).take( 5 )
       val expected = List( TimeSeries( "foobar", dp ) )
-      val actual = PythonPickleProtocol.toDataPoints( pickled(dp) )
+      val actual = protocol.toDataPoints( pickled(dp) )
       actual mustBe expected
     }
 
@@ -92,7 +93,7 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
       val dp = makeDataPoints( points, start = now ).take( 5 )
       val expected = TimeSeries( "foobar", dp )
 
-      val flowUnderTest = PythonPickleProtocol.loadTimeSeriesData
+      val flowUnderTest = protocol.loadTimeSeriesData
       //      val flowUnderTest = Flow[ByteString].mapConcat( PythonPickleProtocol.toDataPoints )
       val future = Source( List(pickled(dp)) ).via( flowUnderTest ).runWith( Sink.head )
       val result = Await.result( future, 100.millis.dilated )
@@ -106,8 +107,8 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
       val expected = TimeSeries( "foobar", dp )
 
       val flowUnderTest = Flow[ByteString]
-        .via( PythonPickleProtocol.framingFlow() )
-        .via( PythonPickleProtocol.loadTimeSeriesData )
+        .via( protocol.framingFlow() )
+        .via( protocol.loadTimeSeriesData )
 
       val future = Source( List(withHeader(pickled(dp))) ).via( flowUnderTest ).runWith( Sink.head )
       val result = Await.result( future, 1.second.dilated )
@@ -125,8 +126,8 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
       trace( s"expected = $expected" )
 
       val flowUnderTest = Flow[ByteString]
-        .via( PythonPickleProtocol.framingFlow() )
-        .via( PythonPickleProtocol.loadTimeSeriesData )
+        .via( protocol.framingFlow() )
+        .via( protocol.loadTimeSeriesData )
 
       val pickles = withHeader( pickled( Seq(dp1, dp2) map { ("foobar", _) } ) )
       trace( s"pickles = ${pickles.utf8String}" )
