@@ -1,31 +1,23 @@
 package lineup.stream
 
-import java.io.OutputStream
-import java.net.{InetSocketAddress, Socket, InetAddress}
-import org.joda.time.DateTime
-import peds.akka.metrics.InstrumentedActor
-import peds.akka.stream.Limiter
-import peds.commons.log.Trace
-
+import java.net.{ InetSocketAddress, Socket }
 import scala.annotation.tailrec
-import scala.concurrent.{Future, ExecutionContext}
+import scala.concurrent.{ Future, ExecutionContext }
 import scala.concurrent.duration._
+import scala.collection.immutable
+import scala.util.Try
 import akka.actor._
 import akka.event.LoggingReceive
 import akka.pattern.{ ask, CircuitBreakerOpenException, CircuitBreaker }
 import akka.util.{ByteString, Timeout}
 import akka.stream.{ ActorAttributes, Supervision }
 import akka.stream.scaladsl.Flow
-import resource._
 import com.typesafe.scalalogging.{ Logger, LazyLogging }
-import org.joda.{ time => joda }
 import org.slf4j.LoggerFactory
-import lineup.model.outlier.{ NoOutliers, SeriesOutliers, Outliers }
-import lineup.model.timeseries._
-import lineup.stream.PythonPickleProtocol._
-import scala.collection.immutable
-import scala.util.Try
-import scalaz.\/
+import peds.akka.stream.Limiter
+import peds.commons.log.Trace
+import lineup.model.outlier.Outliers
+
 
 /**
   * Created by rolfsd on 12/29/15.
@@ -107,9 +99,8 @@ class GraphitePublisher(
   val pickler: PythonPickleProtocol = new PythonPickleProtocol
   val outlierLogger: Logger = Logger( LoggerFactory getLogger "Outliers" )
   var socket: Option[Socket] = None
-//  var out: Option[OutputStream] = None
-
   var waitQueue = immutable.Queue.empty[MarkPoint]
+
   val breaker: CircuitBreaker = {
     new CircuitBreaker(
       context.system.scheduler,
@@ -123,6 +114,17 @@ class GraphitePublisher(
   }
 
   var _nextScheduled: Option[Cancellable] = None
+  def cancelNextSchedule(): Unit = {
+    _nextScheduled foreach { _.cancel() }
+    _nextScheduled = None
+  }
+
+  def resetNextScheduled(): Option[Cancellable] = {
+    cancelNextSchedule()
+    _nextScheduled = Some( context.system.scheduler.scheduleOnce(1.second, self, SendBatch) )
+    _nextScheduled
+  }
+
 
   override def preStart(): Unit = open()
 
@@ -152,11 +154,7 @@ class GraphitePublisher(
 
     case Flush => flush()
 
-    case SendBatch => {
-      import akka.pattern.pipe
-      batchAndSend pipeTo self
-      resetNextScheduled()
-    }
+    case SendBatch => if ( waitQueue.nonEmpty ) batchAndSend()
   }
 
   override def publish( o: Outliers ): Unit = trace.block( s"publish($o)" ) {
@@ -164,43 +162,6 @@ class GraphitePublisher(
     outlierLogger info o.toString
   }
 
-
-  override def markPoints(o: Outliers): Seq[(String, DateTime, Double)] = trace.block(s"markPoints($o)") { super.markPoints( o ) }
-
-  override def mark(o: Outliers): Seq[DataPoint] = trace.block( s"mark($o)" ) { super.mark( o ) }
-
-  def cancelNextSchedule(): Unit = trace.block( "cancelNextSchedule" ) {
-    _nextScheduled foreach { _.cancel() }
-    _nextScheduled = None
-  }
-
-  def resetNextScheduled(): Option[Cancellable] = trace.block( s"resetNextSchedule" ) {
-    cancelNextSchedule()
-    _nextScheduled = Some( context.system.scheduler.scheduleOnce(1.second, self, SendBatch) )
-    _nextScheduled
-  }
-
-  def batchAndSend: Future[SendBatch.type] = trace.block( "batchAndSend" ) {
-    val (toBePublished, remainingQueue) = waitQueue splitAt batchSize
-    waitQueue = remainingQueue
-
-    val report = pickler.pickleFlattenedTimeSeries( toBePublished:_* )
-    breaker withCircuitBreaker {
-      Future {
-        sendToGraphite( report )
-        SendBatch
-      }
-    }
-  }
-
-  def sendToGraphite( pickle: ByteString ): Unit = trace.block( "sendToGraphite" ) {
-    require( pickle == pickler.pickle( ("foo", 100L, "0.0") ) )
-    socket foreach { s =>
-      val out = s.getOutputStream
-      out write pickle.toArray
-      out.flush()
-    }
-  }
 
   def open(): Try[Unit] = trace.block( "open" ) {
     Try {
@@ -238,14 +199,35 @@ class GraphitePublisher(
       val (toBePublished, remainingQueue) = waitQueue splitAt batchSize
       waitQueue = remainingQueue
 
-      log info s"""flush: batch=[${toBePublished.mkString(",")}]"""
-//WORK HERE
-      val report = pickler.pickleFlattenedTimeSeries( toBePublished:_* )
-//      val report = pickler.pickle( ("name", 100L, "value") )
-      log info s"""batch pickle: ${report.decodeString("UTF-8")}"""
+      log debug s"""flush: batch=[${toBePublished.mkString(",")}]"""
+      val report = serialize( toBePublished:_* )
       breaker withSyncCircuitBreaker { sendToGraphite( report ) }
       flush()
     }
   }
 
+  def serialize( payload: MarkPoint* ): ByteString = pickler.pickleFlattenedTimeSeries( payload:_* )
+
+  def batchAndSend(): Unit = trace.block( "batchAndSend" ) {
+    val (toBePublished, remainingQueue) = waitQueue splitAt batchSize
+    waitQueue = remainingQueue
+
+    if ( toBePublished.nonEmpty ) {
+      val report = pickler.pickleFlattenedTimeSeries( toBePublished:_* )
+      breaker withCircuitBreaker {
+        Future {
+          sendToGraphite( report )
+          resetNextScheduled()
+        }
+      }
+    }
+  }
+
+  def sendToGraphite( pickle: ByteString ): Unit = trace.block( "sendToGraphite" ) {
+    socket foreach { s =>
+      val out = s.getOutputStream
+      out write pickle.toArray
+      out.flush()
+    }
+  }
 }
