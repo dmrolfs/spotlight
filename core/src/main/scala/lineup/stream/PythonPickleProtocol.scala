@@ -177,7 +177,7 @@ class PythonPickleProtocol extends GraphiteSerializationProtocol with LazyLoggin
 
     pickled.flush
 
-    return ByteString( out.toByteArray )
+    return ByteString( out.toByteArray ).withHeader
   }
 
 
