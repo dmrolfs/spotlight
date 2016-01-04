@@ -49,11 +49,13 @@ object SendStats extends StrictLogging {
           s"Sending to ${settings.host}:${settings.port} [${source.collect{case Success(d) => d.points.size}.sum}] data points"
         )
 
-        import PythonPickleProtocol.{ PickleMessage, pickle }
+        import PythonPickleProtocol._
+        val pickler = new PythonPickleProtocol
+
         for {
           line <- source
           data <- line
-          message = pickle( data ).withHeader
+          message = pickler.pickleTimeSeries( data ).withHeader
         } {
           outStream write message.toArray
           outStream.flush
