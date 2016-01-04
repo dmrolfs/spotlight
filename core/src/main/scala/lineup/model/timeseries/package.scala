@@ -1,5 +1,6 @@
 package lineup.model
 
+import scala.collection.immutable
 import scalaz._, Scalaz._
 import org.joda.{ time => joda }
 import com.github.nscala_time.time.Imports._
@@ -18,10 +19,14 @@ package object timeseries {
     }
   }
 
-  type Row[T] = IndexedSeq[T]
+  type Row[T] = immutable.IndexedSeq[T]
   object Row {
-    def apply[T]( data: T* ): Row[T] = IndexedSeq( data:_* )
-    def empty[T]: Row[T] = IndexedSeq.empty[T]
+    def apply[T]( data: T* ): Row[T] = immutable.IndexedSeq( data:_* )
+    def empty[T]: Row[T] = immutable.IndexedSeq.empty[T]
+  }
+
+  implicit class ConvertSeqToRow[T]( val seq: Seq[T] ) extends AnyVal {
+    def toRow: Row[T] = Row( seq:_* )
   }
 
   type Matrix[T] = Row[Row[T]]

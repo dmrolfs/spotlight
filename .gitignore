@@ -6,6 +6,7 @@
 # Ignore any bin directory in the project root.
 bin/**
 logs/
+training/
 .sync.db*
 icon?
 *.class

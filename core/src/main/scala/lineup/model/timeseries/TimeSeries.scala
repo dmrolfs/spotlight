@@ -16,7 +16,7 @@ sealed trait TimeSeries extends TimeSeriesBase {
 }
 
 object TimeSeries {
-  def apply( topic: Topic, points: Row[DataPoint] = IndexedSeq.empty[DataPoint] ): TimeSeries = {
+  def apply( topic: Topic, points: Row[DataPoint] = Row.empty[DataPoint] ): TimeSeries = {
     val sorted = points sortBy { _.timestamp }
     val (start, end) = if ( sorted.nonEmpty ) (Some(sorted.head.timestamp), Some(sorted.last.timestamp)) else (None, None)
     SimpleTimeSeries( topic = topic, points = sorted, start = start, end = end )

@@ -21,11 +21,11 @@
     <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
       <!-- rollover daily -->
       <fileNamePattern>${LOG_HOME}/graphite-%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+      <minIndex>1</minIndex>
+      <maxIndex>10</maxIndex>
       <timeBasedFileNamingAndTriggeringPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
         <!-- or whenever the file size reaches 1GB -->
         <maxFileSize>1GB</maxFileSize>
-        <minIndex>1</minIndex>
-        <maxIndex>10</maxIndex>
       </timeBasedFileNamingAndTriggeringPolicy>
     </rollingPolicy>
   </appender>
@@ -37,16 +37,16 @@
          ch.qos.logback.classic.encoder.PatternLayoutEncoder by default -->
     <encoder>
       <!--<pattern>%-4relative [%thread] %-5level %logger{35} - %msg%n</pattern>-->
-      <pattern>%msg%n</pattern>
+      <pattern>[%thread] - %msg%n</pattern>
     </encoder>
     <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
       <!-- rollover daily -->
       <fileNamePattern>${LOG_HOME}/outliers-%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+      <minIndex>1</minIndex>
+      <maxIndex>10</maxIndex>
       <timeBasedFileNamingAndTriggeringPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
         <!-- or whenever the file size reaches 1GB -->
         <maxFileSize>1GB</maxFileSize>
-        <minIndex>1</minIndex>
-        <maxIndex>10</maxIndex>
       </timeBasedFileNamingAndTriggeringPolicy>
     </rollingPolicy>
   </appender>
@@ -57,16 +57,15 @@
     <encoder>
       <pattern>%msg%n</pattern>
     </encoder>
-    <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+    <rollingPolicy class="ch.qos.logback.core.rolling.FixedWindowRollingPolicy">
       <!-- rollover daily -->
-      <fileNamePattern>${LOG_HOME}/metrics-%d{yyyy-MM-dd}.%i.txt.gz</fileNamePattern>
-      <timeBasedFileNamingAndTriggeringPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
-        <!-- or whenever the file size reaches 100MB -->
-        <maxFileSize>1GB</maxFileSize>
-        <minIndex>1</minIndex>
-        <maxIndex>10</maxIndex>
-      </timeBasedFileNamingAndTriggeringPolicy>
+      <fileNamePattern>${LOG_HOME}/metrics-%i.txt.gz</fileNamePattern>
+      <minIndex>1</minIndex>
+      <maxIndex>5</maxIndex>
     </rollingPolicy>
+    <triggeringPolicy class="ch.qos.logback.core.rolling.SizeBasedTriggeringPolicy">
+      <maxFileSize>1GB</maxFileSize>
+    </triggeringPolicy>
   </appender>
 
   <appender name="TRAINING_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">

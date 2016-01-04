@@ -24,7 +24,7 @@ object TimeSeriesCohort {
     SimpleTimeSeriesCohort( topic, data, precision )
   }
 
-  def apply( topic: Topic, data: Row[TimeSeries] = IndexedSeq.empty[TimeSeries] ): TimeSeriesCohort = apply(topic, data, SECONDS)
+  def apply( topic: Topic, data: Row[TimeSeries] = Row.empty[TimeSeries] ): TimeSeriesCohort = apply( topic, data, SECONDS )
 
   def apply( data: Row[TimeSeries], precision: TimeUnit ): TimeSeriesCohort = trace.block( s"apply(..., $precision)" ) {
     val prefix = Topic.findAncestor( data.map( _.topic ):_* )
@@ -94,7 +94,7 @@ object TimeSeriesCohort {
       val dupsMerged = for {
         d <- dups
       } yield {
-        val zero: V[TimeSeries] = TimeSeries( d.head.topic, IndexedSeq.empty[DataPoint] ).successNel
+        val zero: V[TimeSeries] = TimeSeries( d.head.topic, Row.empty[DataPoint] ).successNel
         d.foldLeft( zero ) { (acc: V[TimeSeries], c: TimeSeries) =>
           acc flatMap { seriesMerge.merge( _, c ) }
         }
