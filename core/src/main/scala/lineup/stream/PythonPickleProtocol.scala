@@ -1,6 +1,6 @@
 package lineup.stream
 
-import java.io.{OutputStreamWriter, ByteArrayOutputStream}
+import java.io.{ OutputStreamWriter, ByteArrayOutputStream }
 import java.math.BigInteger
 import java.nio.charset.Charset
 import java.nio.{ ByteBuffer, ByteOrder }
