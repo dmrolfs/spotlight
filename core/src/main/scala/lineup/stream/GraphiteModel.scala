@@ -1,35 +1,26 @@
 package lineup.stream
 
-import java.io.OutputStream
-import java.net.{InetSocketAddress, Socket, InetAddress}
+import java.net.{ InetSocketAddress, InetAddress}
 import java.util.concurrent.atomic.AtomicInteger
-
-import peds.akka.stream.Limiter
-
-import scala.annotation.tailrec
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.concurrent.duration._
 import scala.util.matching.Regex
 import scala.util.{ Try, Failure, Success }
-
-import akka.pattern.CircuitBreaker
 import akka.actor.{ ActorRef, ActorSystem }
 import akka.stream.scaladsl._
 import akka.stream._
-import akka.util.{ByteStringBuilder, ByteString}
+import akka.util.ByteString
 import akka.stream.stage.{ SyncDirective, Context, PushStage }
 
 import better.files.{ ManagedResource => _, _ }
-import resource._
 import com.typesafe.config._
 import com.typesafe.scalalogging.{ StrictLogging, Logger }
 import org.slf4j.LoggerFactory
-import org.joda.{ time => joda }
 import nl.grons.metrics.scala.MetricName
 import peds.akka.metrics.{ StreamMonitor, Reporter, Instrumented }
 import peds.commons.log.Trace
 import peds.commons.collection.BloomFilter
-
+import peds.akka.stream.Limiter
 import lineup.analysis.outlier.algorithm.DBSCANAnalyzer
 import lineup.analysis.outlier.{ DetectionAlgorithmRouter, OutlierDetection }
 import lineup.model.outlier._
@@ -60,13 +51,6 @@ object GraphiteModel extends Instrumented with StrictLogging {
       val (host, port) = sourceHostPort
       Tcp().bind( host.getHostAddress, port )
     }
-
-//    //todo refactor into publish actor which encapsulates circuit breaker with graphite connection reset
-//    def graphiteStream: Option[ManagedResource[OutputStream]] = {
-//      graphiteHostPort flatMap {
-//        case (h, p) => { Try { managed( new Socket(h, p) ) flatMap { socket => managed( socket.getOutputStream ) } }.toOption }
-//      }
-//    }
   }
 
   def main( args: Array[String] ): Unit = {
@@ -216,7 +200,7 @@ object GraphiteModel extends Instrumented with StrictLogging {
          |\tWorkflow Buffer Size : ${workflowBufferSize}
          |\tDetect Timeout       : ${detectTimeout.toCoarsest}
          |\tplans                : [${plans.zipWithIndex.map{ case (p,i) => f"${i}%2d: ${p}"}.mkString("\n","\n","\n")}]
-        """.stripMargin
+       """.stripMargin
     }
 
     val graph = GraphDSL.create() { implicit b =>
