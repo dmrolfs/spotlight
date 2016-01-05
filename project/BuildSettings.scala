@@ -39,8 +39,7 @@ object BuildSettings {
     // AllenAi Public Resolver
     resolvers += "Typesafe Repository" at "http://repo.typesafe.com/typesafe/releases/",
     // resolvers += "AllenAI Releases" at "http://utility.allenai.org:8081/nexus/content/repositories/public-releases",
-    resolvers += "dmrolfs-releases" at "http://dmrolfs.github.com/releases",
-    resolvers += "dmrolfs-snapshots" at "http://dmrolfs.github.com/snapshots",
+    resolvers += "omen-bintray" at "http://dl.bintray.com/omen/maven",
     // Factorie Resolver
     resolvers += "IESL Releases" at "http://dev-iesl.cs.umass.edu/nexus/content/groups/public",
     resolvers += "spray repo" at "http://repo.spray.io",

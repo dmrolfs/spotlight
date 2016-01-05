@@ -1,36 +1,28 @@
 import Dependencies._
 import sbtassembly.AssemblyPlugin.autoImport.MergeStrategy
-//import sbtdocker.DockerKeys._
 
-
-//import sbtassembly.{MergeStrategy, Assembly}
 
 name := "lineup-core"
 
 description := "lorem ipsum."
 
-libraryDependencies ++= commonDependencies ++ Seq(
-  akkaModule( "actor" ),
-  akkaModule( "testkit" ) % "test",
-  peds( "akka" ),
-  //  "com.github.melrief" %% "pureconfig" % "0.1.2",
-  "com.typesafe.akka" % "akka-stream-experimental_2.11" % "2.0.1",
-  "org.apache.commons" % "commons-math3" % "3.5",
-  "com.github.scopt" %% "scopt" % "3.3.0",
-  "com.github.dmrolfs" %% "demesne-core" % "0.8.0-SNAPSHOT" % "compile" changing(),
-  "com.github.pathikrit" %% "better-files" % "2.14.0",
-  "com.github.pathikrit" %% "better-files-akka" % "2.14.0",
-  "org.parboiled" %% "parboiled" % "2.1.0",
-  "io.dropwizard.metrics" % "metrics-core" % "3.1.2",
-  "io.dropwizard.metrics" % "metrics-graphite" % "3.1.2",
-  "nl.grons" %% "metrics-scala" % "3.5.2_a2.3",
-  "com.typesafe.akka" % "akka-stream-testkit-experimental_2.11" % "2.0.1" % "test",
-  "com.github.dmrolfs" %% "demesne-testkit" % "0.8.0-SNAPSHOT" % "test" changing(),
-  "org.python" % "jython-standalone" % "2.5.3" % "test",
-  "com.github.marklister" %% "product-collections" % "1.4.2" % "test"
-)
-
-libraryDependencies += ( "net.razorvine" % "pyrolite" % "4.10" )
+libraryDependencies ++= commonDependencies ++
+  metrics.all ++
+  facility.betterFiles.all ++
+  Seq(
+    //  facility.pureConfig,
+    akka.streams,
+    facility.math3,
+    facility.scopt,
+    demesne.core,
+    facility.parboiled,
+    facility.pyrolite
+  ) ++ Dependencies.test(
+    akka.streamsTestkit,
+    demesne.testkit,
+    "org.python" % "jython-standalone" % "2.5.3",
+    "com.github.marklister" %% "product-collections" % "1.4.2"
+  )
 
 libraryDependencies += ( "com.jsuereth" %% "scala-arm" % "2.0.0-M1" )
 

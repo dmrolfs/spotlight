@@ -2,43 +2,142 @@ import sbt.Keys._
 import sbt._
 
 object Dependencies {
-  val logbackVersion = "1.1.3"
+  object peds {
+    val version = "0.1.6"
+    def module( id: String ) = "com.github.dmrolfs" %% s"peds-$id" % version
 
-  val loggingDependencies = Seq(
-    "org.slf4j" % "slf4j-api" % "1.7.13",
-    "ch.qos.logback" % "logback-core" % logbackVersion,
-    "ch.qos.logback" % "logback-classic" % logbackVersion
-  )
+    val commons = module( "commons" )
+    val archetype = module( "archetype" )
+    val akka = module( "akka" )
 
-  val commonDependencies = loggingDependencies ++ Seq(
-    "com.eaio.uuid" % "uuid" % "3.4",
-    "com.typesafe" % "config" % "1.3.0",
-    "com.typesafe.scala-logging" %% "scala-logging" % "3.1.0",
-    "com.chuusai" %% "shapeless" % "2.2.5",
-    "org.scalaz" %% "scalaz-core" % "7.2.0",
-    // "org.typelevel" %% "scalaz-outlaws" % "0.2",
-//    "org.typelevel" %% "scalaz-contrib-210"        % "0.2",
-//    "org.typelevel" %% "scalaz-contrib-validation" % "0.2",
-//    "org.typelevel" %% "scalaz-contrib-undo"       % "0.2",
-    // currently unavailable because there's no 2.11 build of Lift yet
-    // "org.typelevel" %% "scalaz-lift"               % "0.2",
-//    "org.typelevel" %% "scalaz-nscala-time"        % "0.2",
-//    "org.typelevel" %% "scalaz-spire"              % "0.2",
-    peds( "commons" ),
-    peds( "archetype" ),
-    "joda-time" % "joda-time" % "2.9",
-    "org.joda" % "joda-convert" % "1.7",
-    "com.github.nscala-time" %% "nscala-time" % "2.4.0",
-    "org.scalatest" %% "scalatest" % "2.2.4" % "test",
-    "org.mockito" % "mockito-core" % "1.10.19" % "test"
+    val all = Seq( commons, akka, archetype )
+  }
+
+  object demesne {
+    val version = "1.0.0"
+    def module( id: String ) = "com.github.dmrolfs" %% s"demesne-$id" % version
+    val core = module( "core" )
+    val testkit = module( "testkit" )
+  }
+
+  object akka {
+    val version = "2.4.1"
+    def module( id: String ) = "com.typesafe.akka" %% s"akka-$id" % version
+
+    val actor = module( "actor" )
+    val agent = module( "agent" )
+    val cluster = module( "cluster" )
+    val clusterSharding = module( "cluster-sharding" )
+    val contrib = module( "contrib" )
+    val persistence = module( "persistence" )
+    val remote = module( "remote" )
+    val slf4j = module( "slf4j" )
+    val testkit = module( "testkit" )
+
+    val streamsVersion = "2.0.1"
+    val streams = "com.typesafe.akka" % "akka-stream-experimental_2.11" % streamsVersion
+    val streamsTestkit = "com.typesafe.akka" % "akka-stream-testkit-experimental_2.11" % streamsVersion
+  }
+
+  object scalaz {
+    val version = "7.2.0"
+    def module( id: String ) = "org.scalaz" %% s"scalaz-$id" % version
+
+    val core = module( "core" )
+    val concurrent = module( "concurrent" )
+  }
+
+  object time {
+    val joda = "joda-time" % "joda-time" % "2.9"
+    val jodaConvert = "org.joda" % "joda-convert" % "1.7"
+    val scalaTime = "com.github.nscala-time" %% "nscala-time" % "2.4.0"
+    val all = Seq( joda, jodaConvert, scalaTime )
+  }
+
+  object log {
+    val typesafe = "com.typesafe.scala-logging" %% "scala-logging" % "3.1.0"
+
+    object logback {
+      val version = "1.1.3"
+      def module( id: String ) = "ch.qos.logback" % s"logback-$id" % version
+
+      val core = module( "core" )
+      val classic = module( "classic" )
+    }
+
+    val slf4j = "org.slf4j" % "slf4j-api" % "1.7.13"
+
+    val all = Seq( typesafe, logback.core, logback.classic, slf4j )
+  }
+
+  object metrics {
+    val version = "3.1.2"
+    def module( id: String ) = "io.dropwizard.metrics" % s"metrics-$id" % "3.1.2"
+
+    val core = module( "core" )
+    val graphite = module( "graphite" )
+    val metricsScala = "nl.grons" %% "metrics-scala" % "3.5.2_a2.3"
+
+    val all = Seq( core, graphite, metricsScala )
+  }
+
+  object facility {
+    val uuid = "com.eaio.uuid" % "uuid" % "3.4"
+    val config = "com.typesafe" % "config" % "1.3.0"
+    val pureConfig = "com.github.melrief" %% "pureconfig" % "0.1.2"
+    val shapeless = "com.chuusai" %% "shapeless" % "2.2.5"
+    val parboiled = "org.parboiled" %% "parboiled" % "2.1.0"
+    val inflector = "org.atteo" % "evo-inflector" % "1.2.1"
+    val squants = "com.squants"  %% "squants"  % "0.5.3"
+    val accord = "com.wix" %% "accord-core" % "0.5"
+    val math3 = "org.apache.commons" % "commons-math3" % "3.5"
+    val scopt = "com.github.scopt" %% "scopt" % "3.3.0"
+    val pyrolite = "net.razorvine" % "pyrolite" % "4.10"
+
+    object betterFiles {
+      val version = "2.14.0"
+      val core = "com.github.pathikrit" %% "better-files" % version
+      val akka = "com.github.pathikrit" %% "better-files-akka" % version
+      val all = Seq( core, akka )
+    }
+  }
+
+  object quality {
+    val scalatest = "org.scalatest" %% "scalatest" % "2.2.4"
+
+    object mockito {
+      val version = "1.10.19"
+      def module( id: String ) = "org.mockito" % s"mockito-$id" % version
+      val core = module( "core" )
+    }
+
+    object persistence {
+      val inMemory = "com.github.dnvriend" %% "akka-persistence-inmemory" % "1.1.6"
+      val testkit = "com.github.krasserm" %% "akka-persistence-testkit" % "0.3.4"
+    }
+  }
+
+
+  val commonDependencies = log.all ++ peds.all ++ time.all ++ Seq(
+    akka.actor,
+    facility.uuid,
+    facility.config,
+    facility.shapeless,
+    scalaz.core
+  ) ++ test(
+    akka.testkit,
+    quality.scalatest,
+    quality.mockito.core
   )
 
   val defaultDependencyOverrides = Set(
-    "org.scalaz" %% "scalaz-core" % "7.2.0"
+    scalaz.core
   )
 
-  val sprayJson = "io.spray" %% "spray-json" % "1.3.1"
 
-  def akkaModule( id: String ) = "com.typesafe.akka" %% s"akka-$id" % "2.4.1"
-  def peds( id: String ) = "com.github.dmrolfs" %% s"peds-$id" % "0.1.6" % "compile" changing()
+  def compile( deps: ModuleID* ): Seq[ModuleID] = deps map ( _ % "compile" )
+  def provided( deps: ModuleID* ): Seq[ModuleID] = deps map ( _ % "provided" )
+  def test( deps: ModuleID* ): Seq[ModuleID] = deps map ( _ % "test" )
+  def runtime( deps: ModuleID* ): Seq[ModuleID] = deps map ( _ % "runtime" )
+  def container( deps: ModuleID* ): Seq[ModuleID] = deps map ( _ % "container" )
 }
