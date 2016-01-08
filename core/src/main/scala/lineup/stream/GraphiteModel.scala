@@ -1,93 +1,140 @@
 package lineup.stream
 
-import java.net.{ InetSocketAddress, InetAddress}
+import java.net.{ InetSocketAddress, InetAddress }
 import java.util.concurrent.atomic.AtomicInteger
-import scala.concurrent.{ ExecutionContext, Future }
+import lineup.stream.OutlierDetectionWorkflow._
+import peds.akka.supervision.IsolatedLifeCycleSupervisor.{ChildStarted, WaitForStart}
+import peds.akka.supervision.OneForOneStrategyFactory
+
+import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
 import scala.util.matching.Regex
 import scala.util.{ Try, Failure, Success }
-import akka.actor.{ ActorRef, ActorSystem }
+import akka.actor._
+import akka.actor.SupervisorStrategy._
+import akka.pattern.ask
 import akka.stream.scaladsl._
 import akka.stream._
-import akka.util.ByteString
+import akka.util.{Timeout, ByteString}
 import akka.stream.stage.{ SyncDirective, Context, PushStage }
 
 import better.files.{ ManagedResource => _, _ }
 import com.typesafe.config._
 import com.typesafe.scalalogging.{ StrictLogging, Logger }
 import org.slf4j.LoggerFactory
-import nl.grons.metrics.scala.MetricName
+import nl.grons.metrics.scala.{Meter, MetricName}
 import peds.akka.metrics.{ StreamMonitor, Reporter, Instrumented }
 import peds.commons.log.Trace
 import peds.commons.collection.BloomFilter
-import peds.akka.stream.Limiter
 import lineup.analysis.outlier.algorithm.DBSCANAnalyzer
-import lineup.analysis.outlier.{ DetectionAlgorithmRouter, OutlierDetection }
+import lineup.analysis.outlier.OutlierDetection
 import lineup.model.outlier._
 import lineup.model.timeseries.TimeSeriesBase.Merging
 import lineup.model.timeseries._
+
 
 /**
  * Created by rolfsd on 10/21/15.
  */
 object GraphiteModel extends Instrumented with StrictLogging {
-
   val OutlierMetricPrefix = "lineup.outlier."
 
-  override lazy val metricBaseName: MetricName = MetricName( "" )
+  override lazy val metricBaseName: MetricName = {
+    import peds.commons.util._
+    val result = MetricName( getClass.getPackage.getName, getClass.safeSimpleName )
+    logger error s"METRIC BASE NAME: [${result.name}] \t simple:[${getClass.safeSimpleName}] \t package:[${getClass.getPackage.getName}]"
+    result
+  }
 
   override protected val logger: Logger = Logger( LoggerFactory.getLogger("Graphite") )
 
   val trace = Trace[GraphiteModel.type]
 
-  case class UsageConfiguration(
-    sourceHostPort: (InetAddress, Int),
-    maxFrameLength: Int,
-    protocol: GraphiteSerializationProtocol,
-    windowDuration: FiniteDuration,
-    graphiteHostPort: Option[(InetAddress, Int)]
-  ) {
-    def serverBinding( implicit system: ActorSystem ): Source[Tcp.IncomingConnection, Future[Tcp.ServerBinding]] = {
-      val (host, port) = sourceHostPort
-      Tcp().bind( host.getHostAddress, port )
+//  case class ModelSupervisionStrategy(
+//    override val maxNrOfRetries: Int = -1,
+//    override val withinTimeRange: Duration = Duration.Inf,
+//    override val loggingEnabled: Boolean = true
+//  )(
+//    override val decider: SupervisorStrategy.Decider
+//  ) extends OneForOneStrategy( maxNrOfRetries, withinTimeRange, loggingEnabled )( decider ) {
+//    override def logFailure( context: ActorContext, child: ActorRef, cause: Throwable, decision: Directive ): Unit = {
+//      super
+//      .logFailure(
+//                   context,
+//                   child,
+//                   cause,
+//                   decision
+//                 )
+//    }
+//  }
+
+
+  lazy val actorFailures: Meter = metrics meter "actor.failures"
+
+  val defaultSupervision: SupervisorStrategy = OneForOneStrategy() {
+    case _: ActorInitializationException  => Stop
+
+    case _: ActorKilledException => Stop
+
+    case _: Exception => {
+      actorFailures.mark()
+      Restart
+    }
+
+    case _ => Escalate
+  }
+
+  lazy val streamFailures: Meter = metrics meter "stream.failures"
+
+  val streamSupervisionDecider: Supervision.Decider = {
+    case ex => {
+      logger.error( "Error caught by Supervisor:", ex )
+      streamFailures.mark()
+      Supervision.Restart
     }
   }
 
+
+  case class WorkflowConfiguration(
+    sourceAddress: InetSocketAddress,
+    maxFrameLength: Int,
+    protocol: GraphiteSerializationProtocol,
+    windowDuration: FiniteDuration,
+    graphiteAddress: Option[InetSocketAddress],
+    configuration: Config
+  )
+
+
   def main( args: Array[String] ): Unit = {
+    logger error s"ACTOR FAILURES COUNT: [${actorFailures.count}]"
     Settings.makeUsageConfig.parse( args, Settings.zero ) match {
       case None => System exit -1
 
       case Some( usage ) => {
         val config = ConfigFactory.load
-        val usageConfig = getConfiguration( usage, config )
+        val workflowConfig = getConfiguration( usage, config )
 
-        val detectTimeout = FiniteDuration( config.getDuration("lineup.workflow.detect.timeout", MILLISECONDS), MILLISECONDS )
+        val detectTimeoutBudget = FiniteDuration(config.getDuration("lineup.workflow.detect.timeout", MILLISECONDS), MILLISECONDS)
         val PlanConfigPath = "lineup.detection-plans"
+
         val plansFn: () => Try[Seq[OutlierPlan]] = () => Try {
           ConfigFactory.invalidateCaches()
-          makePlans( detectTimeout, ConfigFactory.load.getConfig(PlanConfigPath) )
+          makePlans( detectTimeoutBudget, ConfigFactory.load.getConfig(PlanConfigPath) )
         }
 
         plansFn() foreach { plans =>
           val usageMessage = s"""
             |\nRunning Lineup using the following configuration:
-            |\tsource binding  : ${usageConfig.sourceHostPort._1}:${usageConfig.sourceHostPort._2}
-            |\tpublish binding : ${usageConfig.graphiteHostPort map { case (h,p) => h.toString + ":" + p.toString }}
-            |\tmax frame size  : ${usageConfig.maxFrameLength}
-            |\tprotocol        : ${usageConfig.protocol}
-            |\twindow          : ${usageConfig.windowDuration.toCoarsest}
+            |\tsource binding  : ${workflowConfig.sourceAddress}
+            |\tpublish binding : ${workflowConfig.graphiteAddress}
+            |\tmax frame size  : ${workflowConfig.maxFrameLength}
+            |\tprotocol        : ${workflowConfig.protocol}
+            |\twindow          : ${workflowConfig.windowDuration.toCoarsest}
             |\tAvail Processors: ${Runtime.getRuntime.availableProcessors}
             |\tplans           : [${plans.zipWithIndex.map{ case (p,i) => f"${i}%2d: ${p}"}.mkString("\n","\n","\n")}]
           """.stripMargin
 
           logger info usageMessage
-        }
-
-        val decider: Supervision.Decider = {
-          case ex => {
-            logger.error( "Error caught by Supervisor:", ex )
-            Supervision.Stop
-          }
         }
 
         if ( config hasPath "lineup.metrics" ) {
@@ -99,54 +146,33 @@ object GraphiteModel extends Instrumented with StrictLogging {
         }
 
         implicit val system = ActorSystem( "Graphite" )
-        implicit val materializer = ActorMaterializer( ActorMaterializerSettings(system).withSupervisionStrategy(decider) )
-        implicit val ec = system.dispatcher
 
-        import java.nio.file.{ StandardWatchEventKinds => Events }
-        import better.files.FileWatcher._
-
-        val limiter = system.actorOf( Limiter.props(100, 1.second, 10), "limiter" )
-
-        val publisher = usageConfig.graphiteHostPort map { case (host, port) =>
-          system.actorOf( GraphitePublisher.props( new InetSocketAddress(host, port) ), "graphite-publisher" )
-        } getOrElse {
-          system.actorOf( LogPublisher.props, "log-publisher" )
-        }
-
-        val router = system.actorOf( DetectionAlgorithmRouter.props, "router" )
-        val dbscan = system.actorOf( DBSCANAnalyzer.props( router ), "dbscan" )
-
-        val detector = system.actorOf(
-          props = OutlierDetection.props(router ){ r =>
-            new OutlierDetection(r) with OutlierDetection.ConfigPlanPolicy {
-              override lazy val metricBaseName = MetricName( classOf[OutlierDetection] )
-              override def getPlans: () => Try[Seq[OutlierPlan]] = plansFn
-              override def refreshInterval: FiniteDuration = 15.minutes
+        val workflow = system.actorOf(
+          OutlierDetectionWorkflow.props(
+            new OutlierDetectionWorkflow() with OneForOneStrategyFactory with OutlierDetectionWorkflow.ConfigurationProvider {
+              override def sourceAddress: InetSocketAddress = workflowConfig.sourceAddress
+              override def maxFrameLength: Int = workflowConfig.maxFrameLength
+              override def protocol: GraphiteSerializationProtocol = workflowConfig.protocol
+              override def windowDuration: FiniteDuration = workflowConfig.windowDuration
+              override def graphiteAddress: Option[InetSocketAddress] = workflowConfig.graphiteAddress
+              override def makePlans: () => Try[Seq[OutlierPlan]] = plansFn
+              override def configuration: Config = config
             }
-          },
-          name = "outlierDetector"
+          ),
+          "workflow-supervisor"
         )
 
-        val configOrigin = config.getConfig( PlanConfigPath ).origin
-        logger info s"origin for ${PlanConfigPath}: [${configOrigin}]"
+        implicit val materializer = ActorMaterializer(
+          ActorMaterializerSettings( system ) withSupervisionStrategy streamSupervisionDecider
+        )
 
-        determineConfigFileComponents( configOrigin ) foreach { filename =>
-          // note: attempting to watch a shared file wrt VirtualBox will not work (https://www.virtualbox.org/ticket/9069)
-          // so dev testing of watching should be done by running the Java locally
-          logger info s"watching for changes in ${filename}"
-          val configWatcher = File( filename ).newWatcher( true )
-          configWatcher ! on( Events.ENTRY_MODIFY ) {
-            case _ => {
-              logger info s"config file watcher sending reload command due to change in ${configOrigin.description}"
-              detector ! OutlierDetection.ReloadPlans
-            }
-          }
-        }
+        implicit val ec = system.dispatcher
 
-        streamGraphiteOutliers( usageConfig, detector, limiter, publisher, PlanConfigPath ) onComplete {
+        streamGraphiteOutliers( workflow, workflowConfig, PlanConfigPath ) onComplete {
           case Success(_) => system.terminate()
+
           case Failure( e ) => {
-            logger.error( "Failure:", e )
+            logger.error( "Graphite Model bootstrap failure:", e )
             system.terminate()
           }
         }
@@ -154,17 +180,16 @@ object GraphiteModel extends Instrumented with StrictLogging {
     }
   }
 
-  def determineConfigFileComponents(origin: ConfigOrigin ): List[String] = {
+
+  def determineConfigFileComponents( origin: ConfigOrigin ): List[String] = {
     val Path = "@\\s+file:(.*):\\s+\\d+,".r
     Path.findAllMatchIn( origin.toString ).map{ _ group 1 }.toList
   }
 
 
   def streamGraphiteOutliers(
-    usageConfig: UsageConfiguration,
-    detector: ActorRef,
-    limiter: ActorRef,
-    publisher: ActorRef,
+    workflow: ActorRef,
+    workflowConfig: WorkflowConfiguration,
     planConfigPath: String
   )(
     implicit system: ActorSystem,
@@ -172,8 +197,42 @@ object GraphiteModel extends Instrumented with StrictLogging {
   ): Future[Unit] = {
     implicit val dispatcher = system.dispatcher
 
-    usageConfig.serverBinding runForeach { connection =>
-      connection.handleWith( detectionWorkflow(detector, limiter, publisher, usageConfig, planConfigPath) )
+    val configOrigin = workflowConfig.configuration.getConfig( planConfigPath ).origin
+    logger info s"origin for ${planConfigPath}: [${configOrigin}]"
+
+    implicit val timeout = Timeout( 5.seconds )
+    val actors = for {
+      _ <- workflow ? WaitForStart
+      ChildStarted( d ) <- ( workflow ? GetOutlierDetector ).mapTo[ChildStarted]
+      ChildStarted( l ) <- ( workflow ? GetPublishRateLimiter ).mapTo[ChildStarted]
+      ChildStarted( p ) <- ( workflow ? GetPublisher ).mapTo[ChildStarted]
+    } yield (d, l, p)
+
+    val (detector, limiter, publisher) = Await.result( actors, 1.seconds )
+
+    import java.nio.file.{ StandardWatchEventKinds => Events }
+    import better.files.FileWatcher._
+
+    determineConfigFileComponents( configOrigin ) foreach { filename =>
+      // note: attempting to watch a shared file wrt VirtualBox will not work (https://www.virtualbox.org/ticket/9069)
+      // so dev testing of watching should be done by running the Java locally
+      logger info s"watching for changes in ${filename}"
+      val configWatcher = File( filename ).newWatcher( true )
+      configWatcher ! on( Events.ENTRY_MODIFY ) {
+        case _ => {
+          logger info s"config file watcher sending reload command due to change in ${configOrigin.description}"
+          detector ! OutlierDetection.ReloadPlans
+        }
+      }
+    }
+
+    val hostname = workflowConfig.sourceAddress.getHostName
+    val port = workflowConfig.sourceAddress.getPort
+    val tcp = Tcp().bind( hostname, port )
+    tcp runForeach { connection =>
+      connection.handleWith(
+        detectionWorkflow( detector, limiter, publisher, workflowConfig, planConfigPath )
+      )
     }
   }
 
@@ -181,7 +240,7 @@ object GraphiteModel extends Instrumented with StrictLogging {
     detector: ActorRef,
     limiter: ActorRef,
     publisher: ActorRef,
-    usageConfig: UsageConfiguration,
+    workflowConfig: WorkflowConfiguration,
     planConfigPath: String
   )(
     implicit system: ActorSystem,
@@ -206,11 +265,14 @@ object GraphiteModel extends Instrumented with StrictLogging {
     val graph = GraphDSL.create() { implicit b =>
       import GraphDSL.Implicits._
 
-      val framing = b.add( StreamMonitor.source('framing).watch(usageConfig.protocol.framingFlow(usageConfig.maxFrameLength)) )
-      val timeSeries = b.add( StreamMonitor.source('timeseries).watch(usageConfig.protocol.loadTimeSeriesData) )
+      val framing = b.add(
+        StreamMonitor.source('framing).watch( workflowConfig.protocol.framingFlow( workflowConfig.maxFrameLength ) )
+      )
+
+      val timeSeries = b.add( StreamMonitor.source('timeseries).watch( workflowConfig.protocol.loadTimeSeriesData ) )
       val planned = b.add( StreamMonitor.flow('planned).watch( filterPlanned(plans) ) )
 
-      val batch = StreamMonitor.sink('batch).watch( batchSeries(usageConfig.windowDuration) )
+      val batch = StreamMonitor.sink('batch).watch( batchSeries( workflowConfig.windowDuration ) )
 
       val buf1 = b.add(
         StreamMonitor.flow('buffer1).watch(Flow[ByteString].buffer(tcpInBufferSize, OverflowStrategy.backpressure))
@@ -376,7 +438,7 @@ object GraphiteModel extends Instrumented with StrictLogging {
   }
 
 
-  def getConfiguration( usage: Settings, config: Config ): UsageConfiguration = {
+  def getConfiguration( usage: Settings, config: Config ): WorkflowConfiguration = {
     val sourceHost = usage.sourceHost getOrElse {
       if ( config hasPath Settings.SOURCE_HOST ) InetAddress getByName config.getString( Settings.SOURCE_HOST )
       else InetAddress.getLocalHost
@@ -421,17 +483,18 @@ object GraphiteModel extends Instrumented with StrictLogging {
       Some( 2004 )
     }
 
-    UsageConfiguration(
-      sourceHostPort = (sourceHost, sourcePort),
+    WorkflowConfiguration(
+      sourceAddress = new InetSocketAddress( sourceHost, sourcePort ),
       maxFrameLength,
       protocol,
       windowSize,
-      graphiteHostPort = {
+      graphiteAddress = {
         for {
           h <- graphiteHost
           p <- graphitePort
-        } yield (h,p)
-      }
+        } yield new InetSocketAddress( h, p )
+      },
+      configuration = config
     )
   }
 

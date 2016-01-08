@@ -2,13 +2,14 @@ package lineup.stream
 
 import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicInteger
+import akka.actor.ActorRef
 import com.typesafe.config.ConfigFactory
 import org.scalatest.Tag
 import peds.commons.log.Trace
 
 import scala.concurrent.{ Future, Await }
 import scala.concurrent.duration._
-import scala.util.Failure
+import scala.util.{Try, Failure}
 import akka.pattern
 import akka.stream.{scaladsl, OverflowStrategy}
 import akka.stream.testkit.scaladsl.{ TestSource, TestSink }
@@ -39,9 +40,8 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
     val protocol = new PythonPickleProtocol
     val stringFlow: Flow[ByteString, ByteString, Unit] = Flow[ByteString].via( protocol.framingFlow() )
 
-    trait TestPlanPolicy extends OutlierDetection.PlanPolicy{
-      def plans: Seq[OutlierPlan] = fixture.plans
-      override def planFor(m: OutlierDetectionMessage): Option[OutlierPlan] = plans find { _ appliesTo m }
+    trait TestConfigurationProvider extends OutlierDetection.PlanConfigurationProvider{
+      override def getPlans: () => Try[Seq[OutlierPlan]] = () => { Try{ fixture.plans } }
       override def invalidateCaches(): Unit = { }
       override def refreshInterval: FiniteDuration = 5.minutes
     }
@@ -187,12 +187,13 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
         )
       )
 
-      val router = system.actorOf( DetectionAlgorithmRouter.props, "router" )
-      val dbscan = system.actorOf( DBSCANAnalyzer.props(router), "dbscan" )
+      val routerRef = system.actorOf( DetectionAlgorithmRouter.props, "router" )
+      val dbscan = system.actorOf( DBSCANAnalyzer.props(routerRef), "dbscan" )
       val detector = system.actorOf(
-        OutlierDetection.props(router) { r =>
-          new OutlierDetection( r ) with TestPlanPolicy {
-            override def plans: Seq[OutlierPlan] = Seq( defaultPlan )
+        OutlierDetection.props {
+          new OutlierDetection with TestConfigurationProvider {
+            override def router: ActorRef = routerRef
+            override def getPlans: () => Try[Seq[OutlierPlan]] = () => { Try{ Seq( defaultPlan ) } }
           }
         },
         "detectOutliers"
