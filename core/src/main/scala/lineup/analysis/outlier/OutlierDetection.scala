@@ -1,21 +1,26 @@
 package lineup.analysis.outlier
 
-import akka.pattern.AskTimeoutException
-import akka.stream.{ActorAttributes, Supervision}
+import nl.grons.metrics.scala.Meter
 
 import scala.concurrent.duration._
 import scala.util.{ Failure, Success, Try }
-import akka.actor.{Actor, ActorRef, ActorLogging, Props}
+import akka.actor.{ Actor, ActorRef, ActorLogging, Props }
 import akka.event.LoggingReceive
+import akka.pattern.AskTimeoutException
+import akka.stream.{ ActorAttributes, Supervision }
 import akka.stream.scaladsl.Flow
 import com.typesafe.scalalogging.StrictLogging
-import peds.akka.metrics.InstrumentedActor
+import peds.akka.metrics.{ Instrumented, InstrumentedActor }
 import peds.commons.identifier.ShortUUID
 import lineup.model.timeseries.{ Topic, TimeSeriesBase }
 import lineup.model.outlier.{ Outliers, OutlierPlan }
 
 
-object OutlierDetection extends StrictLogging {
+object OutlierDetection extends StrictLogging with Instrumented {
+  def props( makeDetector: => OutlierDetection ): Props = Props( makeDetector )
+
+  lazy val timeoutMeter: Meter = metrics meter "timeouts"
+
   def detectOutlier(
     detector: ActorRef,
     maxAllowedWait: FiniteDuration,
@@ -27,6 +32,7 @@ object OutlierDetection extends StrictLogging {
     val decider: Supervision.Decider = {
       case ex: AskTimeoutException => {
         logger error s"Detection stage timed out on [${ex.getMessage}]"
+        timeoutMeter.mark()
         Supervision.Resume
       }
 
@@ -47,9 +53,6 @@ object OutlierDetection extends StrictLogging {
   }
 
 
-
-  def props( router: ActorRef )( makeDetector: ActorRef => OutlierDetection ): Props = Props( makeDetector(router) )
-
   sealed trait DetectionProtocol
   case object ReloadPlans extends DetectionProtocol
 
@@ -69,7 +72,8 @@ object OutlierDetection extends StrictLogging {
     case t: Topic => Some(t)
   }
 
-  trait PlanPolicy {
+  trait ConfigurationProvider {
+    def router: ActorRef
     def planFor( m: OutlierDetectionMessage ): Option[OutlierPlan]
     def refreshInterval: FiniteDuration
     def definedAt( m: OutlierDetectionMessage ): Boolean = planFor( m ).isDefined
@@ -77,7 +81,7 @@ object OutlierDetection extends StrictLogging {
   }
 
 
-  trait ConfigPlanPolicy extends OutlierDetection.PlanPolicy {
+  trait PlanConfigurationProvider extends OutlierDetection.ConfigurationProvider {
     def getPlans: () => Try[Seq[OutlierPlan]]
 
     def getPlansWithFallback( default: Seq[OutlierPlan] ): Seq[OutlierPlan] = {
@@ -101,8 +105,8 @@ object OutlierDetection extends StrictLogging {
 }
 
 
-class OutlierDetection( router: ActorRef ) extends Actor with InstrumentedActor with ActorLogging {
-  outer: OutlierDetection.PlanPolicy =>
+class OutlierDetection extends Actor with InstrumentedActor with ActorLogging {
+  outer: OutlierDetection.PlanConfigurationProvider =>
 
   val scheduleEC = context.system.dispatchers.lookup( "schedule-dispatcher" )
 
@@ -113,25 +117,36 @@ class OutlierDetection( router: ActorRef ) extends Actor with InstrumentedActor 
     OutlierDetection.ReloadPlans
   )( scheduleEC )
 
+  override def preStart(): Unit = {
+    initializeMetrics()
+    log info s"${self.path} dispatcher: [${context.dispatcher}]"
+  }
+
   override def postStop(): Unit = reloader.cancel()
 
-  type AggregatorSubscribers = Map[ActorRef, ActorRef]
-  override def receive: Receive = around( detection(Map.empty[ActorRef, ActorRef]) )
+  def initializeMetrics(): Unit = {
+    metrics.gauge( "outstanding" ) { outstanding.size }
+  }
 
-  def detection(outstanding: AggregatorSubscribers, inRetry: Boolean = false ): Receive = LoggingReceive {
+  type AggregatorSubscribers = Map[ActorRef, ActorRef]
+  var outstanding: AggregatorSubscribers = Map.empty[ActorRef, ActorRef]
+
+  override def receive: Receive = around( detection() )
+
+  def detection( inRetry: Boolean = false ): Receive = LoggingReceive {
     case result: Outliers if outstanding.contains( sender() ) => {
       val aggregator = sender()
       outstanding( aggregator ) ! result
-      context become around( detection(outstanding - aggregator, inRetry) )
+      outstanding -= aggregator
+      context become around( detection(inRetry) )
     }
 
     case m: OutlierDetectionMessage if outer.definedAt( m ) => {
       log debug s"plan for topic [${m.topic}]: [${outer.planFor(m)}]"
       val requester = sender()
       val aggregator = dispatch( m, outer.planFor(m).get )
-      val newOutstanding = outstanding + (aggregator -> requester)
-//      log debug s"new-outstanding[${newOutstanding.contains(aggregator)}] = $newOutstanding"
-      context become around( detection(newOutstanding, inRetry) )
+      outstanding += ( aggregator -> requester )
+      context become around( detection(inRetry) )
     }
 
     case m: OutlierDetectionMessage if inRetry == false && outer.definedAt( m ) == false => {
@@ -139,7 +154,7 @@ class OutlierDetection( router: ActorRef ) extends Actor with InstrumentedActor 
       // try reloading invalidating caches and retry on first miss only
       outer.invalidateCaches()
       self forward m
-      context become around( detection(outstanding, inRetry = true) )
+      context become around( detection(inRetry = true) )
     }
 
     case m: OutlierDetectionMessage => {
@@ -149,14 +164,14 @@ class OutlierDetection( router: ActorRef ) extends Actor with InstrumentedActor 
 
     case to: OutlierQuorumAggregator.AnalysisTimedOut => {
       log error s"quorum was not reached in time: [$to]"
-      val updated = outstanding - sender()
-      context become around( detection(updated, inRetry) )
+      outstanding -= sender()
+      context become around( detection(inRetry) )
     }
 
     case OutlierDetection.ReloadPlans => {
       // invalidate cache and reset retry if triggered
       outer.invalidateCaches()
-      context become around( detection(outstanding, inRetry = false) )
+      context become around( detection(inRetry = false) )
     }
   }
 

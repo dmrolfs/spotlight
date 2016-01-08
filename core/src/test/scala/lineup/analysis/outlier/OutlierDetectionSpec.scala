@@ -1,6 +1,6 @@
 package lineup.analysis.outlier
 
-import akka.actor.UnhandledMessage
+import akka.actor.{ActorRef, UnhandledMessage}
 import com.typesafe.config.ConfigFactory
 import lineup.analysis.outlier.OutlierDetection.UnrecognizedTopic
 import lineup.model.timeseries._
@@ -10,6 +10,8 @@ import org.mockito.Mockito._
 import org.scalatest.mock.MockitoSugar
 import lineup.model.outlier.{ ReduceOutliers, IsQuorum, OutlierPlan }
 import lineup.testkit.ParallelAkkaSpec
+
+import scala.util.Try
 
 
 /**
@@ -23,9 +25,9 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
 
     val metric = Topic( "metric.a" )
 
-    trait TestPlanPolicy extends OutlierDetection.PlanPolicy{
-      def plans: Seq[OutlierPlan] = fixture.plans
-      override def planFor(m: OutlierDetectionMessage): Option[OutlierPlan] = plans find { _ appliesTo m }
+    trait TestConfigurationProvider extends OutlierDetection.PlanConfigurationProvider {
+      override def router: ActorRef = fixture.router.ref
+      override def getPlans: () => Try[Seq[OutlierPlan]] = () => { Try{ fixture.plans } }
       override def invalidateCaches(): Unit = { }
       override def refreshInterval: FiniteDuration = 5.minutes
     }
@@ -51,9 +53,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
       import f._
       val probe = TestProbe()
       system.eventStream.subscribe( probe.ref, classOf[UnhandledMessage] )
-      val detect = TestActorRef[OutlierDetection](
-        OutlierDetection.props( router.ref ){ r => new OutlierDetection(r) with TestPlanPolicy }
-      )
+      val detect = TestActorRef[OutlierDetection]( OutlierDetection.props{ new OutlierDetection with TestConfigurationProvider } )
 
       val msg = mock[OutlierDetectionMessage]
       when( msg.topic ) thenReturn Topic("dummy")
@@ -81,9 +81,10 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
       )
 
       val detect = TestActorRef[OutlierDetection](
-        OutlierDetection.props( router.ref ){ r =>
-          new OutlierDetection(r) with TestPlanPolicy {
-            override def plans: Seq[OutlierPlan] = Seq(defaultPlan)
+        OutlierDetection.props {
+          new OutlierDetection with TestConfigurationProvider {
+            override def preStart(): Unit = { }
+            override def getPlans: () => Try[Seq[OutlierPlan]] = () => { Try{ Seq(defaultPlan) } }
           }
         }
       )
@@ -126,9 +127,10 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
       )
 
       val detect = TestActorRef[OutlierDetection](
-        OutlierDetection.props( router.ref ) { r =>
-          new OutlierDetection(r) with TestPlanPolicy {
-            override def plans: Seq[OutlierPlan] = f.plans :+ defaultPlan
+        OutlierDetection.props {
+          new OutlierDetection with TestConfigurationProvider {
+            override def preStart(): Unit = { }
+            override def getPlans: () => Try[Seq[OutlierPlan]] = () => { Try{ f.plans :+ defaultPlan } }
           }
         }
       )
@@ -170,9 +172,10 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
       )
 
       val detect = TestActorRef[OutlierDetection](
-        OutlierDetection.props( router.ref ) { r =>
-          new OutlierDetection(r) with TestPlanPolicy {
-            override def plans: Seq[OutlierPlan] = f.plans :+ defaultPlan
+        OutlierDetection.props {
+          new OutlierDetection with TestConfigurationProvider {
+            override def preStart(): Unit = { }
+            override def getPlans: () => Try[Seq[OutlierPlan]] = () => { Try{ f.plans :+ defaultPlan } }
           }
         }
       )
