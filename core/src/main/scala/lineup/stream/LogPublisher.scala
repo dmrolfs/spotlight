@@ -19,18 +19,14 @@ class LogPublisher extends OutlierPublisher {
 
   val outlierLogger = Logger( LoggerFactory getLogger "Outliers" )
 
-  override def receive: Receive = around( publish )
-
-  val publish: Receive = LoggingReceive {
-    case Publish( outliers ) => {
-      publish( outliers )
-      sender() ! Published( outliers )
+  override def receive: Receive = around{
+    LoggingReceive {
+      case Publish( outliers ) => {
+        publish( outliers )
+        sender() ! Published( outliers )
+      }
     }
   }
 
-  override def publish( outliers: Outliers ): Unit = {
-    val points = markPoints( outliers )
-//    outlierLogger info s"RECORDING [${points.size}] points for topic [${outliers.topic}] with outliers [${outliers.hasAnomalies}]"
-    outlierLogger info outliers.toString
-  }
+  override def publish( outliers: Outliers ): Unit = outlierLogger info outliers.toString
 }

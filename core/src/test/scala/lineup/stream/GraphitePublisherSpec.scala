@@ -21,8 +21,6 @@ import org.mockito.stubbing.Answer
 import org.python.core.{ PyList, PyTuple }
 import peds.commons.log.Trace
 
-import scala.collection.generic.AtomicIndexFlag
-
 
 /**
   * Created by rolfsd on 12/31/15.
@@ -103,7 +101,11 @@ with MockitoSugar {
 
     val graphite = TestActorRef[GraphitePublisher](
       Props(
-        new GraphitePublisher(address) with GraphitePublisher.SocketProvider {
+        new GraphitePublisher with GraphitePublisher.PublishProvider {
+          import scala.concurrent.duration._
+          override def separation: FiniteDuration = 1.second
+          override def initializeMetrics(): Unit = { }
+          override def destinationAddress: InetSocketAddress = outer.address
           override def createSocket( address: InetSocketAddress ): Socket = {
             openCount.incrementAndGet()
             outer.socket
@@ -155,9 +157,10 @@ with MockitoSugar {
   val DONE = Tag("done")
 
   "GraphitePublisher" should {
-    "disconnects from graphite" in { f: Fixture =>
+    "disconnects from graphite" taggedAs (WIP) in { f: Fixture =>
       import f._
-      graphite.receive( Close )
+      graphite ! Close
+//      graphite.receive( Close )
       verify( socket ).close()
     }
 
@@ -189,7 +192,7 @@ with MockitoSugar {
       unpickleOutput( actual ) mustBe "foo 0.0 100\n"
     }
 
-    "write full batch" taggedAs (WIP) in { f: Fixture =>
+    "write full batch" in { f: Fixture =>
       import f._
       val outliers = SeriesOutliers(
         algorithms = Set('dbscan),
@@ -214,7 +217,7 @@ with MockitoSugar {
       unpickleOutput() mustBe "foo 1.0 100\nfoo 0.0 117\nfoo 0.0 9821\n"
     }
 
-    "write full no-outlier batch" taggedAs (WIP) in { f: Fixture =>
+    "write full no-outlier batch" in { f: Fixture =>
       import f._
       val outliers = NoOutliers(
         algorithms = Set('dbscan),

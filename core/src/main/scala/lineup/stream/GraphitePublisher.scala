@@ -5,7 +5,7 @@ import scala.annotation.tailrec
 import scala.concurrent.{ Future, ExecutionContext }
 import scala.concurrent.duration._
 import scala.collection.immutable
-import scala.util.Try
+import scala.util.{Failure, Success, Try}
 import akka.actor._
 import akka.event.LoggingReceive
 import akka.pattern.{ ask, CircuitBreakerOpenException, CircuitBreaker }
@@ -25,13 +25,7 @@ import lineup.model.outlier.Outliers
 object GraphitePublisher extends LazyLogging {
   import OutlierPublisher._
 
-  def props( address: InetSocketAddress, batchSize: Int = 100 ): Props = {
-    Props(
-      new GraphitePublisher( address, batchSize ) with SocketProvider {
-        override def createSocket( address: InetSocketAddress ): Socket = new Socket( address.getAddress, address.getPort )
-      }
-    )
-  }
+  def props( makePublisher: => GraphitePublisher with PublishProvider ): Props = Props( makePublisher )
 
 
   def publish(
@@ -59,7 +53,7 @@ object GraphitePublisher extends LazyLogging {
     Flow[Outliers]
     .conflate( immutable.Seq( _ ) ) { _ :+ _ }
     .mapConcat( identity )
-    .via( Limiter.limitGlobal(limiter, 1.minute) )
+    .via( Limiter.limitGlobal(limiter, 2.minutes) )
     .mapAsync( 1 ) { os =>
       val published = publisher ? Publish( os )
       published.mapTo[Published] map { _.outliers }
@@ -79,17 +73,19 @@ object GraphitePublisher extends LazyLogging {
   case object Flushed extends GraphitePublisherProtocol
 
 
-  trait SocketProvider {
+  trait PublishProvider {
+    def separation: FiniteDuration = 10.seconds
+    def destinationAddress: InetSocketAddress
     def createSocket( address: InetSocketAddress ): Socket
+    def batchSize: Int = 100
+    def batchInterval: FiniteDuration = 1.second
   }
 }
 
 
-class GraphitePublisher(
-  address: InetSocketAddress,
-  batchSize: Int = 100
-) extends OutlierPublisher {
-  outer: GraphitePublisher.SocketProvider =>
+class GraphitePublisher( outlierTopicPrefix: Option[String] = None) extends DenseOutlierPublisher {
+  outer: GraphitePublisher.PublishProvider =>
+
   import OutlierPublisher._
   import GraphitePublisher._
   import context.dispatcher
@@ -100,6 +96,13 @@ class GraphitePublisher(
   val outlierLogger: Logger = Logger( LoggerFactory getLogger "Outliers" )
   var socket: Option[Socket] = None
   var waitQueue = immutable.Queue.empty[MarkPoint]
+
+  override val fillSeparation: FiniteDuration = outer.separation
+
+  def initializeMetrics(): Unit = {
+    //todo add waiting gauge in peds Limiter
+    metrics.gauge( "waiting" ) { waitQueue.size }
+  }
 
   val breaker: CircuitBreaker = {
     new CircuitBreaker(
@@ -121,25 +124,38 @@ class GraphitePublisher(
 
   def resetNextScheduled(): Option[Cancellable] = {
     cancelNextSchedule()
-    _nextScheduled = Some( context.system.scheduler.scheduleOnce(1.second, self, SendBatch) )
+    _nextScheduled = Some( context.system.scheduler.scheduleOnce(outer.batchInterval, self, SendBatch) )
     _nextScheduled
   }
 
 
-  override def preStart(): Unit = open()
+  override def preStart(): Unit = {
+    initializeMetrics()
+    log info s"${self.path} dispatcher: [${context.dispatcher}]"
+    self ! Open
+  }
 
   override def postStop(): Unit = {
     cancelNextSchedule()
     close()
+    context.parent ! Closed
+    context become around( closed )
   }
 
 
   override def receive: Receive = around( closed )
 
   val closed: Receive = LoggingReceive {
-    case Open => open()
+    case Open => {
+      open()
+      sender() ! Opened
+      context become around( opened )
+    }
 
-    case Close => { }
+    case Close => {
+      close()
+      sender() ! Closed
+    }
   }
 
   val opened: Receive = LoggingReceive {
@@ -148,45 +164,75 @@ class GraphitePublisher(
       sender() ! Published( outliers ) //todo send when all corresponding marks are sent to graphite
     }
 
-    case Open => { }
+    case Open => {
+      open()
+      sender() ! Opened
+    }
 
-    case Close => close()
+    case Close => {
+      close()
+      sender() ! Closed
+      context become around( closed )
+    }
 
     case Flush => flush()
 
-    case SendBatch => if ( waitQueue.nonEmpty ) batchAndSend()
-  }
-
-  override def publish( o: Outliers ): Unit = trace.block( s"publish($o)" ) {
-    waitQueue = markPoints( o ).foldLeft( waitQueue ){ _.enqueue( _ ) }
-    outlierLogger info o.toString
-  }
-
-
-  def open(): Try[Unit] = trace.block( "open" ) {
-    Try {
-      if ( !isConnected ) {
-        val socketOpen = Try { createSocket(address) }
-        socket = socketOpen.toOption
-        resetNextScheduled()
-        sender() ! Opened
-        context become around( opened )
-        log info s"${self.path} opened [${socket}] [${socketOpen}]"
-      }
+    case SendBatch => {
+      if ( waitQueue.nonEmpty ) batchAndSend()
+      resetNextScheduled()
     }
   }
 
-  def close(): Unit = trace.block( "close" ) {
-    val f = Try { trace.briefBlock("flushing") { flush() } }
-    val socketClose = Try { socket foreach { _.close() } }
-    socket = None
-    cancelNextSchedule()
-    sender() ! Closed
-    context become around( closed )
-    log info s"${self.path} closed [${socket}] [${socketClose}]"
+  override def publish( o: Outliers ): Unit = {
+    waitQueue = markPoints( o ).foldLeft( waitQueue ){ _.enqueue( _ ) }
+    log debug s"publish: added to wait queue - now at [${waitQueue.size}]"
+    outlierLogger info o.toString
+  }
+
+  override def markPoints( o: Outliers ): Seq[MarkPoint] = {
+    def augmentTopic( mp: MarkPoint ): MarkPoint = {
+      outlierTopicPrefix map { prefix =>
+        val (n, ts, v) = mp
+        ( prefix + n, ts, v )
+      } getOrElse {
+        mp
+      }
+    }
+
+    super.markPoints( o ) map { augmentTopic }
   }
 
   def isConnected: Boolean = socket map { s => s.isConnected && !s.isClosed } getOrElse { false }
+
+  def open(): Try[Unit] = {
+    if ( isConnected ) Try { () }
+    else {
+      val socketOpen = Try { createSocket( destinationAddress ) }
+      socket = socketOpen.toOption
+      socketOpen match {
+        case Success(s) => {
+          resetNextScheduled()
+          log info s"${self.path} opened [${socket}] [${socketOpen}] nextScheduled:[${_nextScheduled.map{!_.isCancelled}}]"
+        }
+
+        case Failure(ex) => {
+          log error s"open failed - could not connect with graphite server: [${ex.getMessage}]"
+          cancelNextSchedule()
+        }
+      }
+
+      socketOpen map { s => () }
+    }
+  }
+
+  def close(): Unit = {
+    val f = Try { flush() }
+    val socketClose = Try { socket foreach { _.close() } }
+    socket = None
+    cancelNextSchedule()
+    context become around( closed )
+    log info s"${self.path} closed [${socket}] [${socketClose}]"
+  }
 
   @tailrec final def flush(): Unit = {
     cancelNextSchedule()
@@ -196,10 +242,10 @@ class GraphitePublisher(
       ()
     }
     else {
-      val (toBePublished, remainingQueue) = waitQueue splitAt batchSize
+      val (toBePublished, remainingQueue) = waitQueue splitAt outer.batchSize
       waitQueue = remainingQueue
 
-      log debug s"""flush: batch=[${toBePublished.mkString(",")}]"""
+      log info s"""flush: batch=[${toBePublished.mkString(",")}]"""
       val report = serialize( toBePublished:_* )
       breaker withSyncCircuitBreaker { sendToGraphite( report ) }
       flush()
@@ -208,7 +254,8 @@ class GraphitePublisher(
 
   def serialize( payload: MarkPoint* ): ByteString = pickler.pickleFlattenedTimeSeries( payload:_* )
 
-  def batchAndSend(): Unit = trace.block( "batchAndSend" ) {
+  def batchAndSend(): Unit = {
+    log debug s"waitQueue:[${waitQueue.size}] batch-size:[${outer.batchSize}] toBePublished:[${waitQueue.take(outer.batchSize).size}] remainingQueue:[${waitQueue.drop(outer.batchSize).size}]"
     val (toBePublished, remainingQueue) = waitQueue splitAt batchSize
     waitQueue = remainingQueue
 
@@ -218,12 +265,14 @@ class GraphitePublisher(
         Future {
           sendToGraphite( report )
           resetNextScheduled()
+          self ! SendBatch
         }
       }
     }
   }
 
-  def sendToGraphite( pickle: ByteString ): Unit = trace.block( "sendToGraphite" ) {
+  def sendToGraphite( pickle: ByteString ): Unit = {
+    log debug s"sending to graphite ${pickle.size} bytes"
     socket foreach { s =>
       val out = s.getOutputStream
       out write pickle.toArray
