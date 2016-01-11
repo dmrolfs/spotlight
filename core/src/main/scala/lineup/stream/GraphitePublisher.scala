@@ -1,6 +1,8 @@
 package lineup.stream
 
 import java.net.{ InetSocketAddress, Socket }
+import nl.grons.metrics.scala.Meter
+
 import scala.annotation.tailrec
 import scala.concurrent.{ Future, ExecutionContext }
 import scala.concurrent.duration._
@@ -80,10 +82,16 @@ object GraphitePublisher extends LazyLogging {
     def batchSize: Int = 100
     def batchInterval: FiniteDuration = 1.second
   }
+
+
+  private[stream] sealed trait BreakerStatus
+  case object BreakerOpen extends BreakerStatus { override def toString: String = "open" }
+  case object BreakerPending extends BreakerStatus { override def toString: String = "pending" }
+  case object BreakerClosed extends BreakerStatus { override def toString: String = "closed" }
 }
 
 
-class GraphitePublisher( outlierTopicPrefix: Option[String] = None) extends DenseOutlierPublisher {
+class GraphitePublisher( outlierTopicPrefix: Option[String] ) extends DenseOutlierPublisher {
   outer: GraphitePublisher.PublishProvider =>
 
   import OutlierPublisher._
@@ -96,12 +104,17 @@ class GraphitePublisher( outlierTopicPrefix: Option[String] = None) extends Dens
   val outlierLogger: Logger = Logger( LoggerFactory getLogger "Outliers" )
   var socket: Option[Socket] = None
   var waitQueue = immutable.Queue.empty[MarkPoint]
-
   override val fillSeparation: FiniteDuration = outer.separation
 
+
+  lazy val circuitOpenMeter: Meter = metrics.meter( "circuit", "open" )
+  lazy val circuitPendingMeter: Meter = metrics.meter( "circuit", "pending" )
+  lazy val circuitRequestsMeter: Meter = metrics.meter( "circuit", "requests" )
+  var gaugeStatus: BreakerStatus = BreakerClosed
+
   def initializeMetrics(): Unit = {
-    //todo add waiting gauge in peds Limiter
     metrics.gauge( "waiting" ) { waitQueue.size }
+    metrics.gauge( "circuit", "breaker" ) { gaugeStatus.toString }
   }
 
   val breaker: CircuitBreaker = {
@@ -111,9 +124,18 @@ class GraphitePublisher( outlierTopicPrefix: Option[String] = None) extends Dens
       callTimeout = 10.seconds,
       resetTimeout = 1.minute
     )( executor = context.system.dispatcher )
-    .onOpen( log warning  "graphite connection is down, and circuit breaker will remain open for 1 minute before trying again" )
-    .onHalfOpen( log info "attempting to publish to graphite and close circuit breaker" )
-    .onClose( log info "graphite connection established and circuit breaker is closed" )
+    .onOpen {
+      gaugeStatus = BreakerOpen
+      log warning  "graphite connection is down, and circuit breaker will remain open for 1 minute before trying again"
+    }
+    .onHalfOpen {
+      gaugeStatus = BreakerPending
+      log info "attempting to publish to graphite and close circuit breaker"
+    }
+    .onClose {
+      gaugeStatus = BreakerClosed
+      log info "graphite connection established and circuit breaker is closed"
+    }
   }
 
   var _nextScheduled: Option[Cancellable] = None
@@ -184,8 +206,9 @@ class GraphitePublisher( outlierTopicPrefix: Option[String] = None) extends Dens
   }
 
   override def publish( o: Outliers ): Unit = {
-    waitQueue = markPoints( o ).foldLeft( waitQueue ){ _.enqueue( _ ) }
-    log debug s"publish: added to wait queue - now at [${waitQueue.size}]"
+    val points = markPoints( o )
+    waitQueue = points.foldLeft( waitQueue ){ _.enqueue( _ ) }
+    log info s"publish[${o.topic}:${o.hasAnomalies}]: added [${o.anomalySize} / ${o.size}] to wait queue - now at [${waitQueue.size}]"
     outlierLogger info o.toString
   }
 
@@ -247,7 +270,10 @@ class GraphitePublisher( outlierTopicPrefix: Option[String] = None) extends Dens
 
       log info s"""flush: batch=[${toBePublished.mkString(",")}]"""
       val report = serialize( toBePublished:_* )
-      breaker withSyncCircuitBreaker { sendToGraphite( report ) }
+      breaker withSyncCircuitBreaker {
+        circuitRequestsMeter.mark()
+        sendToGraphite( report )
+      }
       flush()
     }
   }
@@ -263,6 +289,7 @@ class GraphitePublisher( outlierTopicPrefix: Option[String] = None) extends Dens
       val report = pickler.pickleFlattenedTimeSeries( toBePublished:_* )
       breaker withCircuitBreaker {
         Future {
+          circuitRequestsMeter.mark()
           sendToGraphite( report )
           resetNextScheduled()
           self ! SendBatch

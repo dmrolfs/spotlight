@@ -1,5 +1,7 @@
 package lineup.analysis.outlier
 
+import nl.grons.metrics.scala.{MetricName, Meter}
+
 import scala.concurrent.duration.FiniteDuration
 import akka.actor.{ Cancellable, Actor, ActorLogging, Props }
 import akka.event.LoggingReceive
@@ -22,6 +24,11 @@ object OutlierQuorumAggregator {
  */
 class OutlierQuorumAggregator( plan: OutlierPlan, source: TimeSeriesBase ) extends Actor with InstrumentedActor with ActorLogging {
   import OutlierQuorumAggregator._
+
+  override lazy val metricBaseName: MetricName = MetricName( classOf[OutlierQuorumAggregator] )
+  lazy val conclusionsMeter: Meter = metrics meter "quorum.conclusions"
+  lazy val warningsMeter: Meter = metrics meter "quorum.warnings"
+  lazy val timeoutsMeter: Meter = metrics meter "quorum.timeout"
 
   val attemptTimeout: FiniteDuration = plan.timeout / 3L
 
@@ -58,6 +65,7 @@ class OutlierQuorumAggregator( plan: OutlierPlan, source: TimeSeriesBase ) exten
     case _: AnalysisTimedOut if retries > 0 => {
       val retriesLeft = retries - 1
 
+      warningsMeter.mark()
       log warning s"quorum not reached for topic:[${source.topic}] tries-left:[$retriesLeft] " +
                   s"""received:[${fulfilled.keys.mkString(",")}] plan:[${plan.summary}]"""
 
@@ -66,6 +74,7 @@ class OutlierQuorumAggregator( plan: OutlierPlan, source: TimeSeriesBase ) exten
     }
 
     case timeout: AnalysisTimedOut => {
+      timeoutsMeter.mark()
       context.parent ! timeout
       context.stop( self )
     }
@@ -73,6 +82,7 @@ class OutlierQuorumAggregator( plan: OutlierPlan, source: TimeSeriesBase ) exten
 
   def process( m: Outliers ): Unit = {
     if ( plan isQuorum fulfilled ) {
+      conclusionsMeter.mark()
       import akka.pattern.pipe
       plan.reduce( fulfilled, source ) pipeTo context.parent
       context stop self

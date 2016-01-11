@@ -101,7 +101,7 @@ with MockitoSugar {
 
     val graphite = TestActorRef[GraphitePublisher](
       Props(
-        new GraphitePublisher with GraphitePublisher.PublishProvider {
+        new GraphitePublisher( None ) with GraphitePublisher.PublishProvider {
           import scala.concurrent.duration._
           override def separation: FiniteDuration = 1.second
           override def initializeMetrics(): Unit = { }
@@ -207,14 +207,30 @@ with MockitoSugar {
 
     "write past full batch" in { f: Fixture =>
       import f._
+
+      val graphite2 = TestActorRef[GraphitePublisher](
+        Props(
+          new GraphitePublisher( Some("lineup.outlier.") ) with GraphitePublisher.PublishProvider {
+            import scala.concurrent.duration._
+            override def separation: FiniteDuration = 1.second
+            override def initializeMetrics(): Unit = { }
+            override def destinationAddress: InetSocketAddress = f.address
+            override def createSocket( address: InetSocketAddress ): Socket = {
+              openCount.incrementAndGet()
+              f.socket
+            }
+          }
+        )
+      )
+
       val outliers = SeriesOutliers(
         algorithms = Set('dbscan),
         source = TimeSeries("foo", Row(dp1, dp2, dp3)),
         outliers = Row(dp1)
       )
-      graphite.receive( Publish(outliers) )
-      graphite.receive( Flush )
-      unpickleOutput() mustBe "foo 1.0 100\nfoo 0.0 117\nfoo 0.0 9821\n"
+      graphite2.receive( Publish(outliers) )
+      graphite2.receive( Flush )
+      unpickleOutput() mustBe "lineup.outlier.foo 1.0 100\nlineup.outlier.foo 0.0 117\nlineup.outlier.foo 0.0 9821\n"
     }
 
     "write full no-outlier batch" in { f: Fixture =>
