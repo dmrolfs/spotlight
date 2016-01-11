@@ -26,6 +26,9 @@ object OutlierDetectionWorkflow {
   }
 
 
+  val OutlierMetricPrefix = "lineup.outlier."
+
+
   case object GetOutlierDetector
   case object GetPublishRateLimiter
   case object GetPublisher
@@ -70,7 +73,7 @@ object OutlierDetectionWorkflow {
     def publisherProps: Props = {
       graphiteAddress map { address =>
         GraphitePublisher.props {
-          new GraphitePublisher with GraphitePublisher.PublishProvider {
+          new GraphitePublisher( outlierTopicPrefix = Some(OutlierMetricPrefix) ) with GraphitePublisher.PublishProvider {
             override lazy val metricBaseName = MetricName( classOf[GraphitePublisher] )
             override def destinationAddress: InetSocketAddress = address
             override def batchInterval: FiniteDuration = 500.millis
@@ -130,7 +133,7 @@ class OutlierDetectionWorkflow(
 
 
   override lazy val metricBaseName: MetricName = MetricName( classOf[OutlierDetectionWorkflow] )
-  val failures: Meter = metrics.meter( "actor.failures" )
+  val failuresMeter: Meter = metrics.meter( "actor.failures" )
 
   override def childStarter(): Unit = {
     publishRateLimiterRef = makePublishRateLimiter( )
@@ -147,7 +150,7 @@ class OutlierDetectionWorkflow(
     case _: ActorKilledException => Stop
 
     case _: Exception => {
-      failures.mark()
+      failuresMeter.mark( )
       Restart
     }
 
