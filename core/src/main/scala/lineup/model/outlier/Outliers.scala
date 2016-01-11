@@ -12,6 +12,8 @@ trait Outliers {
   def topic: Topic
   def algorithms: Set[Symbol]
   def hasAnomalies: Boolean
+  def size: Int
+  def anomalySize: Int
   def source: Source
 }
 
@@ -28,8 +30,10 @@ case class NoOutliers(
   override val source: TimeSeriesBase
 ) extends Outliers {
   override type Source = TimeSeriesBase
-  override val topic: Topic = source.topic
+  override def topic: Topic = source.topic
+  override def size: Int = source.size
   override val hasAnomalies: Boolean = false
+  override val anomalySize: Int = 0
 
   override def toString: String = {
     s"""${getClass.safeSimpleName}:"${topic}"[source:[${source.size}] interval:[${source.interval getOrElse "No Interval"}]"""
@@ -45,8 +49,10 @@ case class SeriesOutliers(
 
   val trace = Trace[SeriesOutliers]
   override type Source = TimeSeries
-  override val topic: Topic = source.topic
-  override val hasAnomalies: Boolean = outliers.nonEmpty
+  override def topic: Topic = source.topic
+  override def size: Int = source.size
+  override def hasAnomalies: Boolean = outliers.nonEmpty
+  override def anomalySize: Int = outliers.size
 
   def anomalousGroups: Seq[OutlierGroups] = trace.block( "anomalousGroups" ) {
     def nonEmptyAccumulator( acc: List[OutlierGroups] ): List[OutlierGroups] = trace.briefBlock( s"nonEmptyAccumulator" ) {
@@ -90,8 +96,10 @@ case class CohortOutliers(
   outliers: Set[TimeSeries] = Set()
 ) extends Outliers {
   override type Source = TimeSeriesCohort
+  override def size: Int = source.size
   override val topic: Topic = source.topic
   override val hasAnomalies: Boolean = outliers.nonEmpty
+  override def anomalySize: Int = outliers.size
 
   override def toString: String = s"""${getClass.safeSimpleName}:"${topic}"[source:[${source.size}] outliers:[${outliers.mkString(",")}]"""
 }

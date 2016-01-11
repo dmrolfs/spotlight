@@ -61,8 +61,9 @@ object OutlierDetection extends StrictLogging with Instrumented {
     override type Source = TimeSeriesBase
     override def hasAnomalies: Boolean = false
     override def source: Source = null
+    override def size: Int = 0
+    override def anomalySize: Int = 0
     override def algorithms: Set[Symbol] = Set.empty[Symbol]
-
   }
 
 
