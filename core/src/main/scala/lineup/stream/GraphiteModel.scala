@@ -2,7 +2,7 @@ package lineup.stream
 
 import java.net.{ InetSocketAddress, InetAddress }
 import java.util.concurrent.atomic.AtomicInteger
-import lineup.stream.OutlierDetectionWorkflow._
+import kamon.Kamon
 import peds.akka.supervision.IsolatedLifeCycleSupervisor.{ChildStarted, WaitForStart}
 import peds.akka.supervision.OneForOneStrategyFactory
 
@@ -31,19 +31,16 @@ import lineup.analysis.outlier.OutlierDetection
 import lineup.model.outlier._
 import lineup.model.timeseries.TimeSeriesBase.Merging
 import lineup.model.timeseries._
+import lineup.stream.OutlierDetectionWorkflow._
 
 
 /**
  * Created by rolfsd on 10/21/15.
  */
 object GraphiteModel extends Instrumented with StrictLogging {
-  val OutlierMetricPrefix = "lineup.outlier."
-
   override lazy val metricBaseName: MetricName = {
     import peds.commons.util._
-    val result = MetricName( getClass.getPackage.getName, getClass.safeSimpleName )
-    logger error s"METRIC BASE NAME: [${result.name}] \t simple:[${getClass.safeSimpleName}] \t package:[${getClass.getPackage.getName}]"
-    result
+    MetricName( getClass.getPackage.getName, getClass.safeSimpleName )
   }
 
   override protected val logger: Logger = Logger( LoggerFactory.getLogger("Graphite") )
@@ -69,7 +66,7 @@ object GraphiteModel extends Instrumented with StrictLogging {
 //  }
 
 
-  lazy val actorFailures: Meter = metrics meter "actor.failures"
+  lazy val actorFailuresMeter: Meter = metrics meter "actor.failures"
 
   val defaultSupervision: SupervisorStrategy = OneForOneStrategy() {
     case _: ActorInitializationException  => Stop
@@ -77,19 +74,19 @@ object GraphiteModel extends Instrumented with StrictLogging {
     case _: ActorKilledException => Stop
 
     case _: Exception => {
-      actorFailures.mark()
+      actorFailuresMeter.mark( )
       Restart
     }
 
     case _ => Escalate
   }
 
-  lazy val streamFailures: Meter = metrics meter "stream.failures"
+  lazy val streamFailuresMeter: Meter = metrics meter "stream.failures"
 
   val streamSupervisionDecider: Supervision.Decider = {
     case ex => {
       logger.error( "Error caught by Supervisor:", ex )
-      streamFailures.mark()
+      streamFailuresMeter.mark( )
       Supervision.Restart
     }
   }
@@ -106,7 +103,8 @@ object GraphiteModel extends Instrumented with StrictLogging {
 
 
   def main( args: Array[String] ): Unit = {
-    logger error s"ACTOR FAILURES COUNT: [${actorFailures.count}]"
+    Kamon.start()
+
     Settings.makeUsageConfig.parse( args, Settings.zero ) match {
       case None => System exit -1
 
@@ -169,11 +167,15 @@ object GraphiteModel extends Instrumented with StrictLogging {
         implicit val ec = system.dispatcher
 
         streamGraphiteOutliers( workflow, workflowConfig, PlanConfigPath ) onComplete {
-          case Success(_) => system.terminate()
+          case Success(_) => {
+            system.terminate()
+            Kamon.shutdown()
+          }
 
           case Failure( e ) => {
             logger.error( "Graphite Model bootstrap failure:", e )
             system.terminate()
+            Kamon.shutdown()
           }
         }
       }
@@ -409,7 +411,7 @@ object GraphiteModel extends Instrumented with StrictLogging {
   }
 
 
-  val demoReduce = new ReduceOutliers {
+  val defaultOutlierReducer: ReduceOutliers = new ReduceOutliers {
     override def apply(
       results: SeriesOutlierResults,
       source: TimeSeriesBase
@@ -515,7 +517,7 @@ object GraphiteModel extends Instrumented with StrictLogging {
               name = name,
               timeout = timeout,
               isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = algorithms.size, triggerPoint = 1 ),
-              reduce = demoReduce,
+              reduce = defaultOutlierReducer,
               algorithms = algorithms,
               specification = spec
             )
@@ -529,7 +531,7 @@ object GraphiteModel extends Instrumented with StrictLogging {
               name = name,
               timeout = timeout,
               isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = algorithms.size, triggerPoint = 1 ),
-              reduce = demoReduce,
+              reduce = defaultOutlierReducer,
               algorithms = algorithms,
               specification = spec,
               extractTopic = OutlierDetection.extractOutlierDetectionTopic,
@@ -542,7 +544,7 @@ object GraphiteModel extends Instrumented with StrictLogging {
               name = name,
               timeout = timeout,
               isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = algorithms.size, triggerPoint = 1 ),
-              reduce = demoReduce,
+              reduce = defaultOutlierReducer,
               algorithms = algorithms,
               specification = spec,
               extractTopic = OutlierDetection.extractOutlierDetectionTopic,

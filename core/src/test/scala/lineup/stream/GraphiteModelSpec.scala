@@ -52,7 +52,7 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
         algorithms = Set(DBSCANAnalyzer.Algorithm ),
         timeout = 500.millis,
         isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = 1, triggerPoint = 1 ),
-        reduce = GraphiteModel.demoReduce,
+        reduce = GraphiteModel.defaultOutlierReducer,
         specification = ConfigFactory.parseString(
         s"""
          |algorithm-config.${DBSCANAnalyzer.Eps}: 5.0
@@ -78,7 +78,7 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
   val DONE = Tag( "done" )
 
   "GraphiteModel" should {
-    "convert pickle to TimeSeries" taggedAs (DONE) in { f: Fixture =>
+    "convert pickle to TimeSeries" in { f: Fixture =>
       import f._
       val now = joda.DateTime.now
       val dp = makeDataPoints( points, start = now ).take( 5 )
@@ -87,7 +87,7 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
       actual mustBe expected
     }
 
-    "flow convert graphite pickle into TimeSeries" taggedAs (DONE) in { f: Fixture =>
+    "flow convert graphite pickle into TimeSeries" taggedAs (WIP) in { f: Fixture =>
       import f._
       val now = joda.DateTime.now
       val dp = makeDataPoints( points, start = now ).take( 5 )
@@ -100,7 +100,7 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
       result mustBe expected
     }
 
-    "framed flow convert graphite pickle into TimeSeries" taggedAs (DONE) in { f: Fixture =>
+    "framed flow convert graphite pickle into TimeSeries" in { f: Fixture =>
       import f._
       val now = joda.DateTime.now
       val dp = makeDataPoints( points, start = now ).take( 5 )
@@ -115,7 +115,7 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
       result mustBe expected
     }
 
-    "convert pickles from framed ByteStream" taggedAs (NEXT) in { f: Fixture =>
+    "convert pickles from framed ByteStream" in { f: Fixture =>
       import f._
       val now = joda.DateTime.now
       val dp1 = makeDataPoints( points, start = now ).take( 5 )
@@ -137,7 +137,7 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
       result mustBe expected
     }
 
-    "read sliding window" taggedAs (DONE) in { f: Fixture =>
+    "read sliding window" in { f: Fixture =>
       import f._
       import system.dispatcher
 
@@ -167,7 +167,7 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
     }
 
 
-    "detect Outliers" taggedAs (DONE) in { f: Fixture =>
+    "detect Outliers" in { f: Fixture =>
       import f._
       import system.dispatcher
 
@@ -177,7 +177,7 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
         algorithms = algos,
         timeout = 500.millis,
         isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = algos.size, triggerPoint = 1 ),
-        reduce = GraphiteModel.demoReduce,
+        reduce = GraphiteModel.defaultOutlierReducer,
         specification = ConfigFactory.parseString(
           s"""
              |algorithm-config.${DBSCANAnalyzer.Eps}: 5000
