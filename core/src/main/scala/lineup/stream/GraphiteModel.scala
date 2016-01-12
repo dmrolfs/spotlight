@@ -2,14 +2,11 @@ package lineup.stream
 
 import java.net.{ InetSocketAddress, InetAddress }
 import java.util.concurrent.atomic.AtomicInteger
-import kamon.Kamon
-import peds.akka.supervision.IsolatedLifeCycleSupervisor.{ChildStarted, WaitForStart}
-import peds.akka.supervision.OneForOneStrategyFactory
-
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
 import scala.util.matching.Regex
 import scala.util.{ Try, Failure, Success }
+
 import akka.actor._
 import akka.actor.SupervisorStrategy._
 import akka.pattern.ask
@@ -18,14 +15,18 @@ import akka.stream._
 import akka.util.{Timeout, ByteString}
 import akka.stream.stage.{ SyncDirective, Context, PushStage }
 
+import kamon.Kamon
 import better.files.{ ManagedResource => _, _ }
 import com.typesafe.config._
 import com.typesafe.scalalogging.{ StrictLogging, Logger }
 import org.slf4j.LoggerFactory
 import nl.grons.metrics.scala.{Meter, MetricName}
 import peds.akka.metrics.{ StreamMonitor, Reporter, Instrumented }
+import peds.akka.supervision.IsolatedLifeCycleSupervisor.{ChildStarted, WaitForStart}
+import peds.akka.supervision.OneForOneStrategyFactory
 import peds.commons.log.Trace
 import peds.commons.collection.BloomFilter
+
 import lineup.analysis.outlier.algorithm.DBSCANAnalyzer
 import lineup.analysis.outlier.OutlierDetection
 import lineup.model.outlier._
@@ -143,7 +144,7 @@ object GraphiteModel extends Instrumented with StrictLogging {
           logger warn """metric report configuration missing at "lineup.metrics""""
         }
 
-        implicit val system = ActorSystem( "Graphite" )
+        implicit val system = ActorSystem( "Lineup" )
 
         val workflow = system.actorOf(
           OutlierDetectionWorkflow.props(
