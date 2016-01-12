@@ -6,7 +6,8 @@ name := "lineup-core"
 
 description := "lorem ipsum."
 
-libraryDependencies ++= commonDependencies ++
+libraryDependencies ++=
+  commonDependencies ++
   metrics.all ++
   facility.betterFiles.all ++
   Seq(
@@ -37,16 +38,17 @@ mainClass in assembly := Some("lineup.stream.GraphiteModel")
 assemblyJarName in assembly := s"${organizationName.value}-${name.value}-${version.value}.jar"
 
 assemblyMergeStrategy in assembly := {
+  case PathList( "org", "hyperic", "sigar", xs @ _* ) => MergeStrategy.last
+
   case x if Assembly.isConfigFile(x) => MergeStrategy.concat
 
   case PathList(ps @ _*) if Assembly.isReadme(ps.last) || Assembly.isLicenseFile(ps.last) => MergeStrategy.rename
 
   case PathList("META-INF", xs @ _*) => {
-    (xs map {_.toLowerCase}) match {
+    xs map {_.toLowerCase} match {
+      case ("aop.xml" :: Nil) => MergeStrategy.first
       case ("manifest.mf" :: Nil) | ("index.list" :: Nil) | ("dependencies" :: Nil) => MergeStrategy.discard
-
       case ps @ (x :: xs) if ps.last.endsWith(".sf") || ps.last.endsWith(".dsa") => MergeStrategy.discard
-
       case "plexus" :: xs => MergeStrategy.discard
       case "services" :: xs => MergeStrategy.filterDistinctLines
       case ("spring.schemas" :: Nil) | ("spring.handlers" :: Nil) => MergeStrategy.filterDistinctLines
@@ -61,7 +63,11 @@ docker <<= ( docker dependsOn assembly )
 
 dockerfile in docker := {
   val artifact = ( assemblyOutputPath in assembly ).value
-  val artifactTargetPath = s"/app/${artifact.name}"
+  val targetBase = "/app"
+  val artifactTargetPath = s"${targetBase}/${artifact.name}"
+  val coreosPath = baseDirectory.value / ".." / "coreos"
+  val aspectjArtifactName = ( coreosPath ** "aspectjweaver-*.jar" ).get.headOption
+  val sigarBinary = ( coreosPath ** "libsigar-amd64-linux.so" ).get.headOption
   val mainclass = mainClass.in( Compile, run ).value.getOrElse( sys.error("Expected exactly one main class") )
 
   new Dockerfile {
@@ -70,18 +76,33 @@ dockerfile in docker := {
     run( "apt-get", "-y", "install", "tmux" )
     copy( artifact, artifactTargetPath )
 
-    entryPoint(
-      "java",
-//      "-Dcom.sun.management.jmxremote",
-//      "-Dcom.sun.management.jmxremote.ssl=false",
-//      "-Dcom.sun.management.jmxremote.authenticate=false",
-//      "-Dcom.sun.management.jmxremote.port=9010",
-//      "-Dcom.sun.management.jmxremote.rmi.port=9110",
-//      "-Dcom.sun.management.jmxremote.local.only=false",
-////      "-Djava.rmi.server.hostname='192.168.99.100'",
-      "-cp", "/etc/lineup:" + artifactTargetPath,
-      mainclass
-    )
+    val aspectAndSigar = for {
+      aspectj <- aspectjArtifactName
+      sigar <- sigarBinary
+    } yield ( aspectj, sigar )
+
+    aspectAndSigar match {
+      case Some( (aspectj, sigar) ) => {
+        copy( aspectj, targetBase + "/" + aspectj.name )
+        copy( sigar, targetBase + "/sigar-bin/" + sigar.name )
+
+        entryPoint(
+          "java",
+          "-cp", "/etc/lineup:" + artifactTargetPath,
+          s"-Djava.library.path=${targetBase}/sigar-bin/",
+          s"-javaagent:${targetBase}/${aspectj.name}",
+          mainclass
+        )
+      }
+
+      case None => {
+        entryPoint(
+          "java",
+          "-cp", "/etc/lineup:" + artifactTargetPath ,
+          mainclass
+        )
+      }
+    }
 
     env( "LOG_HOME", "/var/log" )
     env( "CONFIG_HOME", "/etc/lineup" )

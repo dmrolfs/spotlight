@@ -5,12 +5,12 @@ object Dependencies {
   object peds {
     val version = "0.1.6"
     def module( id: String ) = "com.github.dmrolfs" %% s"peds-$id" % version
+    def all = Seq( commons, akka, archetype )
 
     val commons = module( "commons" )
     val archetype = module( "archetype" )
     val akka = module( "akka" )
-
-    val all = Seq( commons, akka, archetype )
+    val builder = "com.github.dmrolfs" %% "shapeless-builder" % "1.0.0"
   }
 
   object demesne {
@@ -51,7 +51,7 @@ object Dependencies {
     val joda = "joda-time" % "joda-time" % "2.9"
     val jodaConvert = "org.joda" % "joda-convert" % "1.7"
     val scalaTime = "com.github.nscala-time" %% "nscala-time" % "2.4.0"
-    val all = Seq( joda, jodaConvert, scalaTime )
+    def all = Seq( joda, jodaConvert, scalaTime )
   }
 
   object log {
@@ -67,18 +67,33 @@ object Dependencies {
 
     val slf4j = "org.slf4j" % "slf4j-api" % "1.7.13"
 
-    val all = Seq( typesafe, logback.core, logback.classic, slf4j )
+    def all = Seq( typesafe, logback.core, logback.classic, slf4j )
   }
 
   object metrics {
     val version = "3.1.2"
     def module( id: String ) = "io.dropwizard.metrics" % s"metrics-$id" % "3.1.2"
+    def all = Seq( sigar, core, graphite, metricsScala ) ++ kamon.all
+
+    val sigar = "org.hyperic" % "sigar" % "1.6.4"
 
     val core = module( "core" )
     val graphite = module( "graphite" )
     val metricsScala = "nl.grons" %% "metrics-scala" % "3.5.2_a2.3"
 
-    val all = Seq( core, graphite, metricsScala )
+    object kamon {
+      val version = "0.5.2"
+      def module( id: String ) = "io.kamon" %% s"kamon-$id" % version
+      def all = Seq( core, scala, akka, akkaRemote, system, statsd )
+
+      val core = module( "core" )
+      val scala = module( "scala" )
+      val akka = module( "akka" )
+      val akkaRemote = module( "akka-remote" )
+      val system = module( "system-metrics" )
+      val statsd = module( "statsd" )
+      val logReporter = module( "log-reporter" )
+    }
   }
 
   object facility {
@@ -98,7 +113,7 @@ object Dependencies {
       val version = "2.14.0"
       val core = "com.github.pathikrit" %% "better-files" % version
       val akka = "com.github.pathikrit" %% "better-files-akka" % version
-      val all = Seq( core, akka )
+      def all = Seq( core, akka )
     }
   }
 

@@ -5,7 +5,7 @@ import Dependencies._
 import spray.revolver.RevolverPlugin._
 
 object BuildSettings {
-  val defaultBuildSettings = Defaults.defaultSettings ++ Format.settings ++ Revolver.settings ++ Seq(
+  val defaultBuildSettings = Defaults.coreDefaultSettings ++ Format.settings ++ Revolver.settings ++ Seq(
     organization := "cdkglobal",
     crossScalaVersions := Seq( "2.11.7" ),
     scalaVersion <<= crossScalaVersions { (vs: Seq[String]) => vs.head },
