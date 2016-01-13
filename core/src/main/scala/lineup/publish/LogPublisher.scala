@@ -1,4 +1,4 @@
-package lineup.stream
+package lineup.publish
 
 import akka.actor.Props
 import akka.event.LoggingReceive

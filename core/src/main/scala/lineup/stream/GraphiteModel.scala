@@ -2,6 +2,7 @@ package lineup.stream
 
 import java.net.{ InetSocketAddress, InetAddress }
 import java.util.concurrent.atomic.AtomicInteger
+
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
 import scala.util.matching.Regex
@@ -32,6 +33,8 @@ import lineup.analysis.outlier.OutlierDetection
 import lineup.model.outlier._
 import lineup.model.timeseries.TimeSeriesBase.Merging
 import lineup.model.timeseries._
+import lineup.publish.GraphitePublisher
+import lineup.protocol.{ GraphiteSerializationProtocol, MessagePackProtocol, PythonPickleProtocol }
 import lineup.stream.OutlierDetectionWorkflow._
 
 

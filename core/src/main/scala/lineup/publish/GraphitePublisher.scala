@@ -1,24 +1,26 @@
-package lineup.stream
+package lineup.publish
 
 import java.net.{ InetSocketAddress, Socket }
-import nl.grons.metrics.scala.Meter
-
 import scala.annotation.tailrec
-import scala.concurrent.{ Future, ExecutionContext }
-import scala.concurrent.duration._
 import scala.collection.immutable
-import scala.util.{Failure, Success, Try}
+import scala.concurrent.duration._
+import scala.concurrent.{ ExecutionContext, Future }
+import scala.util.{ Failure, Success, Try }
+
 import akka.actor._
 import akka.event.LoggingReceive
-import akka.pattern.{ ask, CircuitBreakerOpenException, CircuitBreaker }
-import akka.util.{ByteString, Timeout}
-import akka.stream.{ ActorAttributes, Supervision }
+import akka.pattern.{ CircuitBreaker, CircuitBreakerOpenException, ask }
 import akka.stream.scaladsl.Flow
-import com.typesafe.scalalogging.{ Logger, LazyLogging }
+import akka.stream.{ ActorAttributes, Supervision }
+import akka.util.{ ByteString, Timeout }
+
+import com.typesafe.scalalogging.{ LazyLogging, Logger }
+import nl.grons.metrics.scala.Meter
 import org.slf4j.LoggerFactory
 import peds.akka.stream.Limiter
 import peds.commons.log.Trace
 import lineup.model.outlier.Outliers
+import lineup.protocol.PythonPickleProtocol
 
 
 /**
@@ -84,7 +86,7 @@ object GraphitePublisher extends LazyLogging {
   }
 
 
-  private[stream] sealed trait BreakerStatus
+  private[publish] sealed trait BreakerStatus
   case object BreakerOpen extends BreakerStatus { override def toString: String = "open" }
   case object BreakerPending extends BreakerStatus { override def toString: String = "pending" }
   case object BreakerClosed extends BreakerStatus { override def toString: String = "closed" }
@@ -94,8 +96,8 @@ object GraphitePublisher extends LazyLogging {
 class GraphitePublisher( outlierTopicPrefix: Option[String] ) extends DenseOutlierPublisher {
   outer: GraphitePublisher.PublishProvider =>
 
-  import OutlierPublisher._
   import GraphitePublisher._
+  import OutlierPublisher._
   import context.dispatcher
 
   val trace = Trace[GraphitePublisher]

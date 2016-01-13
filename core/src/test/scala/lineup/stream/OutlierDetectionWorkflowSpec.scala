@@ -2,24 +2,24 @@ package lineup.stream
 
 import java.net.InetSocketAddress
 import java.util.concurrent.atomic.AtomicInteger
-import akka.util.Timeout
-import org.scalatest.concurrent.ScalaFutures
-import peds.akka.supervision.IsolatedLifeCycleSupervisor.{ChildStarted, Started, WaitForStart}
-
+import scala.concurrent.duration.FiniteDuration
+import scala.util.{ Success, Try }
 import scala.concurrent.duration._
-import akka.actor.{ActorContext, Actor, ActorRef, Props}
+import akka.actor.{ ActorContext, Actor, ActorRef, Props }
 import akka.pattern.ask
 import akka.testkit._
+import akka.util.Timeout
+import org.scalatest.concurrent.ScalaFutures
 import com.typesafe.config.Config
-import lineup.model.outlier.OutlierPlan
-import lineup.testkit.ParallelAkkaSpec
 import org.scalatest.Tag
 import org.scalatest.mock.MockitoSugar
 import peds.akka.supervision.OneForOneStrategyFactory
 import peds.commons.log.Trace
+import peds.akka.supervision.IsolatedLifeCycleSupervisor.{ ChildStarted, Started, WaitForStart }
+import lineup.model.outlier.OutlierPlan
+import lineup.testkit.ParallelAkkaSpec
+import lineup.protocol.GraphiteSerializationProtocol
 
-import scala.concurrent.duration.FiniteDuration
-import scala.util.{Success, Try}
 
 
 /**

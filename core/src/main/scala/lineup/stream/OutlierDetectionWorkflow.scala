@@ -3,9 +3,11 @@ package lineup.stream
 import java.net.{ Socket, InetSocketAddress }
 import scala.util.Try
 import scala.concurrent.duration._
+
 import akka.actor.SupervisorStrategy._
 import akka.actor._
 import akka.event.LoggingReceive
+
 import com.typesafe.config.Config
 import nl.grons.metrics.scala.{ MetricName, Meter }
 import peds.akka.supervision.IsolatedLifeCycleSupervisor.ChildStarted
@@ -15,6 +17,8 @@ import peds.akka.supervision.{ OneForOneStrategyFactory, SupervisionStrategyFact
 import lineup.analysis.outlier.algorithm.DBSCANAnalyzer
 import lineup.analysis.outlier.{ OutlierDetection, DetectionAlgorithmRouter }
 import lineup.model.outlier.OutlierPlan
+import lineup.publish.{ LogPublisher, GraphitePublisher }
+import lineup.protocol.GraphiteSerializationProtocol
 
 
 /**

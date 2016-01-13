@@ -2,27 +2,26 @@ package lineup.stream
 
 import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicInteger
-import akka.actor.ActorRef
-import com.typesafe.config.ConfigFactory
-import org.scalatest.Tag
-import peds.commons.log.Trace
-
 import scala.concurrent.{ Future, Await }
 import scala.concurrent.duration._
 import scala.util.{Try, Failure}
 import akka.pattern
-import akka.stream.{scaladsl, OverflowStrategy}
+import akka.stream.OverflowStrategy
 import akka.stream.testkit.scaladsl.{ TestSource, TestSink }
 import akka.stream.scaladsl._
 import akka.util.ByteString
 import akka.testkit._
+import akka.actor.ActorRef
+import com.typesafe.config.ConfigFactory
+import org.scalatest.Tag
 import com.typesafe.scalalogging.LazyLogging
 import org.apache.commons.math3.random.RandomDataGenerator
 import org.joda.{ time => joda }
-import com.github.nscala_time.time.OrderingImplicits._
 import com.github.nscala_time.time.Imports.{ richSDuration, richDateTime }
+import peds.commons.log.Trace
+import lineup.protocol.PythonPickleProtocol
 import lineup.testkit.ParallelAkkaSpec
-import lineup.analysis.outlier.{OutlierDetectionMessage, DetectionAlgorithmRouter, OutlierDetection}
+import lineup.analysis.outlier.{ DetectionAlgorithmRouter, OutlierDetection }
 import lineup.analysis.outlier.algorithm.DBSCANAnalyzer
 import lineup.model.outlier.{ SeriesOutliers, IsQuorum, OutlierPlan }
 import lineup.model.timeseries.{ TimeSeries, DataPoint, Row }

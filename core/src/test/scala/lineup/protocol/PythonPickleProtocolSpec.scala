@@ -1,10 +1,11 @@
-package lineup.stream
+package lineup.protocol
 
-import javax.script.{ SimpleBindings, Compilable, ScriptEngineManager }
+import javax.script.{ Compilable, ScriptEngineManager, SimpleBindings }
+
 import akka.util.ByteString
+import org.python.core.{ PyTuple, PyList }
 import org.scalatest._
 import org.scalatest.mock.MockitoSugar
-import org.python.core.{ PyList, PyTuple }
 import peds.commons.log.Trace
 
 
@@ -43,6 +44,7 @@ with MockitoSugar {
     val protocol: PythonPickleProtocol = new PythonPickleProtocol
 
     def unpickleOutput( pickle: ByteString ): String = {
+      import scala.collection.JavaConverters._
       import scala.collection.mutable
       val results = mutable.StringBuilder.newBuilder
       // the charset is important. if the GraphitePickleReporter and this test
@@ -57,8 +59,6 @@ with MockitoSugar {
         result.addAll( result.size, bindings.get("metrics").asInstanceOf[java.util.Collection[_]] )
         nextIndex += bindings.get( "batchLength" ).asInstanceOf[Int]
       }
-
-      import scala.collection.JavaConverters._
 
       result.iterator.asScala.foreach { case datapoint: PyTuple =>
         val name = datapoint.get( 0 ).toString
@@ -85,20 +85,17 @@ with MockitoSugar {
   "PythonPickleProtocol" should {
     "first replicate dropwizard test" in { f: Fixture =>
       import f._
-      import PythonPickleProtocol._
       val pickler = new com.codahale.metrics.graphite.PicklerStub
-      unpickleOutput( pickler.pickle( ("name", 100L, "value") ).withHeader ) mustBe "name value 100\n"
+      unpickleOutput( pickler.pickle( ("name", 100L, "value") ) ) mustBe "name value 100\n"
     }
 
     "write value" in { f: Fixture =>
       import f._
-      import PythonPickleProtocol._
       unpickleOutput( protocol.pickle( ("name", 100L, "value") )) mustBe "name value 100\n"
     }
 
     "write full batch" in { f: Fixture =>
       import f._
-      import PythonPickleProtocol._
       val batch = Seq(
         ("foo", 100L, "value"),
         ("bar", 117L, "value2")
@@ -108,7 +105,6 @@ with MockitoSugar {
 
     "writes past full batch" in { f: Fixture =>
       import f._
-      import PythonPickleProtocol._
       val batch = Seq(
         ("foo", 100L, "value"),
         ("bar", 117L, "value2"),
@@ -119,7 +115,6 @@ with MockitoSugar {
 
     "writes past full batch as flattend time series" in { f: Fixture =>
       import f._
-      import PythonPickleProtocol._
       import org.joda.{ time => joda }
 
       val batch = Seq(
@@ -136,7 +131,6 @@ with MockitoSugar {
 
     "writes past full batch as flattend outlier marked series" in { f: Fixture =>
       import f._
-      import PythonPickleProtocol._
       import org.joda.{ time => joda }
 
       val batch = Seq(
@@ -152,14 +146,12 @@ with MockitoSugar {
 
     "write santized name" in { f: Fixture =>
       import f._
-      import PythonPickleProtocol._
       val batch = ("name woo", 100L, "value")
       unpickleOutput( protocol.pickle( batch ) ) mustBe "name-woo value 100\n"
     }
 
     "write santized value" in { f: Fixture =>
       import f._
-      import PythonPickleProtocol._
       val batch = ("name", 100L, "value woo")
       unpickleOutput( protocol.pickle( batch ) ) mustBe "name value-woo 100\n"
     }
@@ -167,30 +159,27 @@ with MockitoSugar {
 
     "match dropwizard pickle" in { f: Fixture =>
       import f._
-      import PythonPickleProtocol._
       val tuple = ( "name", 100L, "value" )
       val pickler = new com.codahale.metrics.graphite.PicklerStub
-      val expected = pickler.pickle( tuple ).withHeader
+      val expected = pickler.pickle( tuple )
       val actual = protocol.pickle( tuple )
       actual mustBe expected
     }
 
     "match dropwizard pickled full batch" in { f: Fixture =>
       import f._
-      import PythonPickleProtocol._
       val tuples = Seq(
         ( "name", 100L, "value" ),
         ( "name", 100L, "value2" )
       )
       val pickler = new com.codahale.metrics.graphite.PicklerStub
-      val expected = pickler.pickle( tuples:_* ).withHeader
+      val expected = pickler.pickle( tuples:_* )
       val actual = protocol.pickle( tuples:_* )
       actual mustBe expected
     }
 
     "match dropwizard pickled past full batch" in { f: Fixture =>
       import f._
-      import PythonPickleProtocol._
 
       val tuples = Seq(
         ( "name", 100L, "value" ),
@@ -198,17 +187,16 @@ with MockitoSugar {
         ( "name", 100L, "value3" )
       )
       val pickler = new com.codahale.metrics.graphite.PicklerStub
-      val expected = pickler.pickle( tuples:_* ).withHeader
+      val expected = pickler.pickle( tuples:_* )
       val actual = protocol.pickle( tuples:_* )
       actual mustBe expected
     }
 
     "match dropwizard pickle santized names" in { f: Fixture =>
       import f._
-      import PythonPickleProtocol._
 
       val pickler = new com.codahale.metrics.graphite.PicklerStub
-      val expected = pickler.pickle( ("name-woo", 100L, "value") ).withHeader
+      val expected = pickler.pickle( ("name-woo", 100L, "value") )
       val actual = protocol.pickle( (protocol.sanitize("name woo"), 100L, "value") )
       actual mustBe expected
     }

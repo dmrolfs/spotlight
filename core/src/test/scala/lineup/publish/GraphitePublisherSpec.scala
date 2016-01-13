@@ -1,24 +1,26 @@
-package lineup.stream
+package lineup.publish
 
 import java.io.ByteArrayOutputStream
-import java.net.{ InetAddress, Socket, InetSocketAddress }
-import java.util.concurrent.atomic.{AtomicInteger, AtomicBoolean}
+import java.net.{ InetAddress, InetSocketAddress, Socket }
+import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger }
 import javax.net._
-import javax.script.{ SimpleBindings, Compilable, ScriptEngineManager }
+import javax.script.{ Compilable, ScriptEngineManager, SimpleBindings }
+
 import akka.actor.Props
 import akka.testkit.TestActorRef
 import akka.util.ByteString
-import org.joda.{ time => joda }
-import lineup.model.outlier.{ SeriesOutliers, NoOutliers }
+import lineup.model.outlier.{ NoOutliers, SeriesOutliers }
 import lineup.model.timeseries.{ DataPoint, Row, TimeSeries }
+import lineup.protocol.PythonPickleProtocol
 import lineup.testkit.ParallelAkkaSpec
-import org.scalatest._
-import org.scalatest.mock.MockitoSugar
+import org.joda.{ time => joda }
 import org.mockito.Mockito._
 import org.mockito.Matchers._
 import org.mockito.invocation.InvocationOnMock
 import org.mockito.stubbing.Answer
-import org.python.core.{ PyList, PyTuple }
+import org.python.core.{ PyTuple, PyList }
+import org.scalatest.Tag
+import org.scalatest.mock.MockitoSugar
 import peds.commons.log.Trace
 
 
@@ -49,8 +51,8 @@ object GraphitePublisherSpec {
 class GraphitePublisherSpec
 extends ParallelAkkaSpec
 with MockitoSugar {
-  import GraphitePublisherSpec._
   import GraphitePublisher._
+  import GraphitePublisherSpec._
   import OutlierPublisher._
 
   override val trace = Trace[GraphitePublisherSpec]
@@ -97,7 +99,7 @@ with MockitoSugar {
       }
     ).when(output).close()
 
-    when( socketFactory.createSocket( any(classOf[InetAddress]) , anyInt ) ).thenReturn( socket )
+    when( socketFactory.createSocket( any(classOf[InetAddress]), anyInt ) ).thenReturn( socket )
 
     val graphite = TestActorRef[GraphitePublisher](
       Props(
@@ -138,7 +140,6 @@ with MockitoSugar {
       }
 
       import scala.collection.JavaConverters._
-
       result.iterator.asScala.foreach { case datapoint: PyTuple =>
         val name = datapoint.get( 0 ).toString
         val valueTuple = datapoint.get( 1 ).asInstanceOf[PyTuple]
