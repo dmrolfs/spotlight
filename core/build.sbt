@@ -31,7 +31,7 @@ resolvers += "velvia maven" at "http://dl.bintray.com/velvia/maven"
 
 libraryDependencies += "org.velvia" % "msgpack4s_2.11" % "0.5.1"
 
-mainClass in (Compile, run) := Some("lineup.stream.GraphiteModel")
+mainClass in (Compile, run) := Some("lineup.app.GraphiteLineup")
 
 mainClass in assembly := Some("lineup.stream.GraphiteModel")
 

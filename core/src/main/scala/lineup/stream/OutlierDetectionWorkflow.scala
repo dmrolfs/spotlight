@@ -14,6 +14,7 @@ import peds.akka.supervision.IsolatedLifeCycleSupervisor.ChildStarted
 import peds.akka.metrics.InstrumentedActor
 import peds.akka.stream.Limiter
 import peds.akka.supervision.{ OneForOneStrategyFactory, SupervisionStrategyFactory, IsolatedLifeCycleSupervisor }
+import lineup.Valid
 import lineup.analysis.outlier.algorithm.DBSCANAnalyzer
 import lineup.analysis.outlier.{ OutlierDetection, DetectionAlgorithmRouter }
 import lineup.model.outlier.OutlierPlan
@@ -57,13 +58,13 @@ object OutlierDetectionWorkflow {
 
   type MakeProps = ActorRef => Props
 
-  trait ConfigurationProvider {
+  trait ConfigurationProvider { outer =>
     def sourceAddress: InetSocketAddress
     def maxFrameLength: Int
     def protocol: GraphiteSerializationProtocol
     def windowDuration: FiniteDuration
     def graphiteAddress: Option[InetSocketAddress]
-    def makePlans: () => Try[Seq[OutlierPlan]]
+    def makePlans: () => Valid[Seq[OutlierPlan]]
     def configuration: Config
 
     def makePublishRateLimiter()(implicit context: ActorContext ): ActorRef = {
@@ -113,7 +114,7 @@ object OutlierDetectionWorkflow {
           new OutlierDetection with OutlierDetection.PlanConfigurationProvider {
             override def router: ActorRef = routerRef
             override lazy val metricBaseName = MetricName( classOf[OutlierDetection] )
-            override def getPlans: () => Try[Seq[OutlierPlan]] = makePlans
+            override def makePlans: OutlierDetection.PlanConfigurationProvider.Creator = outer.makePlans
             override def refreshInterval: FiniteDuration = 15.minutes
           }
         }.withDispatcher( "outlier-detection-dispatcher" ),

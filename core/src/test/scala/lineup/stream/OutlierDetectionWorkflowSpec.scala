@@ -2,8 +2,9 @@ package lineup.stream
 
 import java.net.InetSocketAddress
 import java.util.concurrent.atomic.AtomicInteger
+import lineup.analysis.outlier.OutlierDetection.PlanConfigurationProvider
+
 import scala.concurrent.duration.FiniteDuration
-import scala.util.{ Success, Try }
 import scala.concurrent.duration._
 import akka.actor.{ ActorContext, Actor, ActorRef, Props }
 import akka.pattern.ask
@@ -35,8 +36,10 @@ class OutlierDetectionWorkflowSpec extends ParallelAkkaSpec with MockitoSugar wi
   override val trace = Trace[OutlierDetectionWorkflowSpec]
 
   class Fixture extends AkkaFixture { fixture =>
+    import lineup.Valid._
+
     val protocol = mock[GraphiteSerializationProtocol]
-    val makePlans: () => Try[Seq[OutlierPlan]] = () => { Success( Seq.empty[OutlierPlan] ) }
+    val makePlans: PlanConfigurationProvider.Creator = () => { Seq.empty[OutlierPlan].valid }
     val config = mock[Config]
 
     val rateLimiter = TestProbe()
@@ -52,8 +55,9 @@ class OutlierDetectionWorkflowSpec extends ParallelAkkaSpec with MockitoSugar wi
         def protocol: GraphiteSerializationProtocol = fixture.protocol
         def windowDuration: FiniteDuration = 2.minutes
         def graphiteAddress: Option[InetSocketAddress] = Some( new InetSocketAddress("example.com", 20400) )
-        def makePlans: () => Try[Seq[OutlierPlan]] = fixture.makePlans
+        override def makePlans: PlanConfigurationProvider.Creator = fixture.makePlans
         def configuration: Config = fixture.config
+
 
         override def makePublishRateLimiter()(implicit context: ActorContext): ActorRef = rateLimiter.ref
         override def makePublisher(publisherProps: Props)(implicit context: ActorContext): ActorRef = publisher.ref

@@ -2,16 +2,16 @@ package lineup.analysis.outlier
 
 import akka.actor.{ActorRef, UnhandledMessage}
 import com.typesafe.config.ConfigFactory
+import lineup.analysis.outlier.OutlierDetection.PlanConfigurationProvider.Creator
 import lineup.analysis.outlier.OutlierDetection.UnrecognizedTopic
 import lineup.model.timeseries._
 import scala.concurrent.duration._
 import akka.testkit._
 import org.mockito.Mockito._
 import org.scalatest.mock.MockitoSugar
+import lineup.Valid._
 import lineup.model.outlier.{ ReduceOutliers, IsQuorum, OutlierPlan }
 import lineup.testkit.ParallelAkkaSpec
-
-import scala.util.Try
 
 
 /**
@@ -27,7 +27,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
 
     trait TestConfigurationProvider extends OutlierDetection.PlanConfigurationProvider {
       override def router: ActorRef = fixture.router.ref
-      override def getPlans: () => Try[Seq[OutlierPlan]] = () => { Try{ fixture.plans } }
+      override def makePlans: Creator = () => { fixture.plans.valid }
       override def invalidateCaches(): Unit = { }
       override def refreshInterval: FiniteDuration = 5.minutes
     }
@@ -84,7 +84,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
         OutlierDetection.props {
           new OutlierDetection with TestConfigurationProvider {
             override def preStart(): Unit = { }
-            override def getPlans: () => Try[Seq[OutlierPlan]] = () => { Try{ Seq(defaultPlan) } }
+            override def makePlans: Creator = () => { Seq(defaultPlan).valid }
           }
         }
       )
@@ -130,7 +130,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
         OutlierDetection.props {
           new OutlierDetection with TestConfigurationProvider {
             override def preStart(): Unit = { }
-            override def getPlans: () => Try[Seq[OutlierPlan]] = () => { Try{ f.plans :+ defaultPlan } }
+            override def makePlans: Creator = () => { (f.plans :+ defaultPlan).valid }
           }
         }
       )
@@ -175,7 +175,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
         OutlierDetection.props {
           new OutlierDetection with TestConfigurationProvider {
             override def preStart(): Unit = { }
-            override def getPlans: () => Try[Seq[OutlierPlan]] = () => { Try{ f.plans :+ defaultPlan } }
+            override def makePlans: Creator = () => { (f.plans :+ defaultPlan).valid }
           }
         }
       )

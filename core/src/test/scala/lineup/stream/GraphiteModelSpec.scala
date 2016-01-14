@@ -2,9 +2,14 @@ package lineup.stream
 
 import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicInteger
+import lineup.analysis.outlier.OutlierDetection.PlanConfigurationProvider.Creator
+import lineup.app.Configuration
+
 import scala.concurrent.{ Future, Await }
 import scala.concurrent.duration._
-import scala.util.{Try, Failure}
+import scala.util.Failure
+
+//import scala.util.{Try, Failure}
 import akka.pattern
 import akka.stream.OverflowStrategy
 import akka.stream.testkit.scaladsl.{ TestSource, TestSink }
@@ -19,6 +24,7 @@ import org.apache.commons.math3.random.RandomDataGenerator
 import org.joda.{ time => joda }
 import com.github.nscala_time.time.Imports.{ richSDuration, richDateTime }
 import peds.commons.log.Trace
+import lineup.Valid._
 import lineup.protocol.PythonPickleProtocol
 import lineup.testkit.ParallelAkkaSpec
 import lineup.analysis.outlier.{ DetectionAlgorithmRouter, OutlierDetection }
@@ -39,11 +45,13 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
     val protocol = new PythonPickleProtocol
     val stringFlow: Flow[ByteString, ByteString, Unit] = Flow[ByteString].via( protocol.framingFlow() )
 
-    trait TestConfigurationProvider extends OutlierDetection.PlanConfigurationProvider{
-      override def getPlans: () => Try[Seq[OutlierPlan]] = () => { Try{ fixture.plans } }
+    trait TestConfigurationProvider extends OutlierDetection.PlanConfigurationProvider {
+      override def makePlans: Creator = () => { fixture.plans.valid }
       override def invalidateCaches(): Unit = { }
       override def refreshInterval: FiniteDuration = 5.minutes
     }
+
+    val configurationReloader = Configuration.reloader( Array.empty[String] )()()
 
     val plans = Seq(
       OutlierPlan.default(
@@ -51,7 +59,7 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
         algorithms = Set(DBSCANAnalyzer.Algorithm ),
         timeout = 500.millis,
         isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = 1, triggerPoint = 1 ),
-        reduce = GraphiteModel.defaultOutlierReducer,
+        reduce = Configuration.defaultOutlierReducer,
         specification = ConfigFactory.parseString(
         s"""
          |algorithm-config.${DBSCANAnalyzer.Eps}: 5.0
@@ -176,7 +184,7 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
         algorithms = algos,
         timeout = 500.millis,
         isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = algos.size, triggerPoint = 1 ),
-        reduce = GraphiteModel.defaultOutlierReducer,
+        reduce = Configuration.defaultOutlierReducer,
         specification = ConfigFactory.parseString(
           s"""
              |algorithm-config.${DBSCANAnalyzer.Eps}: 5000
@@ -192,7 +200,7 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
         OutlierDetection.props {
           new OutlierDetection with TestConfigurationProvider {
             override def router: ActorRef = routerRef
-            override def getPlans: () => Try[Seq[OutlierPlan]] = () => { Try{ Seq( defaultPlan ) } }
+            override def makePlans: Creator = () => { Seq(defaultPlan).valid }
           }
         },
         "detectOutliers"
@@ -273,7 +281,7 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
           _.groupBy( _.topic )
           .map {case (topic, es) => es.tail.foldLeft( es.head ) {(acc, e) => Fixture.TickA.merge( acc, e ) } }
         }
-        .mapConcat {identity}
+        .mapConcat { identity }
       }
 
       val future = source
