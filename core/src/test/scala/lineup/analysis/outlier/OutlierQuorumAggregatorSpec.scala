@@ -66,7 +66,7 @@ class OutlierQuorumAggregatorSpec extends ParallelAkkaSpec with MockitoSugar {
   case object WIP extends Tag( "wip" )
 
   "OutlierQuorumAggregator" should  {
-    "die after no timely response" taggedAs(WIP) in { f: Fixture =>
+    "die after no timely response" in { f: Fixture =>
       import f._
       val p = plan( 5.millis )
 
@@ -80,7 +80,7 @@ class OutlierQuorumAggregatorSpec extends ParallelAkkaSpec with MockitoSugar {
       }
     }
 
-    "send results upon satisfying quorum" in { f: Fixture =>
+    "send results upon satisfying quorum" taggedAs(WIP) in { f: Fixture =>
       import f._
 //      when( plan.timeout ) thenReturn 2.seconds
 //      when( plan.isQuorum ) thenReturn new IsQuorum {

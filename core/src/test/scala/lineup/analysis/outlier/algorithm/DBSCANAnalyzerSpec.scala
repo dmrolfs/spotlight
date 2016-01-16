@@ -68,7 +68,7 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       )
     }
 
-    "detect outlying points in series" in { f: Fixture =>
+    "detect outlying points in series" taggedAs (WIP) in { f: Fixture =>
       import f._
       val analyzer = TestActorRef[DBSCANAnalyzer]( DBSCANAnalyzer.props(router.ref) )
       val series = TimeSeries( "series", points )
@@ -83,7 +83,7 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
         """.stripMargin
       )
 
-      analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered )
+      analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( 'dbscan ) )
       analyzer.receive( DetectUsing( 'dbscan, aggregator.ref, DetectOutliersInSeries(series), algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "detect" ) {
         //todo stream envelope
@@ -137,7 +137,7 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
         """.stripMargin
       )
 
-      analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered )
+      analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered('dbscan) )
       analyzer.receive( DetectUsing( 'dbscan, aggregator.ref, DetectOutliersInSeries(series), algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "detect" ) {
         //todo stream envelope
@@ -171,7 +171,7 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
         """.stripMargin
       )
 
-      analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered )
+      analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered('dbscan) )
       analyzer.receive( DetectUsing( 'dbscan, aggregator.ref, DetectOutliersInCohort(cohort), algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "detect" ) {
         //todo stream envelope
@@ -211,7 +211,7 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
         """.stripMargin
       )
 
-      analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered )
+      analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered('dbscan) )
       analyzer.receive( DetectUsing( 'dbscan, aggregator.ref, DetectOutliersInCohort(cohort), algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "detect" ) {
         //todo stream envelope

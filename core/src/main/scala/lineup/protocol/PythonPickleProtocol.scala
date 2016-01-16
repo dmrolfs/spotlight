@@ -66,7 +66,8 @@ class PythonPickleProtocol extends GraphiteSerializationProtocol with LazyLoggin
       fieldOffset = 0,
       maximumFrameLength = maximumFrameLength,
       byteOrder = ByteOrder.BIG_ENDIAN
-    ).map { _ drop SizeFieldLength }
+    )
+    .map { _ drop SizeFieldLength }
   }
 
   case class Metric( topic: Topic, timestamp: joda.DateTime, value: Double )

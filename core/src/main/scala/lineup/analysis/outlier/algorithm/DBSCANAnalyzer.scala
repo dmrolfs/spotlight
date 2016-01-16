@@ -7,10 +7,10 @@ import org.apache.commons.math3.ml.distance.DistanceMeasure
 import org.apache.commons.math3.stat.{ descriptive => stat }
 import org.apache.commons.math3.ml
 import com.typesafe.config.Config
+import peds.commons.math.MahalanobisDistance
 import lineup.model.timeseries.{ Matrix, DataPoint }
 import lineup.model.outlier.{ CohortOutliers, NoOutliers, SeriesOutliers }
 import lineup.analysis.outlier.{ DetectUsing, DetectOutliersInSeries, DetectOutliersInCohort }
-import peds.commons.math.MahalanobisDistance
 
 
 /**

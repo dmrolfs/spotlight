@@ -61,7 +61,8 @@ object GraphitePublisher extends LazyLogging {
     .mapAsync( 1 ) { os =>
       val published = publisher ? Publish( os )
       published.mapTo[Published] map { _.outliers }
-    }.withAttributes( ActorAttributes.supervisionStrategy(decider) )
+    }
+    .withAttributes( ActorAttributes.supervisionStrategy(decider) )
   }
 
 
@@ -112,7 +113,9 @@ class GraphitePublisher( outlierTopicPrefix: Option[String] ) extends DenseOutli
   lazy val circuitOpenMeter: Meter = metrics.meter( "circuit", "open" )
   lazy val circuitPendingMeter: Meter = metrics.meter( "circuit", "pending" )
   lazy val circuitRequestsMeter: Meter = metrics.meter( "circuit", "requests" )
+  lazy val publishedMeter: Meter = metrics.meter( "published" )
   var gaugeStatus: BreakerStatus = BreakerClosed
+
 
   def initializeMetrics(): Unit = {
     metrics.gauge( "waiting" ) { waitQueue.size }
@@ -301,7 +304,8 @@ class GraphitePublisher( outlierTopicPrefix: Option[String] ) extends DenseOutli
   }
 
   def sendToGraphite( pickle: ByteString ): Unit = {
-    log debug s"sending to graphite ${pickle.size} bytes"
+    publishedMeter mark pickle.size
+
     socket foreach { s =>
       val out = s.getOutputStream
       out write pickle.toArray

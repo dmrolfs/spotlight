@@ -12,7 +12,7 @@ import peds.akka.metrics.InstrumentedActor
 object DetectionAlgorithmRouter {
   sealed trait RouterProtocol
   case class RegisterDetectionAlgorithm( algorithm: Symbol, handler: ActorRef ) extends RouterProtocol
-  case object AlgorithmRegistered extends RouterProtocol
+  case class AlgorithmRegistered( algorithm: Symbol ) extends RouterProtocol
 
   val ContextKey = 'DetectionAlgorithmRouter
 
@@ -30,7 +30,7 @@ class DetectionAlgorithmRouter extends Actor with InstrumentedActor with ActorLo
   val registration: Receive = LoggingReceive {
     case RegisterDetectionAlgorithm( algorithm, handler ) => {
       routingTable += ( algorithm -> handler )
-      sender() ! AlgorithmRegistered
+      sender() ! AlgorithmRegistered( algorithm )
     }
   }
 

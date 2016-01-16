@@ -1,12 +1,12 @@
 package lineup.analysis.outlier
 
-import nl.grons.metrics.scala.{MetricName, Meter}
-
 import scala.concurrent.duration.FiniteDuration
 import akka.actor.{ Cancellable, Actor, ActorLogging, Props }
 import akka.event.LoggingReceive
 import peds.akka.metrics.InstrumentedActor
 import peds.commons.log.Trace
+import nl.grons.metrics.scala.{MetricName, Meter}
+import lineup.analysis.outlier.OutlierQuorumAggregator.ConfigurationProvider
 import lineup.model.outlier._
 import lineup.model.timeseries.{ Topic, TimeSeriesBase }
 
@@ -14,15 +14,31 @@ import lineup.model.timeseries.{ Topic, TimeSeriesBase }
 object OutlierQuorumAggregator {
   val trace = Trace[OutlierQuorumAggregator.type]
 
-  def props( plan: OutlierPlan, source: TimeSeriesBase ): Props = Props( new OutlierQuorumAggregator(plan, source) )
+  def props( plan: OutlierPlan, source: TimeSeriesBase ): Props = {
+    Props(
+      new OutlierQuorumAggregator(plan, source) with ConfigurationProvider {
+        override val warningsBeforeTimeout: Int = 3
+      }
+    )
+  }
 
   case class AnalysisTimedOut( topic: Topic, plan: OutlierPlan )
+
+
+  trait ConfigurationProvider {
+    def warningsBeforeTimeout: Int
+    def attemptBudget( planBudget: FiniteDuration ): FiniteDuration = {
+      if ( warningsBeforeTimeout == 0 ) planBudget
+      else planBudget / warningsBeforeTimeout.toLong
+    }
+  }
 }
 
 /**
  * Created by rolfsd on 9/28/15.
  */
-class OutlierQuorumAggregator( plan: OutlierPlan, source: TimeSeriesBase ) extends Actor with InstrumentedActor with ActorLogging {
+class OutlierQuorumAggregator( plan: OutlierPlan, source: TimeSeriesBase )
+extends Actor with InstrumentedActor with ActorLogging { outer: ConfigurationProvider =>
   import OutlierQuorumAggregator._
 
   override lazy val metricBaseName: MetricName = MetricName( classOf[OutlierQuorumAggregator] )
@@ -30,14 +46,12 @@ class OutlierQuorumAggregator( plan: OutlierPlan, source: TimeSeriesBase ) exten
   lazy val warningsMeter: Meter = metrics meter "quorum.warnings"
   lazy val timeoutsMeter: Meter = metrics meter "quorum.timeout"
 
-  val attemptTimeout: FiniteDuration = plan.timeout / 3L
-
   implicit val ec = context.system.dispatcher
 
   var pendingWhistle: Option[Cancellable] = None
   scheduleWhistle()
 
-  def scheduleWhistle( duration: FiniteDuration = attemptTimeout ): Unit = {
+  def scheduleWhistle( duration: FiniteDuration = attemptBudget(plan.timeout) ): Unit = {
     cancelWhistle()
     pendingWhistle = Some( context.system.scheduler.scheduleOnce(duration, self, AnalysisTimedOut(source.topic, plan)) )
   }
@@ -54,7 +68,7 @@ class OutlierQuorumAggregator( plan: OutlierPlan, source: TimeSeriesBase ) exten
 
   override def receive: Receive = around( quorum() )
 
-  def quorum( retries: Int = 3 ): Receive = LoggingReceive {
+  def quorum( retries: Int = warningsBeforeTimeout ): Receive = LoggingReceive {
     case m: Outliers => {
       val source = sender()
       fulfilled ++= m.algorithms map { _ -> m }

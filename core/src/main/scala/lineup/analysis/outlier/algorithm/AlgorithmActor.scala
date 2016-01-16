@@ -18,8 +18,8 @@ trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
   override def receive: Receive = around( quiescent )
 
   def quiescent: Receive = LoggingReceive {
-    case DetectionAlgorithmRouter.AlgorithmRegistered => {
-      log info s"${self.path} registered with ${sender().path}"
+    case DetectionAlgorithmRouter.AlgorithmRegistered( algorithm ) => {
+      log info s"${self.path} registered [${algorithm.name}] with ${sender().path}"
       context become around( detect )
     }
 

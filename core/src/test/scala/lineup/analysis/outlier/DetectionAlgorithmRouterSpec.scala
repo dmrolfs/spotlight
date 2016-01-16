@@ -25,7 +25,9 @@ class DetectionAlgorithmRouterSpec extends ParallelAkkaSpec with MockitoSugar {
       import f._
       val probe = TestProbe()
       router.receive( RegisterDetectionAlgorithm('foo, probe.ref), probe.ref )
-      probe.expectMsg( AlgorithmRegistered )
+      probe.expectMsgPF( hint = "register", max = 200.millis.dilated ) {
+        case AlgorithmRegistered( actual ) => actual.name mustBe Symbol("foo").name
+      }
     }
 
     "route detection messages" in { f: Fixture =>

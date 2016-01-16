@@ -36,23 +36,6 @@ object OutlierDetectionWorkflow {
   case object GetPublishRateLimiter
   case object GetPublisher
 
-//  case class InstrumentedOneForOneStrategy(
-//    override val maxNrOfRetries: Int = 1,
-//    override val withinTimeRange: Duration = Duration.Inf,
-//    override val loggingEnabled: Boolean = true
-//  )(
-//    override val decider: Decider
-//  ) extends OneForOneStrategy {
-//    override def handleFailure(
-//      context: ActorContext,
-//      child: ActorRef,
-//      cause: Throwable,
-//      stats: ChildRestartStats,
-//      children: Iterable[ChildRestartStats]
-//    ): Boolean = {
-//      super.handleFailure( context, child, cause, stats, children )
-//    }
-//  }
 
   type MakeProps = ActorRef => Props
 

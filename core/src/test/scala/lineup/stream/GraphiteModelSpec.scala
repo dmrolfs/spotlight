@@ -92,7 +92,7 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
       actual mustBe expected
     }
 
-    "flow convert graphite pickle into TimeSeries" taggedAs (WIP) in { f: Fixture =>
+    "flow convert graphite pickle into TimeSeries" in { f: Fixture =>
       import f._
       val now = joda.DateTime.now
       val dp = makeDataPoints( points, start = now ).take( 5 )
@@ -172,7 +172,7 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
     }
 
 
-    "detect Outliers" in { f: Fixture =>
+    "detect Outliers" taggedAs (WIP) in { f: Fixture =>
       import f._
       import system.dispatcher
 
@@ -180,7 +180,7 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
       val defaultPlan = OutlierPlan.default(
         name = "DEFAULT_PLAN",
         algorithms = algos,
-        timeout = 500.millis,
+        timeout = 5000.millis,
         isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = algos.size, triggerPoint = 1 ),
         reduce = Configuration.defaultOutlierReducer,
         specification = ConfigFactory.parseString(
