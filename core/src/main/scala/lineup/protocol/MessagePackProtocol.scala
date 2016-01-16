@@ -1,4 +1,4 @@
-package lineup.stream
+package lineup.protocol
 
 import akka.stream.scaladsl.Flow
 import akka.util.ByteString
@@ -10,7 +10,7 @@ import lineup.model.timeseries.TimeSeries
   * Created by rolfsd on 11/25/15.
   */
 case object MessagePackProtocol extends GraphiteSerializationProtocol with LazyLogging {
-  override def framingFlow(maximumFrameLength: Int): Flow[ByteString, ByteString, Unit] = ???
+  override def framingFlow( maximumFrameLength: Int ): Flow[ByteString, ByteString, Unit] = ???
 
   override def toDataPoints( bytes: ByteString ): List[TimeSeries] = {
     import org.velvia.MsgPack

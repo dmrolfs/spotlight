@@ -1,21 +1,22 @@
-package lineup.stream
+package lineup.app
+
+import java.io.{ File => JFile }
+import java.net.Socket
 
 import scala.concurrent.duration._
-import scala.util.{ Try, Success }
-import java.io.{ File => JFile, _ }
-import java.net.Socket
-import org.parboiled2._
-import org.apache.commons.math3.random.RandomDataGenerator
-import com.typesafe.scalalogging.StrictLogging
-import org.joda.{ time => joda }
+import scala.util.{ Success, Try }
+
 import better.files._
+import com.github.nscala_time.time.Imports.{ richDateTime, richSDuration }
+import com.typesafe.scalalogging.StrictLogging
+import org.apache.commons.math3.random.RandomDataGenerator
+import org.joda.{ time => joda }
+import org.parboiled2._
+import peds.commons.log.Trace
 import resource._
 import scopt.OptionParser
-import com.github.nscala_time.time.OrderingImplicits._
-import com.github.nscala_time.time.Imports.{ richSDuration, richDateTime }
-import peds.commons.log.Trace
-import lineup.stream.SendStats.Grammar.DataParser
 import lineup.model.timeseries._
+import lineup.protocol.PythonPickleProtocol
 
 
 /**
@@ -36,7 +37,7 @@ object SendStats extends StrictLogging {
 
     if ( settings.source.isEmpty ) System.exit(-1)
 
-    val source = settings.source map { DataParser( _ ) } getOrElse Seq.empty[Try[TimeSeries]]
+    val source = settings.source map { Grammar.DataParser( _ ) } getOrElse Seq.empty[Try[TimeSeries]]
     val count = source count { _.isSuccess }
     logger.info( s"Sending ${count} data elements from ${sourceFileName}")
 
@@ -48,14 +49,12 @@ object SendStats extends StrictLogging {
         logger.info(
           s"Sending to ${settings.host}:${settings.port} [${source.collect{case Success(d) => d.points.size}.sum}] data points"
         )
-
-        import PythonPickleProtocol._
         val pickler = new PythonPickleProtocol
 
         for {
           line <- source
           data <- line
-          message = pickler.pickleTimeSeries( data ).withHeader
+          message = pickler.pickleTimeSeries( data )
         } {
           outStream write message.toArray
           outStream.flush

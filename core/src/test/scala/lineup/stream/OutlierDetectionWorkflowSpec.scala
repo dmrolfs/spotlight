@@ -2,24 +2,25 @@ package lineup.stream
 
 import java.net.InetSocketAddress
 import java.util.concurrent.atomic.AtomicInteger
-import akka.util.Timeout
-import org.scalatest.concurrent.ScalaFutures
-import peds.akka.supervision.IsolatedLifeCycleSupervisor.{ChildStarted, Started, WaitForStart}
+import lineup.analysis.outlier.OutlierDetection.PlanConfigurationProvider
 
+import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.duration._
-import akka.actor.{ActorContext, Actor, ActorRef, Props}
+import akka.actor.{ ActorContext, Actor, ActorRef, Props }
 import akka.pattern.ask
 import akka.testkit._
+import akka.util.Timeout
+import org.scalatest.concurrent.ScalaFutures
 import com.typesafe.config.Config
-import lineup.model.outlier.OutlierPlan
-import lineup.testkit.ParallelAkkaSpec
 import org.scalatest.Tag
 import org.scalatest.mock.MockitoSugar
 import peds.akka.supervision.OneForOneStrategyFactory
 import peds.commons.log.Trace
+import peds.akka.supervision.IsolatedLifeCycleSupervisor.{ ChildStarted, Started, WaitForStart }
+import lineup.model.outlier.OutlierPlan
+import lineup.testkit.ParallelAkkaSpec
+import lineup.protocol.GraphiteSerializationProtocol
 
-import scala.concurrent.duration.FiniteDuration
-import scala.util.{Success, Try}
 
 
 /**
@@ -35,8 +36,10 @@ class OutlierDetectionWorkflowSpec extends ParallelAkkaSpec with MockitoSugar wi
   override val trace = Trace[OutlierDetectionWorkflowSpec]
 
   class Fixture extends AkkaFixture { fixture =>
+    import scalaz.Scalaz._
+
     val protocol = mock[GraphiteSerializationProtocol]
-    val makePlans: () => Try[Seq[OutlierPlan]] = () => { Success( Seq.empty[OutlierPlan] ) }
+    val makePlans: PlanConfigurationProvider.Creator = () => { Seq.empty[OutlierPlan].right }
     val config = mock[Config]
 
     val rateLimiter = TestProbe()
@@ -52,8 +55,9 @@ class OutlierDetectionWorkflowSpec extends ParallelAkkaSpec with MockitoSugar wi
         def protocol: GraphiteSerializationProtocol = fixture.protocol
         def windowDuration: FiniteDuration = 2.minutes
         def graphiteAddress: Option[InetSocketAddress] = Some( new InetSocketAddress("example.com", 20400) )
-        def makePlans: () => Try[Seq[OutlierPlan]] = fixture.makePlans
+        override def makePlans: PlanConfigurationProvider.Creator = fixture.makePlans
         def configuration: Config = fixture.config
+
 
         override def makePublishRateLimiter()(implicit context: ActorContext): ActorRef = rateLimiter.ref
         override def makePublisher(publisherProps: Props)(implicit context: ActorContext): ActorRef = publisher.ref

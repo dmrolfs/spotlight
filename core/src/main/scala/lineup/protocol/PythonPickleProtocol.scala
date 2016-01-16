@@ -1,10 +1,9 @@
-package lineup.stream
+package lineup.protocol
 
 import java.io.{ OutputStreamWriter, ByteArrayOutputStream }
 import java.math.BigInteger
 import java.nio.charset.Charset
 import java.nio.{ ByteBuffer, ByteOrder }
-import java.util
 import akka.stream.io.Framing
 import akka.stream.scaladsl.Flow
 import akka.util.ByteString
@@ -33,11 +32,11 @@ object PythonPickleProtocol {
   }
 
 
-  final case class PickleException private[stream]( part: String, value: Any )
+  final case class PickleException private[protocol]( part: String, value: Any )
   extends Exception( s"failed to parse ${part} for [${value.toString}] of type [${value.getClass.getName}]" )
   with GraphiteSerializationProtocol.ProtocolException
 
-  private[stream] object Opcodes {
+  private[protocol] object Opcodes {
     val charset = Charset forName "UTF-8"
 
     val MARK = '('

@@ -1,12 +1,13 @@
-package lineup.stream
+package lineup.publish
+
+import akka.actor.{ Actor, ActorLogging }
+import lineup.model.outlier.{ NoOutliers, Outliers, SeriesOutliers }
+import lineup.model.timeseries._
+import org.joda.{ time => joda }
+import peds.akka.metrics.InstrumentedActor
 
 import scala.annotation.tailrec
 import scala.concurrent.duration.FiniteDuration
-import akka.actor.{ Actor, ActorLogging }
-import org.joda.{ time => joda }
-import peds.akka.metrics.InstrumentedActor
-import lineup.model.timeseries._
-import lineup.model.outlier.{ NoOutliers, SeriesOutliers, Outliers }
 
 
 /**

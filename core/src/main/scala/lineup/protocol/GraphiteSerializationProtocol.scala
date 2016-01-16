@@ -1,7 +1,6 @@
-package lineup.stream
+package lineup.protocol
 
-import java.nio.charset.Charset
-import akka.stream.{ActorAttributes, Supervision}
+import akka.stream.{ ActorAttributes, Supervision }
 import akka.stream.scaladsl.Flow
 import akka.util.ByteString
 import com.typesafe.scalalogging.LazyLogging
@@ -9,18 +8,8 @@ import lineup.model.timeseries.TimeSeries
 
 
 /**
-  * Created by rolfsd on 11/25/15.
+  * Created by rolfsd on 1/12/16.
   */
-trait GraphiteSerializationProtocol {
-  def framingFlow( maximumFrameLength: Int ): Flow[ByteString, ByteString, Unit]
-  def toDataPoints( bytes: ByteString ): List[TimeSeries]
-  def loadTimeSeriesData: Flow[ByteString, TimeSeries, Unit] = {
-    Flow[ByteString]
-    .mapConcat { toDataPoints }
-    .withAttributes( ActorAttributes.supervisionStrategy(GraphiteSerializationProtocol.decider) )
-  }
-}
-
 object GraphiteSerializationProtocol extends LazyLogging {
   trait ProtocolException extends Exception {
     def part: String
@@ -38,5 +27,16 @@ object GraphiteSerializationProtocol extends LazyLogging {
     }
 
     case _ => Supervision.Stop
+  }
+}
+
+trait GraphiteSerializationProtocol {
+  def framingFlow( maximumFrameLength: Int ): Flow[ByteString, ByteString, Unit]
+  def toDataPoints( bytes: ByteString ): List[TimeSeries]
+
+  def unmarshalTimeSeriesData: Flow[ByteString, TimeSeries, Unit] = {
+    Flow[ByteString]
+    .mapConcat { toDataPoints }
+    .withAttributes( ActorAttributes.supervisionStrategy(GraphiteSerializationProtocol.decider) )
   }
 }

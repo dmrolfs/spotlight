@@ -1,17 +1,17 @@
 package lineup.analysis.outlier
 
-import nl.grons.metrics.scala.Meter
-
 import scala.concurrent.duration._
-import scala.util.{ Failure, Success, Try }
 import akka.actor.{ Actor, ActorRef, ActorLogging, Props }
 import akka.event.LoggingReceive
 import akka.pattern.AskTimeoutException
 import akka.stream.{ ActorAttributes, Supervision }
 import akka.stream.scaladsl.Flow
+import scalaz.{ \/-, -\/ }
 import com.typesafe.scalalogging.StrictLogging
+import nl.grons.metrics.scala.Meter
 import peds.akka.metrics.{ Instrumented, InstrumentedActor }
 import peds.commons.identifier.ShortUUID
+import peds.commons.Valid
 import lineup.model.timeseries.{ Topic, TimeSeriesBase }
 import lineup.model.outlier.{ Outliers, OutlierPlan }
 
@@ -82,24 +82,28 @@ object OutlierDetection extends StrictLogging with Instrumented {
   }
 
 
-  trait PlanConfigurationProvider extends OutlierDetection.ConfigurationProvider {
-    def getPlans: () => Try[Seq[OutlierPlan]]
+  object PlanConfigurationProvider {
+    type Creator = () => Valid[Seq[OutlierPlan]]
+  }
 
-    def getPlansWithFallback( default: Seq[OutlierPlan] ): Seq[OutlierPlan] = {
-      getPlans() match {
-        case Success(ps) => ps
-        case Failure(ex) => {
-          logger warn s"Detector failed to load policy detection plans: $ex"
+  trait PlanConfigurationProvider extends OutlierDetection.ConfigurationProvider {
+    def makePlans: PlanConfigurationProvider.Creator
+
+    def makePlansWithFallback( default: Seq[OutlierPlan] ): Seq[OutlierPlan] = {
+      makePlans() match {
+        case \/-(ps) => ps
+        case -\/(exs) => {
+          exs foreach { ex => logger warn s"Detector failed to load policy detection plans: $ex" }
           default
         }
       }
     }
 
-    var plans: Seq[OutlierPlan] = getPlansWithFallback( Seq.empty[OutlierPlan] )
+    var plans: Seq[OutlierPlan] = makePlansWithFallback( Seq.empty[OutlierPlan] )
     override def planFor( m: OutlierDetectionMessage ): Option[OutlierPlan] = plans find { _ appliesTo m }
 
     override def invalidateCaches(): Unit = {
-      plans = getPlansWithFallback( plans )
+      plans = makePlansWithFallback( plans )
       logger debug s"""Detector detection plans: [${plans.zipWithIndex.map{ case (p,i) => f"${i}%2d: ${p}"}.mkString("\n","\n","\n")}]"""
     }
   }
