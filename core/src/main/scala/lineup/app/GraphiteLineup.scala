@@ -1,15 +1,18 @@
 package lineup.app
 
 import java.net.InetSocketAddress
+import lineup.publish.GraphitePublisher
+import peds.akka.stream.StreamMonitor
+
 import scala.concurrent.{ Await, Future }
 import scala.concurrent.duration._
 import scala.util.{ Failure, Success }
-import akka.actor.{ ActorRef, ActorSystem }
-import akka.stream.scaladsl.Tcp
-import akka.stream.{ Materializer, Supervision, ActorMaterializerSettings, ActorMaterializer }
-import akka.util.Timeout
+import akka.actor.{ ActorKilledException, ActorInitializationException, ActorRef, ActorSystem }
+import akka.stream.scaladsl._
+import akka.stream._
+import akka.util.{ ByteString, Timeout }
 
-import scalaz._, Scalaz._
+import scalaz.{ Sink => _, _ }, Scalaz._
 import org.slf4j.LoggerFactory
 import com.typesafe.scalalogging.{ Logger, StrictLogging }
 import com.typesafe.config.Config
@@ -21,12 +24,12 @@ import peds.akka.supervision.IsolatedLifeCycleSupervisor.{ WaitForStart, ChildSt
 import peds.commons.log.Trace
 import peds.akka.supervision.OneForOneStrategyFactory
 import peds.akka.metrics.{ Reporter, Instrumented }
-import lineup.Valid
+import peds.commons.Valid
 import lineup.analysis.outlier.OutlierDetection
 import lineup.stream.OutlierDetectionWorkflow.{ GetPublisher, GetPublishRateLimiter, GetOutlierDetector }
 import lineup.model.outlier._
 import lineup.protocol.GraphiteSerializationProtocol
-import lineup.stream.{ GraphiteModel, OutlierDetectionWorkflow }
+import lineup.stream.{ TrainOutlierAnalysis, Configuration, GraphiteModel, OutlierDetectionWorkflow }
 
 
 /**
@@ -65,7 +68,7 @@ object GraphiteLineup extends Instrumented with StrictLogging{
     implicit val system = ActorSystem( "Lineup" )
     implicit val ec = system.dispatcher
     implicit val materializer = ActorMaterializer(
-      ActorMaterializerSettings( system ) withSupervisionStrategy streamSupervisionDecider
+      ActorMaterializerSettings( system ) withSupervisionStrategy workflowSupervision
     )
 
     val workflow = startWorkflow( config, reloader )
@@ -110,11 +113,95 @@ object GraphiteLineup extends Instrumented with StrictLogging{
 
     val tcp = Tcp().bind( config.sourceAddress.getHostName, config.sourceAddress.getPort )
     tcp runForeach { connection =>
-      GraphiteModel.detectionWorkflow( detector, limiter, publisher, reloader ) match {
+      detectionWorkflow( detector, limiter, publisher, reloader ) match {
         case \/-( model ) => connection.handleWith( model )
         case -\/( exs ) => exs foreach { ex => logger error s"failed to handle connection: ${ex.getMessage}" }
       }
     }
+  }
+
+  def detectionWorkflow(
+    detector: ActorRef,
+    limiter: ActorRef,
+    publisher: ActorRef,
+    reloadConfiguration: Configuration.Reload
+  )(
+    implicit system: ActorSystem,
+    materializer: Materializer
+  ): Valid[Flow[ByteString, ByteString, Unit]] = {
+    for {
+      config <- reloadConfiguration()
+    } yield {
+      logger.info(
+        s"""
+           |\nConnection made using the following configuration:
+           |\tTCP-In Buffer Size   : ${config.tcpInboundBufferSize}
+           |\tWorkflow Buffer Size : ${config.workflowBufferSize}
+           |\tDetect Timeout       : ${config.detectionBudget.toCoarsest}
+           |\tplans                : [${config.plans.zipWithIndex.map{ case (p,i) => f"${i}%2d: ${p}"}.mkString("\n","\n","\n")}]
+        """.stripMargin
+      )
+
+      val graph = GraphDSL.create() { implicit b =>
+        import GraphDSL.Implicits._
+        import StreamMonitor._
+
+        //todo add support to watch FlowShapes
+
+        val framing = b.add( config.protocol.framingFlow(config.maxFrameLength).watchSourced( 'framing ) )
+
+        val intakeBuffer = b.add(
+          Flow[ByteString]
+          .buffer( config.tcpInboundBufferSize, OverflowStrategy.backpressure )
+          .watchFlow( 'intakeBuffer )
+        )
+
+        val timeSeries = b.add( config.protocol.unmarshalTimeSeriesData.watchSourced( 'timeseries ) )
+        val scoring = b.add( Flow.fromGraph( GraphiteModel.scoringGraph( detector, config ) ).watchFlow( 'scoring ) )
+        val broadcast = b.add( Broadcast[Outliers](outputPorts = 2, eagerCancel = false) )
+        val publish = b.add( publishOutliers( limiter, publisher ).watchFlow( 'publish ) )
+        val tcpOut = b.add( Flow[Outliers].map{ _ => ByteString() }.watchConsumed( 'tcpOut ) )
+        val train = b.add( TrainOutlierAnalysis.feedOutlierTraining.watchConsumed( 'train ) )
+        val term = b.add( Sink.ignore )
+
+        StreamMonitor.set(
+          'framing,
+          'intakeBuffer,
+          'timeseries,
+          'scoring,
+          GraphiteModel.WatchPoints.ScoringPlanned,
+          GraphiteModel.WatchPoints.ScoringBatch,
+          GraphiteModel.WatchPoints.ScoringAnalysisBuffer,
+          GraphiteModel.WatchPoints.ScoringDetect,
+          'publish,
+          'tcpOut,
+          'train
+        )
+
+        framing ~> intakeBuffer ~> timeSeries ~> scoring ~> broadcast ~> publish ~> tcpOut
+                                                            broadcast ~> train ~> term
+
+        FlowShape( framing.in, tcpOut.out )
+      }
+
+      Flow.fromGraph( graph ).withAttributes( ActorAttributes.supervisionStrategy(workflowSupervision) )
+    }
+  }
+
+  def publishOutliers(
+    limiter: ActorRef,
+    publisher: ActorRef
+  )(
+    implicit system: ActorSystem
+  ): Flow[Outliers, Outliers, Unit] = {
+    import scala.collection.immutable
+
+    implicit val ec = system.dispatcher
+
+    Flow[Outliers]
+    .conflate( immutable.Seq( _ ) ) { _ :+ _ }
+    .mapConcat( identity )
+    .via( GraphitePublisher.publish( limiter, publisher, 2, 90.seconds ) )
   }
 
   def startPlanWatcher( config: Configuration, listeners: Set[ActorRef] )( implicit system: ActorSystem ): Unit = {
@@ -142,12 +229,12 @@ object GraphiteLineup extends Instrumented with StrictLogging{
     }
   }
 
-  lazy val streamFailuresMeter: Meter = metrics meter "stream.failures"
+  lazy val workflowFailuresMeter: Meter = metrics meter "workflow.failures"
 
-  val streamSupervisionDecider: Supervision.Decider = {
+  val workflowSupervision: Supervision.Decider = {
     case ex => {
       logger.error( "Error caught by Supervisor:", ex )
-      streamFailuresMeter.mark( )
+      workflowFailuresMeter.mark( )
       Supervision.Restart
     }
   }
@@ -180,4 +267,19 @@ object GraphiteLineup extends Instrumented with StrictLogging{
       "workflow-supervisor"
     )
   }
+
+
+  //  def loggerDispatcher( system: ActorSystem ): ExecutionContext = system.dispatchers lookup "logger-dispatcher"
+  //
+  //  def log( logr: Logger, level: Symbol )( msg: => String )( implicit system: ActorSystem ): Future[Unit] = {
+  //    Future {
+  //      level match {
+  //        case 'debug => logr debug msg
+  //        case 'info => logr info msg
+  //        case 'warn => logr warn msg
+  //        case 'error => logr error msg
+  //        case _ => logr error msg
+  //      }
+  //    }( loggerDispatcher(system) )
+  //  }
 }
