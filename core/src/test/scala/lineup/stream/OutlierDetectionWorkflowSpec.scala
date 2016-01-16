@@ -36,10 +36,10 @@ class OutlierDetectionWorkflowSpec extends ParallelAkkaSpec with MockitoSugar wi
   override val trace = Trace[OutlierDetectionWorkflowSpec]
 
   class Fixture extends AkkaFixture { fixture =>
-    import lineup.Valid._
+    import scalaz.Scalaz._
 
     val protocol = mock[GraphiteSerializationProtocol]
-    val makePlans: PlanConfigurationProvider.Creator = () => { Seq.empty[OutlierPlan].valid }
+    val makePlans: PlanConfigurationProvider.Creator = () => { Seq.empty[OutlierPlan].right }
     val config = mock[Config]
 
     val rateLimiter = TestProbe()

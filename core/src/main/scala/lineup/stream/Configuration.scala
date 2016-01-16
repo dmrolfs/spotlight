@@ -1,22 +1,22 @@
-package lineup.app
+package lineup.stream
 
-import java.{ lang, time, util }
 import java.net.{ InetAddress, InetSocketAddress }
-import scala.concurrent.{ ExecutionContext, Future }
-import scala.concurrent.duration._
-import scala.util.matching.Regex
+import java.{ lang, time, util }
 
-import scalaz._, Scalaz._
-import com.typesafe.scalalogging.LazyLogging
 import com.typesafe.config._
-import peds.commons.V
-
-import lineup.Valid
+import com.typesafe.scalalogging.LazyLogging
 import lineup.analysis.outlier.OutlierDetection
 import lineup.analysis.outlier.algorithm.DBSCANAnalyzer
 import lineup.model.outlier._
-import lineup.model.timeseries.{ Topic, TimeSeriesBase }
-import lineup.protocol.{ PythonPickleProtocol, MessagePackProtocol, GraphiteSerializationProtocol }
+import lineup.model.timeseries.{ TimeSeriesBase, Topic }
+import lineup.protocol.{ GraphiteSerializationProtocol, MessagePackProtocol, PythonPickleProtocol }
+import peds.commons.{ V, Valid }
+
+import scala.concurrent.duration._
+import scala.concurrent.{ ExecutionContext, Future }
+import scala.util.matching.Regex
+import scalaz.Scalaz._
+import scalaz._
 
 
 /**
@@ -203,7 +203,7 @@ object Configuration {
 
 
 
-  final case class SimpleConfiguration private[app](
+  final case class SimpleConfiguration private[stream](
     override val sourceAddress: InetSocketAddress,
     override val maxFrameLength: Int,
     override val protocol: GraphiteSerializationProtocol,
@@ -358,9 +358,9 @@ object Configuration {
     override def getMillisecondsList(s: String): util.List[lang.Long] = underlying.getMillisecondsList(s)
   }
 
-  case class UsageConfigurationError private[app]( usage: String ) extends IllegalArgumentException( usage )
+  case class UsageConfigurationError private[stream]( usage: String ) extends IllegalArgumentException( usage )
 
-  private case class UsageSettings(
+  final case class UsageSettings private[stream](
     sourceHost: Option[InetAddress] = None,
     sourcePort: Option[Int] = None,
     windowSize: Option[FiniteDuration] = None

@@ -1,9 +1,7 @@
 package lineup.stream
 
 import java.net.{ Socket, InetSocketAddress }
-import scala.util.Try
 import scala.concurrent.duration._
-
 import akka.actor.SupervisorStrategy._
 import akka.actor._
 import akka.event.LoggingReceive
@@ -14,7 +12,7 @@ import peds.akka.supervision.IsolatedLifeCycleSupervisor.ChildStarted
 import peds.akka.metrics.InstrumentedActor
 import peds.akka.stream.Limiter
 import peds.akka.supervision.{ OneForOneStrategyFactory, SupervisionStrategyFactory, IsolatedLifeCycleSupervisor }
-import lineup.Valid
+import peds.commons.Valid
 import lineup.analysis.outlier.algorithm.DBSCANAnalyzer
 import lineup.analysis.outlier.{ OutlierDetection, DetectionAlgorithmRouter }
 import lineup.model.outlier.OutlierPlan

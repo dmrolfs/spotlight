@@ -2,14 +2,11 @@ package lineup.stream
 
 import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicInteger
-import lineup.analysis.outlier.OutlierDetection.PlanConfigurationProvider.Creator
-import lineup.app.Configuration
 
 import scala.concurrent.{ Future, Await }
 import scala.concurrent.duration._
 import scala.util.Failure
 
-//import scala.util.{Try, Failure}
 import akka.pattern
 import akka.stream.OverflowStrategy
 import akka.stream.testkit.scaladsl.{ TestSource, TestSink }
@@ -17,6 +14,7 @@ import akka.stream.scaladsl._
 import akka.util.ByteString
 import akka.testkit._
 import akka.actor.ActorRef
+import scalaz.Scalaz._
 import com.typesafe.config.ConfigFactory
 import org.scalatest.Tag
 import com.typesafe.scalalogging.LazyLogging
@@ -24,13 +22,13 @@ import org.apache.commons.math3.random.RandomDataGenerator
 import org.joda.{ time => joda }
 import com.github.nscala_time.time.Imports.{ richSDuration, richDateTime }
 import peds.commons.log.Trace
-import lineup.Valid._
 import lineup.protocol.PythonPickleProtocol
 import lineup.testkit.ParallelAkkaSpec
 import lineup.analysis.outlier.{ DetectionAlgorithmRouter, OutlierDetection }
 import lineup.analysis.outlier.algorithm.DBSCANAnalyzer
 import lineup.model.outlier.{ SeriesOutliers, IsQuorum, OutlierPlan }
 import lineup.model.timeseries.{ TimeSeries, DataPoint, Row }
+import lineup.analysis.outlier.OutlierDetection.PlanConfigurationProvider.Creator
 
 
 /**
@@ -46,7 +44,7 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
     val stringFlow: Flow[ByteString, ByteString, Unit] = Flow[ByteString].via( protocol.framingFlow() )
 
     trait TestConfigurationProvider extends OutlierDetection.PlanConfigurationProvider {
-      override def makePlans: Creator = () => { fixture.plans.valid }
+      override def makePlans: Creator = () => { fixture.plans.right }
       override def invalidateCaches(): Unit = { }
       override def refreshInterval: FiniteDuration = 5.minutes
     }
@@ -100,7 +98,7 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
       val dp = makeDataPoints( points, start = now ).take( 5 )
       val expected = TimeSeries( "foobar", dp )
 
-      val flowUnderTest = protocol.loadTimeSeriesData
+      val flowUnderTest = protocol.unmarshalTimeSeriesData
       //      val flowUnderTest = Flow[ByteString].mapConcat( PythonPickleProtocol.toDataPoints )
       val future = Source( List(pickled(dp)) ).via( flowUnderTest ).runWith( Sink.head )
       val result = Await.result( future, 100.millis.dilated )
@@ -115,7 +113,7 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
 
       val flowUnderTest = Flow[ByteString]
         .via( protocol.framingFlow() )
-        .via( protocol.loadTimeSeriesData )
+        .via( protocol.unmarshalTimeSeriesData )
 
       val future = Source( List(withHeader(pickled(dp))) ).via( flowUnderTest ).runWith( Sink.head )
       val result = Await.result( future, 1.second.dilated )
@@ -134,7 +132,7 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
 
       val flowUnderTest = Flow[ByteString]
         .via( protocol.framingFlow() )
-        .via( protocol.loadTimeSeriesData )
+        .via( protocol.unmarshalTimeSeriesData )
 
       val pickles = withHeader( pickled( Seq(dp1, dp2) map { ("foobar", _) } ) )
       trace( s"pickles = ${pickles.utf8String}" )
@@ -200,7 +198,7 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
         OutlierDetection.props {
           new OutlierDetection with TestConfigurationProvider {
             override def router: ActorRef = routerRef
-            override def makePlans: Creator = () => { Seq(defaultPlan).valid }
+            override def makePlans: Creator = () => { Seq(defaultPlan).right }
           }
         },
         "detectOutliers"

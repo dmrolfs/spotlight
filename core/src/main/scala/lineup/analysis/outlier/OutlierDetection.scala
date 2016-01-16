@@ -11,7 +11,7 @@ import com.typesafe.scalalogging.StrictLogging
 import nl.grons.metrics.scala.Meter
 import peds.akka.metrics.{ Instrumented, InstrumentedActor }
 import peds.commons.identifier.ShortUUID
-import lineup.Valid
+import peds.commons.Valid
 import lineup.model.timeseries.{ Topic, TimeSeriesBase }
 import lineup.model.outlier.{ Outliers, OutlierPlan }
 
