@@ -1,6 +1,7 @@
 package lineup.app
 
 import java.net.InetSocketAddress
+import lineup.model.timeseries.TimeSeries
 import lineup.publish.GraphitePublisher
 import peds.akka.stream.StreamMonitor
 
@@ -157,18 +158,23 @@ object GraphiteLineup extends Instrumented with StrictLogging{
         )
 
         val timeSeries = b.add( config.protocol.unmarshalTimeSeriesData.watchSourced( 'timeseries ) )
-        val scoring = b.add( Flow.fromGraph( GraphiteModel.scoringGraph( detector, config ) ).watchFlow( 'scoring ) )
+        val scoring = b.add( GraphiteModel.scoringGraph( detector, config ) )
+        val logUnrecognized = b.add(
+          Flow[TimeSeries].transform( () =>
+            GraphiteModel.logMetric( Logger(LoggerFactory getLogger "Unrecognized"), config.plans )
+          )
+        )
         val broadcast = b.add( Broadcast[Outliers](outputPorts = 2, eagerCancel = false) )
         val publish = b.add( publishOutliers( limiter, publisher ).watchFlow( 'publish ) )
         val tcpOut = b.add( Flow[Outliers].map{ _ => ByteString() }.watchConsumed( 'tcpOut ) )
         val train = b.add( TrainOutlierAnalysis.feedOutlierTraining.watchConsumed( 'train ) )
-        val term = b.add( Sink.ignore )
+        val termTraining = b.add( Sink.ignore )
+        val termUnrecognized = b.add( Sink.ignore )
 
         StreamMonitor.set(
           'framing,
           'intakeBuffer,
           'timeseries,
-          'scoring,
           GraphiteModel.WatchPoints.ScoringPlanned,
           GraphiteModel.WatchPoints.ScoringBatch,
           GraphiteModel.WatchPoints.ScoringAnalysisBuffer,
@@ -178,8 +184,10 @@ object GraphiteLineup extends Instrumented with StrictLogging{
           'train
         )
 
-        framing ~> intakeBuffer ~> timeSeries ~> scoring ~> broadcast ~> publish ~> tcpOut
-                                                            broadcast ~> train ~> term
+        framing ~> intakeBuffer ~> timeSeries ~> scoring.in
+                                                 scoring.out0 ~> broadcast ~> publish ~> tcpOut
+                                                                 broadcast ~> train ~> termTraining
+                                                 scoring.out1 ~> logUnrecognized ~> termUnrecognized
 
         FlowShape( framing.in, tcpOut.out )
       }

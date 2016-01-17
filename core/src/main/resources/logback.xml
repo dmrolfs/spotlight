@@ -68,6 +68,23 @@
     </triggeringPolicy>
   </appender>
 
+  <appender name="UNRECOGNIZED_METRICS_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+    <file>${LOG_HOME}/unrecognized-metrics.txt</file>
+    <append>true</append>
+    <encoder>
+      <pattern>%msg%n</pattern>
+    </encoder>
+    <rollingPolicy class="ch.qos.logback.core.rolling.FixedWindowRollingPolicy">
+      <!-- rollover daily -->
+      <fileNamePattern>${LOG_HOME}/unrecognized-metrics-%i.txt.gz</fileNamePattern>
+      <minIndex>1</minIndex>
+      <maxIndex>5</maxIndex>
+    </rollingPolicy>
+    <triggeringPolicy class="ch.qos.logback.core.rolling.SizeBasedTriggeringPolicy">
+      <maxFileSize>1GB</maxFileSize>
+    </triggeringPolicy>
+  </appender>
+
   <appender name="TRAINING_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
     <file>${LOG_HOME}/training.csv</file>
     <append>true</append>
@@ -105,6 +122,10 @@
 
   <logger name="Metrics" level="DEBUG" additivity="false">
     <appender-ref ref="METRIC_FILE" />
+  </logger>
+
+  <logger name="Unrecognized" level="DEBUG" additivity="false">
+    <appender-ref ref="UNRECOGNIZED_METRICS_FILE" />
   </logger>
 
   <logger name="Training" level="DEBUG" additivity="false">

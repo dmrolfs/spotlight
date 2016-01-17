@@ -1,6 +1,8 @@
 package lineup.stream
 
 import java.util.concurrent.atomic.AtomicInteger
+import akka.stream.FanOutShape.{ Ports, Name, Init }
+
 import scala.concurrent.duration._
 import akka.actor._
 import akka.stream.scaladsl._
@@ -23,25 +25,47 @@ import lineup.stream.OutlierDetectionWorkflow._
  * Created by rolfsd on 10/21/15.
  */
 object GraphiteModel extends Instrumented with StrictLogging {
+  object ScoringShape {
+    def apply[In, Out, Off]( init: Init[In] ): ScoringShape[In, Out, Off] = new ScoringShape( init )
+  }
+
+  class ScoringShape[In, Out, Off]( _init: Init[In] = Name("ScoringStage") ) extends FanOutShape2[In, Out, Off]( _init ) {
+    protected override def construct( init: Init[In] ): FanOutShape[In] = new ScoringShape( init )
+  }
+
   object WatchPoints {
     val ScoringPlanned = Symbol("scoring.planned")
+    val ScoringUnrecognized = Symbol("scoring.unrecognized")
     val ScoringBatch = Symbol("scoring.batch")
     val ScoringAnalysisBuffer = Symbol("scoring.analysisBuffer")
     val ScoringGrouping = Symbol("scoring.grouping")
     val ScoringDetect = Symbol("scoring.detect")
   }
+
   def scoringGraph(
     detector: ActorRef,
     config: Configuration
   )(
     implicit system: ActorSystem,
     materializer: Materializer
-  ): Graph[FlowShape[TimeSeries,Outliers], Unit] = {
+  ): Graph[ScoringShape[TimeSeries, Outliers, TimeSeries], Unit] = {
     import akka.stream.scaladsl.GraphDSL.Implicits._
     import StreamMonitor._
 
     GraphDSL.create() { implicit b =>
-      val planned = b.add( filterPlanned( config.plans ).watchFlow( WatchPoints.ScoringPlanned ) )
+      val logMetrics = b.add(
+        Flow[TimeSeries].transform( () => logMetric( Logger(LoggerFactory getLogger "Metrics"), config.plans ) )
+      )
+      val blockPriors = b.add( Flow[TimeSeries].filter{ ts => !isOutlierReport(ts) } )
+      val broadcast = b.add( Broadcast[TimeSeries](outputPorts = 2, eagerCancel = false) )
+
+      val watchPlanned = Flow[TimeSeries].map{ identity }.watchFlow( WatchPoints.ScoringPlanned )
+      val passPlanned = b.add( Flow[TimeSeries].filter{ isPlanned( _, config.plans ) }.via( watchPlanned ) )
+
+      val watchUnrecognized = Flow[TimeSeries].map{ identity }.watchFlow( WatchPoints.ScoringUnrecognized )
+      val passUnrecognized = b.add(
+        Flow[TimeSeries].filter{ !isPlanned( _, config.plans ) }.via( watchUnrecognized )
+      )
 
       val batch = b.add( batchSeries( config.windowDuration ).watchConsumed( WatchPoints.ScoringBatch ) )
 
@@ -64,38 +88,50 @@ object GraphiteModel extends Instrumented with StrictLogging {
         .watchFlow( WatchPoints.ScoringDetect )
       )
 
-      planned ~> batch ~> scoringBuffer ~> detectOutlier
+      logMetrics ~> blockPriors ~> broadcast ~> passPlanned ~> batch ~> scoringBuffer ~> detectOutlier
+                                   broadcast ~> passUnrecognized
 
-      FlowShape( planned.in, detectOutlier.out )
+      ScoringShape(
+        FanOutShape.Ports( inlet = logMetrics.in, outlets = scala.collection.immutable.Seq(detectOutlier.out, passUnrecognized.out) )
+      )
     }
   }
 
 
-  def filterPlanned( plans: Seq[OutlierPlan] )( implicit system: ActorSystem ): Flow[TimeSeries, TimeSeries, Unit] = {
-    def logMetric: PushStage[TimeSeries, TimeSeries] = new PushStage[TimeSeries, TimeSeries] {
-      val count = new AtomicInteger( 0 )
-      var bloom = BloomFilter[Topic]( maxFalsePosProbability = 0.001, 500000 )
-      val metricLogger = Logger( LoggerFactory getLogger "Metrics" )
+  def logMetric(
+    destination: Logger,
+    plans: Seq[OutlierPlan]
+  ): PushStage[TimeSeries, TimeSeries] = new PushStage[TimeSeries, TimeSeries] {
+    val count = new AtomicInteger( 0 )
+    var bloom = BloomFilter[Topic]( maxFalsePosProbability = 0.001, 500000 )
 
-      override def onPush( elem: TimeSeries, ctx: Context[TimeSeries] ): SyncDirective = {
-        if ( bloom has_? elem.topic ) ctx push elem
-        else {
-          bloom += elem.topic
-          if ( !elem.topic.name.startsWith(OutlierMetricPrefix) ) {
-            metricLogger.debug(
-              s"""[${count.incrementAndGet}] Plan for ${elem.topic}: ${plans.find{ _ appliesTo elem }.getOrElse{"NONE"}}"""
-            )
-          }
-
-          ctx push elem
+    override def onPush( elem: TimeSeries, ctx: Context[TimeSeries] ): SyncDirective = {
+      if ( bloom has_? elem.topic ) ctx push elem
+      else {
+        bloom += elem.topic
+        if ( !elem.topic.name.startsWith(OutlierMetricPrefix) ) {
+          destination.debug(
+            s"""[${count.incrementAndGet}] Plan for ${elem.topic}: ${plans.find{ _ appliesTo elem }.getOrElse{"NONE"}}"""
+          )
         }
+
+        ctx push elem
       }
     }
-
-    Flow[TimeSeries]
-    .transform( () => logMetric )
-    .filter { ts => !ts.topic.name.startsWith( OutlierMetricPrefix ) && plans.exists{ _ appliesTo ts } }
   }
+
+  def filterPlanned( plans: Seq[OutlierPlan] )( implicit system: ActorSystem ): Flow[TimeSeries, TimeSeries, Unit] = {
+    Flow[TimeSeries]
+//    .transform( () => logMetric )
+    .filter { ts => !isOutlierReport(ts) && isPlanned( ts, plans ) }
+  }
+
+  def filterUnrecognized( plans: Seq[OutlierPlan] )( implicit system: ActorSystem ): Flow[TimeSeries, TimeSeries, Unit] = {
+    Flow[TimeSeries].filter{ ts => !isOutlierReport(ts) }
+  }
+  def isOutlierReport( ts: TimeSeriesBase ): Boolean = ts.topic.name.startsWith( OutlierMetricPrefix )
+  def isPlanned( ts: TimeSeriesBase, plans: Seq[OutlierPlan] ): Boolean = plans.exists{ _ appliesTo ts }
+
 
   def batchSeries(
     windowSize: FiniteDuration = 1.minute,

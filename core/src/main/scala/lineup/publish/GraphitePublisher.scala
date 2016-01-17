@@ -105,8 +105,8 @@ class GraphitePublisher( outlierTopicPrefix: Option[String] ) extends DenseOutli
 
   val pickler: PythonPickleProtocol = new PythonPickleProtocol
   val outlierLogger: Logger = Logger( LoggerFactory getLogger "Outliers" )
-  var socket: Option[Socket] = None
-  var waitQueue = immutable.Queue.empty[MarkPoint]
+  var socket: Option[Socket] = None //todo: if socket fails supervisor should restart actor
+  var waitQueue: immutable.Queue[MarkPoint] = immutable.Queue.empty[MarkPoint]
   override val fillSeparation: FiniteDuration = outer.separation
 
 
