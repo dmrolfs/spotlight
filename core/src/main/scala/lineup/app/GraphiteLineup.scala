@@ -3,12 +3,13 @@ package lineup.app
 import java.net.InetSocketAddress
 import lineup.model.timeseries.TimeSeries
 import lineup.publish.GraphitePublisher
+import lineup.train.TrainOutlierAnalysis
 import peds.akka.stream.StreamMonitor
 
 import scala.concurrent.{ Await, Future }
 import scala.concurrent.duration._
 import scala.util.{ Failure, Success }
-import akka.actor.{ ActorKilledException, ActorInitializationException, ActorRef, ActorSystem }
+import akka.actor.{ ActorRef, ActorSystem }
 import akka.stream.scaladsl._
 import akka.stream._
 import akka.util.{ ByteString, Timeout }
@@ -30,7 +31,7 @@ import lineup.analysis.outlier.OutlierDetection
 import lineup.stream.OutlierDetectionWorkflow.{ GetPublisher, GetPublishRateLimiter, GetOutlierDetector }
 import lineup.model.outlier._
 import lineup.protocol.GraphiteSerializationProtocol
-import lineup.stream.{ TrainOutlierAnalysis, Configuration, GraphiteModel, OutlierDetectionWorkflow }
+import lineup.stream.{ Configuration, OutlierScoringModel, OutlierDetectionWorkflow }
 
 
 /**
@@ -158,10 +159,10 @@ object GraphiteLineup extends Instrumented with StrictLogging{
         )
 
         val timeSeries = b.add( config.protocol.unmarshalTimeSeriesData.watchSourced( 'timeseries ) )
-        val scoring = b.add( GraphiteModel.scoringGraph( detector, config ) )
+        val scoring = b.add( OutlierScoringModel.scoringGraph( detector, config ) )
         val logUnrecognized = b.add(
           Flow[TimeSeries].transform( () =>
-            GraphiteModel.logMetric( Logger(LoggerFactory getLogger "Unrecognized"), config.plans )
+            OutlierScoringModel.logMetric( Logger( LoggerFactory getLogger "Unrecognized" ), config.plans )
           )
         )
         val broadcast = b.add( Broadcast[Outliers](outputPorts = 2, eagerCancel = false) )
@@ -175,10 +176,10 @@ object GraphiteLineup extends Instrumented with StrictLogging{
           'framing,
           'intakeBuffer,
           'timeseries,
-          GraphiteModel.WatchPoints.ScoringPlanned,
-          GraphiteModel.WatchPoints.ScoringBatch,
-          GraphiteModel.WatchPoints.ScoringAnalysisBuffer,
-          GraphiteModel.WatchPoints.ScoringDetect,
+                           OutlierScoringModel.WatchPoints.ScoringPlanned,
+                           OutlierScoringModel.WatchPoints.ScoringBatch,
+                           OutlierScoringModel.WatchPoints.ScoringAnalysisBuffer,
+                           OutlierScoringModel.WatchPoints.ScoringDetect,
           'publish,
           'tcpOut,
           'train

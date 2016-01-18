@@ -1,7 +1,7 @@
 package lineup.stream
 
 import java.util.concurrent.atomic.AtomicInteger
-import akka.stream.FanOutShape.{ Ports, Name, Init }
+import akka.stream.FanOutShape.{ Name, Init }
 
 import scala.concurrent.duration._
 import akka.actor._
@@ -24,7 +24,7 @@ import lineup.stream.OutlierDetectionWorkflow._
 /**
  * Created by rolfsd on 10/21/15.
  */
-object GraphiteModel extends Instrumented with StrictLogging {
+object OutlierScoringModel extends Instrumented with StrictLogging {
   object ScoringShape {
     def apply[In, Out, Off]( init: Init[In] ): ScoringShape[In, Out, Off] = new ScoringShape( init )
   }
@@ -59,10 +59,10 @@ object GraphiteModel extends Instrumented with StrictLogging {
       val blockPriors = b.add( Flow[TimeSeries].filter{ ts => !isOutlierReport(ts) } )
       val broadcast = b.add( Broadcast[TimeSeries](outputPorts = 2, eagerCancel = false) )
 
-      val watchPlanned = Flow[TimeSeries].map{ identity }.watchFlow( WatchPoints.ScoringPlanned )
+      val watchPlanned = Flow[TimeSeries].map{ identity }.watchConsumed( WatchPoints.ScoringPlanned )
       val passPlanned = b.add( Flow[TimeSeries].filter{ isPlanned( _, config.plans ) }.via( watchPlanned ) )
 
-      val watchUnrecognized = Flow[TimeSeries].map{ identity }.watchFlow( WatchPoints.ScoringUnrecognized )
+      val watchUnrecognized = Flow[TimeSeries].map{ identity }.watchConsumed( WatchPoints.ScoringUnrecognized )
       val passUnrecognized = b.add(
         Flow[TimeSeries].filter{ !isPlanned( _, config.plans ) }.via( watchUnrecognized )
       )

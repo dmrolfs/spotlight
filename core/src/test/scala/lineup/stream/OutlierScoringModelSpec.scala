@@ -34,8 +34,8 @@ import lineup.analysis.outlier.OutlierDetection.PlanConfigurationProvider.Creato
 /**
  * Created by rolfsd on 10/28/15.
  */
-class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
-  import GraphiteModelSpec._
+class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
+  import OutlierScoringModelSpec._
 
   class Fixture extends AkkaFixture { fixture =>
     def status[T]( label: String ): Flow[T, T, Unit] = Flow[T].map { e => logger info s"\n$label:${e.toString}"; e }
@@ -157,7 +157,7 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
       )
 
 
-      val flowUnderTest: Flow[TimeSeries, TimeSeries, Unit] = GraphiteModel.batchSeries( windowSize = 1.second, parallelism = 4 )
+      val flowUnderTest: Flow[TimeSeries, TimeSeries, Unit] = OutlierScoringModel.batchSeries( windowSize = 1.second, parallelism = 4 )
       val topics = List( "foo", "bar", "foo" )
       val data: List[TimeSeries] = topics.zip(List(dp1, dp2, dp3)).map{ case (t,p) => TimeSeries(t, p) }
       trace( s"""data=[${data.mkString(",\n")}]""")
@@ -236,7 +236,7 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
       )
 //      val expected = TimeSeries( "foo", (dp1 ++ dp3).sortBy( _.timestamp ) )
 
-      val graphiteFlow = GraphiteModel.batchSeries( parallelism = 4, windowSize = 20.millis )
+      val graphiteFlow = OutlierScoringModel.batchSeries( parallelism = 4, windowSize = 20.millis )
       val detectFlow = OutlierDetection.detectOutlier( detector, maxAllowedWait = 2.seconds, parallelism = 4 )
 
       val flowUnderTest = graphiteFlow via detectFlow
@@ -410,8 +410,8 @@ class GraphiteModelSpec extends ParallelAkkaSpec with LazyLogging {
   }
 }
 
-object GraphiteModelSpec {
-  val trace = Trace[GraphiteModelSpec.type]
+object OutlierScoringModelSpec {
+  val trace = Trace[OutlierScoringModelSpec.type]
 
   def withHeader( body: ByteString ): ByteString = {
     val result = ByteBuffer.allocate( 4 + body.size )
