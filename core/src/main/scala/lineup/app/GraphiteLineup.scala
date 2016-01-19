@@ -3,10 +3,10 @@ package lineup.app
 import java.net.InetSocketAddress
 import lineup.model.timeseries.TimeSeries
 import lineup.publish.GraphitePublisher
-import lineup.train.TrainOutlierAnalysis
+import lineup.train.{ TrainingRepositoryLogStatisticsInterpreter, TrainOutlierAnalysis }
 import peds.akka.stream.StreamMonitor
 
-import scala.concurrent.{ Await, Future }
+import scala.concurrent.{ ExecutionContext, Await, Future }
 import scala.concurrent.duration._
 import scala.util.{ Failure, Success }
 import akka.actor.{ ActorRef, ActorSystem }
@@ -168,7 +168,11 @@ object GraphiteLineup extends Instrumented with StrictLogging{
         val broadcast = b.add( Broadcast[Outliers](outputPorts = 2, eagerCancel = false) )
         val publish = b.add( publishOutliers( limiter, publisher ).watchFlow( 'publish ) )
         val tcpOut = b.add( Flow[Outliers].map{ _ => ByteString() }.watchConsumed( 'tcpOut ) )
-        val train = b.add( TrainOutlierAnalysis.feedOutlierTraining.watchConsumed( 'train ) )
+        val train = b.add(
+          TrainOutlierAnalysis.feedTrainingFlow(
+            TrainingRepositoryLogStatisticsInterpreter( trainingLogger )( trainingDispatcher(system) )
+          ).watchConsumed( 'train )
+        )
         val termTraining = b.add( Sink.ignore )
         val termUnrecognized = b.add( Sink.ignore )
 
@@ -176,10 +180,10 @@ object GraphiteLineup extends Instrumented with StrictLogging{
           'framing,
           'intakeBuffer,
           'timeseries,
-                           OutlierScoringModel.WatchPoints.ScoringPlanned,
-                           OutlierScoringModel.WatchPoints.ScoringBatch,
-                           OutlierScoringModel.WatchPoints.ScoringAnalysisBuffer,
-                           OutlierScoringModel.WatchPoints.ScoringDetect,
+          OutlierScoringModel.WatchPoints.ScoringPlanned,
+          OutlierScoringModel.WatchPoints.ScoringBatch,
+          OutlierScoringModel.WatchPoints.ScoringAnalysisBuffer,
+          OutlierScoringModel.WatchPoints.ScoringDetect,
           'publish,
           'tcpOut,
           'train
@@ -223,7 +227,6 @@ object GraphiteLineup extends Instrumented with StrictLogging{
     Path
     .findAllMatchIn( config.planOrigin.toString )
     .map { _ group 1 }
-//    .toList
     .foreach { filename =>
       // note: attempting to watch a shared file wrt VirtualBox will not work (https://www.virtualbox.org/ticket/9069)
       // so dev testing of watching should be done by running the Java locally
@@ -277,18 +280,7 @@ object GraphiteLineup extends Instrumented with StrictLogging{
     )
   }
 
+  private val trainingLogger: Logger = Logger( LoggerFactory getLogger "Training" )
 
-  //  def loggerDispatcher( system: ActorSystem ): ExecutionContext = system.dispatchers lookup "logger-dispatcher"
-  //
-  //  def log( logr: Logger, level: Symbol )( msg: => String )( implicit system: ActorSystem ): Future[Unit] = {
-  //    Future {
-  //      level match {
-  //        case 'debug => logr debug msg
-  //        case 'info => logr info msg
-  //        case 'warn => logr warn msg
-  //        case 'error => logr error msg
-  //        case _ => logr error msg
-  //      }
-  //    }( loggerDispatcher(system) )
-  //  }
+  private def trainingDispatcher( system: ActorSystem ): ExecutionContext = system.dispatchers lookup "logger-dispatcher"
 }
