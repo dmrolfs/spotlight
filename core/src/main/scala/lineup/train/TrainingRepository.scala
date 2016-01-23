@@ -45,6 +45,8 @@ object TrainingRepository extends TrainingRepository {
 
 
   trait Interpreter {
-    def apply[Next]( action: TrainingProtocol[Next] ): Task[Next]
+    def apply[Next]( action: TrainingProtocol[Next] ): Task[Next] = action runM step
+
+    def step[Next]( action: TrainingProtocolF[TrainingProtocol[Next]] ): Task[TrainingProtocol[Next]]
   }
 }

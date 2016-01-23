@@ -17,6 +17,8 @@ libraryDependencies ++=
     facility.scopt,
     demesne.core,
     facility.parboiled,
+    facility.avro,
+    facility.hadoopClient,
     facility.pyrolite
   ) ++ Dependencies.test(
     akka.streamsTestkit,

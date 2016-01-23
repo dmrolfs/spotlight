@@ -31,7 +31,7 @@ object TimeSeriesCohort {
     SimpleTimeSeriesCohort( prefix, data, precision )
   }
 
-  def apply( data: Row[TimeSeries] ): TimeSeriesCohort = apply( data, SECONDS )
+  def apply( data: TimeSeries* ): TimeSeriesCohort = apply( data.toIndexedSeq, SECONDS )
 
   val topicLens: Lens[TimeSeriesCohort, Topic] = new Lens[TimeSeriesCohort, Topic] {
     override def get( c: TimeSeriesCohort ): Topic = c.topic

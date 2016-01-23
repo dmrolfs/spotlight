@@ -2,11 +2,13 @@ package lineup.train
 
 import java.util.concurrent.ExecutorService
 import scala.concurrent.ExecutionContext
+import scala.concurrent.duration._
 
 import scalaz.concurrent.Task
 import com.typesafe.scalalogging.Logger
 import org.apache.commons.math3.linear.MatrixUtils
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
+import peds.commons.log.Trace
 import peds.commons.math.MahalanobisDistance
 import lineup.model.timeseries.{ Topic, TimeSeriesCohort, TimeSeries }
 
@@ -23,22 +25,25 @@ case class TrainingRepositoryLogStatisticsInterpreter(
   import TrainingRepositoryLogStatisticsInterpreter._
   import TrainingRepository._
 
-  writeHeader()
+  val trace = Trace[TrainingRepositoryLogStatisticsInterpreter]
 
   implicit val pool: ExecutorService = TrainingRepositoryLogStatisticsInterpreter.ExecutionContextExecutorServiceBridge( ec )
 
-  override def apply[Next]( action: TrainingProtocol[Next] ): Task[Next] = action.runM( step )
+  writeHeader().unsafePerformSync
 
-  def step[Next]( action: TrainingProtocolF[TrainingProtocol[Next]] ): Task[TrainingProtocol[Next]] = {
+  override def step[Next]( action: TrainingProtocolF[TrainingProtocol[Next]] ): Task[TrainingProtocol[Next]] = {
     action match {
       case PutTimeSeries(series, next) => write( seriesStatistics(series) ) map { _ => next }
       case PutTimeSeriesCohort(cohort, next) => write( cohortStatistics(cohort) ) map { _ => next }
     }
   }
 
-  def writeHeader(): Task[Unit] = log( Statistics.header )
-  def write( stats: Statistics ): Task[Unit] = log( stats.toString )
-  def log( line: String ): Task[Unit] = Task { logger debug line }( pool )
+  def writeHeader(): Task[Unit] = trace.block( "writeHeader" ) {
+    trace( s"HEADER = ${Statistics.header}")
+    log( Statistics.header )
+  }
+  def write( stats: Statistics ): Task[Unit] = trace.block( "write(stats)" ) { log( stats.toString ) }
+  def log( line: String ): Task[Unit] = trace.block( s"log(${line.take(10)})" ) { Task { logger debug line }( pool ) }
 }
 
 object TrainingRepositoryLogStatisticsInterpreter {

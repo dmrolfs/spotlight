@@ -38,12 +38,10 @@ with TryValues {
     val series4 = TimeSeries( topic = "series.four", points = generateTimeSequence("series4", s4) )
 
     val briefCohort = TimeSeriesCohort(
-      Row(
-        TimeSeries( topic = "series.one", points = generateTimeSequence("series.one", s1 take 4) ),
-        TimeSeries( topic = "series.two", points = generateTimeSequence("series.two", s2 take 4) ),
-        TimeSeries( topic = "series.three", points = generateTimeSequence("series.three", s3 take 4) ),
-        TimeSeries( topic = "series.four", points = generateTimeSequence("series.four", s4 take 4) )
-      )
+      TimeSeries( topic = "series.one", points = generateTimeSequence("series.one", s1 take 4) ),
+      TimeSeries( topic = "series.two", points = generateTimeSequence("series.two", s2 take 4) ),
+      TimeSeries( topic = "series.three", points = generateTimeSequence("series.three", s3 take 4) ),
+      TimeSeries( topic = "series.four", points = generateTimeSequence("series.four", s4 take 4) )
     )
 
     val cohortBySecond = TimeSeriesCohort( data = Row(series1, series2, series3, series4), precision = SECONDS )
@@ -269,12 +267,10 @@ with TryValues {
       val expected = Row( row(cs(0)), row(cs(1)), row(cs(2)), row(cs(3)) )
 
       val actual = TimeSeriesCohort(
-        Row(
-          TimeSeries( topic = "series.one", points = series1 ),
-          TimeSeries( topic = "series.two", points = series2 ),
-          TimeSeries( topic = "series.three", points = series3 ),
-          TimeSeries( topic = "series.four", points = series4 )
-        )
+        TimeSeries( topic = "series.one", points = series1 ),
+        TimeSeries( topic = "series.two", points = series2 ),
+        TimeSeries( topic = "series.three", points = series3 ),
+        TimeSeries( topic = "series.four", points = series4 )
       )
 
       compareApproximateCohorts( actual.toMatrix, expected ) mustBe 0
@@ -311,12 +307,10 @@ with TryValues {
       trace( s"EXPECTED=$expected" )
 
       val actual = TimeSeriesCohort(
-        Row(
-          TimeSeries( topic = "series.one", points = series1 ),
-          TimeSeries( topic = "series.two", points = series2 ),
-          TimeSeries( topic = "series.three", points = series3 ),
-          TimeSeries( topic = "series.four", points = series4 )
-        )
+        TimeSeries( topic = "series.one", points = series1 ),
+        TimeSeries( topic = "series.two", points = series2 ),
+        TimeSeries( topic = "series.three", points = series3 ),
+        TimeSeries( topic = "series.four", points = series4 )
       )
 
       compareApproximateCohorts( actual.toMatrix, expected ) mustBe 0
@@ -342,13 +336,11 @@ with TryValues {
       val expected = Row( row(cs(0)), row(cs(1)), row(cs(2)), row(cs(3)) )
 
       val actual = TimeSeriesCohort(
-                                     Row(
-                                          TimeSeries( topic = "series.one", points = series1 ),
-                                          TimeSeries( topic = "series.two", points = series2 ),
-                                          TimeSeries( topic = "series.three", points = series3 ),
-                                          TimeSeries( topic = "series.four", points = series4 )
-                                        )
-                                   )
+        TimeSeries( topic = "series.one", points = series1 ),
+        TimeSeries( topic = "series.two", points = series2 ),
+        TimeSeries( topic = "series.three", points = series3 ),
+        TimeSeries( topic = "series.four", points = series4 )
+      )
 
       compareApproximateCohorts( actual.toMatrix, expected ) mustBe 0
     }

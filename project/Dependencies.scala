@@ -108,6 +108,9 @@ object Dependencies {
     val math3 = "org.apache.commons" % "commons-math3" % "3.5"
     val scopt = "com.github.scopt" %% "scopt" % "3.3.0"
     val pyrolite = "net.razorvine" % "pyrolite" % "4.10"
+    val avro = "org.apache.avro" % "avro" % "1.7.7"
+    val hadoopClient = "org.apache.hadoop" % "hadoop-client" % "1.1.0"
+
 
     object betterFiles {
       val version = "2.14.0"

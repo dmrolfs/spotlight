@@ -162,7 +162,7 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       val series2 = tweakSeries( TimeSeries("series.two", pointsB), range )
       val series3 = tweakSeries( TimeSeries("series.three", pointsB), range )
       val series4 = tweakSeries( TimeSeries("series.four", pointsB), range )
-      val cohort = TimeSeriesCohort( Row(series1, series2, series3, series4) )
+      val cohort = TimeSeriesCohort( series1, series2, series3, series4 )
 
       val algProps = ConfigFactory.parseString(
         s"""
@@ -202,7 +202,7 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       val series2 = tweakSeries( TimeSeries("series.two", pointsB), range )
       val series3 = tweakSeries( TimeSeries("series.three", pointsB), range )
       val series4 = tweakSeries( TimeSeries("series.four", pointsB), range )
-      val cohort = TimeSeriesCohort( Row(series1, series2, series3, series4) )
+      val cohort = TimeSeriesCohort( series1, series2, series3, series4 )
 
       val algProps = ConfigFactory.parseString(
         s"""
