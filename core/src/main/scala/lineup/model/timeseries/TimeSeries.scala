@@ -44,7 +44,8 @@ object TimeSeries {
 
     private def combinePoints( lhs: Row[DataPoint], rhs: Row[DataPoint] ): V[Row[DataPoint]] = {
       val merged = lhs ++ rhs
-      val (uniques, dups) = merged groupBy { _.timestamp } map { _._2 } partition { _.size == 1 }
+      val (uniques, dups) = merged.groupBy{ _.timestamp }.values.partition{ _.size == 1 }
+
       val dupsAveraged = for {
         d <- dups
         ts = d.head.timestamp
