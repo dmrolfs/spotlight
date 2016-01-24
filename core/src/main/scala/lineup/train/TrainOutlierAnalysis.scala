@@ -29,13 +29,13 @@ object TrainOutlierAnalysis {
     implicit system: ActorSystem
   ): Flow[Outliers, Outliers, Unit] = {
     Flow[Outliers]
-    .map {o =>
+    .map { o =>
       val protocol = o.source match {
         case s: TimeSeries => TrainingRepository putSeries s
         case c: TimeSeriesCohort => TrainingRepository putCohort c
       }
-      (protocol, o)
+      ( protocol, o )
     }
-    .mapAsync( Runtime.getRuntime.availableProcessors( ) ) { case (p, o) => taskToFuture( interpreter( p ).map{ _ => o } ) }
+    .mapAsync( Runtime.getRuntime.availableProcessors ) { case (p, o) => taskToFuture( interpreter( p ).map{ _ => o } ) }
   }
 }

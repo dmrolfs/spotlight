@@ -42,6 +42,10 @@ assemblyJarName in assembly := s"${organizationName.value}-${name.value}-${versi
 assemblyMergeStrategy in assembly := {
   case PathList( "org", "hyperic", "sigar", xs @ _* ) => MergeStrategy.last
 
+  case PathList( "org", "apache", "commons", "beanutils", xs @ _* ) => MergeStrategy.last
+
+  case PathList( "org", "apache", "commons", "collections", xs @ _* ) => MergeStrategy.last
+
   case x if Assembly.isConfigFile(x) => MergeStrategy.concat
 
   case PathList(ps @ _*) if Assembly.isReadme(ps.last) || Assembly.isLicenseFile(ps.last) => MergeStrategy.rename

@@ -81,6 +81,8 @@ with MockitoSugar {
       override def destination: File = outer.destination.toJava
     }
 
+    implicit val ec = scala.concurrent.ExecutionContext.global
+
     val interpreter = new TrainingRepositoryAvroInterpreter() with TestWritersContextProvider
 
 

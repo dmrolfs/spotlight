@@ -20,13 +20,13 @@ trait TimeSeriesCohort extends TimeSeriesBase {
 object TimeSeriesCohort {
   val trace = Trace[TimeSeriesCohort.type]
 
-  def apply( topic: Topic, data: Row[TimeSeries], precision: TimeUnit ): TimeSeriesCohort = trace.block( s"apply($topic, ..., $precision)" ) {
+  def apply( topic: Topic, data: Row[TimeSeries], precision: TimeUnit ): TimeSeriesCohort = {
     SimpleTimeSeriesCohort( topic, data, precision )
   }
 
   def apply( topic: Topic, data: Row[TimeSeries] = Row.empty[TimeSeries] ): TimeSeriesCohort = apply( topic, data, SECONDS )
 
-  def apply( data: Row[TimeSeries], precision: TimeUnit ): TimeSeriesCohort = trace.block( s"apply(..., $precision)" ) {
+  def apply( data: Row[TimeSeries], precision: TimeUnit ): TimeSeriesCohort = {
     val prefix = Topic.findAncestor( data.map( _.topic ):_* )
     SimpleTimeSeriesCohort( prefix, data, precision )
   }

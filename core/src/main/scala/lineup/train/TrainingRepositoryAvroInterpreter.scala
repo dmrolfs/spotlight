@@ -1,25 +1,30 @@
 package lineup.train
 
 import java.io.File
+import java.util.concurrent.ExecutorService
+import scala.concurrent.ExecutionContext
 import scalaz._, Scalaz._
 import scalaz.concurrent.Task
 import org.apache.avro.Schema
 import org.apache.avro.file.{ CodecFactory, DataFileWriter }
 import org.apache.avro.generic.{ GenericRecordBuilder, GenericDatumWriter, GenericRecord }
 import org.apache.hadoop.conf.{ Configuration => HConfiguration }
+import com.typesafe.config.ConfigFactory
 import peds.commons.log.Trace
-import lineup.model.timeseries.{ TimeSeriesCohort, DataPoint, Row }
+import lineup.model.timeseries.{ TimeSeriesCohort, DataPoint }
 
 
 /**
   * Created by rolfsd on 1/19/16.
   */
-class TrainingRepositoryAvroInterpreter()
+class TrainingRepositoryAvroInterpreter()( implicit ec: ExecutionContext )
 extends TrainingRepository.Interpreter
 with TrainingRepositoryAvroInterpreter.AvroWriter { outer: TrainingRepositoryAvroInterpreter.WritersContextProvider =>
 
   import TrainingRepository._
   import TrainingRepositoryAvroInterpreter._
+
+  implicit val pool: ExecutorService = executionContextToService( ec )
 
   override def step[Next]( action: TrainingProtocolF[TrainingProtocol[Next]] ): Task[TrainingProtocol[Next]] = {
     action match {
@@ -28,7 +33,7 @@ with TrainingRepositoryAvroInterpreter.AvroWriter { outer: TrainingRepositoryAvr
     }
   }
 
-  override def genericRecords: Op[WritersContext, List[GenericRecord]] = {
+  override val genericRecords: Op[WritersContext, List[GenericRecord]] = {
     Kleisli[Task, WritersContext, List[GenericRecord]] { ctx =>
       import scala.collection.JavaConverters._
 
@@ -54,20 +59,20 @@ with TrainingRepositoryAvroInterpreter.AvroWriter { outer: TrainingRepositoryAvr
   }
 
 
-  override def makeWritersContext: Op[TimeSeriesCohort, WritersContext] = {
+  override val makeWritersContext: Op[TimeSeriesCohort, WritersContext] = {
     Kleisli[Task, TimeSeriesCohort, WritersContext] { cohort => Task { outer.context( cohort ) } }
   }
 
-  override def makeWriter: Op[WritersContext, Writer] = Kleisli[Task, WritersContext, Writer] {ctx  =>
+  override val makeWriter: Op[WritersContext, Writer] = Kleisli[Task, WritersContext, Writer] {ctx  =>
     Task fromDisjunction {
       \/ fromTryCatchNonFatal {
-        if ( ctx.destination.exists ) _timeseriesDataWriterFactory.appendTo( ctx.destination )
-        else _timeseriesDataWriterFactory.create( ctx.schema, ctx.destination )
+        if ( ctx.destination.exists ) makeDataWriter.appendTo( ctx.destination )
+        else makeDataWriter.create( ctx.schema, ctx.destination )
       }
     }
   }
 
-  override def writeRecords: Op[RecordsContext, Writer] = {
+  override val writeRecords: Op[RecordsContext, Writer] = {
     Kleisli[Task, RecordsContext, Writer] { case RecordsContext(records, writer) =>
       Task {
         records foreach { r => writer append r }
@@ -76,13 +81,13 @@ with TrainingRepositoryAvroInterpreter.AvroWriter { outer: TrainingRepositoryAvr
     }
   }
 
-  override def closeWriter: Op[Writer, Unit] = Kleisli[Task, Writer, Unit] { writer => Task { writer.close() } }
+  override val closeWriter: Op[Writer, Unit] = Kleisli[Task, Writer, Unit] { writer => Task { writer.close() } }
 
   private val _timeseriesDatumWriter: GenericDatumWriter[GenericRecord] = {
     new GenericDatumWriter[GenericRecord]( outer.timeseriesSchema )
   }
 
-  private val _timeseriesDataWriterFactory: DataFileWriter[GenericRecord] = {
+  private def makeDataWriter: DataFileWriter[GenericRecord] = {
     new DataFileWriter[GenericRecord]( _timeseriesDatumWriter ).setCodec( CodecFactory.snappyCodec )
   }
 }
@@ -104,18 +109,25 @@ object TrainingRepositoryAvroInterpreter {
     override def hadoopConfiguration: HConfiguration = new HConfiguration
 
     override lazy val timeseriesSchema: Schema = {
-      val avsc = getClass.getClassLoader.getResourceAsStream( "timeseries.avsc" )
+      val avsc = getClass.getClassLoader.getResourceAsStream( "avro/timeseries.avsc" )
       new Schema.Parser().parse( avsc )
     }
 
     override def datapointSubSchema( tsSchema: Schema ): Schema = tsSchema.getField( "points" ).schema.getElementType
 
+    lazy val trainingHome: String = {
+      val Home = "lineup.training.home"
+      val config = ConfigFactory.load().withFallback( ConfigFactory parseString s"${Home}: ." )
+      config getString Home
+    }
+
     override def destination: File = {
-      import better.files._
+      import better.files.{ File => BFile, _ }
       import org.joda.{ time => joda }
       val formatter = joda.format.DateTimeFormat forPattern "yyyyMMddHH"
       val suffix = formatter print joda.DateTime.now
-      file"timeseries-${suffix}.avro".toJava
+      BFile( trainingHome ).createIfNotExists( asDirectory = true )
+      file"${trainingHome}/timeseries-${suffix}.avro".toJava
     }
   }
 
@@ -134,9 +146,9 @@ object TrainingRepositoryAvroInterpreter {
 
     def makeRecordsContext: Op[WritersContext, RecordsContext] = {
       for {
-        w <- makeWriter
+        writer <- makeWriter
         records <- genericRecords
-      } yield RecordsContext( records, w )
+      } yield RecordsContext( records, writer )
     }
 
     def genericRecords: Op[WritersContext, List[GenericRecord]]

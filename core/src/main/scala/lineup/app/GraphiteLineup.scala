@@ -3,7 +3,7 @@ package lineup.app
 import java.net.InetSocketAddress
 import lineup.model.timeseries.TimeSeries
 import lineup.publish.GraphitePublisher
-import lineup.train.{ TrainingRepositoryLogStatisticsInterpreter, TrainOutlierAnalysis }
+import lineup.train.{ TrainingRepositoryAvroInterpreter, TrainingRepositoryLogStatisticsInterpreter, TrainOutlierAnalysis }
 import peds.akka.stream.StreamMonitor
 
 import scala.concurrent.{ ExecutionContext, Await, Future }
@@ -170,7 +170,9 @@ object GraphiteLineup extends Instrumented with StrictLogging{
         val tcpOut = b.add( Flow[Outliers].map{ _ => ByteString() }.watchConsumed( 'tcpOut ) )
         val train = b.add(
           TrainOutlierAnalysis.feedTrainingFlow(
-            TrainingRepositoryLogStatisticsInterpreter( trainingLogger )( trainingDispatcher(system) )
+            new TrainingRepositoryAvroInterpreter()( trainingDispatcher(system) )
+              with TrainingRepositoryAvroInterpreter.SimpleWritersContextProvider
+//            TrainingRepositoryLogStatisticsInterpreter( trainingLogger )( trainingDispatcher(system) )
           ).watchConsumed( 'train )
         )
         val termTraining = b.add( Sink.ignore )
@@ -254,6 +256,7 @@ object GraphiteLineup extends Instrumented with StrictLogging{
   def startMetricsReporter( config: Configuration ): Unit = {
     if ( config hasPath "lineup.metrics" ) {
       logger info s"""starting metric reporting with config: [${config getConfig "lineup.metrics"}]"""
+if ( config.hasPath("lineup.metrics.csv.dir") ) File( config.getString("lineup.metrics.csv.dir") ).createIfNotExists( asDirectory = true ) //todo remove with next peds version
       val reporter = Reporter.startReporter( config getConfig "lineup.metrics" )
       logger info s"metric reporter: [${reporter}]"
     } else {
