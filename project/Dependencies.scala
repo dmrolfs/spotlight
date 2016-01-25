@@ -34,7 +34,7 @@ object Dependencies {
     val slf4j = module( "slf4j" )
     val testkit = module( "testkit" )
 
-    val streamsVersion = "2.0.1"
+    val streamsVersion = "2.0.2"
     val streams = "com.typesafe.akka" % "akka-stream-experimental_2.11" % streamsVersion
     val streamsTestkit = "com.typesafe.akka" % "akka-stream-testkit-experimental_2.11" % streamsVersion
   }

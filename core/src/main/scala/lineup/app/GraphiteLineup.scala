@@ -3,7 +3,7 @@ package lineup.app
 import java.net.InetSocketAddress
 import lineup.model.timeseries.TimeSeries
 import lineup.publish.GraphitePublisher
-import lineup.train.{ TrainingRepositoryAvroInterpreter, TrainingRepositoryLogStatisticsInterpreter, TrainOutlierAnalysis }
+import lineup.train.{ AvroFileTrainingRepositoryInterpreter, LogStatisticsTrainingRepositoryInterpreter, TrainOutlierAnalysis }
 import peds.akka.stream.StreamMonitor
 
 import scala.concurrent.{ ExecutionContext, Await, Future }
@@ -165,14 +165,17 @@ object GraphiteLineup extends Instrumented with StrictLogging{
             OutlierScoringModel.logMetric( Logger( LoggerFactory getLogger "Unrecognized" ), config.plans )
           )
         )
-        val broadcast = b.add( Broadcast[Outliers](outputPorts = 2, eagerCancel = false) )
+        val broadcast = b.add( Broadcast[TimeSeries](outputPorts = 2, eagerCancel = false) )
         val publish = b.add( publishOutliers( limiter, publisher ).watchFlow( 'publish ) )
         val tcpOut = b.add( Flow[Outliers].map{ _ => ByteString() }.watchConsumed( 'tcpOut ) )
+
+        import AvroFileTrainingRepositoryInterpreter.SimpleWritersContextProvider
         val train = b.add(
-          TrainOutlierAnalysis.feedTrainingFlow(
-            new TrainingRepositoryAvroInterpreter()( trainingDispatcher(system) )
-              with TrainingRepositoryAvroInterpreter.SimpleWritersContextProvider
-//            TrainingRepositoryLogStatisticsInterpreter( trainingLogger )( trainingDispatcher(system) )
+          TrainOutlierAnalysis.feedTrainingFlow[TimeSeries](
+//            interpreter = TrainingRepositoryLogStatisticsInterpreter( trainingLogger )( trainingDispatcher(system) )
+            interpreter = new AvroFileTrainingRepositoryInterpreter( )( trainingDispatcher( system ) ) with SimpleWritersContextProvider,
+            maxPoints = config.getInt( "lineup.training.batch.max-points" ),
+            batchingWindow = FiniteDuration( config.getDuration("lineup.training.batch.window", NANOSECONDS), NANOSECONDS )
           ).watchConsumed( 'train )
         )
         val termTraining = b.add( Sink.ignore )
@@ -191,10 +194,10 @@ object GraphiteLineup extends Instrumented with StrictLogging{
           'train
         )
 
-        framing ~> intakeBuffer ~> timeSeries ~> scoring.in
-                                                 scoring.out0 ~> broadcast ~> publish ~> tcpOut
-                                                                 broadcast ~> train ~> termTraining
-                                                 scoring.out1 ~> logUnrecognized ~> termUnrecognized
+                                                 broadcast ~> train ~> termTraining
+        framing ~> intakeBuffer ~> timeSeries ~> broadcast ~> scoring.in
+                                                              scoring.out0 ~> publish ~> tcpOut
+                                                              scoring.out1 ~> logUnrecognized ~> termUnrecognized
 
         FlowShape( framing.in, tcpOut.out )
       }

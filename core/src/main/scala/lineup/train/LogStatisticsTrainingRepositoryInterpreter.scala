@@ -2,8 +2,6 @@ package lineup.train
 
 import java.util.concurrent.ExecutorService
 import scala.concurrent.ExecutionContext
-import scala.concurrent.duration._
-
 import scalaz.concurrent.Task
 import com.typesafe.scalalogging.Logger
 import org.apache.commons.math3.linear.MatrixUtils
@@ -13,19 +11,18 @@ import peds.commons.math.MahalanobisDistance
 import lineup.model.timeseries.{ Topic, TimeSeriesCohort, TimeSeries }
 
 
-
 /**
   * Created by rolfsd on 1/18/16.
   */
-case class TrainingRepositoryLogStatisticsInterpreter(
+case class LogStatisticsTrainingRepositoryInterpreter(
   logger: Logger
 )(
   implicit ec: ExecutionContext
 ) extends TrainingRepository.Interpreter {
-  import TrainingRepositoryLogStatisticsInterpreter._
+  import LogStatisticsTrainingRepositoryInterpreter._
   import TrainingRepository._
 
-  val trace = Trace[TrainingRepositoryLogStatisticsInterpreter]
+  val trace = Trace[LogStatisticsTrainingRepositoryInterpreter]
 
   implicit val pool: ExecutorService = executionContextToService( ec )
 
@@ -46,7 +43,7 @@ case class TrainingRepositoryLogStatisticsInterpreter(
   def log( line: String ): Task[Unit] = trace.block( s"log(${line.take(10)})" ) { Task { logger debug line }( pool ) }
 }
 
-object TrainingRepositoryLogStatisticsInterpreter {
+object LogStatisticsTrainingRepositoryInterpreter {
   def seriesStatistics( series: TimeSeries ): Statistics = {
     val valueStats = new DescriptiveStatistics
     series.points foreach { valueStats addValue _.value }

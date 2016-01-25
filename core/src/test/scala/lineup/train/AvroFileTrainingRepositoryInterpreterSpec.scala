@@ -25,7 +25,7 @@ import lineup.model.timeseries._
   * Created by rolfsd on 1/21/16.
   */
 
-object TrainingRepositoryAvroInterpreterSpec {
+object AvroFileTrainingRepositoryInterpreterSpec {
   val index = new AtomicInteger( 0 )
 
   val TimeSeriesSchema =
@@ -55,14 +55,14 @@ object TrainingRepositoryAvroInterpreterSpec {
     """.stripMargin
 }
 
-class TrainingRepositoryAvroInterpreterSpec
+class AvroFileTrainingRepositoryInterpreterSpec
 extends fixture.WordSpec
 with ParallelTestExecution
 with MustMatchers
 with MockitoSugar {
-  import TrainingRepositoryAvroInterpreterSpec._
+  import AvroFileTrainingRepositoryInterpreterSpec._
 
-  val trace = Trace[TrainingRepositoryAvroInterpreterSpec]
+  val trace = Trace[AvroFileTrainingRepositoryInterpreterSpec]
 
   type Fixture = TestFixture
   override type FixtureParam = Fixture
@@ -76,14 +76,14 @@ with MockitoSugar {
     val destination = file"./log/test-training-${dateFormatter.print(joda.Instant.now)}-${index.incrementAndGet()}.avro"
 
 
-    trait TestWritersContextProvider extends TrainingRepositoryAvroInterpreter.SimpleWritersContextProvider {
+    trait TestWritersContextProvider extends AvroFileTrainingRepositoryInterpreter.SimpleWritersContextProvider {
       override lazy val timeseriesSchema: Schema = outer.schema
       override def destination: File = outer.destination.toJava
     }
 
     implicit val ec = scala.concurrent.ExecutionContext.global
 
-    val interpreter = new TrainingRepositoryAvroInterpreter() with TestWritersContextProvider
+    val interpreter = new AvroFileTrainingRepositoryInterpreter( ) with TestWritersContextProvider
 
 
     def recordToSeries( r: GenericRecord ): TimeSeries = {
@@ -247,7 +247,7 @@ with MockitoSugar {
 
     "close writer" in { f: Fixture =>
       import f._
-      val w = mock[TrainingRepositoryAvroInterpreter.Writer]
+      val w = mock[AvroFileTrainingRepositoryInterpreter.Writer]
       interpreter.closeWriter.run( w ).unsafePerformSync
       verify( w ).close()
     }

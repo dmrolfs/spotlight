@@ -1,13 +1,13 @@
 package lineup.train
 
+import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ Promise, Future }
 import akka.actor.ActorSystem
 import akka.stream.scaladsl.Flow
 import scalaz.{ -\/, \/- }
 import scalaz.concurrent.Task
-
-import lineup.model.outlier.Outliers
-import lineup.model.timeseries.{ TimeSeries, TimeSeriesCohort }
+import lineup.model.timeseries.{ TimeSeries, TimeSeriesBase, TimeSeriesCohort }
+import lineup.model.timeseries.TimeSeriesBase.Merging
 
 
 /**
@@ -23,19 +23,30 @@ object TrainOutlierAnalysis {
     p.future
   }
 
-  def feedTrainingFlow(
-    interpreter: TrainingRepository.Interpreter
+  def feedTrainingFlow[T <: TimeSeriesBase](
+    interpreter: TrainingRepository.Interpreter,
+    maxPoints: Int,
+    batchingWindow: FiniteDuration
   )(
-    implicit system: ActorSystem
-  ): Flow[Outliers, Outliers, Unit] = {
-    Flow[Outliers]
-    .map { o =>
-      val protocol = o.source match {
+    implicit system: ActorSystem,
+    merging: Merging[T]
+  ): Flow[T, T, Unit] = {
+    Flow[T]
+    .groupedWithin( maxPoints, batchingWindow )  // batch points before archiving
+    .map {
+      _.groupBy{ _.topic }
+      .map { case (topic, tss) =>
+        tss.tail.foldLeft( tss.head ){ (acc, e) => merging.merge( acc, e ) valueOr { exs => throw exs.head } }
+      }
+    }
+    .mapConcat { identity }
+    .map { ts =>
+      val protocol = ts match {
         case s: TimeSeries => TrainingRepository putSeries s
         case c: TimeSeriesCohort => TrainingRepository putCohort c
       }
-      ( protocol, o )
+      ( protocol, ts )
     }
-    .mapAsync( Runtime.getRuntime.availableProcessors ) { case (p, o) => taskToFuture( interpreter( p ).map{ _ => o } ) }
+    .mapAsync( Runtime.getRuntime.availableProcessors ) { case (p, ts) => taskToFuture( interpreter( p ).map{ _ => ts } ) }
   }
 }

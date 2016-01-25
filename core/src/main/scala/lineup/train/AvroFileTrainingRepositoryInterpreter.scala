@@ -17,12 +17,13 @@ import lineup.model.timeseries.{ TimeSeriesCohort, DataPoint }
 /**
   * Created by rolfsd on 1/19/16.
   */
-class TrainingRepositoryAvroInterpreter()( implicit ec: ExecutionContext )
+class AvroFileTrainingRepositoryInterpreter()(implicit ec: ExecutionContext )
 extends TrainingRepository.Interpreter
-with TrainingRepositoryAvroInterpreter.AvroWriter { outer: TrainingRepositoryAvroInterpreter.WritersContextProvider =>
+with AvroFileTrainingRepositoryInterpreter.AvroWriter {
+  outer: AvroFileTrainingRepositoryInterpreter.WritersContextProvider =>
 
   import TrainingRepository._
-  import TrainingRepositoryAvroInterpreter._
+  import AvroFileTrainingRepositoryInterpreter._
 
   implicit val pool: ExecutorService = executionContextToService( ec )
 
@@ -92,8 +93,8 @@ with TrainingRepositoryAvroInterpreter.AvroWriter { outer: TrainingRepositoryAvr
   }
 }
 
-object TrainingRepositoryAvroInterpreter {
-  val trace = Trace[TrainingRepositoryAvroInterpreter.type]
+object AvroFileTrainingRepositoryInterpreter {
+  val trace = Trace[AvroFileTrainingRepositoryInterpreter.type]
 
   case class WritersContext( cohort: TimeSeriesCohort, schema: Schema, destination: File )
 
@@ -115,18 +116,20 @@ object TrainingRepositoryAvroInterpreter {
 
     override def datapointSubSchema( tsSchema: Schema ): Schema = tsSchema.getField( "points" ).schema.getElementType
 
-    lazy val trainingHome: String = {
+    val trainingHome: String = {
       val Home = "lineup.training.home"
       val config = ConfigFactory.load().withFallback( ConfigFactory parseString s"${Home}: ." )
       config getString Home
     }
 
+    import better.files.{ File => BFile }
+    BFile( trainingHome ).createIfNotExists( asDirectory = true )
+
     override def destination: File = {
-      import better.files.{ File => BFile, _ }
       import org.joda.{ time => joda }
-      val formatter = joda.format.DateTimeFormat forPattern "yyyyMMddHH"
+      import better.files._
+      val formatter = joda.format.DateTimeFormat forPattern "yyyyMMddTHH"
       val suffix = formatter print joda.DateTime.now
-      BFile( trainingHome ).createIfNotExists( asDirectory = true )
       file"${trainingHome}/timeseries-${suffix}.avro".toJava
     }
   }
