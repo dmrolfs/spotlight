@@ -108,9 +108,14 @@ object Dependencies {
     val math3 = "org.apache.commons" % "commons-math3" % "3.5"
     val scopt = "com.github.scopt" %% "scopt" % "3.3.0"
     val pyrolite = "net.razorvine" % "pyrolite" % "4.10"
-    val avro = "org.apache.avro" % "avro" % "1.7.7"
-    val hadoopClient = "org.apache.hadoop" % "hadoop-client" % "1.1.0"
+    val hadoopClient = "org.apache.hadoop" % "hadoop-client" % "2.7.1"
 
+    object avro {
+      val version = "1.7.7"
+      def all = Seq( core, mapred )
+      val core = "org.apache.avro" % "avro" % version
+      val mapred = "org.apache.avro" % "avro-mapred" % version
+    }
 
     object betterFiles {
       val version = "2.14.0"

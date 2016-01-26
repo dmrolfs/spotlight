@@ -47,6 +47,6 @@ object TrainOutlierAnalysis {
       }
       ( protocol, ts )
     }
-    .mapAsync( Runtime.getRuntime.availableProcessors ) { case (p, ts) => taskToFuture( interpreter( p ).map{ _ => ts } ) }
+    .map { case (p, ts) => interpreter( p ).map{ _ => ts }.unsafePerformSync } // avro's DataFileWriter is not thread safe
   }
 }

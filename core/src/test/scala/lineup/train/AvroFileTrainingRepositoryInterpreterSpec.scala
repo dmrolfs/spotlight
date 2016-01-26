@@ -13,10 +13,13 @@ import org.mockito.Mockito._
 import org.mockito.Matchers._
 import org.mockito.stubbing.Answer
 import peds.commons.log.Trace
+import org.apache.hadoop.conf.{ Configuration => HConfiguration }
 import org.apache.avro.Schema
 import org.apache.avro.file._
 import org.apache.avro.generic._
+import org.apache.avro.mapred.FsInput
 import org.apache.avro.util.Utf8
+import org.apache.hadoop.fs._
 import org.joda.{ time => joda }
 import lineup.model.timeseries._
 
@@ -72,13 +75,33 @@ with MockitoSugar {
 
     val writer = mock[DataFileWriter[GenericRecord]]
 
+    val hadoopConfiguration: HConfiguration = {
+      val conf = new HConfiguration
+      conf.setBoolean( "dfs.support.append", true )
+//      conf.set( "fs.defaultFS", "hdfs://localhost" )
+//      conf.setInt( "dfs.replication", 1 )
+      conf
+    }
+
+    val fileSystem: FileSystem = FileSystem get hadoopConfiguration
+
     val dateFormatter = joda.format.ISODateTimeFormat.basicOrdinalDateTimeNoMillis
+
     val destination = file"./log/test-training-${dateFormatter.print(joda.Instant.now)}-${index.incrementAndGet()}.avro"
+//    val destination: File = {
+//      BFile( s"./log/test-training-${dateFormatter.print(joda.Instant.now)}-${index.incrementAndGet()}.avro" ).toJava
+//    }
 
+    def input( path: Path, conf: HConfiguration ): SeekableInput = new FsInput( path, conf )
 
-    trait TestWritersContextProvider extends AvroFileTrainingRepositoryInterpreter.SimpleWritersContextProvider {
+    trait TestWritersContextProvider extends AvroFileTrainingRepositoryInterpreter.WritersContextProvider {
+      override def hadoopConfiguration: HConfiguration = outer.hadoopConfiguration
       override lazy val timeseriesSchema: Schema = outer.schema
-      override def destination: File = outer.destination.toJava
+      override def datapointSubSchema(tsSchema: Schema): Schema = tsSchema.getField( "points" ).schema.getElementType
+//      override def fileSystem: FileSystem = outer.fileSystem
+//      override def outPath: Path = outer.destination
+      //    def fileSystem: FileSystem = FileSystem get hadoopConfiguration
+      override def outFile: File = outer.destination.toJava
     }
 
     implicit val ec = scala.concurrent.ExecutionContext.global
@@ -121,7 +144,7 @@ with MockitoSugar {
 
     def writeSeries( ts: TimeSeries ): Task[Unit] = interpreter.write.run( TimeSeriesCohort(ts) )
 
-    def readDestination( f: BFile )( implicit sc: Schema ): List[GenericRecord] = {
+    def readDestination( dest: BFile )( implicit sc: Schema ): List[GenericRecord] = {
       @tailrec def loop( st: DataFileStream[GenericRecord], acc: Seq[GenericRecord] ): List[GenericRecord] = {
         if ( !st.hasNext ) acc.toList
         else {
@@ -131,16 +154,18 @@ with MockitoSugar {
       }
 
       val dr = new GenericDatumReader[GenericRecord]( sc )
-      val stream = new DataFileStream( f.newInputStream, dr )
+//      val stream = new DataFileReader[GenericRecord]( input(destination, hadoopConfiguration), dr )
+      val stream = new DataFileReader[GenericRecord]( dest.toJava, dr )
       val result = loop( stream, Nil )
       stream.close()
       result
     }
 
     def cleanup(): Unit = {
+      trace( s"CLEANING destination: [${destination.toString}]")
+//      fileSystem.delete( destination, false )
       import better.files.Cmds._
-      trace( s"CLEANING destination: [${destination.pathAsString}]")
-      rm(destination)
+      rm( destination )
     }
 
     val ts1 = TimeSeries(
@@ -252,7 +277,7 @@ with MockitoSugar {
       verify( w ).close()
     }
 
-    "convert time series into avro's generic record" taggedAs (WIP) in { f: Fixture =>
+    "convert time series into avro's generic record" in { f: Fixture =>
       import f._
       val expected = seriesToRecord( ts1 )
       val actual = interpreter.genericRecords.run( interpreter.context( TimeSeriesCohort(ts1) ) ).unsafePerformSync
@@ -269,21 +294,23 @@ with MockitoSugar {
       actual mustBe List(expected)
     }
 
-    "write multiple" in { f: Fixture =>
+    "write multiple" taggedAs (WIP) in { f: Fixture =>
       import f._
-
+trace("A")
       val e1 = seriesToRecord( ts1 )
       val t1 = writeSeries( ts1 )
       t1.unsafePerformSync
       val a1 = readDestination( destination )
       a1 mustBe List(e1)
 
+trace("B")
       val e2 = seriesToRecord( ts2 )
       val t2 = writeSeries( ts2 )
       t2.unsafePerformSync
       val a2 = readDestination( destination )
       a2 mustBe List(e1, e2)
 
+trace("C")
       val e3 = seriesToRecord( ts3 )
       val t3 = writeSeries( ts3 )
       t3.unsafePerformSync

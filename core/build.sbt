@@ -10,6 +10,7 @@ libraryDependencies ++=
   commonDependencies ++
   metrics.all ++
   facility.betterFiles.all ++
+  facility.avro.all ++
   Seq(
     //  facility.pureConfig,
     akka.streams,
@@ -17,7 +18,6 @@ libraryDependencies ++=
     facility.scopt,
     demesne.core,
     facility.parboiled,
-    facility.avro,
     facility.hadoopClient,
     facility.pyrolite
   ) ++ Dependencies.test(
@@ -41,10 +41,14 @@ assemblyJarName in assembly := s"${organizationName.value}-${name.value}-${versi
 
 assemblyMergeStrategy in assembly := {
   case PathList( "org", "hyperic", "sigar", xs @ _* ) => MergeStrategy.last
-
   case PathList( "org", "apache", "commons", "beanutils", xs @ _* ) => MergeStrategy.last
-
   case PathList( "org", "apache", "commons", "collections", xs @ _* ) => MergeStrategy.last
+  case PathList( "javax", "servlet", xs @ _* ) => MergeStrategy.last
+  case PathList( "org", "apache", "hadoop", "yarn", xs @ _* ) => MergeStrategy.last
+  case PathList( "org", "slf4j", xs @ _* ) => MergeStrategy.first
+  case PathList( "META-INF", "maven", "com.fasterxml.jackson.core", xs @ _* ) => MergeStrategy.discard
+  case PathList( "META-INF", "maven", "commons-logging", xs @ _* ) => MergeStrategy.discard
+  case PathList( "META-INF", "maven", "org.apache.avro", xs @ _* ) => MergeStrategy.discard
 
   case x if Assembly.isConfigFile(x) => MergeStrategy.concat
 

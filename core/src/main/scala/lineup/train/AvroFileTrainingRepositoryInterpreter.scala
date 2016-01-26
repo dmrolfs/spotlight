@@ -1,14 +1,16 @@
 package lineup.train
 
-import java.io.File
+import java.io.{ File, OutputStream }
 import java.util.concurrent.ExecutorService
 import scala.concurrent.ExecutionContext
 import scalaz._, Scalaz._
 import scalaz.concurrent.Task
 import org.apache.avro.Schema
-import org.apache.avro.file.{ CodecFactory, DataFileWriter }
+import org.apache.avro.file.{ CodecFactory, DataFileWriter, SeekableInput }
 import org.apache.avro.generic.{ GenericRecordBuilder, GenericDatumWriter, GenericRecord }
+import org.apache.avro.mapred.FsInput
 import org.apache.hadoop.conf.{ Configuration => HConfiguration }
+import org.apache.hadoop.fs.{ FileSystem, Path }
 import com.typesafe.config.ConfigFactory
 import peds.commons.log.Trace
 import lineup.model.timeseries.{ TimeSeriesCohort, DataPoint }
@@ -64,13 +66,8 @@ with AvroFileTrainingRepositoryInterpreter.AvroWriter {
     Kleisli[Task, TimeSeriesCohort, WritersContext] { cohort => Task { outer.context( cohort ) } }
   }
 
-  override val makeWriter: Op[WritersContext, Writer] = Kleisli[Task, WritersContext, Writer] {ctx  =>
-    Task fromDisjunction {
-      \/ fromTryCatchNonFatal {
-        if ( ctx.destination.exists ) makeDataWriter.appendTo( ctx.destination )
-        else makeDataWriter.create( ctx.schema, ctx.destination )
-      }
-    }
+  override val makeWriter: Op[WritersContext, Writer] = {
+    Kleisli[Task, WritersContext, Writer] { ctx  => Task fromDisjunction { ctx.writer } }
   }
 
   override val writeRecords: Op[RecordsContext, Writer] = {
@@ -93,21 +90,78 @@ with AvroFileTrainingRepositoryInterpreter.AvroWriter {
   }
 }
 
+
 object AvroFileTrainingRepositoryInterpreter {
   val trace = Trace[AvroFileTrainingRepositoryInterpreter.type]
 
-  case class WritersContext( cohort: TimeSeriesCohort, schema: Schema, destination: File )
+  class WritersContext(
+    val cohort: TimeSeriesCohort,
+    val schema: Schema,
+    hadoopConfiguration: HConfiguration,
+    outFile: File
+//    fileSystem: FileSystem,
+//    destinationPath: Path
+  ) {
+    val datumWriter: GenericDatumWriter[GenericRecord] = new GenericDatumWriter[GenericRecord]( schema )
+
+    def writer: \/[Throwable, Writer] = {
+      \/ fromTryCatchNonFatal {
+        val writer = new DataFileWriter[GenericRecord]( datumWriter ).setCodec( CodecFactory.snappyCodec )
+        if ( !destinationExists ) writer.create( schema, outFile )
+        else writer.appendTo( outFile )
+      }
+    }
+
+    private def destinationExists: Boolean = {
+      outFile.exists
+//      fileSystem exists destinationPath
+    }
+//    private def input: SeekableInput = new FsInput( destinationPath, hadoopConfiguration )
+//    private def out: \/[Throwable, OutputStream] = {
+//      writer map { w => w.
+//        if ( destinationExists ) {
+//          w appendTo outFile
+//          //        trace( s"append: fileSystem: [${fileSystem}]" )
+//          //        trace( s"append: destinationPath: [${destinationPath}]" )
+//          //        trace( s"""append: append supported: [${fileSystem.getConf.get("dfs.support.append")}]""")
+//          //        fileSystem append destinationPath
+//        } else {
+//          w.create( schema, outFile )
+//          //        trace( s"create: fileSystem: [${fileSystem}]" )
+//          //        trace( s"create: destinationPath: [${destinationPath}]" )
+//          //        trace( s"""create: append supported: [${fileSystem.getConf.get("dfs.support.append")}]""")
+//          //        fileSystem create destinationPath
+//        }
+//      }
+//    }
+  }
 
   trait WritersContextProvider {
     def hadoopConfiguration: HConfiguration
     def timeseriesSchema: Schema
     def datapointSubSchema( tsSchema: Schema ): Schema
-    def destination: File
-    def context( cohort: TimeSeriesCohort ): WritersContext = WritersContext( cohort, schema = timeseriesSchema, destination )
+//    def fileSystem: FileSystem = FileSystem get hadoopConfiguration
+    def outFile: File
+//    def outPath: Path
+    def context( cohort: TimeSeriesCohort ): WritersContext = {
+      new WritersContext(
+        cohort,
+        schema = timeseriesSchema,
+        hadoopConfiguration = hadoopConfiguration,
+        outFile = outFile
+//        fileSystem = fileSystem,
+//        destinationPath = outPath
+      )
+    }
   }
 
-  trait SimpleWritersContextProvider extends WritersContextProvider {
-    override def hadoopConfiguration: HConfiguration = new HConfiguration
+  trait LocalhostWritersContextProvider extends WritersContextProvider {
+    override def hadoopConfiguration: HConfiguration = {
+      val conf = new HConfiguration
+      conf.set( "fs.defaultFS", "hdfs://localhost" )
+      conf.setInt( "dfs.replication", 1 )
+      conf
+    }
 
     override lazy val timeseriesSchema: Schema = {
       val avsc = getClass.getClassLoader.getResourceAsStream( "avro/timeseries.avsc" )
@@ -125,13 +179,14 @@ object AvroFileTrainingRepositoryInterpreter {
     import better.files.{ File => BFile }
     BFile( trainingHome ).createIfNotExists( asDirectory = true )
 
-    override def destination: File = {
+    override def outFile: File = {
       import org.joda.{ time => joda }
-      import better.files._
-      val formatter = joda.format.DateTimeFormat forPattern "yyyyMMddTHH"
+      val formatter = joda.format.DateTimeFormat forPattern "yyyyMMddHH"
       val suffix = formatter print joda.DateTime.now
-      file"${trainingHome}/timeseries-${suffix}.avro".toJava
+      BFile(  s"${trainingHome}/timeseries-${suffix}.avro" ).toJava
     }
+
+//    override def outPath: Path = new Path( outFile.getCanonicalPath )
   }
 
 

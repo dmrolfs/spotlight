@@ -37,7 +37,7 @@ import lineup.stream.{ Configuration, OutlierScoringModel, OutlierDetectionWorkf
 /**
   * Created by rolfsd on 1/12/16.
   */
-object GraphiteLineup extends Instrumented with StrictLogging{
+object GraphiteLineup extends Instrumented with StrictLogging {
   override lazy val metricBaseName: MetricName = {
     import peds.commons.util._
     MetricName( getClass.getPackage.getName, getClass.safeSimpleName )
@@ -169,11 +169,11 @@ object GraphiteLineup extends Instrumented with StrictLogging{
         val publish = b.add( publishOutliers( limiter, publisher ).watchFlow( 'publish ) )
         val tcpOut = b.add( Flow[Outliers].map{ _ => ByteString() }.watchConsumed( 'tcpOut ) )
 
-        import AvroFileTrainingRepositoryInterpreter.SimpleWritersContextProvider
+        import AvroFileTrainingRepositoryInterpreter.LocalhostWritersContextProvider
         val train = b.add(
           TrainOutlierAnalysis.feedTrainingFlow[TimeSeries](
 //            interpreter = TrainingRepositoryLogStatisticsInterpreter( trainingLogger )( trainingDispatcher(system) )
-            interpreter = new AvroFileTrainingRepositoryInterpreter( )( trainingDispatcher( system ) ) with SimpleWritersContextProvider,
+            interpreter = new AvroFileTrainingRepositoryInterpreter( )( trainingDispatcher( system ) ) with LocalhostWritersContextProvider,
             maxPoints = config.getInt( "lineup.training.batch.max-points" ),
             batchingWindow = FiniteDuration( config.getDuration("lineup.training.batch.window", NANOSECONDS), NANOSECONDS )
           ).watchConsumed( 'train )
