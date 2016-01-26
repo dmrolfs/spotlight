@@ -213,7 +213,7 @@ class GraphitePublisher( outlierTopicPrefix: Option[String] ) extends DenseOutli
   override def publish( o: Outliers ): Unit = {
     val points = markPoints( o )
     waitQueue = points.foldLeft( waitQueue ){ _.enqueue( _ ) }
-    log info s"publish[${o.topic}:${o.hasAnomalies}]: added [${o.anomalySize} / ${o.size}] to wait queue - now at [${waitQueue.size}]"
+    log debug s"publish[${o.topic}:${o.hasAnomalies}]: added [${o.anomalySize} / ${o.size}] to wait queue - now at [${waitQueue.size}]"
     outlierLogger info o.toString
   }
 
