@@ -1,5 +1,9 @@
 package lineup.analysis.outlier
 
+import com.typesafe.scalalogging.Logger
+import org.slf4j.LoggerFactory
+
+import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.FiniteDuration
 import akka.actor.{ Cancellable, Actor, ActorLogging, Props }
 import akka.event.LoggingReceive
@@ -9,6 +13,8 @@ import nl.grons.metrics.scala.{MetricName, Meter}
 import lineup.analysis.outlier.OutlierQuorumAggregator.ConfigurationProvider
 import lineup.model.outlier._
 import lineup.model.timeseries.{ Topic, TimeSeriesBase }
+
+import scala.util.Success
 
 
 object OutlierQuorumAggregator {
@@ -64,15 +70,15 @@ extends Actor with InstrumentedActor with ActorLogging { outer: ConfigurationPro
   override def postStop(): Unit = cancelWhistle()
 
   type AnalysisFulfillment = Map[Symbol, Outliers]
-  var fulfilled: AnalysisFulfillment = Map()
+  var _fulfilled: AnalysisFulfillment = Map()
 
   override def receive: Receive = around( quorum() )
 
   def quorum( retries: Int = warningsBeforeTimeout ): Receive = LoggingReceive {
     case m: Outliers => {
       val source = sender()
-      fulfilled ++= m.algorithms map { _ -> m }
-      process( m )
+      _fulfilled ++= m.algorithms map { _ -> m }
+      process( m, _fulfilled )
     }
 
     //todo: this whole retry approach is wrong; should simply increase timeout
@@ -81,7 +87,7 @@ extends Actor with InstrumentedActor with ActorLogging { outer: ConfigurationPro
 
       warningsMeter.mark()
       log warning s"quorum not reached for topic:[${source.topic}] tries-left:[$retriesLeft] " +
-                  s"""received:[${fulfilled.keys.mkString(",")}] plan:[${plan.summary}]"""
+                  s"""received:[${_fulfilled.keys.mkString(",")}] plan:[${plan.summary}]"""
 
       scheduleWhistle()
       context become around( quorum(retriesLeft) )
@@ -94,12 +100,23 @@ extends Actor with InstrumentedActor with ActorLogging { outer: ConfigurationPro
     }
   }
 
-  def process( m: Outliers ): Unit = {
+  def process( m: Outliers, fulfilled: AnalysisFulfillment )( implicit ec: ExecutionContext ): Unit = {
     if ( plan isQuorum fulfilled ) {
       conclusionsMeter.mark()
       import akka.pattern.pipe
-      plan.reduce( fulfilled, source ) pipeTo context.parent
+      plan.reduce( fulfilled, source ) pipeTo context.parent andThen { case Success(r) => logTally( r, fulfilled ) }
       context stop self
+    }
+  }
+
+  val outlierLogger: Logger = Logger( LoggerFactory getLogger "Outliers" )
+  def logTally( result: Outliers, fulfilled: AnalysisFulfillment ): Unit = {
+    result match {
+      case o: NoOutliers => outlierLogger info o.toString
+      case o => {
+        outlierLogger info o.toString
+        fulfilled foreach { case (a, o) => outlierLogger info s""" + [${a.name}][${o.anomalySize} / ${o.size}] ${o}""" }
+      }
     }
   }
 }
