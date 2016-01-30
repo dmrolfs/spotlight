@@ -1,28 +1,25 @@
 package lineup.analysis.outlier
 
-import org.slf4j.LoggerFactory
-
-import scala.concurrent.{ ExecutionContext, Future }
+import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
 import akka.actor.{ Actor, ActorRef, ActorLogging, Props }
-import akka.agent.Agent
 import akka.event.LoggingReceive
 import akka.pattern.AskTimeoutException
 import akka.stream.{ ActorAttributes, Supervision }
 import akka.stream.scaladsl.Flow
 import scalaz.{ \/-, -\/ }
+import org.slf4j.LoggerFactory
 import com.typesafe.scalalogging.{ Logger, StrictLogging }
 import nl.grons.metrics.scala.Meter
 import peds.akka.metrics.{ Instrumented, InstrumentedActor }
 import peds.commons.identifier.ShortUUID
 import peds.commons.V
-import lineup.model.timeseries.{ Topic, TimeSeriesBase, TimeSeries, TimeSeriesCohort, DataPoint }
-//import lineup.model.timeseries.DataPoint._
+import lineup.model.timeseries.{ Topic, TimeSeriesBase, TimeSeries, TimeSeriesCohort }
 import lineup.model.outlier.{ Outliers, OutlierPlan }
 
 
 object OutlierDetection extends StrictLogging with Instrumented {
-  def props( makeDetector: => OutlierDetection ): Props = Props( makeDetector )
+  def props( makeDetector: => OutlierDetection ): Props = Props{ makeDetector }
 
   lazy val timeoutMeter: Meter = metrics meter "timeouts"
 
