@@ -11,7 +11,7 @@ import org.apache.avro.generic.{ GenericRecordBuilder, GenericDatumWriter, Gener
 import org.apache.avro.mapred.FsInput
 import org.apache.hadoop.conf.{ Configuration => HConfiguration }
 import org.apache.hadoop.fs.{ FileSystem, Path }
-import com.typesafe.config.ConfigFactory
+import com.typesafe.config.{ Config, ConfigFactory }
 import peds.commons.log.Trace
 import lineup.model.timeseries.{ TimeSeriesCohort, DataPoint }
 
@@ -137,6 +137,7 @@ object AvroFileTrainingRepositoryInterpreter {
   }
 
   trait WritersContextProvider {
+    def config: Config
     def hadoopConfiguration: HConfiguration
     def timeseriesSchema: Schema
     def datapointSubSchema( tsSchema: Schema ): Schema
@@ -171,9 +172,8 @@ object AvroFileTrainingRepositoryInterpreter {
     override def datapointSubSchema( tsSchema: Schema ): Schema = tsSchema.getField( "points" ).schema.getElementType
 
     val trainingHome: String = {
-      val Home = "lineup.training.home"
-      val config = ConfigFactory.load().withFallback( ConfigFactory parseString s"${Home}: ." )
-      config getString Home
+      if ( config hasPath "lineup.training.home" ) config getString "lineup.training.home"
+      else "."
     }
 
     import better.files.{ File => BFile }
@@ -216,5 +216,7 @@ object AvroFileTrainingRepositoryInterpreter {
     def writeRecords: Op[RecordsContext, Writer]
 
     def closeWriter: Op[Writer, Unit]
+
+    val noop: Op[TimeSeriesCohort, Unit] = Kleisli[Task, TimeSeriesCohort, Unit] { cohort => Task now { () } }
   }
 }

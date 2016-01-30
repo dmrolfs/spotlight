@@ -50,3 +50,4 @@ object TrainOutlierAnalysis {
     .map { case (p, ts) => interpreter( p ).map{ _ => ts }.unsafePerformSync } // avro's DataFileWriter is not thread safe
   }
 }
+

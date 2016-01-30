@@ -40,6 +40,7 @@ package object outlier {
     algorithm: Symbol,
     aggregator: ActorRef,
     payload: OutlierDetectionMessage,
+    history: Option[HistoricalStatistics],
     properties: Config = ConfigFactory.empty()
   ) extends OutlierDetectionMessage {
     override def topic: Topic = payload.topic

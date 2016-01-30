@@ -2,15 +2,17 @@ package lineup.analysis.outlier.algorithm
 
 import akka.actor.{ ActorRef, Props }
 import akka.event.LoggingReceive
+import scalaz._, Scalaz._
 import org.apache.commons.math3.linear.MatrixUtils
 import org.apache.commons.math3.ml.distance.DistanceMeasure
 import org.apache.commons.math3.stat.{ descriptive => stat }
 import org.apache.commons.math3.ml
 import com.typesafe.config.Config
+import peds.commons.V
 import peds.commons.math.MahalanobisDistance
 import lineup.model.timeseries.{ Matrix, DataPoint }
 import lineup.model.outlier.{ CohortOutliers, NoOutliers, SeriesOutliers }
-import lineup.analysis.outlier.{ DetectUsing, DetectOutliersInSeries, DetectOutliersInCohort }
+import lineup.analysis.outlier.{ HistoricalStatistics, DetectUsing, DetectOutliersInSeries, DetectOutliersInCohort }
 
 
 /**
@@ -34,12 +36,9 @@ class DBSCANAnalyzer( override val router: ActorRef ) extends AlgorithmActor {
   override def receive: Receive = around( quiescent )
 
   override val detect: Receive = LoggingReceive {
-    case s @ DetectUsing( _, aggregator, payload: DetectOutliersInSeries, algorithmConfig ) => {
-      def pointsFromSeries( underlying: DetectOutliersInSeries ): Seq[ml.clustering.DoublePoint] = {
-        underlying.data.points map { dp => new ml.clustering.DoublePoint( Array(dp.timestamp.getMillis.toDouble, dp.value) )}
-      }
-
-      val clusters = cluster( pointsFromSeries(payload), algorithmConfig )
+    case s @ DetectUsing( _, aggregator, payload: DetectOutliersInSeries, history, algorithmConfig ) => {
+      val points = payload.data.points map { DataPoint.toDoublePoint }
+      val clusters = cluster( points, history, algorithmConfig )
       val isOutlier = makeOutlierTest( clusters )
       val outliers = payload.data.points collect { case dp if isOutlier( dp ) => dp }
       val result = {
@@ -50,7 +49,7 @@ class DBSCANAnalyzer( override val router: ActorRef ) extends AlgorithmActor {
       aggregator ! result
     }
 
-    case c @ DetectUsing( algo, aggregator, payload: DetectOutliersInCohort, algorithmConfig ) => {
+    case c @ DetectUsing( algo, aggregator, payload: DetectOutliersInCohort, history, algorithmConfig ) => {
       def cohortDistances( underlying: DetectOutliersInCohort ): Matrix[DataPoint] = {
         for {
           frame <- underlying.data.toMatrix
@@ -64,7 +63,7 @@ class DBSCANAnalyzer( override val router: ActorRef ) extends AlgorithmActor {
       val outlierMarks = for {
         frameDistances <- cohortDistances( payload )
         points = frameDistances map { dp => new ml.clustering.DoublePoint( Array(dp.timestamp.getMillis.toDouble, dp.value) ) }
-        clusters = cluster( points, algorithmConfig )
+        clusters = cluster( points, history, algorithmConfig )
         isOutlier = makeOutlierTest( clusters )
       } yield frameDistances.zipWithIndex collect { case (fd, i) if isOutlier( fd ) => i }
 
@@ -99,6 +98,7 @@ class DBSCANAnalyzer( override val router: ActorRef ) extends AlgorithmActor {
 
   def cluster(
     payload: Seq[ml.clustering.DoublePoint],
+    history: Option[HistoricalStatistics],
     algorithmConfig: Config
   ): Seq[ml.clustering.Cluster[ml.clustering.DoublePoint]] = {
     implicit val algo = algorithm
@@ -106,25 +106,34 @@ class DBSCANAnalyzer( override val router: ActorRef ) extends AlgorithmActor {
     val minDensityConnectedPoints = algorithmConfig.getInt( MinDensityConnectedPoints )
 
     import scala.collection.JavaConversions._
-    val distance = distanceMeasure( algorithmConfig, payload )
+    val distance = distanceMeasure( algorithmConfig, history, payload )
     val transformer = new ml.clustering.DBSCANClusterer[ml.clustering.DoublePoint]( eps, minDensityConnectedPoints, distance )
     transformer.cluster( payload )
   }
 
-  def distanceMeasure( algorithmConfig: Config, payload: Seq[ml.clustering.DoublePoint] ): DistanceMeasure = {
-    if ( algorithmConfig.hasPath(Distance) ) {
+  def distanceMeasure(
+    algorithmConfig: Config,
+    history: Option[HistoricalStatistics],
+    payload: Seq[ml.clustering.DoublePoint]
+  ): DistanceMeasure = {
+    def makeMahalanobis(): DistanceMeasure = {
+      history map { h =>
+        MahalanobisDistance fromCovariance h.covariance
+      } getOrElse {
+        MahalanobisDistance.fromPoints( MatrixUtils.createRealMatrix( payload.toArray map { _.getPoint } ) )
+      } match {
+        case Success(result) => result
+        case Failure(exs) => throw exs.head
+      }
+    }
+
+    if ( algorithmConfig hasPath Distance ) {
       algorithmConfig.getString( Distance ).toLowerCase match {
         case "euclidean" | "euclid" =>  new ml.distance.EuclideanDistance
-
-        case "mahalanobis" | "mahal" | _ => {
-          val points = payload.map{ _.getPoint }.toArray
-          //todo support mahal dist creation from supplied covariance matrix, which will come from training (into plan)
-          MahalanobisDistance( MatrixUtils.createRealMatrix(points) )
-        }
+        case "mahalanobis" | "mahal" | _ => makeMahalanobis()
       }
     } else {
-      val points = payload.map{ _.getPoint }.toArray
-      MahalanobisDistance( MatrixUtils.createRealMatrix(points) )
+      makeMahalanobis()
     }
   }
 }

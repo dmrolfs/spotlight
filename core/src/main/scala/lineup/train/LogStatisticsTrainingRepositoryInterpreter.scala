@@ -2,10 +2,12 @@ package lineup.train
 
 import java.util.concurrent.ExecutorService
 import scala.concurrent.ExecutionContext
+import scalaz._, Scalaz._
 import scalaz.concurrent.Task
 import com.typesafe.scalalogging.Logger
 import org.apache.commons.math3.linear.MatrixUtils
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
+import peds.commons.V
 import peds.commons.log.Trace
 import peds.commons.math.MahalanobisDistance
 import lineup.model.timeseries.{ Topic, TimeSeriesCohort, TimeSeries }
@@ -35,49 +37,57 @@ case class LogStatisticsTrainingRepositoryInterpreter(
     }
   }
 
-  def writeHeader(): Task[Unit] = trace.block( "writeHeader" ) {
-    trace( s"HEADER = ${Statistics.header}")
-    log( Statistics.header )
+  def writeHeader(): Task[Unit] = trace.block( "writeHeader" ) { log( Statistics.header ) }
+
+  def write( stats: V[Statistics] ): Task[Unit] = trace.block( "write(stats)" ) {
+    implicit val showErrors = Show.shows[NonEmptyList[Throwable]]{ _.map{ _.getMessage }.toList.mkString("; ") }
+    log( stats.map{ _.toString }.shows )
   }
-  def write( stats: Statistics ): Task[Unit] = trace.block( "write(stats)" ) { log( stats.toString ) }
+
   def log( line: String ): Task[Unit] = trace.block( s"log(${line.take(10)})" ) { Task { logger debug line }( pool ) }
 }
 
 object LogStatisticsTrainingRepositoryInterpreter {
-  def seriesStatistics( series: TimeSeries ): Statistics = {
+  def seriesStatistics( series: TimeSeries ): V[Statistics] = {
     val valueStats = new DescriptiveStatistics
     series.points foreach { valueStats addValue _.value }
 
     val data = series.points map { p => Array(p.timestamp.getMillis.toDouble, p.value) }
 
-    val euclideanDistance = new org.apache.commons.math3.ml.distance.EuclideanDistance
-    val mahalanobisDistance = MahalanobisDistance( MatrixUtils.createRealMatrix(data.toArray) )
-    val edStats = new DescriptiveStatistics //acc euclidean stats
-    val mdStats = new DescriptiveStatistics //acc mahalanobis stats
+    val result = for {
+      mahalanobisDistance <- MahalanobisDistance.fromPoints( MatrixUtils.createRealMatrix(data.toArray) ).disjunction
+    } yield {
+      val edStats = new DescriptiveStatistics //acc euclidean stats
+      val mdStats = new DescriptiveStatistics //acc mahalanobis stats
 
-    val distances = data.take( data.size - 1 ).zip( data drop 1 ) map { case (l, r) =>
-      val e = euclideanDistance.compute( l, r )
-      val m = mahalanobisDistance.compute( l, r )
-      edStats addValue e
-      mdStats addValue m
-      ( e, m )
+      val euclideanDistance = new org.apache.commons.math3.ml.distance.EuclideanDistance
+
+      val distances = data.take( data.size - 1 ).zip( data drop 1 ) map { case (l, r) =>
+        val e = euclideanDistance.compute( l, r )
+        val m = mahalanobisDistance.compute( l, r )
+        edStats addValue e
+        mdStats addValue m
+        ( e, m )
+      }
+
+      val (ed, md) = distances.unzip
+      val edOutliers = ed count { _ > edStats.getPercentile(95) }
+      val mdOutliers = md count { _ > mdStats.getPercentile(95) }
+
+      Statistics(
+        source = series.topic,
+        points = valueStats,
+        mahalanobis = mdStats,
+        mahalanobisOutliers = mdOutliers,
+        euclidean = edStats,
+        euclideanOutliers = edOutliers
+      )
     }
 
-    val (ed, md) = distances.unzip
-    val edOutliers = ed count { _ > edStats.getPercentile(95) }
-    val mdOutliers = md count { _ > mdStats.getPercentile(95) }
-
-    Statistics(
-      source = series.topic,
-      points = valueStats,
-      mahalanobis = mdStats,
-      mahalanobisOutliers = mdOutliers,
-      euclidean = edStats,
-      euclideanOutliers = edOutliers
-    )
+    result.leftMap { _ map { ex => DistanceError( series.topic, ex ) } }
   }
 
-  def cohortStatistics( cohort: TimeSeriesCohort ): Statistics = {
+  def cohortStatistics( cohort: TimeSeriesCohort ): V[Statistics] = {
     val st = new DescriptiveStatistics
     for {
       s <- cohort.data
@@ -91,8 +101,14 @@ object LogStatisticsTrainingRepositoryInterpreter {
       mahalanobisOutliers = 0,
       euclidean = new DescriptiveStatistics,
       euclideanOutliers = 0
-    )
+    ).right
   }
+
+
+  final case class DistanceError private[train]( topic: Topic, root: Throwable ) extends Throwable {
+    override def getMessage: String = s"[${topic}] could not create distance: [${root}]"
+  }
+
 
   case class Statistics private[train](
     source: Topic,
