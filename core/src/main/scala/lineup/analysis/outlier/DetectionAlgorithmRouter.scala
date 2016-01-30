@@ -35,6 +35,6 @@ class DetectionAlgorithmRouter extends Actor with InstrumentedActor with ActorLo
   }
 
   val routing: Receive = LoggingReceive {
-    case m @ DetectUsing( algorithm, _, _, _ ) if routingTable.contains( algorithm ) => routingTable( algorithm ) forward m
+    case m: DetectUsing if routingTable.contains( m.algorithm ) => routingTable( m.algorithm ) forward m
   }
 }

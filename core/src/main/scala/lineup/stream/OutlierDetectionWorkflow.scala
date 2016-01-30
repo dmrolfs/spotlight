@@ -12,7 +12,7 @@ import peds.akka.supervision.IsolatedLifeCycleSupervisor.ChildStarted
 import peds.akka.metrics.InstrumentedActor
 import peds.akka.stream.Limiter
 import peds.akka.supervision.{ OneForOneStrategyFactory, SupervisionStrategyFactory, IsolatedLifeCycleSupervisor }
-import peds.commons.Valid
+import peds.commons.V
 import lineup.analysis.outlier.algorithm.DBSCANAnalyzer
 import lineup.analysis.outlier.{ OutlierDetection, DetectionAlgorithmRouter }
 import lineup.model.outlier.OutlierPlan
@@ -45,7 +45,7 @@ object OutlierDetectionWorkflow {
     def protocol: GraphiteSerializationProtocol
     def windowDuration: FiniteDuration
     def graphiteAddress: Option[InetSocketAddress]
-    def makePlans: () => Valid[Seq[OutlierPlan]]
+    def makePlans: () => V[Seq[OutlierPlan]]
     def configuration: Config
 
     def makePublishRateLimiter()(implicit context: ActorContext ): ActorRef = {

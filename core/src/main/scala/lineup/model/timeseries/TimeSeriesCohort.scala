@@ -5,7 +5,7 @@ import scalaz.{ Ordering => _, _ }, Scalaz._
 import shapeless.Lens
 import org.joda.{ time => joda }
 import com.github.nscala_time.time.Imports._
-import peds.commons.V
+import peds.commons.Valid
 import peds.commons.log.Trace
 import peds.commons.math.Interpolator
 
@@ -75,7 +75,7 @@ object TimeSeriesCohort {
   implicit val cohortMerging: Merging[TimeSeriesCohort] = new Merging[TimeSeriesCohort] {
     override def zero( topic: Topic ): TimeSeriesCohort = TimeSeriesCohort( topic )
 
-    override def merge( lhs: TimeSeriesCohort, rhs: TimeSeriesCohort ): V[TimeSeriesCohort] = {
+    override def merge( lhs: TimeSeriesCohort, rhs: TimeSeriesCohort ): Valid[TimeSeriesCohort] = {
       ( checkTopic(lhs.topic, rhs.topic) |@| combineSeries(lhs.data, rhs.data) ) { (_, merged) =>
         dataLens.set( lhs )( merged )
       }
@@ -86,7 +86,7 @@ object TimeSeriesCohort {
       rhs: Row[TimeSeries]
     )(
       implicit seriesMerge: Merging[TimeSeries]
-    ): V[Row[TimeSeries]] = {
+    ): Valid[Row[TimeSeries]] = {
       import scalaz.Validation.FlatMap._
 
       val merged = lhs ++ rhs
@@ -94,8 +94,8 @@ object TimeSeriesCohort {
       val dupsMerged = for {
         d <- dups
       } yield {
-        val zero: V[TimeSeries] = TimeSeries( d.head.topic, Row.empty[DataPoint] ).successNel
-        d.foldLeft( zero ) { (acc: V[TimeSeries], c: TimeSeries) =>
+        val zero: Valid[TimeSeries] = TimeSeries( d.head.topic, Row.empty[DataPoint] ).successNel
+        d.foldLeft( zero ) { (acc: Valid[TimeSeries], c: TimeSeries) =>
           acc flatMap { seriesMerge.merge( _, c ) }
         }
       }

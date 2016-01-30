@@ -4,7 +4,7 @@ import scalaz._, Scalaz._
 import shapeless.Lens
 import org.joda.{ time => joda }
 import com.github.nscala_time.time.Imports._
-import peds.commons.V
+import peds.commons.Valid
 import peds.commons.util._
 
 
@@ -36,13 +36,13 @@ object TimeSeries {
   implicit val seriesMerging: TimeSeriesBase.Merging[TimeSeries] = new TimeSeriesBase.Merging[TimeSeries] {
     override def zero( topic: Topic ): TimeSeries = TimeSeries( topic )
 
-    override def merge(lhs: TimeSeries, rhs: TimeSeries): V[TimeSeries] = {
+    override def merge(lhs: TimeSeries, rhs: TimeSeries): Valid[TimeSeries] = {
       ( checkTopic(lhs.topic, rhs.topic) |@| combinePoints(lhs.points, rhs.points) ) { (_, merged) =>
         pointsLens.set( lhs )( merged )
       }
     }
 
-    private def combinePoints( lhs: Row[DataPoint], rhs: Row[DataPoint] ): V[Row[DataPoint]] = {
+    private def combinePoints( lhs: Row[DataPoint], rhs: Row[DataPoint] ): Valid[Row[DataPoint]] = {
       val merged = lhs ++ rhs
       val (uniques, dups) = merged.groupBy{ _.timestamp }.values.partition{ _.size == 1 }
 

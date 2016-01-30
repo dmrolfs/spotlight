@@ -3,8 +3,8 @@ package lineup.model.outlier
 import lineup.model.timeseries.Topic
 import shapeless._
 import scalaz.{ Lens => _, _ }, Scalaz._
-import peds.commons.V
-import peds.archetype.domain.model.core.{ EntityCompanion, Entity }
+import peds.commons.Valid
+import peds.archetype.domain.model.core.Entity
 import peds.commons.identifier.TaggedID
 
 
@@ -19,11 +19,11 @@ object OutlierHistory {
   val idTag: Symbol = 'outlierHistory
   implicit def tag( id: OutlierHistory#ID ): OutlierHistory#TID = TaggedID( idTag, id )
 
-  def apply( topic: Topic, outlierAnnotations: Seq[OutlierAnnotation] ): V[OutlierHistory] = {
+  def apply( topic: Topic, outlierAnnotations: Seq[OutlierAnnotation] ): Valid[OutlierHistory] = {
     SimpleOutlierHistory( id = topic, outlierAnnotations = outlierAnnotations ).successNel
   }
 
-  def apply( series: Outliers ): V[OutlierHistory] = {
+  def apply( series: Outliers ): Valid[OutlierHistory] = {
     val annotations = OutlierAnnotation annotationsFromSeries series
     annotations map { a => SimpleOutlierHistory( id = series.topic, outlierAnnotations = a ) }
   }

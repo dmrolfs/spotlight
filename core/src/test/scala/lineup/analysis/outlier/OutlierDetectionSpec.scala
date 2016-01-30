@@ -94,7 +94,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
       detect receive msg
 
       router.expectMsgPF( 2.seconds.dilated, "default-routed-foo" ) {
-        case m @ DetectUsing( algo, _, payload, properties ) => {
+        case m @ DetectUsing( algo, _, payload, history, properties ) => {
           m.topic mustBe Topic("dummy")
           algo must equal('foo)
           payload mustBe msg
@@ -103,7 +103,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
       }
 
       router.expectMsgPF( 2.seconds.dilated, "default-routed-bar" ) {
-        case m @ DetectUsing( algo, _, payload, properties ) => {
+        case m @ DetectUsing( algo, _, payload, history, properties ) => {
           m.topic mustBe Topic("dummy")
           algo must equal('bar)
           payload mustBe msg
@@ -140,7 +140,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
       detect receive msg
 
       router.expectMsgPF( 2.seconds.dilated, "default-routed-foo" ) {
-        case m @ DetectUsing( algo, _, payload, properties ) => {
+        case m @ DetectUsing( algo, _, payload, history, properties ) => {
           m.topic mustBe metric
           algo must equal('foo)
           payload mustBe msg
@@ -149,7 +149,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
       }
 
       router.expectMsgPF( 2.seconds.dilated, "default-routed-bar" ) {
-        case m @ DetectUsing( algo, _, payload, properties ) => {
+        case m @ DetectUsing( algo, _, payload, history, properties ) => {
           m.topic mustBe metric
           algo must equal('bar)
           payload mustBe msg
@@ -185,7 +185,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
       detect receive msgForDefault
 
       router.expectMsgPF( 2.seconds.dilated, "default-routed" ) {
-        case m @ DetectUsing( algo, _, payload, properties ) => {
+        case m @ DetectUsing( algo, _, payload, history, properties ) => {
           m.topic mustBe Topic( "dummy" )
           algo must equal('zed)
           payload mustBe msgForDefault
@@ -198,7 +198,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
       detect receive metricMsg
 
       router.expectMsgPF( 2.seconds.dilated, "default-routed-2" ) {
-        case m @ DetectUsing( algo, _, payload, properties ) => {
+        case m @ DetectUsing( algo, _, payload, history, properties ) => {
           m.topic mustBe metric
           algo must equal('zed)
           payload mustBe metricMsg

@@ -6,7 +6,7 @@ package lineup.model
  */
 package object outlier {
 
-  type SeriesOutlierResults = Map[Symbol, Outliers]
+  type OutlierAlgorithmResults = Map[Symbol, Outliers]
 
 
   trait OutlierError

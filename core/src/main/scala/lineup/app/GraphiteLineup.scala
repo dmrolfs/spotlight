@@ -1,14 +1,10 @@
 package lineup.app
 
 import java.net.InetSocketAddress
-import lineup.model.timeseries.TimeSeries
-import lineup.publish.GraphitePublisher
-import lineup.train.{ AvroFileTrainingRepositoryInterpreter, LogStatisticsTrainingRepositoryInterpreter, TrainOutlierAnalysis }
-import peds.akka.stream.StreamMonitor
-
 import scala.concurrent.{ ExecutionContext, Await, Future }
 import scala.concurrent.duration._
 import scala.util.{ Failure, Success }
+import scala.util.matching.Regex
 import akka.actor.{ ActorRef, ActorSystem }
 import akka.stream.scaladsl._
 import akka.stream._
@@ -26,12 +22,16 @@ import peds.akka.supervision.IsolatedLifeCycleSupervisor.{ WaitForStart, ChildSt
 import peds.commons.log.Trace
 import peds.akka.supervision.OneForOneStrategyFactory
 import peds.akka.metrics.{ Reporter, Instrumented }
-import peds.commons.Valid
+import peds.commons.V
+import peds.akka.stream.StreamMonitor
 import lineup.analysis.outlier.OutlierDetection
-import lineup.stream.OutlierDetectionWorkflow.{ GetPublisher, GetPublishRateLimiter, GetOutlierDetector }
 import lineup.model.outlier._
+import lineup.model.timeseries.{ TimeSeries, TimeSeriesBase }
 import lineup.protocol.GraphiteSerializationProtocol
+import lineup.publish.GraphitePublisher
 import lineup.stream.{ Configuration, OutlierScoringModel, OutlierDetectionWorkflow }
+import lineup.stream.OutlierDetectionWorkflow.{ GetPublisher, GetPublishRateLimiter, GetOutlierDetector }
+import lineup.train.{ AvroFileTrainingRepositoryInterpreter, LogStatisticsTrainingRepositoryInterpreter, TrainOutlierAnalysis }
 
 
 /**
@@ -61,7 +61,7 @@ object GraphiteLineup extends Instrumented with StrictLogging {
 
   val PlanConfigPath = "lineup.detection-plans"
 
-  def execute( config: Configuration, reloader: () => Valid[Configuration] ): Unit = {
+  def execute( config: Configuration, reloader: () => V[Configuration] ): Unit = {
     Kamon.start( config )
     logger info config.usage
 
@@ -92,7 +92,7 @@ object GraphiteLineup extends Instrumented with StrictLogging {
   def streamGraphiteOutliers(
     workflow: ActorRef,
     config: Configuration,
-    reloader: () => Valid[Configuration]
+    reloader: () => V[Configuration]
   )(
     implicit system: ActorSystem,
     materializer: Materializer
@@ -130,17 +130,17 @@ object GraphiteLineup extends Instrumented with StrictLogging {
   )(
     implicit system: ActorSystem,
     materializer: Materializer
-  ): Valid[Flow[ByteString, ByteString, Unit]] = {
+  ): V[Flow[ByteString, ByteString, Unit]] = {
     for {
-      config <- reloadConfiguration()
+      conf <- reloadConfiguration()
     } yield {
       logger.info(
         s"""
            |\nConnection made using the following configuration:
-           |\tTCP-In Buffer Size   : ${config.tcpInboundBufferSize}
-           |\tWorkflow Buffer Size : ${config.workflowBufferSize}
-           |\tDetect Timeout       : ${config.detectionBudget.toCoarsest}
-           |\tplans                : [${config.plans.zipWithIndex.map{ case (p,i) => f"${i}%2d: ${p}"}.mkString("\n","\n","\n")}]
+           |\tTCP-In Buffer Size   : ${conf.tcpInboundBufferSize}
+           |\tWorkflow Buffer Size : ${conf.workflowBufferSize}
+           |\tDetect Timeout       : ${conf.detectionBudget.toCoarsest}
+           |\tplans                : [${conf.plans.zipWithIndex.map{ case (p,i) => f"${i}%2d: ${p}"}.mkString("\n","\n","\n")}]
         """.stripMargin
       )
 
@@ -150,34 +150,45 @@ object GraphiteLineup extends Instrumented with StrictLogging {
 
         //todo add support to watch FlowShapes
 
-        val framing = b.add( config.protocol.framingFlow(config.maxFrameLength).watchSourced( 'framing ) )
+        val framing = b.add( conf.protocol.framingFlow(conf.maxFrameLength).watchSourced( 'framing ) )
 
         val intakeBuffer = b.add(
           Flow[ByteString]
-          .buffer( config.tcpInboundBufferSize, OverflowStrategy.backpressure )
+          .buffer( conf.tcpInboundBufferSize, OverflowStrategy.backpressure )
           .watchFlow( 'intakeBuffer )
         )
 
-        val timeSeries = b.add( config.protocol.unmarshalTimeSeriesData.watchSourced( 'timeseries ) )
-        val scoring = b.add( OutlierScoringModel.scoringGraph( detector, config ) )
+        val timeSeries = b.add( conf.protocol.unmarshalTimeSeriesData.watchSourced( 'timeseries ) )
+        val scoring = b.add( OutlierScoringModel.scoringGraph( detector, conf ) )
         val logUnrecognized = b.add(
           Flow[TimeSeries].transform( () =>
-            OutlierScoringModel.logMetric( Logger( LoggerFactory getLogger "Unrecognized" ), config.plans )
+            OutlierScoringModel.logMetric( Logger( LoggerFactory getLogger "Unrecognized" ), conf.plans )
           )
         )
         val broadcast = b.add( Broadcast[TimeSeries](outputPorts = 2, eagerCancel = false) )
         val publish = b.add( publishOutliers( limiter, publisher ).watchFlow( 'publish ) )
         val tcpOut = b.add( Flow[Outliers].map{ _ => ByteString() }.watchConsumed( 'tcpOut ) )
 
+        val passArchivable = b.add( archiveFilter[TimeSeries]( conf ) )
+
         import AvroFileTrainingRepositoryInterpreter.LocalhostWritersContextProvider
+        val interpreter = {
+          if ( conf.hasPath("lineup.training.archival") && conf.getBoolean("lineup.training.archival") ) {
+            new AvroFileTrainingRepositoryInterpreter()( trainingDispatcher( system ) ) with LocalhostWritersContextProvider {
+              override def config: Config = conf
+            }
+          } else {
+            LogStatisticsTrainingRepositoryInterpreter( trainingLogger )( trainingDispatcher(system) )
+          }
+        }
         val train = b.add(
           TrainOutlierAnalysis.feedTrainingFlow[TimeSeries](
-//            interpreter = TrainingRepositoryLogStatisticsInterpreter( trainingLogger )( trainingDispatcher(system) )
-            interpreter = new AvroFileTrainingRepositoryInterpreter( )( trainingDispatcher( system ) ) with LocalhostWritersContextProvider,
-            maxPoints = config.getInt( "lineup.training.batch.max-points" ),
-            batchingWindow = FiniteDuration( config.getDuration("lineup.training.batch.window", NANOSECONDS), NANOSECONDS )
+            interpreter = interpreter,
+            maxPoints = conf.getInt( "lineup.training.batch.max-points" ),
+            batchingWindow = FiniteDuration( conf.getDuration("lineup.training.batch.window", NANOSECONDS), NANOSECONDS )
           ).watchConsumed( 'train )
         )
+
         val termTraining = b.add( Sink.ignore )
         val termUnrecognized = b.add( Sink.ignore )
 
@@ -194,7 +205,7 @@ object GraphiteLineup extends Instrumented with StrictLogging {
           'train
         )
 
-                                                 broadcast ~> train ~> termTraining
+                                                 broadcast ~> passArchivable ~> train ~> termTraining
         framing ~> intakeBuffer ~> timeSeries ~> broadcast ~> scoring.in
                                                               scoring.out0 ~> publish ~> tcpOut
                                                               scoring.out1 ~> logUnrecognized ~> termUnrecognized
@@ -204,6 +215,23 @@ object GraphiteLineup extends Instrumented with StrictLogging {
 
       Flow.fromGraph( graph ).withAttributes( ActorAttributes.supervisionStrategy(workflowSupervision) )
     }
+  }
+
+  def archiveFilter[T <: TimeSeriesBase]( config: Configuration ): Flow[T, T, Unit] = {
+    val archiveWhitelist: Set[Regex] = {
+      import scala.collection.JavaConverters._
+      config.getStringList( "lineup.training.whitelist" ).asScala.toSet map { wl: String => new Regex( wl ) }
+    }
+    logger info s"""training archive whitelist: [${archiveWhitelist.mkString(",")}]"""
+
+    val baseline = (ts: T) => { config.plans.exists{ _ appliesTo ts } }
+
+    val isArchivable: T => Boolean = {
+      if ( archiveWhitelist.nonEmpty ) baseline
+      else (ts: T) => { archiveWhitelist.exists( _.findFirstIn( ts.topic.name ).isDefined ) || baseline( ts ) }
+    }
+
+    Flow[T].filter{ isArchivable }
   }
 
   def publishOutliers(
@@ -267,8 +295,8 @@ if ( config.hasPath("lineup.metrics.csv.dir") ) File( config.getString("lineup.m
     }
   }
 
-  def startWorkflow( config: Configuration, reloader: () => Valid[Configuration] )( implicit system: ActorSystem ): ActorRef = {
-    val loadPlans: () => Valid[Seq[OutlierPlan]] = () => { reloader() map { _.plans } }
+  def startWorkflow( config: Configuration, reloader: () => V[Configuration] )( implicit system: ActorSystem ): ActorRef = {
+    val loadPlans: () => V[Seq[OutlierPlan]] = () => { reloader() map { _.plans } }
 
     system.actorOf(
       OutlierDetectionWorkflow.props(
@@ -278,7 +306,7 @@ if ( config.hasPath("lineup.metrics.csv.dir") ) File( config.getString("lineup.m
           override def protocol: GraphiteSerializationProtocol = config.protocol
           override def windowDuration: FiniteDuration = config.windowDuration
           override def graphiteAddress: Option[InetSocketAddress] = config.graphiteAddress
-          override def makePlans: () => Valid[Seq[OutlierPlan]] = loadPlans
+          override def makePlans: () => V[Seq[OutlierPlan]] = loadPlans
           override def configuration: Config = config
         }
       ),

@@ -1,5 +1,7 @@
 package lineup.train
 
+import com.typesafe.config.{ ConfigFactory, Config }
+
 import scalaz.concurrent.Task
 import java.io.File
 import java.util.concurrent.atomic.AtomicInteger
@@ -106,7 +108,18 @@ with MockitoSugar {
 
     implicit val ec = scala.concurrent.ExecutionContext.global
 
-    val interpreter = new AvroFileTrainingRepositoryInterpreter( ) with TestWritersContextProvider
+    val interpreter = new AvroFileTrainingRepositoryInterpreter( ) with TestWritersContextProvider {
+      override def config: Config = {
+        val fallback = """
+         |lineup.training {
+         |  archival: on
+         |  home: .
+         |}
+        """.stripMargin
+
+        ConfigFactory.load().withFallback( ConfigFactory parseString fallback )
+      }
+    }
 
 
     def recordToSeries( r: GenericRecord ): TimeSeries = {

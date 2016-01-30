@@ -15,7 +15,7 @@ import akka.stream.{ ActorAttributes, Supervision }
 import akka.util.{ ByteString, Timeout }
 
 import com.typesafe.scalalogging.{ LazyLogging, Logger }
-import nl.grons.metrics.scala.Meter
+import nl.grons.metrics.scala.{ Timer, Meter }
 import org.slf4j.LoggerFactory
 import peds.akka.stream.Limiter
 import peds.commons.log.Trace
@@ -104,7 +104,6 @@ class GraphitePublisher( outlierTopicPrefix: Option[String] ) extends DenseOutli
   val trace = Trace[GraphitePublisher]
 
   val pickler: PythonPickleProtocol = new PythonPickleProtocol
-  val outlierLogger: Logger = Logger( LoggerFactory getLogger "Outliers" )
   var socket: Option[Socket] = None //todo: if socket fails supervisor should restart actor
   var waitQueue: immutable.Queue[MarkPoint] = immutable.Queue.empty[MarkPoint]
   override val fillSeparation: FiniteDuration = outer.separation
@@ -114,6 +113,7 @@ class GraphitePublisher( outlierTopicPrefix: Option[String] ) extends DenseOutli
   lazy val circuitPendingMeter: Meter = metrics.meter( "circuit", "pending" )
   lazy val circuitRequestsMeter: Meter = metrics.meter( "circuit", "requests" )
   lazy val publishedMeter: Meter = metrics.meter( "published" )
+  lazy val publishTimer: Timer = metrics.timer( "publishing" )
   var gaugeStatus: BreakerStatus = BreakerClosed
 
 
@@ -214,7 +214,6 @@ class GraphitePublisher( outlierTopicPrefix: Option[String] ) extends DenseOutli
     val points = markPoints( o )
     waitQueue = points.foldLeft( waitQueue ){ _.enqueue( _ ) }
     log debug s"publish[${o.topic}:${o.hasAnomalies}]: added [${o.anomalySize} / ${o.size}] to wait queue - now at [${waitQueue.size}]"
-    outlierLogger info o.toString
   }
 
   override def markPoints( o: Outliers ): Seq[MarkPoint] = {
@@ -277,7 +276,7 @@ class GraphitePublisher( outlierTopicPrefix: Option[String] ) extends DenseOutli
       val report = serialize( toBePublished:_* )
       breaker withSyncCircuitBreaker {
         circuitRequestsMeter.mark()
-        sendToGraphite( report )
+        publishTimer time { sendToGraphite( report ) }
       }
       flush()
     }

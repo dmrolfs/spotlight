@@ -58,6 +58,7 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
           'dbscan,
           aggregator.ref,
           DetectOutliersInSeries( TimeSeries("series", points) ),
+          None,
           ConfigFactory.parseString(
             s"""
                |${DBSCANAnalyzer.Eps}: 5.0
@@ -84,7 +85,7 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       )
 
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( 'dbscan ) )
-      analyzer.receive( DetectUsing( 'dbscan, aggregator.ref, DetectOutliersInSeries(series), algProps ) )
+      analyzer.receive( DetectUsing( 'dbscan, aggregator.ref, DetectOutliersInSeries(series), None, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "detect" ) {
         //todo stream envelope
         //        case Envelope(SeriesOutliers(alg, source, outliers), hdr) => {
@@ -138,7 +139,7 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       )
 
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered('dbscan) )
-      analyzer.receive( DetectUsing( 'dbscan, aggregator.ref, DetectOutliersInSeries(series), algProps ) )
+      analyzer.receive( DetectUsing( 'dbscan, aggregator.ref, DetectOutliersInSeries(series), None, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "detect" ) {
         //todo stream envelope
         //        case Envelope(SeriesOutliers(alg, source, outliers), hdr) => {
@@ -172,7 +173,7 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       )
 
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered('dbscan) )
-      analyzer.receive( DetectUsing( 'dbscan, aggregator.ref, DetectOutliersInCohort(cohort), algProps ) )
+      analyzer.receive( DetectUsing( 'dbscan, aggregator.ref, DetectOutliersInCohort(cohort), None, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "detect" ) {
         //todo stream envelope
         //        case Envelope(CohortOutliers(alg, source, outliers), hdr) => {
@@ -212,7 +213,7 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       )
 
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered('dbscan) )
-      analyzer.receive( DetectUsing( 'dbscan, aggregator.ref, DetectOutliersInCohort(cohort), algProps ) )
+      analyzer.receive( DetectUsing( 'dbscan, aggregator.ref, DetectOutliersInCohort(cohort), None, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "detect" ) {
         //todo stream envelope
         //        case Envelope(CohortOutliers(alg, source, outliers), hdr) => {

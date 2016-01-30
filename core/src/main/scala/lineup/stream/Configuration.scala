@@ -50,7 +50,7 @@ trait Configuration extends Config {
 }
 
 object Configuration {
-  type Reload = () => Valid[Configuration]
+  type Reload = () => V[Configuration]
 
   def reloader(
     args: Array[String]
@@ -70,7 +70,7 @@ object Configuration {
     }
   }
 
-  def apply( args: Array[String], config: => Config = ConfigFactory.load ): V[Configuration] = {
+  def apply( args: Array[String], config: => Config = ConfigFactory.load ): Valid[Configuration] = {
     import scalaz.Validation.FlatMap._
 
     for {
@@ -79,7 +79,7 @@ object Configuration {
     } yield makeConfiguration( u, c )
   }
 
-  private def checkUsage( args: Array[String] ): V[UsageSettings] = {
+  private def checkUsage( args: Array[String] ): Valid[UsageSettings] = {
     val parser = UsageSettings.makeUsageConfig
     parser.parse( args, UsageSettings.zero ) match {
       case Some( settings ) => settings.successNel
@@ -101,13 +101,13 @@ object Configuration {
     val WORKFLOW_BUFFER_SIZE = "lineup.workflow.buffer"
   }
 
-  private def checkConfiguration( config: Config, usage: UsageSettings ): V[Config] = {
+  private def checkConfiguration( config: Config, usage: UsageSettings ): Valid[Config] = {
     object Req {
       def withUsageSetting( path: String, setting: Option[_] ): Req = new Req( path, () => { setting.isDefined } )
       def withoutUsageSetting( path: String ): Req = new Req( path, NotDefined )
       val NotDefined = () => { false }
 
-      def check( r: Req ): V[String] = {
+      def check( r: Req ): Valid[String] = {
         if ( r.inUsage() || config.hasPath(r.path) ) r.path.successNel
         else Validation.failureNel( UsageConfigurationError( s"expected configuration path [${r.path}]" ) )
       }
@@ -190,8 +190,8 @@ object Configuration {
 
   val defaultOutlierReducer: ReduceOutliers = new ReduceOutliers {
     override def apply(
-      results: SeriesOutlierResults,
-      source: TimeSeriesBase
+                        results: OutlierAlgorithmResults,
+                        source: TimeSeriesBase
     )(
       implicit ec: ExecutionContext
     ): Future[Outliers] = {

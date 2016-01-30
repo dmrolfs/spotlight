@@ -1,18 +1,23 @@
 package lineup.analysis.outlier
 
+import org.slf4j.LoggerFactory
+
+import scala.concurrent.{ ExecutionContext, Future }
 import scala.concurrent.duration._
 import akka.actor.{ Actor, ActorRef, ActorLogging, Props }
+import akka.agent.Agent
 import akka.event.LoggingReceive
 import akka.pattern.AskTimeoutException
 import akka.stream.{ ActorAttributes, Supervision }
 import akka.stream.scaladsl.Flow
 import scalaz.{ \/-, -\/ }
-import com.typesafe.scalalogging.StrictLogging
+import com.typesafe.scalalogging.{ Logger, StrictLogging }
 import nl.grons.metrics.scala.Meter
 import peds.akka.metrics.{ Instrumented, InstrumentedActor }
 import peds.commons.identifier.ShortUUID
-import peds.commons.Valid
-import lineup.model.timeseries.{ Topic, TimeSeriesBase }
+import peds.commons.V
+import lineup.model.timeseries.{ Topic, TimeSeriesBase, TimeSeries, TimeSeriesCohort, DataPoint }
+//import lineup.model.timeseries.DataPoint._
 import lineup.model.outlier.{ Outliers, OutlierPlan }
 
 
@@ -83,7 +88,7 @@ object OutlierDetection extends StrictLogging with Instrumented {
 
 
   object PlanConfigurationProvider {
-    type Creator = () => Valid[Seq[OutlierPlan]]
+    type Creator = () => V[Seq[OutlierPlan]]
   }
 
   trait PlanConfigurationProvider extends OutlierDetection.ConfigurationProvider {
@@ -143,13 +148,14 @@ class OutlierDetection extends Actor with InstrumentedActor with ActorLogging {
       val aggregator = sender()
       outstanding( aggregator ) ! result
       outstanding -= aggregator
+      updateScore( result )
       context become around( detection(inRetry) )
     }
 
     case m: OutlierDetectionMessage if outer.definedAt( m ) => {
       log debug s"plan for topic [${m.topic}]: [${outer.planFor(m)}]"
       val requester = sender()
-      val aggregator = dispatch( m, outer.planFor(m).get )
+      val aggregator = dispatch( m, outer.planFor(m).get )( context.dispatcher )
       outstanding += ( aggregator -> requester )
       context become around( detection(inRetry) )
     }
@@ -180,18 +186,58 @@ class OutlierDetection extends Actor with InstrumentedActor with ActorLogging {
     }
   }
 
+  val fullExtractId: OutlierPlan.ExtractTopic = OutlierDetection.extractOutlierDetectionTopic orElse { case _ => None }
 
-  def dispatch( m: OutlierDetectionMessage, p: OutlierPlan ): ActorRef = {
+  def dispatch( m: OutlierDetectionMessage, p: OutlierPlan )( implicit ec: ExecutionContext ): ActorRef = {
     val aggregatorName = s"quorum-${p.name}-${fullExtractId(m) getOrElse "!NULL-ID!"}-${ShortUUID()}"
     val aggregator = context.actorOf( OutlierQuorumAggregator.props( p, m.source ), aggregatorName )
+    val history = updateHistory( m.source )
 
     p.algorithms foreach { a =>
-      //todo stream enveloping: router !+ DetectUsing( algorithm = a, destination = aggregator, payload = m, p.algorithmProperties )
-      router ! DetectUsing( algorithm = a, aggregator = aggregator, payload = m, p.algorithmConfig )
+      val detect = DetectUsing(
+        algorithm = a,
+        aggregator = aggregator,
+        payload = m,
+        history = Some(history),
+        properties = p.algorithmConfig
+      )
+
+      router ! detect
     }
 
     aggregator
   }
 
-  val fullExtractId: OutlierPlan.ExtractTopic = OutlierDetection.extractOutlierDetectionTopic orElse { case _ => None }
+
+  //todo store/hydrate
+  var _history: Map[Topic, HistoricalStatistics] = Map.empty[Topic, HistoricalStatistics]
+  def updateHistory( data: TimeSeriesBase ): HistoricalStatistics = {
+    val result = _history get data.topic getOrElse { HistoricalStatistics( 2, false ) }
+
+    for {
+      dp <- data match {
+        case s: TimeSeries => s.points
+        case c: TimeSeriesCohort => c.data flatMap { _.points }
+      }
+    } {
+      result add dp.getPoint
+      _history += data.topic -> result
+    }
+
+    log debug s"HISTORY for [${data.topic}]: [${result}]"
+    result
+  }
+
+  var _score: Map[Topic, (Long, Long)] = Map.empty[Topic, (Long, Long)]
+  val outlierLogger: Logger = Logger( LoggerFactory getLogger "Outliers" )
+
+  def updateScore( os: Outliers ): Unit = {
+    val s = _score.get( os.topic ) map { case (o, t) =>
+      ( o + os.anomalySize.toLong, t + os.size.toLong )
+    } getOrElse {
+      ( os.anomalySize.toLong, os.size.toLong )
+    }
+    _score += os.topic -> s
+    outlierLogger.debug( s"[${os.topic}] outlier rate:[${s._1.toDouble / s._2.toDouble}%] in [${s._2}] points" )
+  }
 }

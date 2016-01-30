@@ -3,7 +3,7 @@ import sbt._
 
 object Dependencies {
   object peds {
-    val version = "0.2.2"
+    val version = "0.2.3"
     def module( id: String ) = "com.github.dmrolfs" %% s"peds-$id" % version
     def all = Seq( commons, akka, archetype )
 
@@ -14,7 +14,7 @@ object Dependencies {
   }
 
   object demesne {
-    val version = "1.0.0"
+    val version = "1.0.2"
     def module( id: String ) = "com.github.dmrolfs" %% s"demesne-$id" % version
     val core = module( "core" )
     val testkit = module( "testkit" )
@@ -34,7 +34,7 @@ object Dependencies {
     val slf4j = module( "slf4j" )
     val testkit = module( "testkit" )
 
-    val streamsVersion = "2.0.2"
+    val streamsVersion = "2.0.3"
     val streams = "com.typesafe.akka" % "akka-stream-experimental_2.11" % streamsVersion
     val streamsTestkit = "com.typesafe.akka" % "akka-stream-testkit-experimental_2.11" % streamsVersion
   }
@@ -99,7 +99,7 @@ object Dependencies {
   object facility {
     val uuid = "com.eaio.uuid" % "uuid" % "3.4"
     val config = "com.typesafe" % "config" % "1.3.0"
-    val pureConfig = "com.github.melrief" %% "pureconfig" % "0.1.2"
+//    val pureConfig = "com.github.melrief" %% "pureconfig" % "0.1.5"
     val shapeless = "com.chuusai" %% "shapeless" % "2.2.5"
     val parboiled = "org.parboiled" %% "parboiled" % "2.1.0"
     val inflector = "org.atteo" % "evo-inflector" % "1.2.1"
