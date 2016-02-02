@@ -78,7 +78,13 @@ extends Actor with InstrumentedActor with ActorLogging { outer: ConfigurationPro
     case m: Outliers => {
       val source = sender()
       _fulfilled ++= m.algorithms map { _ -> m }
-      process( m, _fulfilled )
+      process( _fulfilled )
+    }
+
+    case unknown: UnrecognizedPayload => {
+      log info s"converting unrecognized response to NoOutliers for [${unknown.topic}]"
+      _fulfilled += unknown.algorithm -> NoOutliers( algorithms = Set(unknown.algorithm), source = unknown.source )
+      process( _fulfilled )
     }
 
     //todo: this whole retry approach is wrong; should simply increase timeout
@@ -100,7 +106,7 @@ extends Actor with InstrumentedActor with ActorLogging { outer: ConfigurationPro
     }
   }
 
-  def process( m: Outliers, fulfilled: AnalysisFulfillment )( implicit ec: ExecutionContext ): Unit = {
+  def process( fulfilled: AnalysisFulfillment )( implicit ec: ExecutionContext ): Unit = {
     if ( plan isQuorum fulfilled ) {
       conclusionsMeter.mark()
       import akka.pattern.pipe

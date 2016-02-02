@@ -55,11 +55,7 @@ trait DenseOutlierPublisher extends OutlierPublisher {
           else fillInterval( timePoint + fillSeparation.toMillis, range, acc :+ DataPoint(timePoint, 0D) )
         }
 
-        source.interval map { i =>
-          Some( fillInterval(i.start, i, Seq.empty[DataPoint]) )
-        } getOrElse {
-          None
-        }
+        source.interval map { i => Some( fillInterval(i.start, i, Seq.empty[DataPoint]) ) } getOrElse { None }
       }
 
       case _ => None

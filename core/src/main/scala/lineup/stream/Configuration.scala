@@ -190,14 +190,12 @@ object Configuration {
 
   val defaultOutlierReducer: ReduceOutliers = new ReduceOutliers {
     override def apply(
-                        results: OutlierAlgorithmResults,
-                        source: TimeSeriesBase
+      results: OutlierAlgorithmResults,
+      source: TimeSeriesBase
     )(
       implicit ec: ExecutionContext
     ): Future[Outliers] = {
-      Future {
-        results.headOption map { _._2 } getOrElse { NoOutliers( algorithms = Set(DBSCANAnalyzer.Algorithm ), source = source ) }
-      }
+      Future { results.headOption map { _._2 } getOrElse { NoOutliers( algorithms = results.keySet, source = source ) } }
     }
   }
 

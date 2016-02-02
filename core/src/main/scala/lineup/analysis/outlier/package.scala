@@ -47,4 +47,11 @@ package object outlier {
     override type Source = payload.Source
     override def source: Source = payload.source
   }
+
+
+  case class UnrecognizedPayload( algorithm: Symbol, request: DetectUsing ) extends OutlierDetectionMessage {
+    override def topic: Topic = request.topic
+    override type Source = request.Source
+    override def source: Source = request.source
+  }
 }

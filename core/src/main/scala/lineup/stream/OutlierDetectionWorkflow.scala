@@ -81,7 +81,7 @@ object OutlierDetectionWorkflow {
 
     def makeAlgorithmWorkers( router: ActorRef )( implicit context: ActorContext ): Map[Symbol, ActorRef] = {
       val algorithmProps: Map[Symbol, Props] = Map(
-        'dbscan -> DBSCANAnalyzer.props( router )
+        DBSCANAnalyzer.SeriesDensityAlgorithm -> DBSCANAnalyzer.seriesDensity( router )
       )
 
       algorithmProps map { case (n, p) =>

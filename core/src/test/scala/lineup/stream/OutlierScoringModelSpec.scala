@@ -51,17 +51,19 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
 
     val configurationReloader = Configuration.reloader( Array.empty[String] )()()
 
+    val algo = DBSCANAnalyzer.SeriesDensityAlgorithm
+
     val plans = Seq(
       OutlierPlan.default(
         name = "DEFAULT_PLAN",
-        algorithms = Set(DBSCANAnalyzer.Algorithm ),
+        algorithms = Set( algo ),
         timeout = 500.millis,
         isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = 1, triggerPoint = 1 ),
         reduce = Configuration.defaultOutlierReducer,
         specification = ConfigFactory.parseString(
         s"""
-         |algorithm-config.${DBSCANAnalyzer.Eps}: 5.0
-         |algorithm-config.${DBSCANAnalyzer.MinDensityConnectedPoints}: 3
+         |algorithm-config.${algo.name}.eps: 5.0
+         |algorithm-config.${algo.name}.minDensityConnectedPoints: 3
         """.stripMargin
         )
       )
@@ -176,7 +178,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
       import f._
       import system.dispatcher
 
-      val algos = Set( DBSCANAnalyzer.Algorithm )
+      val algos = Set( algo )
       val defaultPlan = OutlierPlan.default(
         name = "DEFAULT_PLAN",
         algorithms = algos,
@@ -184,16 +186,20 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
         isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = algos.size, triggerPoint = 1 ),
         reduce = Configuration.defaultOutlierReducer,
         specification = ConfigFactory.parseString(
-          s"""
-             |algorithm-config.${DBSCANAnalyzer.Eps}: 5000
-             |algorithm-config.${DBSCANAnalyzer.MinDensityConnectedPoints}: 9
-             |algorithm-config.${DBSCANAnalyzer.Distance}: Euclidean
-          """.stripMargin
+          algos
+          .map { a =>
+            s"""
+               |algorithm-config.${a.name}.eps: 5000
+               |algorithm-config.${a.name}.minDensityConnectedPoints: 9
+               |algorithm-config.${a.name}.distance: Euclidean
+            """.stripMargin
+          }
+          .mkString( "\n" )
         )
       )
 
       val routerRef = system.actorOf( DetectionAlgorithmRouter.props, "router" )
-      val dbscan = system.actorOf( DBSCANAnalyzer.props(routerRef), "dbscan" )
+      val dbscan = system.actorOf( DBSCANAnalyzer.seriesDensity(routerRef), "dbscan" )
       val detector = system.actorOf(
         OutlierDetection.props {
           new OutlierDetection with TestConfigurationProvider {
@@ -229,11 +235,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
       )
       val expectedPoints = dp1 filterNot { largestCluster contains _ }
 
-      val expected = SeriesOutliers(
-        algorithms = Set(DBSCANAnalyzer.Algorithm ),
-        source = TimeSeries("foo", dp1),
-        outliers = expectedPoints
-      )
+      val expected = SeriesOutliers( algorithms = algos, source = TimeSeries("foo", dp1), outliers = expectedPoints )
 //      val expected = TimeSeries( "foo", (dp1 ++ dp3).sortBy( _.timestamp ) )
 
       val graphiteFlow = OutlierScoringModel.batchSeries( parallelism = 4, windowSize = 20.millis )
