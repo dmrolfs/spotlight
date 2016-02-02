@@ -25,7 +25,7 @@ import peds.commons.log.Trace
 import lineup.protocol.PythonPickleProtocol
 import lineup.testkit.ParallelAkkaSpec
 import lineup.analysis.outlier.{ DetectionAlgorithmRouter, OutlierDetection }
-import lineup.analysis.outlier.algorithm.DBSCANAnalyzer
+import lineup.analysis.outlier.algorithm.{ SeriesDensityAnalyzer, DBSCANAnalyzer }
 import lineup.model.outlier.{ SeriesOutliers, IsQuorum, OutlierPlan }
 import lineup.model.timeseries.{ TimeSeries, DataPoint, Row }
 import lineup.analysis.outlier.OutlierDetection.PlanConfigurationProvider.Creator
@@ -51,7 +51,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
 
     val configurationReloader = Configuration.reloader( Array.empty[String] )()()
 
-    val algo = DBSCANAnalyzer.SeriesDensityAlgorithm
+    val algo = SeriesDensityAnalyzer.Algorithm
 
     val plans = Seq(
       OutlierPlan.default(
@@ -199,7 +199,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
       )
 
       val routerRef = system.actorOf( DetectionAlgorithmRouter.props, "router" )
-      val dbscan = system.actorOf( DBSCANAnalyzer.seriesDensity(routerRef), "dbscan" )
+      val dbscan = system.actorOf( SeriesDensityAnalyzer.props( routerRef ), "dbscan" )
       val detector = system.actorOf(
         OutlierDetection.props {
           new OutlierDetection with TestConfigurationProvider {

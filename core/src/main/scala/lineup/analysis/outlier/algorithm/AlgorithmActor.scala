@@ -2,7 +2,6 @@ package lineup.analysis.outlier.algorithm
 
 import akka.actor.{ Actor, ActorPath, ActorRef, ActorLogging }
 import akka.event.LoggingReceive
-import lineup.analysis.outlier.OutlierDetection.UnrecognizedTopic
 import peds.akka.metrics.InstrumentedActor
 import lineup.analysis.outlier.{ UnrecognizedPayload, DetectUsing, DetectionAlgorithmRouter }
 

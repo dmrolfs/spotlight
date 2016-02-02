@@ -25,8 +25,8 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
   import DBSCANAnalyzerSpec._
 
   class Fixture extends AkkaFixture {
-    val algoS = DBSCANAnalyzer.SeriesDensityAlgorithm
-    val algoC = DBSCANAnalyzer.CohortDensityAlgorithm
+    val algoS = SeriesDensityAnalyzer.Algorithm
+    val algoC = CohortDensityAnalyzer.Algorithm
     val router = TestProbe()
     val aggregator = TestProbe()
     val bus = mock[EventStream]
@@ -44,7 +44,7 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
   "DBSCANAnalyzer" should  {
     "register with router upon create" in { f: Fixture =>
       import f._
-      val analyzer = TestActorRef[DBSCANAnalyzer]( DBSCANAnalyzer.seriesDensity(router.ref) )
+      val analyzer = TestActorRef[DBSCANAnalyzer]( SeriesDensityAnalyzer.props(router.ref) )
       router.expectMsgPF( 1.second.dilated, "register" ) {
         case DetectionAlgorithmRouter.RegisterDetectionAlgorithm(algorithm, _) => algorithm must equal( algoS )
       }
@@ -52,7 +52,7 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
 
     "raise error if used before registration" in { f: Fixture =>
       import f._
-      val analyzer = TestActorRef[DBSCANAnalyzer]( DBSCANAnalyzer.seriesDensity(router.ref) )
+      val analyzer = TestActorRef[DBSCANAnalyzer]( SeriesDensityAnalyzer.props(router.ref) )
 
       an [AlgorithmActor.AlgorithmUsedBeforeRegistrationError] must be thrownBy
       analyzer.receive(
@@ -73,7 +73,7 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
 
     "detect outlying points in series" in { f: Fixture =>
       import f._
-      val analyzer = TestActorRef[DBSCANAnalyzer]( DBSCANAnalyzer.seriesDensity(router.ref) )
+      val analyzer = TestActorRef[DBSCANAnalyzer]( SeriesDensityAnalyzer.props(router.ref) )
       val series = TimeSeries( "series", points )
       val expectedValues = Row( 18.8, 25.2, 31.5, 22.0, 24.1, 39.2 )
       val expected = points filter { expectedValues contains _.value } sortBy { _.timestamp }
@@ -101,7 +101,7 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
 
     "detect no outliers points in series" in { f: Fixture =>
       import f._
-      val analyzer = TestActorRef[DBSCANAnalyzer]( DBSCANAnalyzer.seriesDensity(router.ref) )
+      val analyzer = TestActorRef[DBSCANAnalyzer]( SeriesDensityAnalyzer.props(router.ref) )
 
       val myPoints = Row(
         DataPoint( new joda.DateTime(448), 8.46 ),
@@ -153,7 +153,7 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
 
     "series analyzer doesn't recognize cohort" in { f: Fixture =>
       import f._
-      val analyzer = TestActorRef[DBSCANAnalyzer]( DBSCANAnalyzer.seriesDensity(router.ref) )
+      val analyzer = TestActorRef[DBSCANAnalyzer]( SeriesDensityAnalyzer.props(router.ref) )
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
 
       val series1 = TimeSeries( "series.one", pointsA )
@@ -182,7 +182,7 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
 
     "detect outlying series in cohort" in { f: Fixture =>
       import f._
-      val analyzer = TestActorRef[DBSCANAnalyzer]( DBSCANAnalyzer.cohortDensity(router.ref) )
+      val analyzer = TestActorRef[DBSCANAnalyzer]( CohortDensityAnalyzer.props(router.ref) )
       val series1 = TimeSeries( "series.one", pointsA )
       val range = (0.99998, 1.00003)
       val series2 = tweakSeries( TimeSeries("series.two", pointsB), range )
@@ -222,7 +222,7 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
 
     "detect no outliers series in cohort" in { f: Fixture =>
       import f._
-      val analyzer = TestActorRef[DBSCANAnalyzer]( DBSCANAnalyzer.cohortDensity(router.ref) )
+      val analyzer = TestActorRef[DBSCANAnalyzer]( CohortDensityAnalyzer.props(router.ref) )
       val series1 = TimeSeries( "series.one", pointsB )
       val range = (0.99998, 1.00003)
       val series2 = tweakSeries( TimeSeries("series.two", pointsB), range )
@@ -259,7 +259,7 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
 
     "cohort not recognize series request" in { f: Fixture =>
       import f._
-      val analyzer = TestActorRef[DBSCANAnalyzer]( DBSCANAnalyzer.cohortDensity(router.ref) )
+      val analyzer = TestActorRef[DBSCANAnalyzer]( CohortDensityAnalyzer.props(router.ref) )
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered(algoC) )
 
       val myPoints = Row(

@@ -13,7 +13,7 @@ import peds.akka.metrics.InstrumentedActor
 import peds.akka.stream.Limiter
 import peds.akka.supervision.{ OneForOneStrategyFactory, SupervisionStrategyFactory, IsolatedLifeCycleSupervisor }
 import peds.commons.V
-import lineup.analysis.outlier.algorithm.DBSCANAnalyzer
+import lineup.analysis.outlier.algorithm.{ SeriesDensityAnalyzer, DBSCANAnalyzer }
 import lineup.analysis.outlier.{ OutlierDetection, DetectionAlgorithmRouter }
 import lineup.model.outlier.OutlierPlan
 import lineup.publish.{ LogPublisher, GraphitePublisher }
@@ -81,7 +81,7 @@ object OutlierDetectionWorkflow {
 
     def makeAlgorithmWorkers( router: ActorRef )( implicit context: ActorContext ): Map[Symbol, ActorRef] = {
       val algorithmProps: Map[Symbol, Props] = Map(
-        DBSCANAnalyzer.SeriesDensityAlgorithm -> DBSCANAnalyzer.seriesDensity( router )
+        SeriesDensityAnalyzer.Algorithm -> SeriesDensityAnalyzer.props( router )
       )
 
       algorithmProps map { case (n, p) =>
