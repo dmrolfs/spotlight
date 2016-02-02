@@ -34,22 +34,19 @@ trait DBSCANAnalyzer extends AlgorithmActor {
   case class TestContext(payload: Seq[DoublePoint], algorithmConfig: Config, history: Option[HistoricalStatistics] )
 
   val eps: Op[Config, Double] = {
-    Kleisli[TryV, Config, Double] { c => \/ fromTryCatchNonFatal { trace.briefBlock( "eps" ) { c getDouble algorithm.name +".eps" } } }
+    Kleisli[TryV, Config, Double] { c => \/ fromTryCatchNonFatal { c getDouble algorithm.name +".eps" } }
   }
 
   val minDensityConnectedPoints: Op[Config, Int] = {
     Kleisli[TryV, Config, Int] {c =>
-      \/ fromTryCatchNonFatal { trace.briefBlock("minDensityCOnnectedPoints") { c getInt algorithm.name+".minDensityConnectedPoints" } }
+      \/ fromTryCatchNonFatal { c getInt algorithm.name+".minDensityConnectedPoints" }
     }
   }
 
   val distanceMeasure: Op[TestContext, DistanceMeasure] = {
     Kleisli[TryV, TestContext, DistanceMeasure] { case TestContext( payload, config, history ) =>
       val distancePath = algorithm.name + ".distance"
-trace.briefBlock( "distance" ) {
-trace( s"distancePath = $distancePath" )
       if ( config hasPath distancePath ) {
-trace( s"distancePath: ${config.getString(distancePath).toLowerCase}" )
         config.getString( distancePath ).toLowerCase match {
           case "euclidean" | "euclid" => new EuclideanDistance( ).right[Throwable]
           case "mahalanobis" | "mahal" | _ => {
@@ -68,7 +65,6 @@ trace( s"distancePath: ${config.getString(distancePath).toLowerCase}" )
         .disjunction
         .leftMap { _.head }
       }
-}
     }
   }
 
