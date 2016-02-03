@@ -29,14 +29,17 @@ class CohortDensityAnalyzer( override val router: ActorRef ) extends DBSCANAnaly
   // distance parameter 𝜀. Here is DBSCAN with a tolerance of 3.0 in action on a pool of Cassandra workers:
   override val detect: Receive = LoggingReceive {
     case c @ DetectUsing( algo, aggregator, payload: DetectOutliersInCohort, history, algorithmConfig ) => {
-      val outlierMarks = for {
-        frameDistances <- cohortDistances( payload ).toList
-        points = frameDistances map { DataPoint.toDoublePoint }
-      } yield {
-        cluster.run( TestContext(points, algorithmConfig, history) )
-        .map { clusters =>
-          val isOutlier = makeOutlierTest( clusters )
-          frameDistances.toList.zipWithIndex collect { case (fd, i) if isOutlier( fd ) => i }
+      val outlierMarks = {
+        cohortDistances( payload )
+        .toList
+        .map { DataPoint.toDoublePoints }
+        .map { frameDistances =>
+          cluster.run( TestContext(frameDistances, algorithmConfig, history) )
+          .map { clusters =>
+            val isOutlier = makeOutlierTest( clusters )
+            val ms = frameDistances.zipWithIndex collect { case (fd, i) if isOutlier( fd ) => i }
+            ms.toList
+          }
         }
       }
 
@@ -44,9 +47,9 @@ class CohortDensityAnalyzer( override val router: ActorRef ) extends DBSCANAnaly
         outlierMarks
         .sequenceU
         .map { oms: List[List[Int]] =>
-          val outlierSeries = oms.flatten.toSet[Int] map { index => payload.data.data( index ) }
-          if ( outlierSeries.isEmpty ) NoOutliers( algorithms = Set(algorithm), source = payload.data )
-          else CohortOutliers( algorithms = Set(algorithm), source = payload.data, outliers = outlierSeries )
+          val outlierSeries = oms.flatten.toSet[Int] map { index => payload.source.data( index ) }
+          if ( outlierSeries.isEmpty ) NoOutliers( algorithms = Set(algorithm), source = payload.source )
+          else CohortOutliers( algorithms = Set(algorithm), source = payload.source, outliers = outlierSeries )
         }
       }
 
@@ -59,7 +62,7 @@ class CohortDensityAnalyzer( override val router: ActorRef ) extends DBSCANAnaly
 
   def cohortDistances( underlying: DetectOutliersInCohort ): Matrix[DataPoint] = {
     for {
-      frame <- underlying.data.toMatrix
+      frame <- underlying.source.toMatrix
       timestamp = frame.head._1 // all of frame's _1 better be the same!!!
       frameValues = frame map { _._2 }
       stats = new stat.DescriptiveStatistics( frameValues.toArray )

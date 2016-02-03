@@ -17,6 +17,8 @@ package object timeseries {
     implicit def toDoublePoint( dp: DataPoint ): ml.DoublePoint = {
       new ml.DoublePoint( Array(dp.timestamp.getMillis.toDouble, dp.value) )
     }
+
+    implicit def toDoublePoints( dps: Seq[DataPoint] ): Seq[ml.DoublePoint] = dps map { toDoublePoint }
   }
 
   type Row[T] = immutable.IndexedSeq[T]
