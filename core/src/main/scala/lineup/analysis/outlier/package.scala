@@ -23,16 +23,14 @@ package object outlier {
   }
 
 
-  case class DetectOutliersInSeries( data: TimeSeries ) extends OutlierDetectionMessage {
-    override def topic: Topic = data.topic
+  case class DetectOutliersInSeries( override val source: TimeSeries ) extends OutlierDetectionMessage {
+    override def topic: Topic = source.topic
     override type Source = TimeSeries
-    override def source: Source = data
   }
 
-  case class DetectOutliersInCohort( data: TimeSeriesCohort ) extends OutlierDetectionMessage {
-    override def topic: Topic = data.topic
+  case class DetectOutliersInCohort( override val source: TimeSeriesCohort ) extends OutlierDetectionMessage {
+    override def topic: Topic = source.topic
     override type Source = TimeSeriesCohort
-    override def source: Source = data
   }
 
 
