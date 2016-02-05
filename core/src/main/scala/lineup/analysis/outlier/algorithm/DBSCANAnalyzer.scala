@@ -65,25 +65,24 @@ trait DBSCANAnalyzer extends AlgorithmActor {
 
   val distanceMeasure: Op[TestContext, DistanceMeasure] = {
     Kleisli[TryV, TestContext, DistanceMeasure] { case TestContext( payload, config, history ) =>
+      def makeMahalanobisDistance: TryV[DistanceMeasure] = {
+        val mahal = history map { h =>
+          MahalanobisDistance.fromCovariance( h.covariance )
+        } getOrElse {
+          MahalanobisDistance.fromPoints( MatrixUtils.createRealMatrix( payload.toArray map { _.getPoint } ) )
+        }
+
+        mahal.disjunction.leftMap{ _.head }
+      }
+
       val distancePath = algorithm.name + ".distance"
       if ( config hasPath distancePath ) {
         config.getString( distancePath ).toLowerCase match {
           case "euclidean" | "euclid" => new EuclideanDistance( ).right[Throwable]
-          case "mahalanobis" | "mahal" | _ => {
-            val mahal = history map {h =>
-              MahalanobisDistance.fromCovariance( h.covariance )
-            } getOrElse {
-              MahalanobisDistance.fromPoints( MatrixUtils.createRealMatrix( payload.toArray map {_.getPoint} ) )
-            }
-
-            mahal.disjunction.leftMap{ _.head }
-          }
+          case "mahalanobis" | "mahal" | _ => makeMahalanobisDistance
         }
       } else {
-        MahalanobisDistance
-        .fromPoints( MatrixUtils.createRealMatrix( payload.toArray map {_.getPoint} ) )
-        .disjunction
-        .leftMap { _.head }
+        makeMahalanobisDistance
       }
     }
   }
