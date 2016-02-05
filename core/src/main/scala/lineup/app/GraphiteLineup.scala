@@ -1,6 +1,10 @@
 package lineup.app
 
 import java.net.InetSocketAddress
+import java.util.concurrent.TimeoutException
+import akka.stream.scaladsl.Tcp.{ ServerBinding, IncomingConnection }
+import org.apache.http.HttpEntityEnclosingRequest
+
 import scala.concurrent.{ ExecutionContext, Await, Future }
 import scala.concurrent.duration._
 import scala.util.{ Failure, Success }
@@ -44,60 +48,58 @@ object GraphiteLineup extends Instrumented with StrictLogging {
   }
 
   override protected val logger: Logger = Logger( LoggerFactory.getLogger("GraphiteLineup") )
-
   val trace = Trace[GraphiteLineup.type]
+  val PlanConfigPath = "lineup.detection-plans"
+
+
+  case class BootstrapContext(
+    config: Configuration,
+    reloader: () => V[Configuration],
+    detector: ActorRef,
+    limiter: ActorRef,
+    publisher: ActorRef
+  )
 
 
   def main( args: Array[String] ): Unit = {
     Configuration( args ).disjunction match {
+      case \/-( config ) => {
+        implicit val system = ActorSystem( "Lineup" )
+        implicit val ec = system.dispatcher
+
+        val serverBinding = for {
+          context <- bootstrap( args, config )
+          binding <- execute( context )
+        } yield binding
+
+        serverBinding.onComplete {
+          case Success(b) => logger.info( "Server started, listening on: " + b.localAddress )
+
+          case Failure( ex ) => {
+            logger.error( s"Server could not bind to ${config.sourceAddress.getAddress}: ${ex.getMessage}")
+            system.terminate()
+            Kamon.shutdown()
+          }
+        }
+      }
+
       case -\/( exs ) => {
         logger error s"""Failed to start: ${exs.toList.map {_.getMessage}.mkString( "\n", "\n", "\n" )}"""
         System exit -1
       }
-
-      case \/-( config ) => execute( config, Configuration.reloader(args)()() )
     }
   }
 
-  val PlanConfigPath = "lineup.detection-plans"
-
-  def execute( config: Configuration, reloader: () => V[Configuration] ): Unit = {
+  def bootstrap( args: Array[String], config: Configuration )( implicit system: ActorSystem ): Future[BootstrapContext] = {
     Kamon.start( config )
     logger info config.usage
 
     startMetricsReporter( config )
 
-    implicit val system = ActorSystem( "Lineup" )
     implicit val ec = system.dispatcher
-    implicit val materializer = ActorMaterializer(
-      ActorMaterializerSettings( system ) withSupervisionStrategy workflowSupervision
-    )
 
+    val reloader = Configuration.reloader( args )()()
     val workflow = startWorkflow( config, reloader )
-
-    streamGraphiteOutliers( workflow, config, reloader ) onComplete {
-      case Success(_) => {
-        system.terminate()
-        Kamon.shutdown()
-      }
-
-      case Failure( e ) => {
-        logger.error( "Graphite Model bootstrap failure:", e )
-        system.terminate()
-        Kamon.shutdown()
-      }
-    }
-  }
-
-  def streamGraphiteOutliers(
-    workflow: ActorRef,
-    config: Configuration,
-    reloader: () => V[Configuration]
-  )(
-    implicit system: ActorSystem,
-    materializer: Materializer
-  ): Future[Unit] = {
-    implicit val dispatcher = system.dispatcher
 
     import akka.pattern.ask
 
@@ -107,33 +109,50 @@ object GraphiteLineup extends Instrumented with StrictLogging {
       ChildStarted( d ) <- ( workflow ? GetOutlierDetector ).mapTo[ChildStarted]
       ChildStarted( l ) <- ( workflow ? GetPublishRateLimiter ).mapTo[ChildStarted]
       ChildStarted( p ) <- ( workflow ? GetPublisher ).mapTo[ChildStarted]
-    } yield (d, l, p)
+    } yield ( d, l, p )
 
-    val (detector, limiter, publisher) = Await.result( actors, 1.seconds )
+    val bootstrapTimeout = akka.pattern.after( 1.second, system.scheduler ) {
+      Future.failed( new TimeoutException( "failed to bootstrap detection workflow core actors" ) )
+    }
 
-    startPlanWatcher( config, Set(detector) )
-
-    val tcp = Tcp().bind( config.sourceAddress.getHostName, config.sourceAddress.getPort )
-    tcp runForeach { connection =>
-      detectionWorkflow( detector, limiter, publisher, reloader ) match {
-        case \/-( model ) => connection.handleWith( model )
-        case -\/( exs ) => exs foreach { ex => logger error s"failed to handle connection: ${ex.getMessage}" }
+    Future.firstCompletedOf( actors :: bootstrapTimeout :: Nil ) map {
+      case (detector, limiter, publisher) => {
+        startPlanWatcher( config, Set(detector) )
+        BootstrapContext( config, reloader, detector, limiter, publisher )
       }
     }
   }
 
+
+  def execute( context: BootstrapContext )( implicit system: ActorSystem ): Future[Tcp.ServerBinding] = {
+    implicit val materializer = ActorMaterializer(
+      ActorMaterializerSettings( system ) withSupervisionStrategy workflowSupervision
+    )
+
+    val address = context.config.sourceAddress
+
+    val connections = Tcp().bind( address.getHostName, address.getPort )
+
+    val handler = Sink.foreach[Tcp.IncomingConnection] { connection =>
+      detectionWorkflow( context ) match {
+        case \/-( model ) => connection handleWith model
+        case f @ -\/( exs ) => {
+          exs foreach { ex => logger error s"failed to handle connection: ${ex.getMessage}" }
+          Failure( exs.head )
+        }
+      }
+    }
+
+    connections.to( handler ).run()
+  }
+
   def detectionWorkflow(
-    detector: ActorRef,
-    limiter: ActorRef,
-    publisher: ActorRef,
-    reloadConfiguration: Configuration.Reload
+    context: BootstrapContext
   )(
     implicit system: ActorSystem,
     materializer: Materializer
   ): V[Flow[ByteString, ByteString, Unit]] = {
-    for {
-      conf <- reloadConfiguration()
-    } yield {
+    context.reloader() map { conf =>
       logger.info(
         s"""
            |\nConnection made using the following configuration:
@@ -159,14 +178,14 @@ object GraphiteLineup extends Instrumented with StrictLogging {
         )
 
         val timeSeries = b.add( conf.protocol.unmarshalTimeSeriesData.watchSourced( 'timeseries ) )
-        val scoring = b.add( OutlierScoringModel.scoringGraph( detector, conf ) )
+        val scoring = b.add( OutlierScoringModel.scoringGraph( context.detector, conf ) )
         val logUnrecognized = b.add(
           Flow[TimeSeries].transform( () =>
             OutlierScoringModel.logMetric( Logger( LoggerFactory getLogger "Unrecognized" ), conf.plans )
           )
         )
         val broadcast = b.add( Broadcast[TimeSeries](outputPorts = 2, eagerCancel = false) )
-        val publish = b.add( publishOutliers( limiter, publisher ).watchFlow( 'publish ) )
+        val publish = b.add( publishOutliers( context.limiter, context.publisher ).watchFlow( 'publish ) )
         val tcpOut = b.add( Flow[Outliers].map{ _ => ByteString() }.watchConsumed( 'tcpOut ) )
 
         val passArchivable = b.add( archiveFilter[TimeSeries]( conf ) )
@@ -174,7 +193,7 @@ object GraphiteLineup extends Instrumented with StrictLogging {
         import AvroFileTrainingRepositoryInterpreter.LocalhostWritersContextProvider
         val interpreter = {
           if ( conf.hasPath("lineup.training.archival") && conf.getBoolean("lineup.training.archival") ) {
-            new AvroFileTrainingRepositoryInterpreter()( trainingDispatcher( system ) ) with LocalhostWritersContextProvider {
+            new AvroFileTrainingRepositoryInterpreter()( trainingDispatcher(system) ) with LocalhostWritersContextProvider {
               override def config: Config = conf
             }
           } else {

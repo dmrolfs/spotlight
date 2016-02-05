@@ -27,12 +27,15 @@ class OutlierQuorumAggregatorSpec extends ParallelAkkaSpec with MockitoSugar {
 
     val demoReduce = new ReduceOutliers {
       override def apply(
-                          results: OutlierAlgorithmResults,
-                          source: TimeSeriesBase
+        results: OutlierAlgorithmResults,
+        source: TimeSeriesBase,
+        plan: OutlierPlan
       )(
         implicit ec: ExecutionContext
       ): Future[Outliers] = {
-        Future { results.headOption map { _._2 } getOrElse { NoOutliers( algorithms = Set('foobar), source = source ) } }
+        Future {
+          results.headOption map { _._2 } getOrElse { NoOutliers( algorithms = Set('foobar), source = source, plan = plan ) }
+        }
       }
     }
 

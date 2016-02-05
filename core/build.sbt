@@ -33,6 +33,8 @@ resolvers += "velvia maven" at "http://dl.bintray.com/velvia/maven"
 
 libraryDependencies += "org.velvia" % "msgpack4s_2.11" % "0.5.1"
 
+testOptions in Test += Tests.Argument( "-oDF" )
+
 mainClass in (Compile, run) := Some("lineup.app.GraphiteLineup")
 
 mainClass in assembly := Some("lineup.stream.GraphiteModel")

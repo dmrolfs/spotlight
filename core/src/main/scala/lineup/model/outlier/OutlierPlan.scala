@@ -4,14 +4,15 @@ import scala.concurrent.duration._
 import scala.util.matching.Regex
 import com.typesafe.config.{ ConfigOrigin, ConfigFactory, Config }
 import lineup.model.timeseries.Topic
-import peds.commons.log.Trace
+import peds.commons.identifier.{ TaggedID, ShortUUID }
 import peds.commons.util._
 
 
 /**
  * Created by rolfsd on 10/4/15.
  */
-sealed trait OutlierPlan {
+sealed trait OutlierPlan extends Equals {
+  def id: OutlierPlan.TID
   def name: String
   def appliesTo: OutlierPlan.AppliesTo
   def algorithms: Set[Symbol]
@@ -21,14 +22,29 @@ sealed trait OutlierPlan {
   def algorithmConfig: Config
   def summary: String
 
+  override def hashCode: Int = 41 + id.##
+
+  override def equals( rhs: Any ): Boolean = {
+    rhs match {
+      case that: OutlierPlan => {
+        if ( this eq that ) true
+        else {
+          ( that.## == this.## ) &&
+          ( that canEqual this ) &&
+          ( this.id == that.id )
+        }
+      }
+
+      case _ => false
+    }
+  }
+
   private[outlier] def origin: ConfigOrigin
   private[outlier] def typeOrder: Int
 }
 
 object OutlierPlan {
-  val trace = Trace[OutlierPlan.type]
-
-  val AlgorithmConfig = "algorithm-config"
+  val AlgorithmConfig: String = "algorithm-config"
 
   type ExtractTopic = PartialFunction[Any, Option[Topic]]
 
@@ -44,6 +60,7 @@ object OutlierPlan {
     appliesTo: (Any) => Boolean
   ): OutlierPlan = {
     SimpleOutlierPlan(
+      id = nextId,
       name = name,
       appliesTo = AppliesTo.function( appliesTo ),
       algorithms = algorithms,
@@ -67,6 +84,7 @@ object OutlierPlan {
     appliesTo: PartialFunction[Any, Boolean]
   ): OutlierPlan = {
     SimpleOutlierPlan(
+      id = nextId,
       name = name,
       appliesTo = AppliesTo.partialFunction( appliesTo ),
       algorithms = algorithms,
@@ -90,6 +108,7 @@ object OutlierPlan {
     topics: Set[Topic]
   ): OutlierPlan = {
     SimpleOutlierPlan(
+      id = nextId,
       name = name,
       appliesTo = AppliesTo.topics( topics, extractTopic ),
       algorithms = algorithms,
@@ -113,6 +132,7 @@ object OutlierPlan {
     topics: String*
   ): OutlierPlan = {
     SimpleOutlierPlan(
+      id = nextId,
       name = name,
       appliesTo = AppliesTo.topics( topics.map{ Topic(_) }.toSet, extractTopic ),
       algorithms = algorithms,
@@ -136,6 +156,7 @@ object OutlierPlan {
     regex: Regex
   ): OutlierPlan = {
     SimpleOutlierPlan(
+      id = nextId,
       name = name,
       appliesTo = AppliesTo.regex( regex, extractTopic ),
       algorithms = algorithms,
@@ -157,6 +178,7 @@ object OutlierPlan {
     specification: Config = ConfigFactory.empty
   ): OutlierPlan = {
     SimpleOutlierPlan(
+      id = nextId,
       name = name,
       appliesTo = AppliesTo.all,
       algorithms = algorithms,
@@ -175,7 +197,15 @@ object OutlierPlan {
   }
 
 
+  type ID = ShortUUID
+  type TID = TaggedID[ID]
+  val idTag: Symbol = 'plan
+  def nextId: TID = ShortUUID()
+  implicit def tag( id: ID ): TID = TaggedID( idTag, id )
+
+
   final case class SimpleOutlierPlan private[outlier] (
+    override val id: TID,
     override val name: String,
     override val appliesTo: OutlierPlan.AppliesTo,
     override val algorithms: Set[Symbol],
@@ -188,8 +218,10 @@ object OutlierPlan {
   ) extends OutlierPlan {
     override val summary: String = getClass.safeSimpleName + s"""(${name} ${appliesTo.toString})"""
 
+    override def canEqual( rhs: Any ): Boolean = rhs.isInstanceOf[SimpleOutlierPlan]
+
     override val toString: String = {
-      getClass.safeSimpleName + "(" +
+      getClass.safeSimpleName + s"[${id}](" +
         s"""name:[$name], ${appliesTo.toString} timeout:[${timeout.toCoarsest}], """ +
         s"""algorithms:[${algorithms.mkString(",")}], algorithm-config:[${algorithmConfig.root}]""" +
         ")"

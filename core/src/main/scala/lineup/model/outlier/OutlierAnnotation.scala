@@ -23,11 +23,11 @@ object OutlierAnnotation {
 
   def annotationsFromSeries( series: Outliers ): Valid[Seq[OutlierAnnotation]] = trace.block( s"annotationsFromSeries(...)" ) {
     val result = series match {
-      case NoOutliers(_, source) => List( cleanAnnotation(source.start, source.end) )
+      case NoOutliers(_, source, _) => List( cleanAnnotation(source.start, source.end) )
 
       case tso: SeriesOutliers if tso.hasAnomalies == false => List( cleanAnnotation(tso.source.start, tso.source.end) )
 
-      case tso @ SeriesOutliers(_, source, outliers) => {
+      case tso: SeriesOutliers => {
         for {
           g <- tso.anomalousGroups.toList
           start = g.keySet.min

@@ -1,6 +1,8 @@
 package lineup.publish
 
 import java.net.{ InetSocketAddress, Socket }
+import lineup.model.timeseries.Topic
+
 import scala.annotation.tailrec
 import scala.collection.immutable
 import scala.concurrent.duration._
@@ -84,6 +86,7 @@ object GraphitePublisher extends LazyLogging {
     def createSocket( address: InetSocketAddress ): Socket
     def batchSize: Int = 100
     def batchInterval: FiniteDuration = 1.second
+    def augmentTopic( o: Outliers ): Topic = o.topic
   }
 
 
@@ -94,7 +97,7 @@ object GraphitePublisher extends LazyLogging {
 }
 
 
-class GraphitePublisher( outlierTopicPrefix: Option[String] ) extends DenseOutlierPublisher {
+class GraphitePublisher extends DenseOutlierPublisher {
   outer: GraphitePublisher.PublishProvider =>
 
   import GraphitePublisher._
@@ -217,16 +220,8 @@ class GraphitePublisher( outlierTopicPrefix: Option[String] ) extends DenseOutli
   }
 
   override def markPoints( o: Outliers ): Seq[MarkPoint] = {
-    def augmentTopic( mp: MarkPoint ): MarkPoint = {
-      outlierTopicPrefix map { prefix =>
-        val (n, ts, v) = mp
-        ( prefix + n, ts, v )
-      } getOrElse {
-        mp
-      }
-    }
-
-    super.markPoints( o ) map { augmentTopic }
+    val augmentedName = outer.augmentTopic( o ).name
+    super.markPoints( o ) map { case (_, ts, v) => (augmentedName, ts, v) }
   }
 
   def isConnected: Boolean = socket map { s => s.isConnected && !s.isClosed } getOrElse { false }

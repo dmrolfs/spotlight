@@ -2,9 +2,9 @@ package lineup.analysis.outlier
 
 import java.io.Serializable
 import org.apache.commons.math3.linear.RealMatrix
+import org.apache.commons.math3.ml.clustering.DoublePoint
 import org.apache.commons.math3.stat.descriptive.MultivariateSummaryStatistics
-import org.apache.commons.math3.ml.{ clustering => ml }
-import lineup.model.timeseries.DataPoint
+
 
 /**
   * Created by rolfsd on 1/26/16.
@@ -26,11 +26,15 @@ trait HistoricalStatistics extends Serializable {
 }
 
 
-
 object HistoricalStatistics {
   def apply( k: Int, isCovarianceBiasCorrected: Boolean ): HistoricalStatistics = {
     ApacheMath3HistoricalStatistics( new MultivariateSummaryStatistics(k, isCovarianceBiasCorrected) )
   }
+
+  def fromActivePoints( points: Array[DoublePoint], isCovarianceBiasCorrected: Boolean ): HistoricalStatistics = {
+    points.foldLeft( HistoricalStatistics( k = 2, isCovarianceBiasCorrected ) ) { (h, p) => h add p.getPoint }
+  }
+
 
   final case class ApacheMath3HistoricalStatistics private[outlier](
     underlying: MultivariateSummaryStatistics

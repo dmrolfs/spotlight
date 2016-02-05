@@ -3,7 +3,7 @@ package lineup.analysis.outlier.algorithm
 import akka.actor.{ Actor, ActorPath, ActorRef, ActorLogging }
 import akka.event.LoggingReceive
 import peds.akka.metrics.InstrumentedActor
-import lineup.analysis.outlier.{ DetectUsing, DetectionAlgorithmRouter }
+import lineup.analysis.outlier.{ UnrecognizedPayload, DetectUsing, DetectionAlgorithmRouter }
 
 
 trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
@@ -18,7 +18,7 @@ trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
   override def receive: Receive = around( quiescent )
 
   def quiescent: Receive = LoggingReceive {
-    case DetectionAlgorithmRouter.AlgorithmRegistered( algorithm ) => {
+    case DetectionAlgorithmRouter.AlgorithmRegistered( a ) if a == algorithm => {
       log info s"${self.path} registered [${algorithm.name}] with ${sender().path}"
       context become around( detect )
     }
@@ -27,6 +27,18 @@ trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
   }
 
   def detect: Receive
+
+  override def unhandled( message: Any ): Unit = {
+    message match {
+      case m: DetectUsing => {
+        log info s"algorithm [${algorithm}] does not recognize requested payload: [${m}]"
+        m.aggregator ! UnrecognizedPayload( algorithm, m )
+      }
+
+      case m => super.unhandled( m )
+    }
+
+  }
 }
 
 object AlgorithmActor {

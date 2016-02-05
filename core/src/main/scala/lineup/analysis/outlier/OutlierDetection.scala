@@ -1,5 +1,7 @@
 package lineup.analysis.outlier
 
+import lineup.analysis.outlier.OutlierDetection.DetectionResult
+
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
 import akka.actor.{ Actor, ActorRef, ActorLogging, Props }
@@ -7,6 +9,7 @@ import akka.event.LoggingReceive
 import akka.pattern.AskTimeoutException
 import akka.stream.{ ActorAttributes, Supervision }
 import akka.stream.scaladsl.Flow
+import scala.util.Success
 import scalaz.{ \/-, -\/ }
 import org.slf4j.LoggerFactory
 import com.typesafe.scalalogging.{ Logger, StrictLogging }
@@ -27,6 +30,8 @@ object OutlierDetection extends StrictLogging with Instrumented {
     detector: ActorRef,
     maxAllowedWait: FiniteDuration,
     parallelism: Int
+  )(
+    implicit ec: ExecutionContext
   ): Flow[TimeSeriesBase, Outliers, Unit] = {
     import akka.pattern.ask
     import akka.util.Timeout
@@ -46,27 +51,22 @@ object OutlierDetection extends StrictLogging with Instrumented {
     .mapAsyncUnordered( parallelism ) { ts: TimeSeriesBase =>
       implicit val triggerTimeout = Timeout( maxAllowedWait )
       val result = detector ? OutlierDetectionMessage( ts )
-      result.mapTo[Outliers]
+      result
+      .mapTo[DetectionProtocol]
+      .andThen {
+        case Success( UnrecognizedTopic( topic ) ) => logger info s"detector did not recognize topic [${topic}]"
+      }
     }.withAttributes( ActorAttributes.supervisionStrategy(decider) )
-    .filter {
-      case e: UnrecognizedTopic => false
-      case e => true
+    .collect {
+      case DetectionResult( result ) => result
     }
   }
 
 
   sealed trait DetectionProtocol
   case object ReloadPlans extends DetectionProtocol
-
-  //todo: refactor with FanOutShape with recognized and unrecognized outs.
-  case class UnrecognizedTopic( override val topic: Topic ) extends DetectionProtocol with Outliers {
-    override type Source = TimeSeriesBase
-    override def hasAnomalies: Boolean = false
-    override def source: Source = null
-    override def size: Int = 0
-    override def anomalySize: Int = 0
-    override def algorithms: Set[Symbol] = Set.empty[Symbol]
-  }
+  case class DetectionResult( outliers: Outliers ) extends DetectionProtocol
+  case class UnrecognizedTopic( topic: Topic ) extends DetectionProtocol
 
 
   val extractOutlierDetectionTopic: OutlierPlan.ExtractTopic = {
@@ -143,7 +143,7 @@ class OutlierDetection extends Actor with InstrumentedActor with ActorLogging {
   def detection( inRetry: Boolean = false ): Receive = LoggingReceive {
     case result: Outliers if outstanding.contains( sender() ) => {
       val aggregator = sender()
-      outstanding( aggregator ) ! result
+      outstanding( aggregator ) ! DetectionResult( result )
       outstanding -= aggregator
       updateScore( result )
       context become around( detection(inRetry) )
@@ -195,6 +195,7 @@ class OutlierDetection extends Actor with InstrumentedActor with ActorLogging {
         algorithm = a,
         aggregator = aggregator,
         payload = m,
+        plan = p,
         history = Some(history),
         properties = p.algorithmConfig
       )

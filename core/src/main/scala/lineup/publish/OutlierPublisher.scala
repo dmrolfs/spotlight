@@ -28,7 +28,7 @@ trait OutlierPublisher extends Actor with InstrumentedActor with ActorLogging {
 
   def mark( o: Outliers ): Seq[DataPoint] = {
     o match {
-      case SeriesOutliers(_, source, outliers) => {
+      case SeriesOutliers(_, source, _, outliers) => {
         val identified = outliers.map{ _.timestamp }.toSet
         source.points.collect{
           case DataPoint(ts, _) if identified.contains(ts) => DataPoint( ts, 1D )
@@ -47,7 +47,7 @@ trait DenseOutlierPublisher extends OutlierPublisher {
 
   override def mark( o: Outliers ): Seq[DataPoint] = {
     val result = o match {
-      case NoOutliers(_, source) => {
+      case NoOutliers(_, source, _) => {
         import com.github.nscala_time.time.Imports._
 
         @tailrec def fillInterval( timePoint: joda.DateTime, range: joda.Interval, acc: Seq[DataPoint] ): Seq[DataPoint] = {
@@ -55,11 +55,7 @@ trait DenseOutlierPublisher extends OutlierPublisher {
           else fillInterval( timePoint + fillSeparation.toMillis, range, acc :+ DataPoint(timePoint, 0D) )
         }
 
-        source.interval map { i =>
-          Some( fillInterval(i.start, i, Seq.empty[DataPoint]) )
-        } getOrElse {
-          None
-        }
+        source.interval map { i => Some( fillInterval(i.start, i, Seq.empty[DataPoint]) ) } getOrElse { None }
       }
 
       case _ => None
