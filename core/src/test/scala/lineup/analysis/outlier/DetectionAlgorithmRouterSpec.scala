@@ -1,5 +1,7 @@
 package lineup.analysis.outlier
 
+import lineup.model.outlier.OutlierPlan
+
 import scala.concurrent.duration._
 import akka.testkit._
 import org.joda.{ time => joda }
@@ -59,7 +61,8 @@ class DetectionAlgorithmRouterSpec extends ParallelAkkaSpec with MockitoSugar {
 
       val series = TimeSeries( "series", myPoints )
       val aggregator = TestProbe()
-      val msg = DetectUsing('foo, aggregator.ref, DetectOutliersInSeries(series), None )
+      val plan = mock[OutlierPlan]
+      val msg = DetectUsing('foo, aggregator.ref, DetectOutliersInSeries(series), plan, None )
 
       router.receive( msg )
       algo.expectMsg( 2.seconds.dilated, "route", msg )

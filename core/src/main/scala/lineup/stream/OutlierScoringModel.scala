@@ -84,6 +84,8 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
           detector = detector,
           maxAllowedWait = config.detectionBudget,
           parallelism = Runtime.getRuntime.availableProcessors() * 8
+        )(
+          system.dispatcher
         )
         .watchFlow( WatchPoints.ScoringDetect )
       )

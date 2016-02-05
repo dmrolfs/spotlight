@@ -1,6 +1,8 @@
 package lineup.stream
 
 import java.net.{ Socket, InetSocketAddress }
+import lineup.model.timeseries.Topic
+
 import scala.concurrent.duration._
 import akka.actor.SupervisorStrategy._
 import akka.actor._
@@ -15,7 +17,7 @@ import peds.akka.supervision.{ OneForOneStrategyFactory, SupervisionStrategyFact
 import peds.commons.V
 import lineup.analysis.outlier.algorithm.{ SeriesDensityAnalyzer, DBSCANAnalyzer }
 import lineup.analysis.outlier.{ OutlierDetection, DetectionAlgorithmRouter }
-import lineup.model.outlier.OutlierPlan
+import lineup.model.outlier.{ Outliers, OutlierPlan }
 import lineup.publish.{ LogPublisher, GraphitePublisher }
 import lineup.protocol.GraphiteSerializationProtocol
 
@@ -59,7 +61,7 @@ object OutlierDetectionWorkflow {
     def publisherProps: Props = {
       graphiteAddress map { address =>
         GraphitePublisher.props {
-          new GraphitePublisher( outlierTopicPrefix = Some(OutlierMetricPrefix) ) with GraphitePublisher.PublishProvider {
+          new GraphitePublisher with GraphitePublisher.PublishProvider {
             override lazy val metricBaseName = MetricName( classOf[GraphitePublisher] )
             override def destinationAddress: InetSocketAddress = address
             override def batchInterval: FiniteDuration = 500.millis
@@ -67,6 +69,7 @@ object OutlierDetectionWorkflow {
             override def createSocket(address: InetSocketAddress): Socket = {
               new Socket( destinationAddress.getAddress, destinationAddress.getPort )
             }
+            override def augmentTopic( o: Outliers ): Topic = OutlierMetricPrefix + o.plan.name+"." + o.topic
           }
         }
       } getOrElse {

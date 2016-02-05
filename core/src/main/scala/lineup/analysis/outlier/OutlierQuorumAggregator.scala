@@ -83,7 +83,7 @@ extends Actor with InstrumentedActor with ActorLogging { outer: ConfigurationPro
 
     case unknown: UnrecognizedPayload => {
       log info s"converting unrecognized response to NoOutliers for [${unknown.topic}]"
-      _fulfilled += unknown.algorithm -> NoOutliers( algorithms = Set(unknown.algorithm), source = unknown.source )
+      _fulfilled += unknown.algorithm -> NoOutliers( algorithms = Set(unknown.algorithm), source = unknown.source, plan = plan )
       process( _fulfilled )
     }
 
@@ -110,7 +110,7 @@ extends Actor with InstrumentedActor with ActorLogging { outer: ConfigurationPro
     if ( plan isQuorum fulfilled ) {
       conclusionsMeter.mark()
       import akka.pattern.pipe
-      plan.reduce( fulfilled, source ) pipeTo context.parent andThen { case Success(r) => logTally( r, fulfilled ) }
+      plan.reduce( fulfilled, source, plan ) pipeTo context.parent andThen { case Success(r) => logTally( r, fulfilled ) }
       context stop self
     }
   }

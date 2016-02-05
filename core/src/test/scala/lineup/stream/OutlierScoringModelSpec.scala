@@ -25,7 +25,7 @@ import peds.commons.log.Trace
 import lineup.protocol.PythonPickleProtocol
 import lineup.testkit.ParallelAkkaSpec
 import lineup.analysis.outlier.{ DetectionAlgorithmRouter, OutlierDetection }
-import lineup.analysis.outlier.algorithm.{ SeriesDensityAnalyzer, DBSCANAnalyzer }
+import lineup.analysis.outlier.algorithm.SeriesDensityAnalyzer
 import lineup.model.outlier.{ SeriesOutliers, IsQuorum, OutlierPlan }
 import lineup.model.timeseries.{ TimeSeries, DataPoint, Row }
 import lineup.analysis.outlier.OutlierDetection.PlanConfigurationProvider.Creator
@@ -53,21 +53,21 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
 
     val algo = SeriesDensityAnalyzer.Algorithm
 
-    val plans = Seq(
-      OutlierPlan.default(
-        name = "DEFAULT_PLAN",
-        algorithms = Set( algo ),
-        timeout = 500.millis,
-        isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = 1, triggerPoint = 1 ),
-        reduce = Configuration.defaultOutlierReducer,
-        specification = ConfigFactory.parseString(
+    val plan = OutlierPlan.default(
+      name = "DEFAULT_PLAN",
+      algorithms = Set( algo ),
+      timeout = 500.millis,
+      isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = 1, triggerPoint = 1 ),
+      reduce = Configuration.defaultOutlierReducer,
+      specification = ConfigFactory.parseString(
         s"""
-         |algorithm-config.${algo.name}.eps: 5.0
-         |algorithm-config.${algo.name}.minDensityConnectedPoints: 3
+          |algorithm-config.${algo.name}.eps: 5.0
+          |algorithm-config.${algo.name}.minDensityConnectedPoints: 3
         """.stripMargin
-        )
       )
     )
+
+    val plans = Seq( plan )
   }
 
   object Fixture {
@@ -235,7 +235,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
       )
       val expectedPoints = dp1 filterNot { largestCluster contains _ }
 
-      val expected = SeriesOutliers( algorithms = algos, source = TimeSeries("foo", dp1), outliers = expectedPoints )
+      val expected = SeriesOutliers( algorithms = algos, source = TimeSeries("foo", dp1), outliers = expectedPoints, plan = defaultPlan )
 //      val expected = TimeSeries( "foo", (dp1 ++ dp3).sortBy( _.timestamp ) )
 
       val graphiteFlow = OutlierScoringModel.batchSeries( parallelism = 4, windowSize = 20.millis )
@@ -252,6 +252,14 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
 //                   .via(status("AFTER"))
                    .runWith( Sink.head )
       val result = Await.result( future, 2.seconds.dilated )
+      trace( s"result class   [${result.hashCode}] = ${result.getClass}")
+      trace( s"expected class [${expected.hashCode}] = ${expected.getClass}")
+      result.algorithms mustBe expected.algorithms
+      result.anomalySize mustBe expected.anomalySize
+      result.hasAnomalies mustBe expected.hasAnomalies
+      result.size mustBe expected.size
+      result.source mustBe expected.source
+      result.topic mustBe expected.topic
       result mustBe expected
     }
 

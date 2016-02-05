@@ -28,7 +28,7 @@ class CohortDensityAnalyzer( override val router: ActorRef ) extends DBSCANAnaly
   // The only parameter we take is tolerance, the constant by which the initial threshold is multiplied to yield DBSCAN’s
   // distance parameter 𝜀. Here is DBSCAN with a tolerance of 3.0 in action on a pool of Cassandra workers:
   override val detect: Receive = LoggingReceive {
-    case c @ DetectUsing( algo, aggregator, payload: DetectOutliersInCohort, history, algorithmConfig ) => {
+    case c @ DetectUsing( algo, aggregator, payload: DetectOutliersInCohort, plan, history, algorithmConfig ) => {
       val outlierMarks = {
         cohortDistances( payload )
         .toList
@@ -48,8 +48,8 @@ class CohortDensityAnalyzer( override val router: ActorRef ) extends DBSCANAnaly
         .sequenceU
         .map { oms: List[List[Int]] =>
           val outlierSeries = oms.flatten.toSet[Int] map { index => payload.source.data( index ) }
-          if ( outlierSeries.isEmpty ) NoOutliers( algorithms = Set(algorithm), source = payload.source )
-          else CohortOutliers( algorithms = Set(algorithm), source = payload.source, outliers = outlierSeries )
+          if ( outlierSeries.isEmpty ) NoOutliers( algorithms = Set(algorithm), source = payload.source, plan = plan )
+          else CohortOutliers( algorithms = Set(algorithm), source = payload.source, outliers = outlierSeries, plan = plan )
         }
       }
 

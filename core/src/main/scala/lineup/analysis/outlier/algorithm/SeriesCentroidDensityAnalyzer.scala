@@ -2,7 +2,7 @@ package lineup.analysis.outlier.algorithm
 
 import akka.actor.{ ActorRef, Props }
 import akka.event.LoggingReceive
-import lineup.model.outlier.{ NoOutliers, SeriesOutliers, Outliers }
+import lineup.model.outlier.{ OutlierPlan, NoOutliers, SeriesOutliers, Outliers }
 import scalaz._, Scalaz._
 import lineup.analysis.outlier.{ HistoricalStatistics, DetectOutliersInSeries, DetectUsing }
 import lineup.model.timeseries.{ TimeSeries, DataPoint }
@@ -21,10 +21,10 @@ class SeriesCentroidDensityAnalyzer( override val router: ActorRef ) extends DBS
   override def algorithm: Symbol = SeriesCentroidDensityAnalyzer.Algorithm
 
   override def detect: Receive = LoggingReceive {
-    case s @ DetectUsing( _, aggregator, payload: DetectOutliersInSeries, history, algorithmConfig ) => {
+    case s @ DetectUsing( _, aggregator, payload: DetectOutliersInSeries, plan, history, algorithmConfig ) => {
       val distances = centroidDistances( DataPoint.toDoublePoints(payload.source.points), history )
       val ctx = TestContext( payload = distances, algorithmConfig, history )
-      ( cluster >==> findOutliers(payload.source, history) ).run( ctx ) match {
+      ( cluster >==> findOutliers(payload.source, plan, history) ).run( ctx ) match {
         case \/-( r ) => aggregator ! r
         case -\/( ex ) => log.error( ex, s"failed ${algorithm.name} analysis on ${payload.topic}[${payload.source.interval}]" )
       }
@@ -41,7 +41,11 @@ class SeriesCentroidDensityAnalyzer( override val router: ActorRef ) extends DBS
     points map { _.getPoint } map { case Array(x, y) => new DoublePoint( Array(x, y - mean) ) }
   }
 
-  def findOutliers( source: TimeSeries, history: Option[HistoricalStatistics] ): Op[Seq[Cluster[DoublePoint]], Outliers] = {
+  def findOutliers(
+    source: TimeSeries,
+    plan: OutlierPlan,
+    history: Option[HistoricalStatistics]
+  ): Op[Seq[Cluster[DoublePoint]], Outliers] = {
     Kleisli[TryV, Seq[Cluster[DoublePoint]], Outliers] { clusters =>
       val distances: Seq[DoublePoint] = centroidDistances( DataPoint.toDoublePoints(source.points), history )
       val isOutlier = makeOutlierTest( clusters )
@@ -53,8 +57,12 @@ class SeriesCentroidDensityAnalyzer( override val router: ActorRef ) extends DBS
       }
 
       val outliers = source.points filter { dp => centroidOutliers.contains( dp.getPoint.apply(0).toLong ) }
-      if ( outliers.nonEmpty ) SeriesOutliers( algorithms = Set(algorithm), source = source, outliers = outliers ).right
-      else NoOutliers( algorithms = Set(algorithm), source = source ).right
+      if ( outliers.nonEmpty ) {
+        SeriesOutliers( algorithms = Set(algorithm), source = source, outliers = outliers, plan = plan ).right
+      }
+      else {
+        NoOutliers( algorithms = Set(algorithm), source = source, plan = plan ).right
+      }
     }
   }
 }

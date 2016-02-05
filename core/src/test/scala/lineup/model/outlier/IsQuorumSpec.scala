@@ -1,8 +1,9 @@
 package lineup.model.timeseries
 
 import lineup.model.outlier.IsQuorum.{ MajorityQuorumSpecification, AtLeastQuorumSpecification }
-import lineup.model.outlier.{ Outliers, SeriesOutliers, NoOutliers }
+import lineup.model.outlier.{ OutlierPlan, Outliers, SeriesOutliers, NoOutliers }
 import org.scalatest._
+import org.scalatest.mock.MockitoSugar
 import org.joda.{ time => joda }
 import com.github.nscala_time.time.Imports._
 import peds.commons.log.Trace
@@ -10,6 +11,7 @@ import peds.commons.log.Trace
 
 class IsQuorumSpec
 extends fixture.WordSpec
+with MockitoSugar
 with MustMatchers
 with ParallelTestExecution
 with TryValues {
@@ -22,9 +24,10 @@ with TryValues {
     val now = joda.DateTime.now
     val points = Row( DataPoint(now, 1.01), DataPoint(now+1.second, 2.02), DataPoint(now+2.seconds, 3.02) )
     val series = TimeSeries( "foo", points )
-    val noOutliers = NoOutliers( Set('algo), source = series )
-    val oneOutlier = SeriesOutliers( Set('algo), source = series, outliers = IndexedSeq(points(0)) )
-    val twoOutliers = SeriesOutliers( Set('algo), source = series, outliers = IndexedSeq( points(0), points(1) ) )
+    val plan = mock[OutlierPlan]
+    val noOutliers = NoOutliers( Set('algo), source = series, plan = plan )
+    val oneOutlier = SeriesOutliers( Set('algo), source = series, outliers = IndexedSeq(points(0)), plan = plan )
+    val twoOutliers = SeriesOutliers( Set('algo), source = series, outliers = IndexedSeq( points(0), points(1) ), plan = plan )
   }
 
   def createTestFixture(): Fixture = trace.block( "createTestFixture" ) { new Fixture }

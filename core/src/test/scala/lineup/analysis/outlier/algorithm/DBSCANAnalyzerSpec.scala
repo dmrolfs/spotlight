@@ -11,8 +11,7 @@ import org.joda.{ time => joda }
 import com.github.nscala_time.time.OrderingImplicits._
 import org.apache.commons.math3.random.RandomDataGenerator
 import org.scalatest.mock.MockitoSugar
-import peds.akka.envelope._
-import lineup.model.outlier.{NoOutliers, CohortOutliers, SeriesOutliers}
+import lineup.model.outlier.{ OutlierPlan, NoOutliers, CohortOutliers, SeriesOutliers }
 import lineup.model.timeseries._
 import lineup.analysis.outlier._
 import lineup.testkit.ParallelAkkaSpec
@@ -27,6 +26,7 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
   class Fixture extends AkkaFixture {
     val algoS = SeriesDensityAnalyzer.Algorithm
     val algoC = CohortDensityAnalyzer.Algorithm
+    val plan = mock[OutlierPlan]
     val router = TestProbe()
     val aggregator = TestProbe()
     val bus = mock[EventStream]
@@ -57,9 +57,10 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       an [AlgorithmActor.AlgorithmUsedBeforeRegistrationError] must be thrownBy
       analyzer.receive(
         DetectUsing(
-                     algoS,
+          algoS,
           aggregator.ref,
           DetectOutliersInSeries( TimeSeries("series", points) ),
+          plan,
           None,
           ConfigFactory.parseString(
             s"""
@@ -87,9 +88,9 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       )
 
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
-      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries( series ), None, algProps ) )
+      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries( series ), plan, None, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "detect" ) {
-        case m @ SeriesOutliers(alg, source, outliers) => {
+        case m @ SeriesOutliers(alg, source, plan, outliers) => {
           alg mustBe Set( algoS )
           source mustBe series
           m.hasAnomalies mustBe true
@@ -135,7 +136,7 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       )
 
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
-      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries( series ), None, algProps ) )
+      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries( series ), plan, None, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "detect" ) {
         //todo stream envelope
         //        case Envelope(SeriesOutliers(alg, source, outliers), hdr) => {
@@ -143,7 +144,7 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
         //          source mustBe series
         //          outliers.size mustBe 6
         //        }
-        case m @ NoOutliers(alg, source) => {
+        case m @ NoOutliers(alg, source, plan) => {
           alg mustBe Set( algoS )
           source mustBe series
           m.hasAnomalies mustBe false
@@ -170,7 +171,7 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
         """.stripMargin
       )
 
-      val expected = DetectUsing( algoC, aggregator.ref, DetectOutliersInCohort(cohort), None, algProps )
+      val expected = DetectUsing( algoC, aggregator.ref, DetectOutliersInCohort(cohort), plan, None, algProps )
       analyzer.receive( expected )
       aggregator.expectMsgPF( 2.seconds.dilated, "detect" ) {
         case UnrecognizedPayload( alg, actual ) => {
@@ -198,7 +199,7 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       )
 
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoC ) )
-      analyzer.receive( DetectUsing( algoC, aggregator.ref, DetectOutliersInCohort( cohort ), None, algProps ) )
+      analyzer.receive( DetectUsing( algoC, aggregator.ref, DetectOutliersInCohort( cohort ), plan, None, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "detect" ) {
         //todo stream envelope
         //        case Envelope(CohortOutliers(alg, source, outliers), hdr) => {
@@ -209,7 +210,7 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
         //          outliers.size mustBe 1
         //          outliers.head.name mustBe "series.one"
         //        }
-        case m @ CohortOutliers(alg, source, outliers) => {
+        case m @ CohortOutliers(alg, source, plan, outliers) => {
           trace( s"""outliers=[${outliers.mkString(",")}]""" )
           alg mustBe Set( algoC )
           source mustBe cohort
@@ -238,7 +239,7 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       )
 
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoC ) )
-      analyzer.receive( DetectUsing( algoC, aggregator.ref, DetectOutliersInCohort( cohort ), None, algProps ) )
+      analyzer.receive( DetectUsing( algoC, aggregator.ref, DetectOutliersInCohort( cohort ), plan, None, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "detect" ) {
         //todo stream envelope
         //        case Envelope(CohortOutliers(alg, source, outliers), hdr) => {
@@ -249,7 +250,7 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
         //          outliers.size mustBe 1
         //          outliers.head.name mustBe "series.one"
         //        }
-        case m @ NoOutliers(alg, source) => {
+        case m @ NoOutliers(alg, source, plan) => {
           alg mustBe Set( algoC )
           source mustBe cohort
           m.hasAnomalies mustBe false
@@ -293,7 +294,7 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
         """.stripMargin
       )
 
-      val expected = DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series), None, algProps )
+      val expected = DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series), plan, None, algProps )
       analyzer.receive( expected )
       aggregator.expectMsgPF( 2.seconds.dilated, "detect" ) {
         case UnrecognizedPayload( alg, actual ) => {

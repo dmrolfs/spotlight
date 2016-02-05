@@ -9,8 +9,8 @@ import javax.script.{ Compilable, ScriptEngineManager, SimpleBindings }
 import akka.actor.Props
 import akka.testkit.TestActorRef
 import akka.util.ByteString
-import lineup.model.outlier.{ NoOutliers, SeriesOutliers }
-import lineup.model.timeseries.{ DataPoint, Row, TimeSeries }
+import lineup.model.outlier.{ Outliers, OutlierPlan, NoOutliers, SeriesOutliers }
+import lineup.model.timeseries.{ Topic, DataPoint, Row, TimeSeries }
 import lineup.protocol.PythonPickleProtocol
 import lineup.testkit.ParallelAkkaSpec
 import org.joda.{ time => joda }
@@ -65,6 +65,8 @@ with MockitoSugar {
     val output: ByteArrayOutputStream = spy( new ByteArrayOutputStream )
     val socketFactory: SocketFactory = mock[SocketFactory]
 
+    val plan = mock[OutlierPlan]
+
     val socket: Socket = mock[Socket]
     when( socket.isConnected ).thenAnswer(
       new Answer[Boolean] {
@@ -103,7 +105,7 @@ with MockitoSugar {
 
     val graphite = TestActorRef[GraphitePublisher](
       Props(
-        new GraphitePublisher( None ) with GraphitePublisher.PublishProvider {
+        new GraphitePublisher with GraphitePublisher.PublishProvider {
           import scala.concurrent.duration._
           override def separation: FiniteDuration = 1.second
           override def initializeMetrics(): Unit = { }
@@ -185,7 +187,8 @@ with MockitoSugar {
       import f._
       val outliers = NoOutliers(
         algorithms = Set('dbscan),
-        source = TimeSeries("foo", Row(dp1))
+        source = TimeSeries("foo", Row(dp1)),
+        plan = plan
       )
       graphite.receive( Publish(outliers) )
       graphite.receive( Flush )
@@ -198,7 +201,8 @@ with MockitoSugar {
       val outliers = SeriesOutliers(
         algorithms = Set('dbscan),
         source = TimeSeries("foo", Row(dp1, dp2)),
-        outliers = Row(dp2)
+        outliers = Row(dp2),
+        plan = plan
       )
       // NoOutlier pickle will be include 0.0 for each second in source range
       graphite.receive( Publish(outliers) )
@@ -211,7 +215,7 @@ with MockitoSugar {
 
       val graphite2 = TestActorRef[GraphitePublisher](
         Props(
-          new GraphitePublisher( Some("lineup.outlier.") ) with GraphitePublisher.PublishProvider {
+          new GraphitePublisher with GraphitePublisher.PublishProvider {
             import scala.concurrent.duration._
             override def separation: FiniteDuration = 1.second
             override def initializeMetrics(): Unit = { }
@@ -220,6 +224,8 @@ with MockitoSugar {
               openCount.incrementAndGet()
               f.socket
             }
+
+            override def augmentTopic( o: Outliers ): Topic = "lineup.outlier." + o.topic
           }
         )
       )
@@ -227,7 +233,8 @@ with MockitoSugar {
       val outliers = SeriesOutliers(
         algorithms = Set('dbscan),
         source = TimeSeries("foo", Row(dp1, dp2, dp3)),
-        outliers = Row(dp1)
+        outliers = Row(dp1),
+        plan = plan
       )
       graphite2.receive( Publish(outliers) )
       graphite2.receive( Flush )
@@ -238,7 +245,8 @@ with MockitoSugar {
       import f._
       val outliers = NoOutliers(
         algorithms = Set('dbscan),
-        source = TimeSeries("foo", Row(dp1, dp1b))
+        source = TimeSeries("foo", Row(dp1, dp1b)),
+        plan = plan
       )
       // NoOutlier pickle will be include 0.0 for each second in source range
       graphite.receive( Publish(outliers) )
@@ -251,7 +259,8 @@ with MockitoSugar {
       val outliers = SeriesOutliers(
         algorithms = Set('dbscan),
         source = TimeSeries("foo bar", Row(dp1, dp2, dp3)),
-        outliers = Row(dp1)
+        outliers = Row(dp1),
+        plan = plan
       )
       graphite.receive( Publish(outliers) )
       graphite.receive( Flush )
