@@ -46,6 +46,10 @@ trait Outliers extends Equals {
       case _ => false
     }
   }
+
+  override def toString: String = {
+    s"""${getClass.safeSimpleName}:[${plan.name}][${topic}][source:[${source.size}] interval:[${source.interval getOrElse "No Interval"}]"""
+  }
 }
 
 object Outliers {
@@ -68,10 +72,6 @@ case class NoOutliers(
   override val anomalySize: Int = 0
 
   override def canEqual( rhs: Any ): Boolean = rhs.isInstanceOf[NoOutliers]
-
-  override def toString: String = {
-    s"""${getClass.safeSimpleName}:"${topic}"[source:[${source.size}] interval:[${source.interval getOrElse "No Interval"}]"""
-  }
 }
 
 case class SeriesOutliers(
@@ -142,9 +142,7 @@ case class SeriesOutliers(
   }
 
 
-  override def toString: String = {
-    s"""${getClass.safeSimpleName}:"${topic}"[source:[${source.size}] outliers[${outliers.size}]:[${outliers.mkString(",")}]]"""
-  }
+  override def toString: String = super.toString + s"""[outliers[${outliers.size}]:[${outliers.mkString(",")}]]"""
 }
 
 
@@ -184,5 +182,5 @@ case class CohortOutliers(
     }
   }
 
-  override def toString: String = s"""${getClass.safeSimpleName}:"${topic}"[source:[${source.size}] outliers:[${outliers.mkString(",")}]"""
+  override def toString: String = super.toString + s"""[outliers:[${outliers.mkString(",")}]"""
 }

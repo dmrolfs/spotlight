@@ -19,7 +19,7 @@ trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
 
   def quiescent: Receive = LoggingReceive {
     case DetectionAlgorithmRouter.AlgorithmRegistered( a ) if a == algorithm => {
-      log info s"${self.path} registered [${algorithm.name}] with ${sender().path}"
+      log.info( "{} registered [{}] with {}", self.path, algorithm.name, sender().path )
       context become around( detect )
     }
 
@@ -31,7 +31,7 @@ trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
   override def unhandled( message: Any ): Unit = {
     message match {
       case m: DetectUsing => {
-        log info s"algorithm [${algorithm}] does not recognize requested payload: [${m}]"
+        log.info( "algorithm [{}] does not recognize requested payload: [{}]", algorithm, m )
         m.aggregator ! UnrecognizedPayload( algorithm, m )
       }
 

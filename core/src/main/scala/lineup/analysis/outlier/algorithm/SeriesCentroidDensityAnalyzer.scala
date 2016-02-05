@@ -26,7 +26,7 @@ class SeriesCentroidDensityAnalyzer( override val router: ActorRef ) extends DBS
       val ctx = TestContext( payload = distances, algorithmConfig, history )
       ( cluster >==> findOutliers(payload.source, plan, history) ).run( ctx ) match {
         case \/-( r ) => aggregator ! r
-        case -\/( ex ) => log.error( ex, s"failed ${algorithm.name} analysis on ${payload.topic}[${payload.source.interval}]" )
+        case -\/( ex ) => log.error( ex, "failed {} analysis on {}[{}]", algorithm.name, payload.topic, payload.source.interval )
       }
     }
   }

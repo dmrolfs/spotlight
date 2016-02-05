@@ -239,7 +239,11 @@ object GraphiteLineup extends Instrumented with StrictLogging {
   def archiveFilter[T <: TimeSeriesBase]( config: Configuration ): Flow[T, T, Unit] = {
     val archiveWhitelist: Set[Regex] = {
       import scala.collection.JavaConverters._
-      config.getStringList( "lineup.training.whitelist" ).asScala.toSet map { wl: String => new Regex( wl ) }
+      if ( config hasPath "lineup.training.whitelist" ) {
+        config.getStringList( "lineup.training.whitelist" ).asScala.toSet map { wl: String => new Regex( wl ) }
+      } else {
+        Set.empty[Regex]
+      }
     }
     logger info s"""training archive whitelist: [${archiveWhitelist.mkString(",")}]"""
 
