@@ -117,8 +117,8 @@ object Configuration {
     val required: List[Req] = List(
       Req.withUsageSetting( Directory.SOURCE_HOST, usage.sourceHost ),
       Req.withUsageSetting( Directory.SOURCE_PORT, usage.sourcePort ),
-      Req.withoutUsageSetting( Directory.PUBLISH_GRAPHITE_HOST ),
-      Req.withoutUsageSetting( Directory.PUBLISH_GRAPHITE_PORT ),
+//      Req.withoutUsageSetting( Directory.PUBLISH_GRAPHITE_HOST ),
+//      Req.withoutUsageSetting( Directory.PUBLISH_GRAPHITE_PORT ),
       Req.withoutUsageSetting( Directory.DETECTION_BUDGET ),
       Req.withoutUsageSetting( Directory.PLAN_PATH ),
       Req.withoutUsageSetting( Directory.TCP_INBOUND_BUFFER_SIZE ),

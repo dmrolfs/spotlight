@@ -82,7 +82,7 @@ extends Actor with InstrumentedActor with ActorLogging { outer: ConfigurationPro
     }
 
     case unknown: UnrecognizedPayload => {
-      log info s"converting unrecognized response to NoOutliers for [${unknown.topic}]"
+      log.info( "converting unrecognized response to NoOutliers for [{}]", unknown.topic )
       _fulfilled += unknown.algorithm -> NoOutliers( algorithms = Set(unknown.algorithm), source = unknown.source, plan = plan )
       process( _fulfilled )
     }
@@ -92,8 +92,13 @@ extends Actor with InstrumentedActor with ActorLogging { outer: ConfigurationPro
       val retriesLeft = retries - 1
 
       warningsMeter.mark()
-      log warning s"quorum not reached for topic:[${source.topic}] tries-left:[$retriesLeft] " +
-                  s"""received:[${_fulfilled.keys.mkString(",")}] plan:[${plan.summary}]"""
+      log.warning(
+        "quorum not reached for topic:[{}] tries-left:[{}] received:[{}] plan:[{}]",
+        source.topic,
+        retriesLeft,
+        _fulfilled.keys.mkString(","),
+        plan.summary
+      )
 
       scheduleWhistle()
       context become around( quorum(retriesLeft) )
@@ -121,7 +126,7 @@ extends Actor with InstrumentedActor with ActorLogging { outer: ConfigurationPro
       case o: NoOutliers => outlierLogger info o.toString
       case o => {
         outlierLogger info o.toString
-        fulfilled foreach { case (a, o) => outlierLogger info s""" + [${a.name}][${o.anomalySize} / ${o.size}] ${o}""" }
+        fulfilled foreach { case (a, o) => outlierLogger.info( " + [{}][{} / {}] {}", Seq(a.name, o.anomalySize, o.size, o) ) }
       }
     }
   }

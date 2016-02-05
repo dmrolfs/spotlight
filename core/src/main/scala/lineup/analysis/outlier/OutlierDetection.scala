@@ -95,7 +95,7 @@ object OutlierDetection extends StrictLogging with Instrumented {
       makePlans() match {
         case \/-(ps) => ps
         case -\/(exs) => {
-          exs foreach { ex => logger warn s"Detector failed to load policy detection plans: $ex" }
+          exs foreach { ex => logger.warn( "Detector failed to load policy detection plans: {}", ex ) }
           default
         }
       }
@@ -106,7 +106,10 @@ object OutlierDetection extends StrictLogging with Instrumented {
 
     override def invalidateCaches(): Unit = {
       plans = makePlansWithFallback( plans )
-      logger debug s"""Detector detection plans: [${plans.zipWithIndex.map{ case (p,i) => f"${i}%2d: ${p}"}.mkString("\n","\n","\n")}]"""
+      logger.debug(
+        """Detector detection plans: [{}]""",
+        plans.zipWithIndex.map{ case (p,i) => f"${i}%2d: ${p}"}.mkString("\n","\n","\n")
+      )
     }
   }
 }
@@ -126,7 +129,7 @@ class OutlierDetection extends Actor with InstrumentedActor with ActorLogging {
 
   override def preStart(): Unit = {
     initializeMetrics()
-    log info s"${self.path} dispatcher: [${context.dispatcher}]"
+    log.info( "{} dispatcher: [{}]", self.path, context.dispatcher )
   }
 
   override def postStop(): Unit = reloader.cancel()
@@ -150,7 +153,7 @@ class OutlierDetection extends Actor with InstrumentedActor with ActorLogging {
     }
 
     case m: OutlierDetectionMessage if outer.definedAt( m ) => {
-      log debug s"plan for topic [${m.topic}]: [${outer.planFor(m)}]"
+      log.debug( "plan for topic [{}]: [{}]", m.topic, outer.planFor(m) )
       val requester = sender()
       val aggregator = dispatch( m, outer.planFor(m).get )( context.dispatcher )
       outstanding += ( aggregator -> requester )
@@ -158,7 +161,7 @@ class OutlierDetection extends Actor with InstrumentedActor with ActorLogging {
     }
 
     case m: OutlierDetectionMessage if inRetry == false && outer.definedAt( m ) == false => {
-      log debug s"unrecognized topic [${m.topic}] retrying after reload"
+      log.debug( "unrecognized topic [{}] retrying after reload", m.topic )
       // try reloading invalidating caches and retry on first miss only
       outer.invalidateCaches()
       self forward m
@@ -166,12 +169,12 @@ class OutlierDetection extends Actor with InstrumentedActor with ActorLogging {
     }
 
     case m: OutlierDetectionMessage => {
-      log debug s"unrecognized topic:[${m.topic}] from sender:[${sender()}]"
+      log.debug( "unrecognized topic:[{}] from sender:[{}]", m.topic, sender() )
       sender() ! OutlierDetection.UnrecognizedTopic( m.topic )
     }
 
     case to: OutlierQuorumAggregator.AnalysisTimedOut => {
-      log error s"quorum was not reached in time: [$to]"
+      log.error( "quorum was not reached in time: [{}]", to )
       outstanding -= sender()
       context become around( detection(inRetry) )
     }
@@ -222,7 +225,7 @@ class OutlierDetection extends Actor with InstrumentedActor with ActorLogging {
       _history += data.topic -> result
     }
 
-    log debug s"HISTORY for [${data.topic}]: [${result}]"
+    log.debug( "HISTORY for [{}]: [{}]", data.topic, result )
     result
   }
 
@@ -236,6 +239,12 @@ class OutlierDetection extends Actor with InstrumentedActor with ActorLogging {
       ( os.anomalySize.toLong, os.size.toLong )
     }
     _score += os.topic -> s
-    outlierLogger.debug( s"[${os.topic}] outlier rate:[${s._1.toDouble / s._2.toDouble}%] in [${s._2}] points" )
+    outlierLogger.debug(
+      "[{}]:[{}] outlier rate:[{}%] in [{}] points",
+      os.plan.name,
+      os.topic,
+      (s._1.toDouble / s._2.toDouble).toString,
+      s._2.toString
+    )
   }
 }

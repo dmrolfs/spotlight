@@ -16,9 +16,8 @@ import akka.stream.scaladsl.Flow
 import akka.stream.{ ActorAttributes, Supervision }
 import akka.util.{ ByteString, Timeout }
 
-import com.typesafe.scalalogging.{ LazyLogging, Logger }
+import com.typesafe.scalalogging.LazyLogging
 import nl.grons.metrics.scala.{ Timer, Meter }
-import org.slf4j.LoggerFactory
 import peds.akka.stream.Limiter
 import peds.commons.log.Trace
 import lineup.model.outlier.Outliers
@@ -44,12 +43,12 @@ object GraphitePublisher extends LazyLogging {
   ): Flow[Outliers, Outliers, Unit] = {
     val decider: Supervision.Decider = {
       case ex: CircuitBreakerOpenException => {
-        logger warn s"GRAPHITE CIRCUIT BREAKER OPENED: [${ex.getMessage}]"
+        logger.warn( "GRAPHITE CIRCUIT BREAKER OPENED: [{}]", ex.getMessage )
         Supervision.Resume
       }
 
       case ex => {
-        logger warn s"GraphitePublisher restarting after error: [${ex.getMessage}]"
+        logger.warn( "GraphitePublisher restarting after error: [{}]", ex.getMessage )
         Supervision.Restart
       }
     }
@@ -161,7 +160,7 @@ class GraphitePublisher extends DenseOutlierPublisher {
 
   override def preStart(): Unit = {
     initializeMetrics()
-    log info s"${self.path} dispatcher: [${context.dispatcher}]"
+    log.info( "{} dispatcher: [{}]", self.path, context.dispatcher )
     self ! Open
   }
 
@@ -216,7 +215,7 @@ class GraphitePublisher extends DenseOutlierPublisher {
   override def publish( o: Outliers ): Unit = {
     val points = markPoints( o )
     waitQueue = points.foldLeft( waitQueue ){ _.enqueue( _ ) }
-    log debug s"publish[${o.topic}:${o.hasAnomalies}]: added [${o.anomalySize} / ${o.size}] to wait queue - now at [${waitQueue.size}]"
+    log.debug( "publish[{}]: added [{} / {}] to wait queue - now at [{}]", o.topic, o.anomalySize, o.size, waitQueue.size )
   }
 
   override def markPoints( o: Outliers ): Seq[MarkPoint] = {
@@ -234,11 +233,11 @@ class GraphitePublisher extends DenseOutlierPublisher {
       socketOpen match {
         case Success(s) => {
           resetNextScheduled()
-          log info s"${self.path} opened [${socket}] [${socketOpen}] nextScheduled:[${_nextScheduled.map{!_.isCancelled}}]"
+          log.info( "{} opened [{}] [{}] nextScheduled:[{}]", self.path, socket, socketOpen, _nextScheduled.map{!_.isCancelled} )
         }
 
         case Failure(ex) => {
-          log error s"open failed - could not connect with graphite server: [${ex.getMessage}]"
+          log.error( "open failed - could not connect with graphite server: [{}]", ex.getMessage )
           cancelNextSchedule()
         }
       }
@@ -253,21 +252,21 @@ class GraphitePublisher extends DenseOutlierPublisher {
     socket = None
     cancelNextSchedule()
     context become around( closed )
-    log info s"${self.path} closed [${socket}] [${socketClose}]"
+    log.info( "{} closed [{}] [{}]", self.path, socket, socketClose )
   }
 
   @tailrec final def flush(): Unit = {
     cancelNextSchedule()
 
     if ( waitQueue.isEmpty ) {
-      log info s"${self.path} flushing complete"
+      log.info( "{} flushing complete", self.path )
       ()
     }
     else {
       val (toBePublished, remainingQueue) = waitQueue splitAt outer.batchSize
       waitQueue = remainingQueue
 
-      log info s"""flush: batch=[${toBePublished.mkString(",")}]"""
+      log.info( "flush: batch=[{}]", toBePublished.mkString(",") )
       val report = serialize( toBePublished:_* )
       breaker withSyncCircuitBreaker {
         circuitRequestsMeter.mark()
@@ -280,7 +279,14 @@ class GraphitePublisher extends DenseOutlierPublisher {
   def serialize( payload: MarkPoint* ): ByteString = pickler.pickleFlattenedTimeSeries( payload:_* )
 
   def batchAndSend(): Unit = {
-    log debug s"waitQueue:[${waitQueue.size}] batch-size:[${outer.batchSize}] toBePublished:[${waitQueue.take(outer.batchSize).size}] remainingQueue:[${waitQueue.drop(outer.batchSize).size}]"
+    log.debug(
+      "waitQueue:[{}] batch-size:[{}] toBePublished:[{}] remainingQueue:[{}]",
+      waitQueue.size,
+      outer.batchSize,
+      waitQueue.take(outer.batchSize).size,
+      waitQueue.drop(outer.batchSize).size
+    )
+
     val (toBePublished, remainingQueue) = waitQueue splitAt batchSize
     waitQueue = remainingQueue
 

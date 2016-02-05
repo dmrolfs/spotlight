@@ -101,6 +101,7 @@ dockerfile in docker := {
         entryPoint(
           "java",
           "-cp", "/etc/lineup:" + artifactTargetPath,
+          s"-Dconfig.resource=application-prod.conf",
           s"-Djava.library.path=${targetBase}/sigar-bin/",
           s"-javaagent:${targetBase}/${aspectj.name}",
           mainclass

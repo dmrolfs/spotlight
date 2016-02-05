@@ -24,7 +24,7 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends DBSCANAnaly
     case s @ DetectUsing( _, aggregator, payload: DetectOutliersInSeries, plan, history, algorithmConfig ) => {
       ( extractTestContext >==> cluster >==> findOutliers( payload.source, plan ) ).run( s ) match {
         case \/-( r ) => aggregator ! r
-        case -\/( ex ) => log.error( ex, s"failed ${algorithm.name} analysis on ${payload.topic}[${payload.source.interval}]" )
+        case -\/( ex ) => log.error( ex, "failed {} analysis on {}[{}]", algorithm.name, payload.topic, payload.source.interval )
       }
     }
   }
