@@ -19,7 +19,8 @@ trait DBSCANAnalyzer extends AlgorithmActor {
   val trace = Trace[DBSCANAnalyzer]
   type TryV[T] = \/[Throwable, T]
   type Op[I, O] = Kleisli[TryV, I, O]
-  case class TestContext(payload: Seq[DoublePoint], algorithmConfig: Config, history: Option[HistoricalStatistics] )
+
+  case class TestContext( message: DetectUsing, data: Seq[DoublePoint] )
 
   val eps: Op[Config, Double] = {
     Kleisli[TryV, Config, Double] { c => \/ fromTryCatchNonFatal { c getDouble algorithm.name +".eps" } }
@@ -59,25 +60,25 @@ trait DBSCANAnalyzer extends AlgorithmActor {
         case x => -\/( new UnsupportedOperationException( s"cannot extract test context from [${x.getClass}]" ) )
       }
 
-      points map { pts => TestContext( payload = pts, algorithmConfig = d.properties, history = d.history ) }
+      points map { pts => TestContext( data = pts, message = d ) }
     }
   }
 
   val distanceMeasure: Op[TestContext, DistanceMeasure] = {
-    Kleisli[TryV, TestContext, DistanceMeasure] { case TestContext( payload, config, history ) =>
+    Kleisli[TryV, TestContext, DistanceMeasure] { case TestContext( message, data ) =>
       def makeMahalanobisDistance: TryV[DistanceMeasure] = {
-        val mahal = history map { h =>
+        val mahal = message.history map { h =>
           MahalanobisDistance.fromCovariance( h.covariance )
         } getOrElse {
-          MahalanobisDistance.fromPoints( MatrixUtils.createRealMatrix( payload.toArray map { _.getPoint } ) )
+          MahalanobisDistance.fromPoints( MatrixUtils.createRealMatrix( data.toArray map { _.getPoint } ) )
         }
 
         mahal.disjunction.leftMap{ _.head }
       }
 
       val distancePath = algorithm.name + ".distance"
-      if ( config hasPath distancePath ) {
-        config.getString( distancePath ).toLowerCase match {
+      if ( message.properties hasPath distancePath ) {
+        message.properties.getString( distancePath ).toLowerCase match {
           case "euclidean" | "euclid" => new EuclideanDistance( ).right[Throwable]
           case "mahalanobis" | "mahal" | _ => makeMahalanobisDistance
         }
@@ -88,15 +89,18 @@ trait DBSCANAnalyzer extends AlgorithmActor {
   }
 
   val extractPayload: Op[TestContext, Seq[DoublePoint]] = {
-    Kleisli[TryV, TestContext, Seq[DoublePoint]] { case TestContext(payload, _, _ ) => payload.right }
+    Kleisli[TryV, TestContext, Seq[DoublePoint]] { case TestContext(_, payload) => payload.right }
   }
 
   val extractConfig: Op[TestContext, Config] = {
-    Kleisli[TryV, TestContext, Config] { case TestContext(_, config, _ ) => config.right }
+    Kleisli[TryV, TestContext, Config] { case TestContext(message, _) => message.properties.right }
   }
 
-  val cluster: Op[TestContext, Seq[Cluster[DoublePoint]]] = {
+  val cluster: Op[TestContext, (TestContext, Seq[Cluster[DoublePoint]])] = {
+    val context = Kleisli[TryV, TestContext, TestContext] { ctx => ctx.right[Throwable] }
+
     for {
+      ctx <- context
       payload <- extractPayload
       e <- eps <=< extractConfig
       pts <- minDensityConnectedPoints <=< extractConfig
@@ -108,7 +112,7 @@ trait DBSCANAnalyzer extends AlgorithmActor {
       trace( s"""cluster: payload = [${payload.mkString(",")}]""")
 
       import scala.collection.JavaConverters._
-      new DBSCANClusterer[DoublePoint]( e, pts, distance ).cluster( payload.asJava ).asScala.toSeq
+      ( ctx, new DBSCANClusterer[DoublePoint]( e, pts, distance ).cluster( payload.asJava ).asScala.toSeq )
     }
   }
 

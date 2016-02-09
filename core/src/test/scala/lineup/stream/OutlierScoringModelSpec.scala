@@ -2,7 +2,7 @@ package lineup.stream
 
 import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicInteger
-
+import scala.collection.immutable
 import scala.concurrent.{ Future, Await }
 import scala.concurrent.duration._
 import scala.util.Failure
@@ -28,7 +28,6 @@ import lineup.analysis.outlier.{ DetectionAlgorithmRouter, OutlierDetection }
 import lineup.analysis.outlier.algorithm.SeriesDensityAnalyzer
 import lineup.model.outlier.{ SeriesOutliers, IsQuorum, OutlierPlan }
 import lineup.model.timeseries.{ TimeSeries, DataPoint, Row }
-import lineup.analysis.outlier.OutlierDetection.PlanConfigurationProvider.Creator
 
 
 /**
@@ -43,10 +42,10 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
     val protocol = new PythonPickleProtocol
     val stringFlow: Flow[ByteString, ByteString, Unit] = Flow[ByteString].via( protocol.framingFlow() )
 
-    trait TestConfigurationProvider extends OutlierDetection.PlanConfigurationProvider {
-      override def makePlans: Creator = () => { fixture.plans.right }
-      override def invalidateCaches(): Unit = { }
-      override def refreshInterval: FiniteDuration = 5.minutes
+    trait TestConfigurationProvider extends OutlierDetection.ConfigurationProvider {
+//      override def makePlans: Creator = () => { fixture.plans.right }
+//      override def invalidateCaches(): Unit = { }
+//      override def refreshInterval: FiniteDuration = 5.minutes
     }
 
     val configurationReloader = Configuration.reloader( Array.empty[String] )()()
@@ -204,7 +203,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
         OutlierDetection.props {
           new OutlierDetection with TestConfigurationProvider {
             override def router: ActorRef = routerRef
-            override def makePlans: Creator = () => { Seq(defaultPlan).right }
+//            override def makePlans: Creator = () => { Seq(defaultPlan).right }
           }
         },
         "detectOutliers"
@@ -235,11 +234,21 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
       )
       val expectedPoints = dp1 filterNot { largestCluster contains _ }
 
-      val expected = SeriesOutliers( algorithms = algos, source = TimeSeries("foo", dp1), outliers = expectedPoints, plan = defaultPlan )
+      val expected = SeriesOutliers(
+        algorithms = algos,
+        source = TimeSeries("foo", dp1),
+        outliers = expectedPoints,
+        plan = defaultPlan
+      )
 //      val expected = TimeSeries( "foo", (dp1 ++ dp3).sortBy( _.timestamp ) )
 
       val graphiteFlow = OutlierScoringModel.batchSeries( parallelism = 4, windowSize = 20.millis )
-      val detectFlow = OutlierDetection.detectOutlier( detector, maxAllowedWait = 2.seconds, parallelism = 4 )
+      val detectFlow = OutlierDetection.detectOutlier(
+        detector,
+        maxAllowedWait = 2.seconds,
+        plans = immutable.Seq(defaultPlan),
+        parallelism = 4
+      )
 
       val flowUnderTest = graphiteFlow via detectFlow
 

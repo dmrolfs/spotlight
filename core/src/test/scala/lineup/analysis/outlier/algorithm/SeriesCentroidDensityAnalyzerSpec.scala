@@ -20,11 +20,11 @@ import lineup.testkit.ParallelAkkaSpec
 /**
  * Created by damonrolfs on 9/18/14.
  */
-class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
-  import DBSCANAnalyzerSpec._
+class SeriesCentroidDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
+  import SeriesCentroidDensityAnalyzerSpec._
 
   class Fixture extends AkkaFixture {
-    val algoS = SeriesDensityAnalyzer.Algorithm
+    val algoS = SeriesCentroidDensityAnalyzer.Algorithm
     val algoC = CohortDensityAnalyzer.Algorithm
     val plan = mock[OutlierPlan]
     val router = TestProbe()
@@ -41,10 +41,10 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
 
   override def makeAkkaFixture(): Fixture = new Fixture
 
-  "DBSCANAnalyzer" should  {
+  "SeriesCentroidDensityAnalyzer" should  {
     "register with router upon create" in { f: Fixture =>
       import f._
-      val analyzer = TestActorRef[DBSCANAnalyzer]( SeriesDensityAnalyzer.props(router.ref) )
+      val analyzer = TestActorRef[SeriesCentroidDensityAnalyzer]( SeriesCentroidDensityAnalyzer.props(router.ref) )
       router.expectMsgPF( 1.second.dilated, "register" ) {
         case DetectionAlgorithmRouter.RegisterDetectionAlgorithm(algorithm, _) => algorithm must equal( algoS )
       }
@@ -52,15 +52,14 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
 
     "raise error if used before registration" in { f: Fixture =>
       import f._
-      val analyzer = TestActorRef[DBSCANAnalyzer]( SeriesDensityAnalyzer.props(router.ref) )
+      val analyzer = TestActorRef[SeriesCentroidDensityAnalyzer]( SeriesCentroidDensityAnalyzer.props(router.ref) )
 
       an [AlgorithmActor.AlgorithmUsedBeforeRegistrationError] must be thrownBy
       analyzer.receive(
         DetectUsing(
           algoS,
           aggregator.ref,
-          DetectOutliersInSeries( TimeSeries("series", points) ),
-          plan,
+          DetectOutliersInSeries( TimeSeries("series", points), plan ),
           None,
           ConfigFactory.parseString(
             s"""
@@ -72,9 +71,9 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       )
     }
 
-    "detect outlying points in series" in { f: Fixture =>
+    "detect outlying points in series centroids" in { f: Fixture =>
       import f._
-      val analyzer = TestActorRef[DBSCANAnalyzer]( SeriesDensityAnalyzer.props(router.ref) )
+      val analyzer = TestActorRef[SeriesCentroidDensityAnalyzer]( SeriesCentroidDensityAnalyzer.props(router.ref) )
       val series = TimeSeries( "series", points )
       val expectedValues = Row( 18.8, 25.2, 31.5, 22.0, 24.1, 39.2 )
       val expected = points filter { expectedValues contains _.value } sortBy { _.timestamp }
@@ -88,7 +87,7 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       )
 
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
-      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries( series ), plan, None, algProps ) )
+      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries( series, plan ), None, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "detect" ) {
         case m @ SeriesOutliers(alg, source, plan, outliers) => {
           alg mustBe Set( algoS )
@@ -100,9 +99,9 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       }
     }
 
-    "detect no outliers points in series" in { f: Fixture =>
+    "detect no outliers points in series centroids" taggedAs (WIP) in { f: Fixture =>
       import f._
-      val analyzer = TestActorRef[DBSCANAnalyzer]( SeriesDensityAnalyzer.props(router.ref) )
+      val analyzer = TestActorRef[SeriesCentroidDensityAnalyzer]( SeriesCentroidDensityAnalyzer.props(router.ref) )
 
       val myPoints = Row(
         DataPoint( new joda.DateTime(448), 8.46 ),
@@ -136,7 +135,7 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       )
 
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
-      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries( series ), plan, None, algProps ) )
+      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries( series, plan ), None, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "detect" ) {
         //todo stream envelope
         //        case Envelope(SeriesOutliers(alg, source, outliers), hdr) => {
@@ -152,9 +151,9 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       }
     }
 
-    "series analyzer doesn't recognize cohort" in { f: Fixture =>
+    "series centroid analyzer doesn't recognize cohort" in { f: Fixture =>
       import f._
-      val analyzer = TestActorRef[DBSCANAnalyzer]( SeriesDensityAnalyzer.props(router.ref) )
+      val analyzer = TestActorRef[SeriesCentroidDensityAnalyzer]( SeriesCentroidDensityAnalyzer.props(router.ref) )
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
 
       val series1 = TimeSeries( "series.one", pointsA )
@@ -171,7 +170,7 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
         """.stripMargin
       )
 
-      val expected = DetectUsing( algoC, aggregator.ref, DetectOutliersInCohort(cohort), plan, None, algProps )
+      val expected = DetectUsing( algoC, aggregator.ref, DetectOutliersInCohort(cohort, plan), None, algProps )
       analyzer.receive( expected )
       aggregator.expectMsgPF( 2.seconds.dilated, "detect" ) {
         case UnrecognizedPayload( alg, actual ) => {
@@ -181,134 +180,11 @@ class DBSCANAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       }
     }
 
-    "detect outlying series in cohort" in { f: Fixture =>
-      import f._
-      val analyzer = TestActorRef[DBSCANAnalyzer]( CohortDensityAnalyzer.props(router.ref) )
-      val series1 = TimeSeries( "series.one", pointsA )
-      val range = (0.99998, 1.00003)
-      val series2 = tweakSeries( TimeSeries("series.two", pointsB), range )
-      val series3 = tweakSeries( TimeSeries("series.three", pointsB), range )
-      val series4 = tweakSeries( TimeSeries("series.four", pointsB), range )
-      val cohort = TimeSeriesCohort( series1, series2, series3, series4 )
-
-      val algProps = ConfigFactory.parseString(
-        s"""
-           |${algoC.name}.eps: 5.0
-           |${algoC.name}.minDensityConnectedPoints: 2
-        """.stripMargin
-      )
-
-      analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoC ) )
-      analyzer.receive( DetectUsing( algoC, aggregator.ref, DetectOutliersInCohort( cohort ), plan, None, algProps ) )
-      aggregator.expectMsgPF( 2.seconds.dilated, "detect" ) {
-        //todo stream envelope
-        //        case Envelope(CohortOutliers(alg, source, outliers), hdr) => {
-        //          trace( s"ENVELOPE HEADER = $hdr" )
-        //          trace( s"""outliers=[${outliers.mkString(",")}]""" )
-        //          alg must equal( 'dbscan )
-        //          source mustBe cohort
-        //          outliers.size mustBe 1
-        //          outliers.head.name mustBe "series.one"
-        //        }
-        case m @ CohortOutliers(alg, source, plan, outliers) => {
-          trace( s"""outliers=[${outliers.mkString(",")}]""" )
-          alg mustBe Set( algoC )
-          source mustBe cohort
-          m.hasAnomalies mustBe true
-          outliers.size mustBe 1
-          outliers.head.topic mustBe Topic("series.one")
-        }
-      }
-    }
-
-    "detect no outliers series in cohort" in { f: Fixture =>
-      import f._
-      val analyzer = TestActorRef[DBSCANAnalyzer]( CohortDensityAnalyzer.props(router.ref) )
-      val series1 = TimeSeries( "series.one", pointsB )
-      val range = (0.99998, 1.00003)
-      val series2 = tweakSeries( TimeSeries("series.two", pointsB), range )
-      val series3 = tweakSeries( TimeSeries("series.three", pointsB), range )
-      val series4 = tweakSeries( TimeSeries("series.four", pointsB), range )
-      val cohort = TimeSeriesCohort( series1, series2, series3, series4 )
-
-      val algProps = ConfigFactory.parseString(
-        s"""
-           |${algoC.name}.eps: 5.0
-           |${algoC.name}.minDensityConnectedPoints: 2
-        """.stripMargin
-      )
-
-      analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoC ) )
-      analyzer.receive( DetectUsing( algoC, aggregator.ref, DetectOutliersInCohort( cohort ), plan, None, algProps ) )
-      aggregator.expectMsgPF( 2.seconds.dilated, "detect" ) {
-        //todo stream envelope
-        //        case Envelope(CohortOutliers(alg, source, outliers), hdr) => {
-        //          trace( s"ENVELOPE HEADER = $hdr" )
-        //          trace( s"""outliers=[${outliers.mkString(",")}]""" )
-        //          alg must equal( 'dbscan )
-        //          source mustBe cohort
-        //          outliers.size mustBe 1
-        //          outliers.head.name mustBe "series.one"
-        //        }
-        case m @ NoOutliers(alg, source, plan) => {
-          alg mustBe Set( algoC )
-          source mustBe cohort
-          m.hasAnomalies mustBe false
-        }
-      }
-    }
-
-    "cohort not recognize series request" in { f: Fixture =>
-      import f._
-      val analyzer = TestActorRef[DBSCANAnalyzer]( CohortDensityAnalyzer.props(router.ref) )
-      analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered(algoC) )
-
-      val myPoints = Row(
-        DataPoint( new joda.DateTime(448), 8.46 ),
-        DataPoint( new joda.DateTime(449), 8.9 ),
-        DataPoint( new joda.DateTime(450), 8.58 ),
-        DataPoint( new joda.DateTime(451), 8.36 ),
-        DataPoint( new joda.DateTime(452), 8.58 ),
-        DataPoint( new joda.DateTime(453), 7.5 ),
-        DataPoint( new joda.DateTime(454), 7.1 ),
-        DataPoint( new joda.DateTime(455), 7.3 ),
-        DataPoint( new joda.DateTime(456), 7.71 ),
-        DataPoint( new joda.DateTime(457), 8.14 ),
-        DataPoint( new joda.DateTime(458), 8.14 ),
-        DataPoint( new joda.DateTime(459), 7.1 ),
-        DataPoint( new joda.DateTime(460), 7.5 ),
-        DataPoint( new joda.DateTime(461), 7.1 ),
-        DataPoint( new joda.DateTime(462), 7.1 ),
-        DataPoint( new joda.DateTime(463), 7.3 ),
-        DataPoint( new joda.DateTime(464), 7.71 ),
-        DataPoint( new joda.DateTime(465), 8.8 ),
-        DataPoint( new joda.DateTime(466), 8.9 )
-      )
-
-      val series = TimeSeries( "series", myPoints )
-
-      val algProps = ConfigFactory.parseString(
-        s"""
-           |${algoS.name}.eps: 5.0
-           |${algoS.name}.minDensityConnectedPoints: 3
-        """.stripMargin
-      )
-
-      val expected = DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series), plan, None, algProps )
-      analyzer.receive( expected )
-      aggregator.expectMsgPF( 2.seconds.dilated, "detect" ) {
-        case UnrecognizedPayload( alg, actual ) => {
-          alg.name mustBe algoC.name
-          actual mustBe expected
-        }
-      }
-    }
-
     "handle no clusters found" in { f: Fixture => pending }
   }
 }
 
-object DBSCANAnalyzerSpec {
+object SeriesCentroidDensityAnalyzerSpec {
   val sysId = new AtomicInteger()
 
   val points = Row(

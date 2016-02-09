@@ -1,10 +1,8 @@
 package lineup.analysis.outlier
 
-import akka.actor.{ ActorRef, UnhandledMessage }
+import akka.actor.{ ActorRef }
 import scalaz.Scalaz.{ when => _, _ }
 import com.typesafe.config.ConfigFactory
-import lineup.analysis.outlier.OutlierDetection.PlanConfigurationProvider.Creator
-import lineup.analysis.outlier.OutlierDetection.UnrecognizedTopic
 import lineup.model.timeseries._
 import scala.concurrent.duration._
 import akka.testkit._
@@ -25,11 +23,8 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
 
     val metric = Topic( "metric.a" )
 
-    trait TestConfigurationProvider extends OutlierDetection.PlanConfigurationProvider {
+    trait TestConfigurationProvider extends OutlierDetection.ConfigurationProvider {
       override def router: ActorRef = fixture.router.ref
-      override def makePlans: Creator = () => { fixture.plans.right }
-      override def invalidateCaches(): Unit = { }
-      override def refreshInterval: FiniteDuration = 5.minutes
     }
 
     val plans: Seq[OutlierPlan] = Seq(
@@ -49,27 +44,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
   override def makeAkkaFixture(): Fixture = new Fixture
 
   "OutlierDetection" should {
-    "ignore detect message if no plan and no default" taggedAs (WIP) in { f: Fixture =>
-      import f._
-      val probe = TestProbe()
-      system.eventStream.subscribe( probe.ref, classOf[UnhandledMessage] )
-      val detect = TestActorRef[OutlierDetection]( OutlierDetection.props{ new OutlierDetection with TestConfigurationProvider } )
-
-      val msg = mock[OutlierDetectionMessage]
-      when( msg.topic ) thenReturn Topic("dummy")
-
-      detect.receive( msg, probe.ref )
-
-      probe.expectMsgPF( 2.seconds.dilated, "unrecognized message" ) {
-        case UnrecognizedTopic( t ) => {
-          t mustBe Topic("dummy")
-        }
-      }
-
-      router expectNoMsg 1.second.dilated
-    }
-
-    "apply default plan if no other plan is assigned" in { f: Fixture =>
+    "apply default plan if no other plan is assigned" taggedAs (WIP) in { f: Fixture =>
       import f._
 
       val defaultPlan = OutlierPlan.default(
@@ -80,21 +55,22 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
         reduce = reduceA
       )
 
-      val detect = TestActorRef[OutlierDetection](
+      val detect = TestActorRef[OutlierDetection with OutlierDetection.ConfigurationProvider](
         OutlierDetection.props {
           new OutlierDetection with TestConfigurationProvider {
             override def preStart(): Unit = { }
-            override def makePlans: Creator = () => { Seq(defaultPlan).right }
           }
         }
       )
 
-      val msg = OutlierDetectionMessage( TimeSeries( topic = "dummy", points = Row.empty[DataPoint] ) )
+      detect.underlyingActor.router mustBe f.router.ref
+
+      val msg = OutlierDetectionMessage( TimeSeries( topic = "dummy", points = Row.empty[DataPoint] ), defaultPlan ).toOption.get
 
       detect receive msg
 
       router.expectMsgPF( 2.seconds.dilated, "default-routed-foo" ) {
-        case m @ DetectUsing( algo, _, payload, _, history, properties ) => {
+        case m @ DetectUsing( algo, _, payload, history, properties ) => {
           m.topic mustBe Topic("dummy")
           algo must equal('foo)
           payload mustBe msg
@@ -103,7 +79,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
       }
 
       router.expectMsgPF( 2.seconds.dilated, "default-routed-bar" ) {
-        case m @ DetectUsing( algo, _, payload, _, history, properties ) => {
+        case m @ DetectUsing( algo, _, payload, history, properties ) => {
           m.topic mustBe Topic("dummy")
           algo must equal('bar)
           payload mustBe msg
@@ -130,17 +106,16 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
         OutlierDetection.props {
           new OutlierDetection with TestConfigurationProvider {
             override def preStart(): Unit = { }
-            override def makePlans: Creator = () => { (f.plans :+ defaultPlan).right }
           }
         }
       )
 
-      val msg = OutlierDetectionMessage( TimeSeries( topic = metric, points = Row.empty[DataPoint] ) )
+      val msg = OutlierDetectionMessage( TimeSeries( topic = metric, points = Row.empty[DataPoint] ), defaultPlan ).toOption.get
 
       detect receive msg
 
       router.expectMsgPF( 2.seconds.dilated, "default-routed-foo" ) {
-        case m @ DetectUsing( algo, _, payload, _, history, properties ) => {
+        case m @ DetectUsing( algo, _, payload, history, properties ) => {
           m.topic mustBe metric
           algo must equal('foo)
           payload mustBe msg
@@ -149,7 +124,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
       }
 
       router.expectMsgPF( 2.seconds.dilated, "default-routed-bar" ) {
-        case m @ DetectUsing( algo, _, payload, _, history, properties ) => {
+        case m @ DetectUsing( algo, _, payload, history, properties ) => {
           m.topic mustBe metric
           algo must equal('bar)
           payload mustBe msg
@@ -175,17 +150,19 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
         OutlierDetection.props {
           new OutlierDetection with TestConfigurationProvider {
             override def preStart(): Unit = { }
-            override def makePlans: Creator = () => { (f.plans :+ defaultPlan).right }
           }
         }
       )
 
-      val msgForDefault = OutlierDetectionMessage( TimeSeries( topic = "dummy", points = Row.empty[DataPoint] ) )
+      val msgForDefault = OutlierDetectionMessage(
+        TimeSeries( topic = "dummy", points = Row.empty[DataPoint] ),
+        defaultPlan
+      ).toOption.get
 
       detect receive msgForDefault
 
       router.expectMsgPF( 2.seconds.dilated, "default-routed" ) {
-        case m @ DetectUsing( algo, _, payload, _, history, properties ) => {
+        case m @ DetectUsing( algo, _, payload, history, properties ) => {
           m.topic mustBe Topic( "dummy" )
           algo must equal('zed)
           payload mustBe msgForDefault
@@ -193,12 +170,15 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
         }
       }
 
-      val metricMsg = OutlierDetectionMessage( TimeSeries( topic = metric, points = Row.empty[DataPoint] ) )
+      val metricMsg = OutlierDetectionMessage(
+        TimeSeries( topic = metric, points = Row.empty[DataPoint] ),
+        defaultPlan
+      ).toOption.get
 
       detect receive metricMsg
 
       router.expectMsgPF( 2.seconds.dilated, "default-routed-2" ) {
-        case m @ DetectUsing( algo, _, payload, _, history, properties ) => {
+        case m @ DetectUsing( algo, _, payload, history, properties ) => {
           m.topic mustBe metric
           algo must equal('zed)
           payload mustBe metricMsg
@@ -209,5 +189,9 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
       router expectNoMsg 1.second.dilated
     }
 
+    "evaluate multiple matching plans" in { f: Fixture =>
+      import f._
+      pending
+    }
   }
 }
