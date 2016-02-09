@@ -2,11 +2,11 @@ package lineup.stream
 
 import java.net.{ InetAddress, InetSocketAddress }
 import java.{ lang, time, util }
+import scala.collection.immutable
 
 import com.typesafe.config._
 import com.typesafe.scalalogging.LazyLogging
 import lineup.analysis.outlier.OutlierDetection
-import lineup.analysis.outlier.algorithm.DBSCANAnalyzer
 import lineup.model.outlier._
 import lineup.model.timeseries.{ TimeSeriesBase, Topic }
 import lineup.protocol.{ GraphiteSerializationProtocol, MessagePackProtocol, PythonPickleProtocol }
@@ -29,7 +29,7 @@ trait Configuration extends Config {
   def windowDuration: FiniteDuration
   def graphiteAddress: Option[InetSocketAddress]
   def detectionBudget: FiniteDuration
-  def plans: Seq[OutlierPlan]
+  def plans: immutable.Seq[OutlierPlan]
   def planOrigin: ConfigOrigin
   def tcpInboundBufferSize: Int
   def workflowBufferSize: Int
@@ -216,12 +216,12 @@ object Configuration {
       FiniteDuration( getDuration(Directory.DETECTION_BUDGET, MILLISECONDS), MILLISECONDS )
     }
 
-    override def plans: Seq[OutlierPlan] = makePlans( getConfig( Configuration.Directory.PLAN_PATH ) )
+    override def plans: immutable.Seq[OutlierPlan] = makePlans( getConfig( Configuration.Directory.PLAN_PATH ) )
     override def planOrigin: ConfigOrigin = getConfig( Configuration.Directory.PLAN_PATH ).origin()
     override def workflowBufferSize: Int = getInt( Directory.WORKFLOW_BUFFER_SIZE )
     override def tcpInboundBufferSize: Int = getInt( Directory.TCP_INBOUND_BUFFER_SIZE )
 
-    private def makePlans( planSpecifications: Config ): Seq[OutlierPlan] = {
+    private def makePlans( planSpecifications: Config ): immutable.Seq[OutlierPlan] = {
       import scala.collection.JavaConversions._
 
       val result = planSpecifications.root.collect{ case (n, s: ConfigObject) => (n, s.toConfig) }.toSeq.map {
@@ -278,7 +278,7 @@ object Configuration {
         }
       }
 
-      result.flatten.sorted
+      result.flatten.sorted.to[immutable.Seq]
     }
 
     private def pullCommonPlanFacets( spec: Config ): (FiniteDuration, Set[Symbol]) = {

@@ -1,8 +1,6 @@
 package lineup.stream
 
 import java.net.{ Socket, InetSocketAddress }
-import lineup.model.timeseries.Topic
-
 import scala.concurrent.duration._
 import akka.actor.SupervisorStrategy._
 import akka.actor._
@@ -14,10 +12,10 @@ import peds.akka.supervision.IsolatedLifeCycleSupervisor.ChildStarted
 import peds.akka.metrics.InstrumentedActor
 import peds.akka.stream.Limiter
 import peds.akka.supervision.{ OneForOneStrategyFactory, SupervisionStrategyFactory, IsolatedLifeCycleSupervisor }
-import peds.commons.V
-import lineup.analysis.outlier.algorithm.{ SeriesDensityAnalyzer, DBSCANAnalyzer }
-import lineup.analysis.outlier.{ OutlierDetection, DetectionAlgorithmRouter }
-import lineup.model.outlier.{ Outliers, OutlierPlan }
+import lineup.analysis.outlier.algorithm.{ CohortDensityAnalyzer, SeriesCentroidDensityAnalyzer, SeriesDensityAnalyzer }
+import lineup.analysis.outlier.{ algorithm, OutlierDetection, DetectionAlgorithmRouter }
+import lineup.model.outlier.Outliers
+import lineup.model.timeseries.Topic
 import lineup.publish.{ LogPublisher, GraphitePublisher }
 import lineup.protocol.GraphiteSerializationProtocol
 
@@ -47,7 +45,7 @@ object OutlierDetectionWorkflow {
     def protocol: GraphiteSerializationProtocol
     def windowDuration: FiniteDuration
     def graphiteAddress: Option[InetSocketAddress]
-    def makePlans: () => V[Seq[OutlierPlan]]
+//    def makePlans: OutlierPlan.Creator
     def configuration: Config
 
     def makePublishRateLimiter()(implicit context: ActorContext ): ActorRef = {
@@ -83,11 +81,11 @@ object OutlierDetectionWorkflow {
     }
 
     def makeAlgorithmWorkers( router: ActorRef )( implicit context: ActorContext ): Map[Symbol, ActorRef] = {
-      val algorithmProps: Map[Symbol, Props] = Map(
-        SeriesDensityAnalyzer.Algorithm -> SeriesDensityAnalyzer.props( router )
-      )
-
-      algorithmProps map { case (n, p) =>
+      Map(
+        SeriesDensityAnalyzer.Algorithm -> SeriesDensityAnalyzer.props( router ),
+        SeriesCentroidDensityAnalyzer.Algorithm -> SeriesCentroidDensityAnalyzer.props( router ),
+        CohortDensityAnalyzer.Algorithm -> CohortDensityAnalyzer.props( router )
+      ) map { case (n, p) =>
         n -> context.actorOf( p.withDispatcher("outlier-algorithm-dispatcher"), n.name )
       }
     }
@@ -95,11 +93,11 @@ object OutlierDetectionWorkflow {
     def makeOutlierDetector( routerRef: ActorRef )( implicit context: ActorContext ): ActorRef = {
       context.actorOf(
         OutlierDetection.props {
-          new OutlierDetection with OutlierDetection.PlanConfigurationProvider {
+          new OutlierDetection with OutlierDetection.ConfigurationProvider {
             override def router: ActorRef = routerRef
             override lazy val metricBaseName = MetricName( classOf[OutlierDetection] )
-            override def makePlans: OutlierDetection.PlanConfigurationProvider.Creator = outer.makePlans
-            override def refreshInterval: FiniteDuration = 15.minutes
+//            override def makePlans: OutlierDetection.ConfigurationProvider.Creator = outer.makePlans
+//            override def refreshInterval: FiniteDuration = 15.minutes
           }
         }.withDispatcher( "outlier-detection-dispatcher" ),
         "outlierDetector"

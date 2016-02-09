@@ -2,10 +2,8 @@ package lineup.app
 
 import java.net.InetSocketAddress
 import java.util.concurrent.TimeoutException
-import akka.stream.scaladsl.Tcp.{ ServerBinding, IncomingConnection }
-import org.apache.http.HttpEntityEnclosingRequest
 
-import scala.concurrent.{ ExecutionContext, Await, Future }
+import scala.concurrent.{ ExecutionContext, Future }
 import scala.concurrent.duration._
 import scala.util.{ Failure, Success }
 import scala.util.matching.Regex
@@ -19,7 +17,6 @@ import org.slf4j.LoggerFactory
 import com.typesafe.scalalogging.{ Logger, StrictLogging }
 import com.typesafe.config.Config
 import kamon.Kamon
-import better.files.File
 import nl.grons.metrics.scala.{ MetricName, Meter }
 
 import peds.akka.supervision.IsolatedLifeCycleSupervisor.{ WaitForStart, ChildStarted }
@@ -28,7 +25,6 @@ import peds.akka.supervision.OneForOneStrategyFactory
 import peds.akka.metrics.{ Reporter, Instrumented }
 import peds.commons.V
 import peds.akka.stream.StreamMonitor
-import lineup.analysis.outlier.OutlierDetection
 import lineup.model.outlier._
 import lineup.model.timeseries.{ TimeSeries, TimeSeriesBase }
 import lineup.protocol.GraphiteSerializationProtocol
@@ -274,27 +270,27 @@ object GraphiteLineup extends Instrumented with StrictLogging {
   }
 
   def startPlanWatcher( config: Configuration, listeners: Set[ActorRef] )( implicit system: ActorSystem ): Unit = {
-    logger info s"Outlier plan origin: [${config.planOrigin}]"
-    import java.nio.file.{ StandardWatchEventKinds => Events }
-    import better.files.FileWatcher._
-
-    val Path = "@\\s+file:(.*):\\s+\\d+,".r
-
-    Path
-    .findAllMatchIn( config.planOrigin.toString )
-    .map { _ group 1 }
-    .foreach { filename =>
-      // note: attempting to watch a shared file wrt VirtualBox will not work (https://www.virtualbox.org/ticket/9069)
-      // so dev testing of watching should be done by running the Java locally
-      logger info s"watching for changes in ${filename}"
-      val configWatcher = File( filename ).newWatcher( true )
-      configWatcher ! on( Events.ENTRY_MODIFY ) {
-        case _ => {
-          logger info s"config file watcher sending reload command due to change in ${config.planOrigin.description}"
-          listeners foreach { _ ! OutlierDetection.ReloadPlans }
-        }
-      }
-    }
+//    logger info s"Outlier plan origin: [${config.planOrigin}]"
+//    import java.nio.file.{ StandardWatchEventKinds => Events }
+//    import better.files.FileWatcher._
+//
+//    val Path = "@\\s+file:(.*):\\s+\\d+,".r
+//
+//    Path
+//    .findAllMatchIn( config.planOrigin.toString )
+//    .map { _ group 1 }
+//    .foreach { filename =>
+//      // note: attempting to watch a shared file wrt VirtualBox will not work (https://www.virtualbox.org/ticket/9069)
+//      // so dev testing of watching should be done by running the Java locally
+//      logger info s"watching for changes in ${filename}"
+//      val configWatcher = File( filename ).newWatcher( true )
+//      configWatcher ! on( Events.ENTRY_MODIFY ) {
+//        case _ => {
+//          logger info s"config file watcher sending reload command due to change in ${config.planOrigin.description}"
+//          listeners foreach { _ ! OutlierDetection.ReloadPlans }
+//        }
+//      }
+//    }
   }
 
   lazy val workflowFailuresMeter: Meter = metrics meter "workflow.failures"
@@ -310,7 +306,6 @@ object GraphiteLineup extends Instrumented with StrictLogging {
   def startMetricsReporter( config: Configuration ): Unit = {
     if ( config hasPath "lineup.metrics" ) {
       logger info s"""starting metric reporting with config: [${config getConfig "lineup.metrics"}]"""
-if ( config.hasPath("lineup.metrics.csv.dir") ) File( config.getString("lineup.metrics.csv.dir") ).createIfNotExists( asDirectory = true ) //todo remove with next peds version
       val reporter = Reporter.startReporter( config getConfig "lineup.metrics" )
       logger info s"metric reporter: [${reporter}]"
     } else {
@@ -319,8 +314,6 @@ if ( config.hasPath("lineup.metrics.csv.dir") ) File( config.getString("lineup.m
   }
 
   def startWorkflow( config: Configuration, reloader: () => V[Configuration] )( implicit system: ActorSystem ): ActorRef = {
-    val loadPlans: () => V[Seq[OutlierPlan]] = () => { reloader() map { _.plans } }
-
     system.actorOf(
       OutlierDetectionWorkflow.props(
         new OutlierDetectionWorkflow() with OneForOneStrategyFactory with OutlierDetectionWorkflow.ConfigurationProvider {
@@ -329,7 +322,6 @@ if ( config.hasPath("lineup.metrics.csv.dir") ) File( config.getString("lineup.m
           override def protocol: GraphiteSerializationProtocol = config.protocol
           override def windowDuration: FiniteDuration = config.windowDuration
           override def graphiteAddress: Option[InetSocketAddress] = config.graphiteAddress
-          override def makePlans: () => V[Seq[OutlierPlan]] = loadPlans
           override def configuration: Config = config
         }
       ),

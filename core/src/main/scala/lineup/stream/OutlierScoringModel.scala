@@ -2,6 +2,7 @@ package lineup.stream
 
 import java.util.concurrent.atomic.AtomicInteger
 import akka.stream.FanOutShape.{ Name, Init }
+import peds.commons.V
 
 import scala.concurrent.duration._
 import akka.actor._
@@ -83,6 +84,7 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
         OutlierDetection.detectOutlier(
           detector = detector,
           maxAllowedWait = config.detectionBudget,
+          plans = config.plans,
           parallelism = Runtime.getRuntime.availableProcessors() * 8
         )(
           system.dispatcher
