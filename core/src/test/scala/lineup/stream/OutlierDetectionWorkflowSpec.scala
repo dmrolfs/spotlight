@@ -2,8 +2,6 @@ package lineup.stream
 
 import java.net.InetSocketAddress
 import java.util.concurrent.atomic.AtomicInteger
-import lineup.analysis.outlier.OutlierDetection.PlanConfigurationProvider
-
 import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.duration._
 import akka.actor.{ ActorContext, Actor, ActorRef, Props }
@@ -39,7 +37,7 @@ class OutlierDetectionWorkflowSpec extends ParallelAkkaSpec with MockitoSugar wi
     import scalaz.Scalaz._
 
     val protocol = mock[GraphiteSerializationProtocol]
-    val makePlans: PlanConfigurationProvider.Creator = () => { Seq.empty[OutlierPlan].right }
+//    val makePlans: PlanConfigurationProvider.Creator = () => { Seq.empty[OutlierPlan].right }
     val config = mock[Config]
 
     val rateLimiter = TestProbe()
@@ -55,7 +53,7 @@ class OutlierDetectionWorkflowSpec extends ParallelAkkaSpec with MockitoSugar wi
         def protocol: GraphiteSerializationProtocol = fixture.protocol
         def windowDuration: FiniteDuration = 2.minutes
         def graphiteAddress: Option[InetSocketAddress] = Some( new InetSocketAddress("example.com", 20400) )
-        override def makePlans: PlanConfigurationProvider.Creator = fixture.makePlans
+//        override def makePlans: PlanConfigurationProvider.Creator = fixture.makePlans
         def configuration: Config = fixture.config
 
 

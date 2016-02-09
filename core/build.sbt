@@ -78,6 +78,7 @@ dockerfile in docker := {
   val targetBase = "/app"
   val artifactTargetPath = s"${targetBase}/${artifact.name}"
   val coreosPath = baseDirectory.value / ".." / "coreos"
+  val entryScript = ( coreosPath ** "lineup.sh" ).get.headOption
   val aspectjArtifactName = ( coreosPath ** "aspectjweaver-*.jar" ).get.headOption
   val sigarBinary = ( coreosPath ** "libsigar-amd64-linux.so" ).get.headOption
   val mainclass = mainClass.in( Compile, run ).value.getOrElse( sys.error("Expected exactly one main class") )
@@ -93,37 +94,68 @@ dockerfile in docker := {
       sigar <- sigarBinary
     } yield ( aspectj, sigar )
 
-    aspectAndSigar match {
-      case Some( (aspectj, sigar) ) => {
+    (entryScript, aspectAndSigar) match {
+      case ( Some(entry), Some( (aspectj, sigar) ) ) => {
+        copy( entry, targetBase + "/" + entry.name )
         copy( aspectj, targetBase + "/" + aspectj.name )
         copy( sigar, targetBase + "/sigar-bin/" + sigar.name )
 
-        entryPoint(
-          "java",
-          "-cp", "/etc/lineup:" + artifactTargetPath,
-          s"-Dconfig.resource=application-prod.conf",
+        entryPointShell(
+          s"${targetBase}/${entry.name}",
+          mainclass,
+          "/etc/lineup:" + artifactTargetPath,
+          "-Dconfig.resource=application-${LINEUP_ENV}.conf",
           s"-Djava.library.path=${targetBase}/sigar-bin/",
-          s"-javaagent:${targetBase}/${aspectj.name}",
-          mainclass
+          s"-javaagent:${targetBase}/${aspectj.name}"
         )
+//        entryPoint(
+//          targetBase + "/" + entry.name,
+//          "`-Dconfig.resource=application-$LINEUP_ENV.conf`",
+//          s"-Djava.library.path=${targetBase}/sigar-bin/",
+//          s"-javaagent:${targetBase}/${aspectj.name}",
+//          mainclass
+//        )
       }
 
-      case None => {
-        entryPoint(
-          "java",
-          "-cp", "/etc/lineup:" + artifactTargetPath ,
-          mainclass
-        )
-      }
+//      case ( None, Some( (aspectj, sigar) ) ) => {
+//        copy( aspectj, targetBase + "/" + aspectj.name )
+//        copy( sigar, targetBase + "/sigar-bin/" + sigar.name )
+//
+//        entryPoint(
+//          "java",
+//          "-cp", "/etc/lineup:" + artifactTargetPath,
+//          "-Dconfig.resource=application-devdocker.conf",
+//          s"-Djava.library.path=${targetBase}/sigar-bin/",
+//          s"-javaagent:${targetBase}/${aspectj.name}",
+//          mainclass
+//        )
+//      }
+//
+//      case ( Some(entry), None ) => {
+//        copy( entry, targetBase + "/" + entry.name )
+//
+//        entryPoint(
+//          targetBase + "/" + entry.name,
+//          "`-Dconfig.resource=application-$LINEUP_ENV.conf`",
+//          mainclass
+//        )
+//      }
+//
+//      case ( None, None ) => {
+//        entryPoint(
+//          "java",
+//          "-cp", "/etc/lineup:" + artifactTargetPath ,
+//          mainclass
+//        )
+//      }
     }
 
     env( "LOG_HOME", "/var/log" )
-    env( "CONFIG_HOME", "/etc/lineup" )
+//    env( "CONFIG_HOME", "/etc/lineup" )
+    env( "LINEUP_ENV", "prod" )
     expose( 2004 )
 
     expose( 22 )
-//    expose( 9010 )
-//    expose( 9110 )
   }
 }
 

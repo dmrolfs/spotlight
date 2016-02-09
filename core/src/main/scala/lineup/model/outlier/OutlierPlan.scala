@@ -1,5 +1,7 @@
 package lineup.model.outlier
 
+import peds.commons._
+
 import scala.concurrent.duration._
 import scala.util.matching.Regex
 import com.typesafe.config.{ ConfigOrigin, ConfigFactory, Config }
@@ -47,6 +49,8 @@ object OutlierPlan {
   val AlgorithmConfig: String = "algorithm-config"
 
   type ExtractTopic = PartialFunction[Any, Option[Topic]]
+
+  type Creator = () => V[Seq[OutlierPlan]]
 
 
   def apply(
