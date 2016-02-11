@@ -21,24 +21,26 @@ import peds.commons.util._
 object ParallelAkkaSpec {
   val sysId = new AtomicInteger()
 
-  val testConf: Config = ConfigFactory.parseString(
-    """
-      |akka {
-      |  loggers = ["akka.testkit.TestEventListener"]
-      |  loglevel = "INFO"
-      |  stdout-loglevel = "INFO"
-      |  actor {
-      |    default-dispatcher {
-      |      executor = "fork-join-executor"
-      |      fork-join-executor {
-      |        parallelism-min = 8
-      |        parallelism-factor = 2.0
-      |        parallelism-max = 8
-      |      }
-      |    }
-      |  }
-      |}
-    """.stripMargin
+  val testConf: Config = ConfigFactory.load.withFallback(
+    ConfigFactory.parseString(
+      """
+       |akka {
+       |  loggers = ["akka.testkit.TestEventListener"]
+       |  loglevel = "DEBUG"
+       |  stdout-loglevel = "DEBUG"
+       |  actor {
+       |    default-dispatcher {
+       |      executor = "fork-join-executor"
+       |      fork-join-executor {
+       |        parallelism-min = 8
+       |        parallelism-factor = 2.0
+       |        parallelism-max = 8
+       |      }
+       |    }
+       |  }
+       |}
+      """.stripMargin
+    )
   )
 
 
