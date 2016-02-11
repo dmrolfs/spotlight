@@ -134,7 +134,7 @@ class OutlierDetection extends Actor with InstrumentedActor with ActorLogging {
   def dispatch( m: OutlierDetectionMessage, p: OutlierPlan )( implicit ec: ExecutionContext ): ActorRef = trace.block( s"dispatch(${m.topic}, ${p.name}:${p.id})" ) {
     val aggregatorName = s"quorum-${p.name}-${fullExtractId(m) getOrElse "!NULL-ID!"}-${ShortUUID()}"
     val aggregator = context.actorOf( OutlierQuorumAggregator.props( p, m.source ), aggregatorName )
-    val history = updateHistory( m.source )
+    val history = updateHistory( m.source, p )
 
     p.algorithms foreach { a =>
       val detect = {
@@ -155,9 +155,10 @@ class OutlierDetection extends Actor with InstrumentedActor with ActorLogging {
 
 
   //todo store/hydrate
-  var _history: Map[Topic, HistoricalStatistics] = Map.empty[Topic, HistoricalStatistics]
-  def updateHistory( data: TimeSeriesBase ): HistoricalStatistics = {
-    val result = _history get data.topic getOrElse { HistoricalStatistics( 2, false ) }
+  var _history: Map[HistoryKey, HistoricalStatistics] = Map.empty[HistoryKey, HistoricalStatistics]
+  def updateHistory( data: TimeSeriesBase, plan: OutlierPlan ): HistoricalStatistics = {
+    val key = HistoryKey( plan, data.topic )
+    val result = _history get key getOrElse { HistoricalStatistics( 2, false ) }
 
     for {
       dp <- data match {
@@ -166,7 +167,7 @@ class OutlierDetection extends Actor with InstrumentedActor with ActorLogging {
       }
     } {
       result add dp.getPoint
-      _history += data.topic -> result
+      _history += key -> result
     }
 
     log.debug( "HISTORY for [{}]: [{}]", data.topic, result )
