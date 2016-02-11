@@ -237,7 +237,7 @@ class GraphitePublisher extends DenseOutlierPublisher {
         }
 
         case Failure(ex) => {
-          log.error( "open failed - could not connect with graphite server: [{}]", ex.getMessage )
+          log.error( "open failed - could not connect with graphite server [{}]: [{}]", destinationAddress, ex.getMessage )
           cancelNextSchedule()
         }
       }
