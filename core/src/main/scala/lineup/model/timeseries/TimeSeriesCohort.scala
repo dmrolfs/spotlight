@@ -113,6 +113,8 @@ object TimeSeriesCohort {
   ) extends TimeSeriesCohort {
     val trace = Trace[SimpleTimeSeriesCohort]
 
+    override def points: Row[DataPoint] = data flatMap { _.points }
+
     override val start: Option[joda.DateTime] = {
       val result = for {
         d <- data

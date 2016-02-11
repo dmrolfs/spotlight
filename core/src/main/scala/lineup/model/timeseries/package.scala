@@ -36,6 +36,7 @@ package object timeseries {
 
   trait TimeSeriesBase {
     def topic: Topic
+    def points: Row[DataPoint]
     def size: Int
     def start: Option[joda.DateTime]
     def end: Option[joda.DateTime]
