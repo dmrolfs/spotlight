@@ -60,7 +60,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
       reduce = Configuration.defaultOutlierReducer,
       specification = ConfigFactory.parseString(
         s"""
-          |algorithm-config.${algo.name}.eps: 5.0
+          |algorithm-config.${algo.name}.seedEps: 5.0
           |algorithm-config.${algo.name}.minDensityConnectedPoints: 3
         """.stripMargin
       )
@@ -188,7 +188,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
           algos
           .map { a =>
             s"""
-               |algorithm-config.${a.name}.eps: 5000
+               |algorithm-config.${a.name}.seedEps: 5000
                |algorithm-config.${a.name}.minDensityConnectedPoints: 9
                |algorithm-config.${a.name}.distance: Euclidean
             """.stripMargin

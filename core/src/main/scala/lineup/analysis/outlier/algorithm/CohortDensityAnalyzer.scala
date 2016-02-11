@@ -3,9 +3,10 @@ package lineup.analysis.outlier.algorithm
 import akka.actor.{ ActorRef, Props }
 import akka.event.LoggingReceive
 import scalaz._, Scalaz._
+import org.apache.commons.math3.ml.clustering.{ Cluster, DoublePoint }
 import org.apache.commons.math3.stat.{ descriptive => stat }
-import lineup.model.timeseries.{ Matrix, DataPoint }
-import lineup.model.outlier.{ CohortOutliers, NoOutliers }
+import lineup.model.timeseries.{ TimeSeries, Matrix, DataPoint }
+import lineup.model.outlier.{ Outliers, CohortOutliers, NoOutliers }
 import lineup.analysis.outlier.{ DetectUsing, DetectOutliersInCohort }
 
 
@@ -34,7 +35,7 @@ class CohortDensityAnalyzer( override val router: ActorRef ) extends DBSCANAnaly
         .toList
         .map { DataPoint.toDoublePoints }
         .map { frameDistances =>
-          cluster.run( TestContext(message = c, data = frameDistances) )
+          cluster.run( AnalyzerContext( message = c, data = frameDistances ) )
           .map { case (_, clusters) =>
             val isOutlier = makeOutlierTest( clusters )
             val ms = frameDistances.zipWithIndex collect { case (fd, i) if isOutlier( fd ) => i }
@@ -71,4 +72,7 @@ class CohortDensityAnalyzer( override val router: ActorRef ) extends DBSCANAnaly
       median = stats.getPercentile( 50 )
     } yield frameValues map { v => DataPoint( timestamp, v - median ) }
   }
+
+  //todo figure out how to unify into a single density algorithm
+  override def findOutliers( source: TimeSeries ): Op[(AnalyzerContext, Seq[Cluster[DoublePoint]]), Outliers] = ???
 }

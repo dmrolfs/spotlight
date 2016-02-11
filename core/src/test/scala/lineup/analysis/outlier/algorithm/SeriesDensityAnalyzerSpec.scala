@@ -42,7 +42,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
   override def makeAkkaFixture(): Fixture = new Fixture
 
   "SeriesDensityAnalyzer" should  {
-    "register with router upon create" in { f: Fixture =>
+    "register with router upon create" taggedAs (WIP) in { f: Fixture =>
       import f._
       val analyzer = TestActorRef[SeriesDensityAnalyzer]( SeriesDensityAnalyzer.props(router.ref) )
       router.expectMsgPF( 1.second.dilated, "register" ) {
@@ -63,7 +63,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
           None,
           ConfigFactory.parseString(
             s"""
-               |${algoS.name}.eps: 5.0
+               |${algoS.name}.seedEps: 5.0
                |${algoS.name}.minDensityConnectedPoints: 3
              """.stripMargin
           )
@@ -77,10 +77,10 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       val series = TimeSeries( "series", points )
       val expectedValues = Row( 18.8, 25.2, 31.5, 22.0, 24.1, 39.2 )
       val expected = points filter { expectedValues contains _.value } sortBy { _.timestamp }
-
       val algProps = ConfigFactory.parseString(
         s"""
-           |${algoS.name}.eps: 5.0
+           |${algoS.name}.tolerance: 1.70532639  // to bring effective eps to 5.0
+           |${algoS.name}.seedEps: 1.0
            |${algoS.name}.minDensityConnectedPoints: 3
            |${algoS.name}.distance: Euclidean
         """.stripMargin
@@ -129,7 +129,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
 
       val algProps = ConfigFactory.parseString(
         s"""
-           |${algoS.name}.eps: 5.0
+           |${algoS.name}.seedEps: 5.0
            |${algoS.name}.minDensityConnectedPoints: 3
         """.stripMargin
       )

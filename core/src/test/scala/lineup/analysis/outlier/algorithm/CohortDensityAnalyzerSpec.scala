@@ -83,7 +83,7 @@ class CohortDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
 
       val algProps = ConfigFactory.parseString(
         s"""
-           |${algoC.name}.eps: 5.0
+           |${algoC.name}.seedEps: 5.0
            |${algoC.name}.minDensityConnectedPoints: 2
         """.stripMargin
       )
@@ -123,7 +123,7 @@ class CohortDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
 
       val algProps = ConfigFactory.parseString(
         s"""
-           |${algoC.name}.eps: 5.0
+           |${algoC.name}.seedEps: 5.0
            |${algoC.name}.minDensityConnectedPoints: 2
         """.stripMargin
       )
@@ -179,7 +179,7 @@ class CohortDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
 
       val algProps = ConfigFactory.parseString(
         s"""
-           |${algoS.name}.eps: 5.0
+           |${algoS.name}.seedEps: 5.0
            |${algoS.name}.minDensityConnectedPoints: 3
         """.stripMargin
       )

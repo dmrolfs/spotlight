@@ -1,12 +1,11 @@
 package lineup.analysis.outlier.algorithm
 
 import akka.actor.{ ActorRef, Props }
-import akka.event.LoggingReceive
-import lineup.model.outlier.{ OutlierPlan, NoOutliers, SeriesOutliers, Outliers }
 import scalaz._, Scalaz._
-import lineup.analysis.outlier.{ HistoricalStatistics, DetectOutliersInSeries, DetectUsing }
+import org.apache.commons.math3.ml.clustering.DoublePoint
+import lineup.analysis.outlier.{ HistoricalStatistics, DetectUsing }
+import lineup.model.outlier.{ NoOutliers, SeriesOutliers, Outliers }
 import lineup.model.timeseries.{ TimeSeries, DataPoint }
-import org.apache.commons.math3.ml.clustering.{ Cluster, DoublePoint }
 
 
 /**
@@ -20,37 +19,28 @@ object SeriesCentroidDensityAnalyzer {
 class SeriesCentroidDensityAnalyzer( override val router: ActorRef ) extends DBSCANAnalyzer {
   override def algorithm: Symbol = SeriesCentroidDensityAnalyzer.Algorithm
 
-  override def detect: Receive = LoggingReceive {
-    case s @ DetectUsing( _, aggregator, payload: DetectOutliersInSeries, history, algorithmConfig ) => {
-      ( extractTestContext >==> cluster >==> findOutliers( payload.source ) ).run( s ) match {
-        case \/-( r ) => aggregator ! r
-        case -\/( ex ) => log.error( ex, "failed {} analysis on {}[{}]", algorithm.name, payload.topic, payload.source.interval )
-      }
-    }
-  }
-
-  override val extractTestContext: Op[DetectUsing, TestContext] = {
+  override val analyzerContext: Op[DetectUsing, AnalyzerContext] = {
     def centroidDistances( points: Seq[DoublePoint], history: Option[HistoricalStatistics] ): Seq[DoublePoint] = {
       val h = history getOrElse { HistoricalStatistics.fromActivePoints( points.toArray, false ) }
       val mean = h.mean( 1 )
-      val result = points map { _.getPoint } map { case Array(x, y) => new DoublePoint( Array(x, y - mean) ) }
+      val distFromCentroid = points map { _.getPoint } map { case Array(x, y) => new DoublePoint( Array(x, y - mean) ) }
       log.debug( "points             : [{}]", points.mkString(",") )
-      log.debug( "dists from centroid: [{}]", result.mkString(",") )
-      result
+      log.debug( "dists from centroid: [{}]", distFromCentroid.mkString(",") )
+      distFromCentroid
     }
 
-    Kleisli[TryV, DetectUsing, TestContext] { d =>
+    Kleisli[TryV, DetectUsing, AnalyzerContext] {d =>
       val points: TryV[Seq[DoublePoint]] = d.payload.source match {
         case s: TimeSeries => centroidDistances( DataPoint.toDoublePoints(s.points), d.history ).right
         case x => -\/( new UnsupportedOperationException( s"cannot extract test context from [${x.getClass}]" ) )
       }
 
-      points map { pts => TestContext( message = d, data = pts ) }
+      points map { pts => AnalyzerContext( message = d, data = pts ) }
     }
   }
 
-  def findOutliers( source: TimeSeries ): Op[(TestContext, Seq[Cluster[DoublePoint]]), Outliers] = {
-    Kleisli[TryV, (TestContext, Seq[Cluster[DoublePoint]]), Outliers] { case (context, clusters) =>
+  override def findOutliers( source: TimeSeries ): Op[(AnalyzerContext, Clusters), Outliers] = {
+    Kleisli[TryV, (AnalyzerContext, Clusters), Outliers] { case (context, clusters) =>
       val isOutlier = makeOutlierTest( clusters )
       val centroidOutliers: Set[Long] = {
         context.data
@@ -62,8 +52,7 @@ class SeriesCentroidDensityAnalyzer( override val router: ActorRef ) extends DBS
       val outliers = source.points filter { dp => centroidOutliers.contains( dp.getPoint.apply(0).toLong ) }
       if ( outliers.nonEmpty ) {
         SeriesOutliers( algorithms = Set(algorithm), source = source, outliers = outliers, plan = context.message.plan ).right
-      }
-      else {
+      } else {
         NoOutliers( algorithms = Set(algorithm), source = source, plan = context.message.plan ).right
       }
     }

@@ -63,7 +63,7 @@ class SeriesCentroidDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSug
           None,
           ConfigFactory.parseString(
             s"""
-               |${algoS.name}.eps: 5.0
+               |${algoS.name}.seedEps: 5.0
                |${algoS.name}.minDensityConnectedPoints: 3
              """.stripMargin
           )
@@ -71,7 +71,7 @@ class SeriesCentroidDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSug
       )
     }
 
-    "detect outlying points in series centroids" in { f: Fixture =>
+    "detect outlying points in series centroids without history" in { f: Fixture =>
       import f._
       val analyzer = TestActorRef[SeriesCentroidDensityAnalyzer]( SeriesCentroidDensityAnalyzer.props(router.ref) )
       val series = TimeSeries( "series", points )
@@ -80,7 +80,8 @@ class SeriesCentroidDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSug
 
       val algProps = ConfigFactory.parseString(
         s"""
-           |${algoS.name}.eps: 5.0
+           |${algoS.name}.tolerance: 0.01
+           |${algoS.name}.seedEps: 5
            |${algoS.name}.minDensityConnectedPoints: 3
            |${algoS.name}.distance: Euclidean
         """.stripMargin
@@ -99,7 +100,38 @@ class SeriesCentroidDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSug
       }
     }
 
-    "detect no outliers points in series centroids" taggedAs (WIP) in { f: Fixture =>
+    "detect outlying points in series centroids with history" taggedAs (WIP)  in { f: Fixture =>
+      import f._
+      val analyzer = TestActorRef[SeriesCentroidDensityAnalyzer]( SeriesCentroidDensityAnalyzer.props(router.ref) )
+      val series = TimeSeries( "series", points )
+      val expectedValues = Row( 18.8, 25.2, 31.5, 22.0, 24.1, 39.2 )
+      val expected = points filter { expectedValues contains _.value } sortBy { _.timestamp }
+
+      val algProps = ConfigFactory.parseString(
+        s"""
+           |${algoS.name}.tolerance: 0.65321171
+           |${algoS.name}.seedEps: 0.0
+           |${algoS.name}.minDensityConnectedPoints: 3
+           |${algoS.name}.distance: Euclidean
+        """.stripMargin
+      )
+
+      val history = HistoricalStatistics.fromActivePoints( DataPoint.toDoublePoints(points).toArray, false )
+      trace( s"history = $history" )
+      analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
+      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries( series, plan ), Some(history), algProps ) )
+      aggregator.expectMsgPF( 2.seconds.dilated, "detect" ) {
+        case m @ SeriesOutliers(alg, source, plan, outliers) => {
+          alg mustBe Set( algoS )
+          source mustBe series
+          m.hasAnomalies mustBe true
+          outliers.size mustBe 6
+          outliers mustBe expected
+        }
+      }
+    }
+
+    "detect no outliers points in series centroids" in { f: Fixture =>
       import f._
       val analyzer = TestActorRef[SeriesCentroidDensityAnalyzer]( SeriesCentroidDensityAnalyzer.props(router.ref) )
 
@@ -129,7 +161,7 @@ class SeriesCentroidDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSug
 
       val algProps = ConfigFactory.parseString(
         s"""
-           |${algoS.name}.eps: 5.0
+           |${algoS.name}.seedEps: 5.0
            |${algoS.name}.minDensityConnectedPoints: 3
         """.stripMargin
       )
@@ -165,7 +197,7 @@ class SeriesCentroidDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSug
 
       val algProps = ConfigFactory.parseString(
         s"""
-           |${algoC.name}.eps: 5.0
+           |${algoC.name}.seedEps: 5.0
            |${algoC.name}.minDensityConnectedPoints: 2
         """.stripMargin
       )
