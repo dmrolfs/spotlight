@@ -10,23 +10,29 @@ import org.apache.commons.math3.stat.descriptive.MultivariateSummaryStatistics
   * Created by rolfsd on 1/26/16.
   */
 trait HistoricalStatistics extends Serializable {
-  def add( point: Array[Double] ): HistoricalStatistics
+  import HistoricalStatistics.Point
+
+  def add( point: Point ): HistoricalStatistics
   def covariance: RealMatrix
   def dimension: Int
-  def geometricMean: Array[Double]
-  def max: Array[Double]
-  def mean: Array[Double]
-  def min: Array[Double]
+  def geometricMean: Point
+  def max: Point
+  def mean: Point
+  def min: Point
   def n: Long
-  def standardDeviation: Array[Double]
-  def sum: Array[Double]
-  def sumLog: Array[Double]
-  def sumOfSquares: Array[Double]
-  def hashCode: Int
+  def standardDeviation: Point
+  def sum: Point
+  def sumLog: Point
+  def sumOfSquares: Point
+  def lastPoints: Seq[Point]
+//  def hashCode: Int
 }
 
 
 object HistoricalStatistics {
+  type Point = Array[Double]
+  val LastN: Int = 3
+
   def apply( k: Int, isCovarianceBiasCorrected: Boolean ): HistoricalStatistics = {
     ApacheMath3HistoricalStatistics( new MultivariateSummaryStatistics(k, isCovarianceBiasCorrected) )
   }
@@ -37,24 +43,32 @@ object HistoricalStatistics {
 
 
   final case class ApacheMath3HistoricalStatistics private[outlier](
-    underlying: MultivariateSummaryStatistics
+    underlying: MultivariateSummaryStatistics,
+    override val lastPoints: Seq[Point] = Seq.empty[Point]
   ) extends HistoricalStatistics {
-    override def add( point: Array[Double] ): HistoricalStatistics = {
+    override def add( point: Point ): HistoricalStatistics = {
       underlying addValue point
-      this
+      this.copy( lastPoints = this.lastPoints.drop(this.lastPoints.size - LastN + 1) :+ point )
     }
 
     override def n: Long = underlying.getN
-    override def mean: Array[Double] = underlying.getMean
-    override def sumOfSquares: Array[Double] = underlying.getSumSq
-    override def max: Array[Double] = underlying.getMax
-    override def standardDeviation: Array[Double] = underlying.getStandardDeviation
-    override def geometricMean: Array[Double] = underlying.getGeometricMean
-    override def min: Array[Double] = underlying.getMin
-    override def sum: Array[Double] = underlying.getSum
+    override def mean: Point = underlying.getMean
+    override def sumOfSquares: Point = underlying.getSumSq
+    override def max: Point = underlying.getMax
+    override def standardDeviation: Point = underlying.getStandardDeviation
+    override def geometricMean: Point = underlying.getGeometricMean
+    override def min: Point = underlying.getMin
+    override def sum: Point = underlying.getSum
     override def covariance: RealMatrix = underlying.getCovariance
-    override def sumLog: Array[Double] = underlying.getSumLog
+    override def sumLog: Point = underlying.getSumLog
     override def dimension: Int = underlying.getDimension
+
+    override def toString: String = {
+      s"""
+         |${underlying.toString}
+         |lastPoints = [${lastPoints.map{_.mkString("(",",",")")}.mkString(",")}]
+       """.stripMargin
+    }
 
     //todo underlying serializable ops
   }
