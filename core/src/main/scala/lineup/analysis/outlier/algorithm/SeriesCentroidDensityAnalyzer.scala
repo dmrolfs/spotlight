@@ -17,6 +17,8 @@ object SeriesCentroidDensityAnalyzer {
 }
 
 class SeriesCentroidDensityAnalyzer( override val router: ActorRef ) extends DBSCANAnalyzer {
+  import DBSCANAnalyzer._
+
   override def algorithm: Symbol = SeriesCentroidDensityAnalyzer.Algorithm
 
   override val analyzerContext: Op[DetectUsing, AnalyzerContext] = {

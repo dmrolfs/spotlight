@@ -18,6 +18,8 @@ object SeriesDensityAnalyzer {
 }
 
 class SeriesDensityAnalyzer( override val router: ActorRef ) extends DBSCANAnalyzer {
+  import DBSCANAnalyzer._
+
   override val algorithm: Symbol = SeriesDensityAnalyzer.Algorithm
 
   override def findOutliers( source: TimeSeries ): Op[(AnalyzerContext, Clusters), Outliers] = {
@@ -54,25 +56,27 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends DBSCANAnaly
     }
   }
 
-  case class DistanceHistory( stats: HistoricalStatistics, last: Option[DoublePoint] )
-  var _distanceHistories: Map[HistoryKey, DistanceHistory] = Map.empty[HistoryKey, DistanceHistory]
-  val updateHistory: Op[(OutlierPlan, TimeSeriesBase, DistanceMeasure), DistanceHistory] = {
-    Kleisli[TryV, (OutlierPlan, TimeSeriesBase, DistanceMeasure), DistanceHistory] { case (plan, data, distance) =>
+  var _distanceHistories: Map[HistoryKey, HistoricalStatistics] = Map.empty[HistoryKey, HistoricalStatistics]
+  val updateHistory: Op[(OutlierPlan, TimeSeriesBase, DistanceMeasure), Option[HistoricalStatistics]] = {
+    Kleisli[TryV, (OutlierPlan, TimeSeriesBase, DistanceMeasure), Option[HistoricalStatistics]] { case (plan, data, distance) =>
       val key = HistoryKey( plan, data.topic )
-      val DistanceHistory( stats, last ) = _distanceHistories get key getOrElse {
-        DistanceHistory( HistoricalStatistics( 2, false ), None )
-      }
+      val initialHistory = _distanceHistories get key getOrElse { HistoricalStatistics( 2, false ) }
+      log.debug( "series density initial distance history = {}", initialHistory )
 
       // if no last value then start distance stats from head
       val points = DataPoint toDoublePoints data.points
-      val basis: Seq[(DoublePoint, DoublePoint)] = last map { l => points.zip( l +: points ) } getOrElse { (points drop 1).zip( points ) }
-      basis foreach { case (dp, prev) => stats add Array( dp.getPoint.head, distance.compute(prev.getPoint, dp.getPoint) ) }
+      val last = initialHistory.lastPoints.lastOption map { new DoublePoint( _ ) }
+      val basis = last map { l => points.zip( l +: points ) } getOrElse { (points drop 1).zip( points ) }
 
-      val result = DistanceHistory( stats, last = Option(data.points.last) )
-      _distanceHistories += key -> result
+      val updatedHistory = basis.foldLeft( initialHistory ) { case (h, (cur, prev)) =>
+        val ts = cur.getPoint.head
+        val dist = distance.compute( prev.getPoint, cur.getPoint )
+        h.add( Array(ts, dist) )
+      }
 
-      log.debug( "series density distance history = {}", stats )
-      result.right
+      _distanceHistories += key -> updatedHistory
+      log.debug( "series density updated distance history = {}", updatedHistory )
+      Option( updatedHistory ).right
     }
   }
 
@@ -83,6 +87,6 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends DBSCANAnaly
       d <- distanceMeasure
     } yield ( p, s, d )
 
-    planSourceAndDistance >=> updateHistory map { dh => Option( dh.stats ) }
+    planSourceAndDistance >=> updateHistory
   }
 }

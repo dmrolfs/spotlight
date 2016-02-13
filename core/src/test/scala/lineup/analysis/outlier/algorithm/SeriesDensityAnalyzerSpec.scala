@@ -1,7 +1,10 @@
 package lineup.analysis.outlier.algorithm
 
 import com.typesafe.config.ConfigFactory
+import org.apache.commons.math3.ml.clustering.DoublePoint
+import org.apache.commons.math3.ml.distance.EuclideanDistance
 
+import scala.concurrent.{ Future, ExecutionContext }
 import scala.concurrent.duration._
 import java.util.concurrent.atomic.AtomicInteger
 import akka.event.EventStream
@@ -11,7 +14,11 @@ import org.joda.{ time => joda }
 import com.github.nscala_time.time.OrderingImplicits._
 import org.apache.commons.math3.random.RandomDataGenerator
 import org.scalatest.mock.MockitoSugar
-import lineup.model.outlier.{ OutlierPlan, NoOutliers, CohortOutliers, SeriesOutliers }
+import org.mockito.Mockito._
+import org.mockito.Matchers._
+import org.mockito.invocation.InvocationOnMock
+import org.mockito.stubbing.Answer
+import lineup.model.outlier._
 import lineup.model.timeseries._
 import lineup.analysis.outlier._
 import lineup.testkit.ParallelAkkaSpec
@@ -23,10 +30,31 @@ import lineup.testkit.ParallelAkkaSpec
 class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
   import CohortDensityAnalyzerSpec._
 
+  object Fixture {
+    val appliesToAll: OutlierPlan.AppliesTo = {
+      val isQuorun: IsQuorum = IsQuorum.AtLeastQuorumSpecification(0, 0)
+      val reduce: ReduceOutliers = new ReduceOutliers {
+        override def apply(
+          results: OutlierAlgorithmResults,
+          source: TimeSeriesBase,
+          plan: OutlierPlan
+        )
+        (
+          implicit ec: ExecutionContext
+        ): Future[Outliers] = Future.failed( new IllegalStateException("should not use" ) )
+      }
+
+      OutlierPlan.default( "", 1.second, isQuorun, reduce, Set.empty[Symbol] ).appliesTo
+    }
+  }
+
   class Fixture extends AkkaFixture {
+    val metric = Topic( "metric.a" )
     val algoS = SeriesDensityAnalyzer.Algorithm
     val algoC = CohortDensityAnalyzer.Algorithm
     val plan = mock[OutlierPlan]
+    when( plan.appliesTo ).thenReturn( Fixture.appliesToAll )
+
     val router = TestProbe()
     val aggregator = TestProbe()
     val bus = mock[EventStream]
@@ -37,12 +65,40 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       val tweaked = s.points map { dp => valueLens.set( dp )( dp.value * factor ) }
       TimeSeries.pointsLens.set( s )( tweaked )
     }
+
+    def makeExpected( start: Option[HistoricalStatistics], points: Seq[DataPoint] ): HistoricalStatistics = {
+      val initialH = start getOrElse HistoricalStatistics( 2, false )
+      val last = initialH.lastPoints.lastOption map { new DoublePoint( _ ) }
+      val dps = DataPoint toDoublePoints points
+      val basis = last map { l => dps.zip( l +: dps ) } getOrElse { (dps drop 1).zip( dps ) }
+      basis.foldLeft( initialH ) { case (h, (c, p)) =>
+        val ts = c.getPoint.head
+        val d = new EuclideanDistance().compute( p.getPoint, c.getPoint )
+        h.add( Array(ts, d) )
+      }
+    }
   }
+
+  def assertHistoricalStats( actual: HistoricalStatistics, expected: HistoricalStatistics ): Unit = {
+    actual.dimension mustBe expected.dimension
+    actual.n mustBe expected.n
+    actual.max mustBe expected.max
+    actual.mean mustBe expected.mean
+    actual.min mustBe expected.min
+    actual.sum mustBe expected.sum
+    actual.lastPoints.flatten mustBe expected.lastPoints.flatten
+    actual.geometricMean mustBe expected.geometricMean
+    actual.standardDeviation mustBe expected.standardDeviation
+    actual.sumLog mustBe expected.sumLog
+    actual.sumOfSquares mustBe expected.sumOfSquares
+    actual.covariance mustBe expected.covariance
+  }
+
 
   override def makeAkkaFixture(): Fixture = new Fixture
 
   "SeriesDensityAnalyzer" should  {
-    "register with router upon create" taggedAs (WIP) in { f: Fixture =>
+    "register with router upon create" in { f: Fixture =>
       import f._
       val analyzer = TestActorRef[SeriesDensityAnalyzer]( SeriesDensityAnalyzer.props(router.ref) )
       router.expectMsgPF( 1.second.dilated, "register" ) {
@@ -178,6 +234,109 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
           actual mustBe expected
         }
       }
+    }
+
+
+    "history is updated with each detect request" taggedAs (WIP) in { f: Fixture =>
+      import f._
+
+      def detectUsing( message: OutlierDetectionMessage, history: Option[HistoricalStatistics] = None ): DetectUsing = {
+        val config = ConfigFactory.parseString(
+          s"""
+             |${algoS.name}.tolerance: 3
+             |${algoS.name}.seedEps: 1.0
+             |${algoS.name}.minDensityConnectedPoints: 3
+             |${algoS.name}.distance: Euclidean
+           """.stripMargin
+        )
+
+        DetectUsing( algorithm = algoS, aggregator.ref, payload = message, history, properties = config )
+      }
+
+      val analyzer = TestActorRef[SeriesDensityAnalyzer]( SeriesDensityAnalyzer.props( router.ref ) )
+      analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
+
+      val historyA = HistoricalStatistics.fromActivePoints( DataPoint.toDoublePoints(pointsA).toArray, false )
+      val msgA = detectUsing(
+        message = OutlierDetectionMessage( TimeSeries( topic = metric, points = pointsA ), plan ).toOption.get,
+        history = Option(historyA)
+      )
+
+      val ctxA = DBSCANAnalyzer.AnalyzerContext( msgA, DataPoint.toDoublePoints(pointsA) )
+      val expectedA = makeExpected( None, pointsA )
+      expectedA.n mustBe (pointsA.size - 1)
+      assertHistoricalStats( analyzer.underlyingActor.history.run(ctxA).toOption.get.get, expectedA )
+
+      val historyAB = DataPoint.toDoublePoints( pointsB ).foldLeft( historyA ){ (h, dp) => h.add( dp.getPoint ) }
+      val msgAB = detectUsing(
+        message = OutlierDetectionMessage( TimeSeries( topic = metric, points = pointsB ), plan ).toOption.get,
+        history = Option(historyAB)
+      )
+      val ctxAB = DBSCANAnalyzer.AnalyzerContext( msgAB, DataPoint.toDoublePoints(pointsB) )
+      val expectedAB = makeExpected( Some(expectedA), pointsB )
+      expectedAB.n mustBe (pointsA.size - 1 + pointsB.size)
+      trace( s"expectedAB = $expectedAB" )
+      assertHistoricalStats( analyzer.underlyingActor.history.run(ctxAB).toOption.get.get, expectedAB )
+
+      val analyzerB = TestActorRef[SeriesDensityAnalyzer]( SeriesDensityAnalyzer.props( router.ref ) )
+      analyzerB.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
+
+      val expectedB_A = makeExpected( None, pointsA )
+      analyzerB.underlyingActor._distanceHistories.get( HistoryKey(plan, metric) ) mustBe None
+      analyzerB receive msgA
+      aggregator.expectMsgPF( 2.seconds.dilated, "default-foo-A" ) {
+        case m: SeriesOutliers => {
+          assertHistoricalStats( analyzerB.underlyingActor._distanceHistories( HistoryKey(plan, metric) ),  expectedB_A )
+          m.topic mustBe metric
+          m.algorithms mustBe Set(algoS)
+          m.anomalySize mustBe 10
+        }
+      }
+
+      val expectedB_AB = makeExpected( Option(expectedB_A), pointsB )
+      analyzerB receive msgAB
+      aggregator.expectMsgPF( 2.seconds.dilated, "default-foo-AB" ){
+        case m: NoOutliers => {
+          assertHistoricalStats( analyzerB.underlyingActor._distanceHistories( HistoryKey(plan, metric) ), expectedB_AB )
+          m.topic mustBe metric
+          m.algorithms mustBe Set(algoS)
+          m.anomalySize mustBe 0
+        }
+      }
+//      router.expectMsgPF( 2.seconds.dilated, "default-routed-bar-A" ) {
+//        case m @ DetectUsing( algo, _, payload, history, properties ) => {
+//          m.topic mustBe metric
+//          algo must equal('bar)
+//          history.get.n mustBe pointsA.size
+//          assertHistoricalStats( history.get, expectedA )
+//        }
+//      }
+//
+//      val expectedAB = DataPoint.toDoublePoints( pointsB ).foldLeft( expectedA ){ (h, dp) => h.add( dp.getPoint ) }
+//      expectedAB.n mustBe (pointsA.size + pointsB.size)
+//      trace( s"expectedAB = $expectedAB" )
+//
+//      val msgB = OutlierDetectionMessage( TimeSeries( topic = metric, points = pointsB ), defaultPlan ).toOption.get
+//      detect receive msgB
+//
+//      router.expectMsgPF( 2.seconds.dilated, "default-routed-foo-AB" ) {
+//        case m @ DetectUsing( algo, _, payload, history, properties ) => {
+//          trace( s"history = $history" )
+//          m.topic mustBe metric
+//          algo must equal('foo)
+//          history.get.n mustBe (pointsA.size + pointsB.size)
+//          assertHistoricalStats( history.get, expectedAB )
+//        }
+//      }
+//
+//      router.expectMsgPF( 2.seconds.dilated, "default-routed-bar-AB" ) {
+//        case m @ DetectUsing( algo, _, payload, history, properties ) => {
+//          m.topic mustBe metric
+//          algo must equal('bar)
+//          history.get.n mustBe (pointsA.size + pointsB.size)
+//          assertHistoricalStats( history.get, expectedAB )
+//        }
+//      }
     }
 
     "handle no clusters found" in { f: Fixture => pending }

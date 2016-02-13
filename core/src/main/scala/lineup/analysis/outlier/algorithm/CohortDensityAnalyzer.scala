@@ -19,6 +19,8 @@ object CohortDensityAnalyzer {
 }
 
 class CohortDensityAnalyzer( override val router: ActorRef ) extends DBSCANAnalyzer {
+  import DBSCANAnalyzer._
+
   override val algorithm: Symbol = CohortDensityAnalyzer.Algorithm
 
   //todo: consider sensitivity here and in series!!!
