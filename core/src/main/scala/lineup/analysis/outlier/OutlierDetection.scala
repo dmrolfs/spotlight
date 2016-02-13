@@ -158,20 +158,13 @@ class OutlierDetection extends Actor with InstrumentedActor with ActorLogging {
   var _history: Map[HistoryKey, HistoricalStatistics] = Map.empty[HistoryKey, HistoricalStatistics]
   def updateHistory( data: TimeSeriesBase, plan: OutlierPlan ): HistoricalStatistics = {
     val key = HistoryKey( plan, data.topic )
-    val result = _history get key getOrElse { HistoricalStatistics( 2, false ) }
 
-    for {
-      dp <- data match {
-        case s: TimeSeries => s.points
-        case c: TimeSeriesCohort => c.data flatMap { _.points }
-      }
-    } {
-      result add dp.getPoint
-      _history += key -> result
-    }
+    val initHistory = _history get key getOrElse { HistoricalStatistics( 2, false ) }
+    val updatedHistory = data.points.foldLeft( initHistory ) { (h, dp) => h add dp.getPoint }
+    _history += key -> updatedHistory
 
-    log.debug( "HISTORY for [{}]: [{}]", data.topic, result )
-    result
+    log.debug( "HISTORY for [{}]: [{}]", data.topic, updatedHistory )
+    updatedHistory
   }
 
   var _score: Map[Topic, (Long, Long)] = Map.empty[Topic, (Long, Long)]
