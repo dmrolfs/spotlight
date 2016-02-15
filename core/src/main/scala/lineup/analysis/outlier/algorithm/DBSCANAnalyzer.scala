@@ -3,7 +3,6 @@ package lineup.analysis.outlier.algorithm
 import org.apache.commons.math3.ml.distance.DistanceMeasure
 
 import scalaz._, Scalaz._
-import scalaz.Kleisli.ask
 import scalaz.Kleisli.{ ask, kleisli }
 import akka.event.LoggingReceive
 import org.apache.commons.math3.ml.clustering.{ DBSCANClusterer, Cluster, DoublePoint }
