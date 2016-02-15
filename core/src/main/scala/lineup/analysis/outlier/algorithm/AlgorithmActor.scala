@@ -69,9 +69,9 @@ trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
 //    }
 //  }
 
-  def analyzerContext: Op[DetectUsing, AnalyzerContext] = {
-    Kleisli[TryV, DetectUsing, AnalyzerContext] { message =>
-      AnalyzerContext( message, DataPoint.toDoublePoints(message.source.points) ).right
+  def algorithmContext: Op[DetectUsing, Context] = {
+    Kleisli[TryV, DetectUsing, Context] {message =>
+      Context( message, DataPoint.toDoublePoints( message.source.points ) ).right
     }
   }
 //  val analyzerContext: Op[DetectUsing, AnalyzerContext] = {
@@ -112,7 +112,7 @@ trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
 //    Kleisli[TryV, AnalyzerContext, Seq[DoublePoint]] { _.data.right }
 //  }
 
-  val messageConfig: Op[AnalyzerContext, Config] = kleisli[TryV, AnalyzerContext, Config] { _.messageConfig.right }
+  val messageConfig: Op[Context, Config] = kleisli[TryV, Context, Config] {_.messageConfig.right }
 
 //  val distanceMeasure: Op[AnalyzerContext, DistanceMeasure] = {
 //    Kleisli[TryV, AnalyzerContext, DistanceMeasure] { _.distanceMeasure }
@@ -149,7 +149,7 @@ object AlgorithmActor {
   type Clusters = Seq[Cluster[DoublePoint]]
 
 
-  trait AnalyzerContext {
+  trait Context {
     def message: DetectUsing
     def data: Seq[DoublePoint]
     def algorithm: Symbol
@@ -161,13 +161,13 @@ object AlgorithmActor {
     def tolerance: TryV[Option[Double]]
   }
 
-  object AnalyzerContext {
+  object Context {
 //    //todo remove in favor of message and data?
 //    def fromMessage( message: DetectUsing ): Valid[AnalyzerContext] = {
 //      checkSource( message.payload.source ) map { pts => SimpleAnalyzerContext( message, data = pts ) }
 //    }
 //
-    def apply( message: DetectUsing, data: Seq[DoublePoint] ): AnalyzerContext = SimpleAnalyzerContext( message, data )
+    def apply( message: DetectUsing, data: Seq[DoublePoint] ): Context = SimpleContext( message, data )
 
 //    def checkSource( source: TimeSeriesBase ): Valid[Seq[DoublePoint]] = {
 //      source match {
@@ -198,7 +198,7 @@ object AlgorithmActor {
 //    }
 
 
-    final case class SimpleAnalyzerContext private[algorithm]( message: DetectUsing, data: Seq[DoublePoint] ) extends AnalyzerContext {
+    final case class SimpleContext private[algorithm]( message: DetectUsing, data: Seq[DoublePoint] ) extends Context {
       val algorithm: Symbol = message.algorithm
       def plan: OutlierPlan = message.plan
       def history: HistoricalStatistics = message.history

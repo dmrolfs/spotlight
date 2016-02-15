@@ -21,7 +21,7 @@ class SeriesCentroidDensityAnalyzer( override val router: ActorRef ) extends DBS
 
   override def algorithm: Symbol = SeriesCentroidDensityAnalyzer.Algorithm
 
-  override val analyzerContext: Op[DetectUsing, AnalyzerContext] = {
+  override val algorithmContext: Op[DetectUsing, Context] = {
     def centroidDistances( points: Seq[DoublePoint], history: HistoricalStatistics ): Seq[DoublePoint] = {
       val h = if ( history.n > 0 ) history else { HistoricalStatistics.fromActivePoints( points.toArray, false ) }
       val mean = h.mean( 1 )
@@ -31,18 +31,18 @@ class SeriesCentroidDensityAnalyzer( override val router: ActorRef ) extends DBS
       distFromCentroid
     }
 
-    Kleisli[TryV, DetectUsing, AnalyzerContext] { d =>
+    Kleisli[TryV, DetectUsing, Context] {d =>
       val points: TryV[Seq[DoublePoint]] = d.payload.source match {
         case s: TimeSeries => centroidDistances( DataPoint.toDoublePoints(s.points), d.history ).right
         case x => -\/( new UnsupportedOperationException( s"cannot extract test context from [${x.getClass}]" ) )
       }
 
-      points map { pts => AnalyzerContext( message = d, data = pts ) }
+      points map { pts => Context( message = d, data = pts ) }
     }
   }
 
-  override def findOutliers( source: TimeSeries ): Op[(AnalyzerContext, Clusters), Outliers] = {
-    Kleisli[TryV, (AnalyzerContext, Clusters), Outliers] { case (context, clusters) =>
+  override def findOutliers( source: TimeSeries ): Op[(Context, Clusters), Outliers] = {
+    Kleisli[TryV, (Context, Clusters), Outliers] { case (context, clusters) =>
       val isOutlier = makeOutlierTest( clusters )
       val centroidOutliers: Set[Long] = {
         context.data

@@ -262,7 +262,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
         history = historyA
       )
 
-      val ctxA = AlgorithmActor.AnalyzerContext( msgA, DataPoint.toDoublePoints(msgA.source.points) )
+      val ctxA = AlgorithmActor.Context( msgA, DataPoint.toDoublePoints( msgA.source.points ) )
       val expectedA = makeExpected( None, pointsA )
       expectedA.n mustBe (pointsA.size - 1)
       assertHistoricalStats( analyzer.underlyingActor.history.run(ctxA).toOption.get, expectedA )
@@ -272,7 +272,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
         message = OutlierDetectionMessage( TimeSeries( topic = metric, points = pointsB ), plan ).toOption.get,
         history = historyAB
       )
-      val ctxAB = AlgorithmActor.AnalyzerContext( msgAB, DataPoint.toDoublePoints(msgAB.source.points) )
+      val ctxAB = AlgorithmActor.Context( msgAB, DataPoint.toDoublePoints( msgAB.source.points ) )
       val expectedAB = makeExpected( Some(expectedA), pointsB )
       expectedAB.n mustBe (pointsA.size - 1 + pointsB.size)
       trace( s"expectedAB = $expectedAB" )

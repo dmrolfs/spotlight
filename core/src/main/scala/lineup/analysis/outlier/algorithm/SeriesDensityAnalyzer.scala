@@ -21,9 +21,9 @@ object SeriesDensityAnalyzer {
 
 
   class SeriesDensityContext(
-    underlying: AlgorithmActor.AnalyzerContext,
-    override val history: HistoricalStatistics
-  ) extends AlgorithmActor.AnalyzerContext {
+                              underlying: AlgorithmActor.Context,
+                              override val history: HistoricalStatistics
+  ) extends AlgorithmActor.Context {
     override def message: DetectUsing = underlying.message
     override def algorithm: Symbol = underlying.algorithm
     override def plan: OutlierPlan = underlying.plan
@@ -41,28 +41,28 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends DBSCANAnaly
 
   override val algorithm: Symbol = SeriesDensityAnalyzer.Algorithm
 
-  override def analyzerContext: Op[DetectUsing, AnalyzerContext] = {
+  override def algorithmContext: Op[DetectUsing, Context] = {
     val distanceHistoryArgs = for {
-      context <- ask[TryV, AnalyzerContext]
-      distance <- kleisli { ctx: AnalyzerContext => ctx.distanceMeasure }
+      context <- ask[TryV, Context]
+      distance <- kleisli { ctx: Context => ctx.distanceMeasure }
     } yield ( context.plan, context.source, distance )
 
     for {
-      context <- super.analyzerContext
-      distanceHistory <- updateHistory <=< distanceHistoryArgs <=< super.analyzerContext
+      context <- super.algorithmContext
+      distanceHistory <- updateHistory <=< distanceHistoryArgs <=< super.algorithmContext
     } yield {
       new SeriesDensityContext( underlying = context, distanceHistory )
     }
   }
 
-  override def findOutliers( source: TimeSeries ): Op[(AnalyzerContext, Clusters), Outliers] = {
-    val pullContext = Kleisli[TryV, (AnalyzerContext, Clusters), AnalyzerContext] { case (ctx, _) => ctx.right }
+  override def findOutliers( source: TimeSeries ): Op[(Context, Clusters), Outliers] = {
+    val pullContext = Kleisli[TryV, (Context, Clusters), Context] { case (ctx, _) => ctx.right }
 
-    val outliers: Op[(AnalyzerContext, Clusters), Seq[DataPoint]] = {
+    val outliers: Op[(Context, Clusters), Seq[DataPoint]] = {
       for {
-        contextAndClusters <- Kleisli.ask[TryV, (AnalyzerContext, Clusters)]
+        contextAndClusters <- Kleisli.ask[TryV, (Context, Clusters)]
         (context, clusters) = contextAndClusters
-        distance <- kleisli { ctx: AnalyzerContext => ctx.distanceMeasure } <=< pullContext
+        distance <- kleisli { ctx: Context => ctx.distanceMeasure } <=< pullContext
         isOutlier = makeOutlierTest( clusters )
       } yield {
         for {
@@ -114,10 +114,10 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends DBSCANAnaly
   }
 
 //todo  WORK HERE to lift mutable step -- maybe w phantom type?
-  val history: Op[AnalyzerContext, HistoricalStatistics] = {
+  val history: Op[Context, HistoricalStatistics] = {
     val planSourceAndDistance = for {
-      context <- ask[TryV, AnalyzerContext]
-      distance <- kleisli { ctx: AnalyzerContext => ctx.distanceMeasure }
+      context <- ask[TryV, Context]
+      distance <- kleisli { ctx: Context => ctx.distanceMeasure }
     } yield ( context.plan, context.source, distance )
 
     planSourceAndDistance >=> updateHistory
