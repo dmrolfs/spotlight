@@ -37,7 +37,7 @@ class SeriesCentroidDensityAnalyzer( override val router: ActorRef ) extends DBS
         case x => -\/( new UnsupportedOperationException( s"cannot extract test context from [${x.getClass}]" ) )
       }
 
-      points flatMap { pts => AnalyzerContext.fromMessageAndData( message = d, data = pts ).disjunction.leftMap{ exs => exs.head } }
+      points map { pts => AnalyzerContext( message = d, data = pts ) }
     }
   }
 

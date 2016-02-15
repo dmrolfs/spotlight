@@ -37,16 +37,13 @@ class CohortDensityAnalyzer( override val router: ActorRef ) extends DBSCANAnaly
         .toList
         .map { DataPoint.toDoublePoints }
         .map { frameDistances =>
-          AnalyzerContext.fromMessageAndData( message = c, data = frameDistances )
-          .disjunction
-          .leftMap{ exs => exs.head }
-          .flatMap { context =>
-            cluster.run( context )
-            .map { case (_, clusters) =>
-              val isOutlier = makeOutlierTest( clusters )
-              val ms = frameDistances.zipWithIndex collect { case (fd, i) if isOutlier( fd ) => i }
-              ms.toList
-            }
+          val context = AnalyzerContext( message = c, data = frameDistances )
+
+          cluster.run( context )
+          .map { case (_, clusters) =>
+            val isOutlier = makeOutlierTest( clusters )
+            val ms = frameDistances.zipWithIndex collect { case (fd, i) if isOutlier( fd ) => i }
+            ms.toList
           }
         }
       }

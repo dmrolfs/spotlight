@@ -70,7 +70,9 @@ trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
 //  }
 
   def analyzerContext: Op[DetectUsing, AnalyzerContext] = {
-    Kleisli[TryV, DetectUsing, AnalyzerContext] { message => AnalyzerContext.fromMessage( message ).disjunction.leftMap( exs => exs.head ) }
+    Kleisli[TryV, DetectUsing, AnalyzerContext] { message =>
+      AnalyzerContext( message, DataPoint.toDoublePoints(message.source.points) ).right
+    }
   }
 //  val analyzerContext: Op[DetectUsing, AnalyzerContext] = {
 //    Kleisli[TryV, DetectUsing, AnalyzerContext] { d =>
@@ -160,77 +162,76 @@ object AlgorithmActor {
   }
 
   object AnalyzerContext {
-    //todo remove in favor of message and data?
-    def fromMessage( message: DetectUsing ): Valid[AnalyzerContext] = {
-      checkSource( message.payload.source ) map { pts => SimpleAnalyzerContext( message, data = pts ) }
-    }
+//    //todo remove in favor of message and data?
+//    def fromMessage( message: DetectUsing ): Valid[AnalyzerContext] = {
+//      checkSource( message.payload.source ) map { pts => SimpleAnalyzerContext( message, data = pts ) }
+//    }
+//
+    def apply( message: DetectUsing, data: Seq[DoublePoint] ): AnalyzerContext = SimpleAnalyzerContext( message, data )
 
-    def fromMessageAndData( message: DetectUsing, data: Seq[DoublePoint] ): Valid[AnalyzerContext] = {
-      SimpleAnalyzerContext( message, data ).successNel
-    }
+//    def checkSource( source: TimeSeriesBase ): Valid[Seq[DoublePoint]] = {
+//      source match {
+//        case s: TimeSeries => DataPoint.toDoublePoints( s.points ).successNel
+//
+//        case c: TimeSeriesCohort => {
+//          //          def cohortDistances( cohort: TimeSeriesCohort ): Matrix[DataPoint] = {
+//          //            for {
+//          //              frame <- cohort.toMatrix
+//          //              timestamp = frame.head._1 // all of frame's _1 better be the same!!!
+//          //              frameValues = frame map { _._2 }
+//          //              stats = new DescriptiveStatistics( frameValues.toArray )
+//          //              median = stats.getPercentile( 50 )
+//          //            } yield frameValues map { v => DataPoint( timestamp, v - median ) }
+//          //          }
+//          //
+//          //          val outlierMarks: Row[Row[DoublePoint]] = for {
+//          //            frameDistances <- cohortDistances( c )
+//          //            points = frameDistances map { DataPoint.toDoublePoint }
+//          //          } yield points
+//
+//          //todo: work in progress as part of larger goal to type class b/h around outlier calcs
+//          Validation.failureNel( new UnsupportedOperationException( s"can't support cohorts yet" ) )
+//        }
+//
+//        case x => Validation.failureNel( new UnsupportedOperationException(s"cannot extract test context from [${x.getClass}]") )
+//      }
+//    }
 
-    def checkSource( source: TimeSeriesBase ): Valid[Seq[DoublePoint]] = {
-      source match {
-        case s: TimeSeries => DataPoint.toDoublePoints( s.points ).successNel
 
-        case c: TimeSeriesCohort => {
-          //          def cohortDistances( cohort: TimeSeriesCohort ): Matrix[DataPoint] = {
-          //            for {
-          //              frame <- cohort.toMatrix
-          //              timestamp = frame.head._1 // all of frame's _1 better be the same!!!
-          //              frameValues = frame map { _._2 }
-          //              stats = new DescriptiveStatistics( frameValues.toArray )
-          //              median = stats.getPercentile( 50 )
-          //            } yield frameValues map { v => DataPoint( timestamp, v - median ) }
-          //          }
-          //
-          //          val outlierMarks: Row[Row[DoublePoint]] = for {
-          //            frameDistances <- cohortDistances( c )
-          //            points = frameDistances map { DataPoint.toDoublePoint }
-          //          } yield points
+    final case class SimpleAnalyzerContext private[algorithm]( message: DetectUsing, data: Seq[DoublePoint] ) extends AnalyzerContext {
+      val algorithm: Symbol = message.algorithm
+      def plan: OutlierPlan = message.plan
+      def history: HistoricalStatistics = message.history
+      def source: TimeSeriesBase = message.source
+      def messageConfig: Config = message.properties
 
-          //todo: work in progress as part of larger goal to type class b/h around outlier calcs
-          Validation.failureNel( new UnsupportedOperationException( s"can't support cohorts yet" ) )
+      def distanceMeasure: TryV[DistanceMeasure] = {
+        def makeMahalanobisDistance: TryV[DistanceMeasure] = {
+          val mahal = if ( message.history.n > 0 ) {
+            MahalanobisDistance.fromCovariance( message.history.covariance )
+          } else {
+            MahalanobisDistance.fromPoints( MatrixUtils.createRealMatrix( data.toArray map { _.getPoint } ) )
+          }
+
+          mahal.disjunction.leftMap{ _.head }
         }
 
-        case x => Validation.failureNel( new UnsupportedOperationException(s"cannot extract test context from [${x.getClass}]") )
-      }
-    }
-  }
-
-  final case class SimpleAnalyzerContext private[algorithm]( message: DetectUsing, data: Seq[DoublePoint] ) extends AnalyzerContext {
-    val algorithm: Symbol = message.algorithm
-    def plan: OutlierPlan = message.plan
-    def history: HistoricalStatistics = message.history
-    def source: TimeSeriesBase = message.source
-    def messageConfig: Config = message.properties
-
-    def distanceMeasure: TryV[DistanceMeasure] = {
-      def makeMahalanobisDistance: TryV[DistanceMeasure] = {
-        val mahal = if ( message.history.n > 0 ) {
-          MahalanobisDistance.fromCovariance( message.history.covariance )
+        val distancePath = algorithm.name + ".distance"
+        if ( message.properties hasPath distancePath ) {
+          message.properties.getString( distancePath ).toLowerCase match {
+            case "euclidean" | "euclid" => new EuclideanDistance().right[Throwable]
+            case "mahalanobis" | "mahal" | _ => makeMahalanobisDistance
+          }
         } else {
-          MahalanobisDistance.fromPoints( MatrixUtils.createRealMatrix( data.toArray map { _.getPoint } ) )
+          makeMahalanobisDistance
         }
-
-        mahal.disjunction.leftMap{ _.head }
       }
 
-      val distancePath = algorithm.name + ".distance"
-      if ( message.properties hasPath distancePath ) {
-        message.properties.getString( distancePath ).toLowerCase match {
-          case "euclidean" | "euclid" => new EuclideanDistance().right[Throwable]
-          case "mahalanobis" | "mahal" | _ => makeMahalanobisDistance
+      def tolerance: TryV[Option[Double]] = {
+        val path = algorithm.name+".tolerance"
+        \/ fromTryCatchNonFatal {
+          if ( messageConfig hasPath path ) Some( messageConfig getDouble path ) else None
         }
-      } else {
-        makeMahalanobisDistance
-      }
-    }
-
-    def tolerance: TryV[Option[Double]] = {
-      val path = algorithm.name+".tolerance"
-      \/ fromTryCatchNonFatal {
-        if ( messageConfig hasPath path ) Some( messageConfig getDouble path ) else None
       }
     }
   }
