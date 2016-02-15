@@ -142,7 +142,7 @@ class OutlierDetection extends Actor with InstrumentedActor with ActorLogging {
           algorithm = a,
           aggregator = aggregator,
           payload = m,
-          history = Some(history),
+          history = history,
           properties = p.algorithmConfig
         )
       }

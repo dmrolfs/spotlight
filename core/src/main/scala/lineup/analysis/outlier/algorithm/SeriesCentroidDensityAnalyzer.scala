@@ -17,13 +17,13 @@ object SeriesCentroidDensityAnalyzer {
 }
 
 class SeriesCentroidDensityAnalyzer( override val router: ActorRef ) extends DBSCANAnalyzer {
-  import DBSCANAnalyzer._
+  import AlgorithmActor._
 
   override def algorithm: Symbol = SeriesCentroidDensityAnalyzer.Algorithm
 
   override val analyzerContext: Op[DetectUsing, AnalyzerContext] = {
-    def centroidDistances( points: Seq[DoublePoint], history: Option[HistoricalStatistics] ): Seq[DoublePoint] = {
-      val h = history getOrElse { HistoricalStatistics.fromActivePoints( points.toArray, false ) }
+    def centroidDistances( points: Seq[DoublePoint], history: HistoricalStatistics ): Seq[DoublePoint] = {
+      val h = if ( history.n > 0 ) history else { HistoricalStatistics.fromActivePoints( points.toArray, false ) }
       val mean = h.mean( 1 )
       val distFromCentroid = points map { _.getPoint } map { case Array(x, y) => new DoublePoint( Array(x, y - mean) ) }
       log.debug( "points             : [{}]", points.mkString(",") )
@@ -31,13 +31,13 @@ class SeriesCentroidDensityAnalyzer( override val router: ActorRef ) extends DBS
       distFromCentroid
     }
 
-    Kleisli[TryV, DetectUsing, AnalyzerContext] {d =>
+    Kleisli[TryV, DetectUsing, AnalyzerContext] { d =>
       val points: TryV[Seq[DoublePoint]] = d.payload.source match {
         case s: TimeSeries => centroidDistances( DataPoint.toDoublePoints(s.points), d.history ).right
         case x => -\/( new UnsupportedOperationException( s"cannot extract test context from [${x.getClass}]" ) )
       }
 
-      points map { pts => AnalyzerContext( message = d, data = pts ) }
+      points flatMap { pts => AnalyzerContext.fromMessageAndData( message = d, data = pts ).disjunction.leftMap{ exs => exs.head } }
     }
   }
 

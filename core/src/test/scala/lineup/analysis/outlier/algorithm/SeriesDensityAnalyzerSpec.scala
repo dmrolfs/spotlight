@@ -116,7 +116,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
           algoS,
           aggregator.ref,
           DetectOutliersInSeries( TimeSeries("series", points), plan ),
-          None,
+          HistoricalStatistics(2, false),
           ConfigFactory.parseString(
             s"""
                |${algoS.name}.seedEps: 5.0
@@ -127,7 +127,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       )
     }
 
-    "detect outlying points in series" in { f: Fixture =>
+    "detect outlying points in series" taggedAs (WIP) in { f: Fixture =>
       import f._
       val analyzer = TestActorRef[SeriesDensityAnalyzer]( SeriesDensityAnalyzer.props(router.ref) )
       val series = TimeSeries( "series", points )
@@ -143,7 +143,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       )
 
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
-      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries( series, plan ), None, algProps ) )
+      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries( series, plan ), HistoricalStatistics(2, false), algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "detect" ) {
         case m @ SeriesOutliers(alg, source, plan, outliers) => {
           alg mustBe Set( algoS )
@@ -191,7 +191,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       )
 
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
-      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries( series, plan ), None, algProps ) )
+      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries( series, plan ), HistoricalStatistics(2, false), algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "detect" ) {
         //todo stream envelope
         //        case Envelope(SeriesOutliers(alg, source, outliers), hdr) => {
@@ -226,7 +226,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
         """.stripMargin
       )
 
-      val expected = DetectUsing( algoC, aggregator.ref, DetectOutliersInCohort(cohort, plan), None, algProps )
+      val expected = DetectUsing( algoC, aggregator.ref, DetectOutliersInCohort(cohort, plan), HistoricalStatistics(2, false), algProps )
       analyzer.receive( expected )
       aggregator.expectMsgPF( 2.seconds.dilated, "detect" ) {
         case UnrecognizedPayload( alg, actual ) => {
@@ -237,10 +237,10 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
     }
 
 
-    "history is updated with each detect request" taggedAs (WIP) in { f: Fixture =>
+    "history is updated with each detect request" in { f: Fixture =>
       import f._
 
-      def detectUsing( message: OutlierDetectionMessage, history: Option[HistoricalStatistics] = None ): DetectUsing = {
+      def detectUsing( message: OutlierDetectionMessage, history: HistoricalStatistics ): DetectUsing = {
         val config = ConfigFactory.parseString(
           s"""
              |${algoS.name}.tolerance: 3
@@ -259,24 +259,24 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       val historyA = HistoricalStatistics.fromActivePoints( DataPoint.toDoublePoints(pointsA).toArray, false )
       val msgA = detectUsing(
         message = OutlierDetectionMessage( TimeSeries( topic = metric, points = pointsA ), plan ).toOption.get,
-        history = Option(historyA)
+        history = historyA
       )
 
-      val ctxA = DBSCANAnalyzer.AnalyzerContext( msgA, DataPoint.toDoublePoints(pointsA) )
+      val ctxA = AlgorithmActor.AnalyzerContext.fromMessage( msgA ).toOption.get
       val expectedA = makeExpected( None, pointsA )
       expectedA.n mustBe (pointsA.size - 1)
-      assertHistoricalStats( analyzer.underlyingActor.history.run(ctxA).toOption.get.get, expectedA )
+      assertHistoricalStats( analyzer.underlyingActor.history.run(ctxA).toOption.get, expectedA )
 
       val historyAB = DataPoint.toDoublePoints( pointsB ).foldLeft( historyA ){ (h, dp) => h.add( dp.getPoint ) }
       val msgAB = detectUsing(
         message = OutlierDetectionMessage( TimeSeries( topic = metric, points = pointsB ), plan ).toOption.get,
-        history = Option(historyAB)
+        history = historyAB
       )
-      val ctxAB = DBSCANAnalyzer.AnalyzerContext( msgAB, DataPoint.toDoublePoints(pointsB) )
+      val ctxAB = AlgorithmActor.AnalyzerContext.fromMessage( msgAB ).toOption.get
       val expectedAB = makeExpected( Some(expectedA), pointsB )
       expectedAB.n mustBe (pointsA.size - 1 + pointsB.size)
       trace( s"expectedAB = $expectedAB" )
-      assertHistoricalStats( analyzer.underlyingActor.history.run(ctxAB).toOption.get.get, expectedAB )
+      assertHistoricalStats( analyzer.underlyingActor.history.run(ctxAB).toOption.get, expectedAB )
 
       val analyzerB = TestActorRef[SeriesDensityAnalyzer]( SeriesDensityAnalyzer.props( router.ref ) )
       analyzerB.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )

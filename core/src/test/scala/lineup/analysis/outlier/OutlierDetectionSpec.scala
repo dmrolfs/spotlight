@@ -301,8 +301,8 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
         case m @ DetectUsing( algo, _, payload, history, properties ) => {
           m.topic mustBe metric
           algo must equal('foo)
-          history.get.n mustBe pointsA.size
-          assertHistoricalStats( history.get, expectedA )
+          history.n mustBe pointsA.size
+          assertHistoricalStats( history, expectedA )
         }
       }
 
@@ -310,8 +310,8 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
         case m @ DetectUsing( algo, _, payload, history, properties ) => {
           m.topic mustBe metric
           algo must equal('bar)
-          history.get.n mustBe pointsA.size
-          assertHistoricalStats( history.get, expectedA )
+          history.n mustBe pointsA.size
+          assertHistoricalStats( history, expectedA )
         }
       }
 
@@ -327,8 +327,8 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
           trace( s"history = $history" )
           m.topic mustBe metric
           algo must equal('foo)
-          history.get.n mustBe (pointsA.size + pointsB.size)
-          assertHistoricalStats( history.get, expectedAB )
+          history.n mustBe (pointsA.size + pointsB.size)
+          assertHistoricalStats( history, expectedAB )
         }
       }
 
@@ -336,8 +336,8 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
         case m @ DetectUsing( algo, _, payload, history, properties ) => {
           m.topic mustBe metric
           algo must equal('bar)
-          history.get.n mustBe (pointsA.size + pointsB.size)
-          assertHistoricalStats( history.get, expectedAB )
+          history.n mustBe (pointsA.size + pointsB.size)
+          assertHistoricalStats( history, expectedAB )
         }
       }
     }

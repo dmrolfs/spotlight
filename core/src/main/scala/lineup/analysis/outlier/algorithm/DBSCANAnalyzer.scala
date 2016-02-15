@@ -1,34 +1,26 @@
 package lineup.analysis.outlier.algorithm
 
-import scalaz._, Scalaz._
-import akka.event.LoggingReceive
-import org.apache.commons.math3.linear.MatrixUtils
 import org.apache.commons.math3.ml.distance.DistanceMeasure
+
+import scalaz._, Scalaz._
+import scalaz.Kleisli.ask
+import scalaz.Kleisli.{ ask, kleisli }
+import akka.event.LoggingReceive
 import org.apache.commons.math3.ml.clustering.{ DBSCANClusterer, Cluster, DoublePoint }
-import org.apache.commons.math3.ml.distance.EuclideanDistance
 import com.typesafe.config.Config
 import org.slf4j.LoggerFactory
-import peds.commons.math.MahalanobisDistance
-import lineup.model.outlier.{ OutlierPlan, Outliers }
+import lineup.model.outlier.Outliers
 import lineup.model.timeseries._
-import lineup.analysis.outlier.{ DetectOutliersInSeries, DetectUsing, HistoricalStatistics }
+import lineup.analysis.outlier.{ DetectOutliersInSeries, DetectUsing }
 
 
 /**
  * Created by rolfsd on 9/29/15.
  */
-object DBSCANAnalyzer {
-  case class AnalyzerContext( message: DetectUsing, data: Seq[DoublePoint] )
-}
-
 trait DBSCANAnalyzer extends AlgorithmActor {
-  import DBSCANAnalyzer._
+  import AlgorithmActor._
 
   val trainingLogger = LoggerFactory getLogger "Training"
-
-  type TryV[T] = \/[Throwable, T]
-  type Op[I, O] = Kleisli[TryV, I, O]
-  type Clusters = Seq[Cluster[DoublePoint]]
 
 
   override val detect: Receive = LoggingReceive {
@@ -51,20 +43,6 @@ trait DBSCANAnalyzer extends AlgorithmActor {
   def findOutliers( source: TimeSeries ): Op[(AnalyzerContext, Seq[Cluster[DoublePoint]]), Outliers]
 
 
-  def identityK[T]: Op[T, T] = Kleisli[TryV, T, T] { _.right }
-
-  val plan: Op[AnalyzerContext, OutlierPlan] = Kleisli[TryV, AnalyzerContext, OutlierPlan] { ctx => ctx.message.plan.right }
-
-  val history: Op[AnalyzerContext, Option[HistoricalStatistics]] = {
-    Kleisli[TryV, AnalyzerContext, Option[HistoricalStatistics]] { _.message.history.right }
-  }
-
-  val tolerance: Op[Config, Option[Double]] = Kleisli[TryV, Config, Option[Double]] { c =>
-    \/ fromTryCatchNonFatal {
-      if ( c hasPath algorithm.name+".tolerance" ) Some( c getDouble algorithm.name+".tolerance" ) else None
-    }
-  }
-
   val seedEps: Op[Config, Double] = Kleisli[TryV, Config, Double] { c =>
     \/ fromTryCatchNonFatal { c getDouble algorithm.name +".seedEps" }
   }
@@ -73,88 +51,22 @@ trait DBSCANAnalyzer extends AlgorithmActor {
     Kleisli[TryV, Config, Int] { c => \/ fromTryCatchNonFatal { c getInt algorithm.name+".minDensityConnectedPoints" } }
   }
 
-  val analyzerContext: Op[DetectUsing, AnalyzerContext] = {
-    Kleisli[TryV, DetectUsing, AnalyzerContext] { d =>
-      val points: TryV[Seq[DoublePoint]] = d.payload.source match {
-        case s: TimeSeries => DataPoint.toDoublePoints( s.points ).right[Throwable]
-
-        case c: TimeSeriesCohort => {
-//          def cohortDistances( cohort: TimeSeriesCohort ): Matrix[DataPoint] = {
-//            for {
-//              frame <- cohort.toMatrix
-//              timestamp = frame.head._1 // all of frame's _1 better be the same!!!
-//              frameValues = frame map { _._2 }
-//              stats = new DescriptiveStatistics( frameValues.toArray )
-//              median = stats.getPercentile( 50 )
-//            } yield frameValues map { v => DataPoint( timestamp, v - median ) }
-//          }
-//
-//          val outlierMarks: Row[Row[DoublePoint]] = for {
-//            frameDistances <- cohortDistances( c )
-//            points = frameDistances map { DataPoint.toDoublePoint }
-//          } yield points
-
-          //todo: work in progress as part of larger goal to type class b/h around outlier calcs
-          -\/( new UnsupportedOperationException( s"can't support cohorts yet" ) )
-        }
-
-        case x => -\/( new UnsupportedOperationException( s"cannot extract test context from [${x.getClass}]" ) )
-      }
-
-      points map { pts => AnalyzerContext( data = pts, message = d ) }
-    }
-  }
-
-  val source: Op[AnalyzerContext, TimeSeriesBase] = Kleisli[TryV, AnalyzerContext, TimeSeriesBase] { _.message.source.right }
-
-  val payload: Op[AnalyzerContext, Seq[DoublePoint]] = {
-    Kleisli[TryV, AnalyzerContext, Seq[DoublePoint]] { case AnalyzerContext(_, payload ) => payload.right }
-  }
-
-  val messageConfig: Op[AnalyzerContext, Config] = {
-    Kleisli[TryV, AnalyzerContext, Config] { case AnalyzerContext(message, _ ) => message.properties.right }
-  }
-
-  val distanceMeasure: Op[AnalyzerContext, DistanceMeasure] = {
-    Kleisli[TryV, AnalyzerContext, DistanceMeasure] { case AnalyzerContext( message, data ) =>
-      def makeMahalanobisDistance: TryV[DistanceMeasure] = {
-        val mahal = message.history map { h =>
-          MahalanobisDistance.fromCovariance( h.covariance )
-        } getOrElse {
-          MahalanobisDistance.fromPoints( MatrixUtils.createRealMatrix( data.toArray map { _.getPoint } ) )
-        }
-
-        mahal.disjunction.leftMap{ _.head }
-      }
-
-      val distancePath = algorithm.name + ".distance"
-      if ( message.properties hasPath distancePath ) {
-        message.properties.getString( distancePath ).toLowerCase match {
-          case "euclidean" | "euclid" => new EuclideanDistance().right[Throwable]
-          case "mahalanobis" | "mahal" | _ => makeMahalanobisDistance
-        }
-      } else {
-        makeMahalanobisDistance
-      }
-    }
-  }
-
   val eps: Op[AnalyzerContext, Double] = {
     val epsContext = for {
-      ctx <- identityK[AnalyzerContext]
+      context <- ask[TryV, AnalyzerContext]
       config <- messageConfig
-      hist <- history
-      tol <- tolerance <=< messageConfig
-    } yield ( ctx, config, hist, tol )
+      tol <- kleisli[TryV, AnalyzerContext, Option[Double]] { _.tolerance }
+    } yield ( context, config, context.history, tol )
 
     epsContext flatMapK { case (ctx, config, hist, tol) =>
       log.debug( "eps config = {}", config )
       log.debug( "eps history = {}", hist )
       log.debug( "eps tolerance = {}", tol )
+
+      val sd = hist.standardDeviation( 1 )
+      log.debug( "eps historical std dev = {}", sd )
+
       val calculatedEps = for {
-        h <- hist
-        sd = h.standardDeviation( 1 )
-        _ = log.debug( "eps historical std dev = {}", sd )
         stddev <- if ( sd.isNaN ) None else Some( sd )
         t <- tol
       } yield { t * stddev }
@@ -162,7 +74,8 @@ trait DBSCANAnalyzer extends AlgorithmActor {
       trainingLogger.debug(
         "[{}][{}][{}] eps calculated = {}",
         ctx.message.plan.name,
-        ctx.message.topic, hist.map{ _.n },
+        ctx.message.topic,
+        hist.n.toString,
         calculatedEps
       )
 
@@ -177,19 +90,19 @@ trait DBSCANAnalyzer extends AlgorithmActor {
 
   val cluster: Op[AnalyzerContext, (AnalyzerContext, Seq[Cluster[DoublePoint]])] = {
     for {
-      ctx <- identityK[AnalyzerContext]
-      payload <- payload
+      ctx <- ask[TryV, AnalyzerContext]
+      data = ctx.data
       e <- eps
       minDensityPts <- minDensityConnectedPoints <=< messageConfig
-      distance <- distanceMeasure
+      distance <- kleisli[TryV, AnalyzerContext, DistanceMeasure] { _.distanceMeasure }
     } yield {
       log.info( "cluster [{}]: eps = [{}]", ctx.message.topic, e )
       log.debug( "cluster: minDensityConnectedPoints = [{}]", minDensityPts )
       log.debug( "cluster: distanceMeasure = [{}]", distance )
-      log.debug( "cluster: payload = [{}]", payload.mkString(",") )
+      log.debug( "cluster: data = [{}]", data.mkString(",") )
 
       import scala.collection.JavaConverters._
-      ( ctx, new DBSCANClusterer[DoublePoint]( e, minDensityPts, distance ).cluster( payload.asJava ).asScala.toSeq )
+      ( ctx, new DBSCANClusterer[DoublePoint]( e, minDensityPts, distance ).cluster( data.asJava ).asScala.toSeq )
     }
   }
 
