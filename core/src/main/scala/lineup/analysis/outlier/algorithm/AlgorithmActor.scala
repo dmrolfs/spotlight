@@ -55,12 +55,12 @@ trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
   // -- algorithm functional elements --
 
   def algorithmContext: Op[DetectUsing, Context] = {
-    Kleisli[TryV, DetectUsing, Context] {message =>
-      Context( message, DataPoint.toDoublePoints( message.source.points ) ).right
-    }
+    Kleisli[TryV, DetectUsing, Context] { m => Context( m, DataPoint.toDoublePoints( m.source.points ) ).right }
   }
 
-  val messageConfig: Op[Context, Config] = kleisli[TryV, Context, Config] {_.messageConfig.right }
+  val tolerance: Op[Context, Option[Double]] = Kleisli[TryV, Context, Option[Double]] { _.tolerance }
+
+  val messageConfig: Op[Context, Config] = kleisli[TryV, Context, Config] { _.messageConfig.right }
 
 }
 
