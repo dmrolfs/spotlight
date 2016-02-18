@@ -1,10 +1,14 @@
 package lineup.model.outlier
 
+import peds.commons.Valid
+
 import scala.annotation.tailrec
 import org.joda.{ time => joda }
 import peds.commons.log.Trace
 import peds.commons.util._
 import lineup.model.timeseries._
+
+import scalaz.Validation
 
 
 //todo re-seal with FanOutShape Outlier Detection
@@ -53,11 +57,60 @@ trait Outliers extends Equals {
 }
 
 object Outliers {
+  import scalaz._, Scalaz._
+
   type OutlierGroups = Map[joda.DateTime, Double]
+
+  def forSeries( algorithms: Set[Symbol], plan: OutlierPlan, source: TimeSeriesBase, outliers: Row[DataPoint] ): Valid[Outliers] = {
+    ( checkAlgorithms( algorithms, plan ) |@| checkSeriesSource( source, plan ) |@| checkOutliers( outliers, source ) ) { (a, s, o) =>
+      if ( o.isEmpty ) NoOutliers( algorithms = a, source = s, plan = plan )
+      else SeriesOutliers( algorithms = a, source = s, plan = plan, outliers = o )
+    }
+  }
+
+  //todo
+  def forCohort( algorithms: Set[Symbol], plan: OutlierPlan, source: TimeSeriesBase, outliers: Row[TimeSeries] ): Valid[Outliers] = ???
 
   def unapply( so: Outliers ): Option[(Topic, Set[Symbol], Boolean, so.Source)] = {
     Some( (so.topic, so.algorithms, so.hasAnomalies, so.source) )
   }
+
+
+  def checkAlgorithms( algorithms: Set[Symbol], plan: OutlierPlan ): Valid[Set[Symbol]] = {
+    val notIncluded = algorithms filter { !plan.algorithms.contains(_) }
+    if ( notIncluded.isEmpty ) algorithms.successNel
+    else Validation.failureNel( PlanAlgorithmsMismatchError( notIncluded, plan ) )
+  }
+
+  def checkSeriesSource( source: TimeSeriesBase, plan: OutlierPlan ): Valid[TimeSeries] = {
+    if ( !plan.appliesTo( source ) ) Validation.failureNel( PlanSourceMismatchError(source, plan) )
+    else {
+      source match {
+        case series: TimeSeries => series.successNel
+        case s => Validation.failureNel( PlanSourceMismatchError(s, plan) )
+      }
+    }
+  }
+
+  def checkOutliers( outliers: Row[DataPoint], source: TimeSeriesBase ): Valid[Row[DataPoint]] = {
+    val timestamps = source.points.map{ _.timestamp }.toSet
+    val notIncluded = outliers filter { o => !timestamps.contains( o.timestamp ) }
+    if ( notIncluded.isEmpty ) outliers.successNel
+    else Validation.failureNel( SourceOutliersMismatchError( notIncluded, source ) )
+  }
+
+
+  final case class PlanAlgorithmsMismatchError private[outlier](algorithms: Set[Symbol], plan: OutlierPlan )
+    extends IllegalArgumentException( s"""cannot create Outliers for algorithms[${algorithms.mkString(",")}] not included in plan [$plan]""" )
+
+
+  final case class PlanSourceMismatchError private[outlier]( source: TimeSeriesBase, plan: OutlierPlan )
+    extends IllegalArgumentException( s"""cannot create Outliers since plan [$plan] does not apply to source[${source.topic}]""" )
+
+
+  final case class SourceOutliersMismatchError private[outlier](outliers: Row[DataPoint], source: TimeSeriesBase )
+    extends IllegalArgumentException( s"""cannot create Outliers for outliers[${outliers.mkString(",")}] not included in source [${source}]""" )
+
 }
 
 case class NoOutliers(
