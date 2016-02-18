@@ -28,7 +28,7 @@ import lineup.testkit.ParallelAkkaSpec
  * Created by damonrolfs on 9/18/14.
  */
 class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
-  import CohortDensityAnalyzerSpec._
+  import SeriesDensityAnalyzerSpec._
 
   object Fixture {
     val appliesToAll: OutlierPlan.AppliesTo = {
@@ -262,21 +262,19 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
         history = historyA
       )
 
-      val ctxA = AlgorithmActor.Context( msgA, DataPoint.toDoublePoints( msgA.source.points ) )
       val expectedA = makeExpected( None, pointsA )
       expectedA.n mustBe (pointsA.size - 1)
-      assertHistoricalStats( analyzer.underlyingActor.history.run(ctxA).toOption.get, expectedA )
+      assertHistoricalStats( analyzer.underlyingActor.algorithmContext.run(msgA).toOption.get.history, expectedA )
 
       val historyAB = DataPoint.toDoublePoints( pointsB ).foldLeft( historyA ){ (h, dp) => h.add( dp.getPoint ) }
       val msgAB = detectUsing(
         message = OutlierDetectionMessage( TimeSeries( topic = metric, points = pointsB ), plan ).toOption.get,
         history = historyAB
       )
-      val ctxAB = AlgorithmActor.Context( msgAB, DataPoint.toDoublePoints( msgAB.source.points ) )
       val expectedAB = makeExpected( Some(expectedA), pointsB )
       expectedAB.n mustBe (pointsA.size - 1 + pointsB.size)
       trace( s"expectedAB = $expectedAB" )
-      assertHistoricalStats( analyzer.underlyingActor.history.run(ctxAB).toOption.get, expectedAB )
+      assertHistoricalStats( analyzer.underlyingActor.algorithmContext.run(msgAB).toOption.get.history, expectedAB )
 
       val analyzerB = TestActorRef[SeriesDensityAnalyzer]( SeriesDensityAnalyzer.props( router.ref ) )
       analyzerB.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )

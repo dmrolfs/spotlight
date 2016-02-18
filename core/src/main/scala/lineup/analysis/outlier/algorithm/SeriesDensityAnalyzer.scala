@@ -21,8 +21,8 @@ object SeriesDensityAnalyzer {
 
 
   class SeriesDensityContext(
-                              underlying: AlgorithmActor.Context,
-                              override val history: HistoricalStatistics
+    underlying: AlgorithmActor.Context,
+    override val history: HistoricalStatistics
   ) extends AlgorithmActor.Context {
     override def message: DetectUsing = underlying.message
     override def algorithm: Symbol = underlying.algorithm
@@ -111,15 +111,5 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends DBSCANAnaly
       log.debug( "series density updated distance history = {}", updatedHistory )
       updatedHistory.right
     }
-  }
-
-//todo  WORK HERE to lift mutable step -- maybe w phantom type?
-  val history: Op[Context, HistoricalStatistics] = {
-    val planSourceAndDistance = for {
-      context <- ask[TryV, Context]
-      distance <- kleisli { ctx: Context => ctx.distanceMeasure }
-    } yield ( context.plan, context.source, distance )
-
-    planSourceAndDistance >=> updateHistory
   }
 }
