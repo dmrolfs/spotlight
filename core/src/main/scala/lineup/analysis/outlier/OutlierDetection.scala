@@ -1,5 +1,8 @@
 package lineup.analysis.outlier
 
+import org.apache.commons.math3.stat.descriptive.SummaryStatistics
+import peds.commons.Valid
+
 import scala.collection.immutable
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
@@ -16,7 +19,7 @@ import nl.grons.metrics.scala.Meter
 import peds.akka.metrics.{ Instrumented, InstrumentedActor }
 import peds.commons.identifier.ShortUUID
 import peds.commons.log.Trace
-import lineup.model.timeseries.{ Topic, TimeSeriesBase, TimeSeries, TimeSeriesCohort }
+import lineup.model.timeseries._
 import lineup.model.outlier.{ Outliers, OutlierPlan }
 
 
@@ -159,12 +162,14 @@ class OutlierDetection extends Actor with InstrumentedActor with ActorLogging {
   def updateHistory( data: TimeSeriesBase, plan: OutlierPlan ): HistoricalStatistics = {
     val key = HistoryKey( plan, data.topic )
 
-    val initHistory = _history get key getOrElse { HistoricalStatistics( 2, false ) }
-    val updatedHistory = data.points.foldLeft( initHistory ) { (h, dp) => h add dp.getPoint }
+    val initialHistory = _history get key getOrElse { HistoricalStatistics( 2, false ) }
+    val sentHistory = data.points.foldLeft( initialHistory ) { (h, dp) => h :+ dp.getPoint }
+    val updatedHistory = sentHistory record data.points.map{ _.getPoint }
     _history += key -> updatedHistory
 
-    log.debug( "HISTORY for [{}]: [{}]", data.topic, updatedHistory )
-    updatedHistory
+
+    log.debug( "HISTORY for [{}]: [{}]", data.topic, sentHistory )
+    sentHistory
   }
 
   var _score: Map[Topic, (Long, Long)] = Map.empty[Topic, (Long, Long)]

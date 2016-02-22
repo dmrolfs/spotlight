@@ -104,7 +104,7 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends DBSCANAnaly
       val updatedHistory = basis.foldLeft( initialHistory ) { case (h, (cur, prev)) =>
         val ts = cur.getPoint.head
         val dist = distance.compute( prev.getPoint, cur.getPoint )
-        h.add( Array(ts, dist) )
+        h :+ Array(ts, dist)
       }
 
       _distanceHistories += key -> updatedHistory
