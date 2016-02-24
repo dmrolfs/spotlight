@@ -8,16 +8,17 @@ import org.mockito.invocation.InvocationOnMock
 import org.mockito.stubbing.Answer
 
 import scala.collection.immutable
-import scala.concurrent.{ ExecutionContext, Future }
+import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
 import org.scalatest.mock.MockitoSugar
-import org.joda.{ time => joda }
+import org.joda.{time => joda}
 import com.github.nscala_time.time.JodaImplicits._
 import org.apache.commons.math3.random.RandomDataGenerator
-import lineup.model.timeseries.{ TimeSeriesBase, TimeSeries, DataPoint, Row }
+import lineup.model.timeseries.{DataPoint, Row, TimeSeries, TimeSeriesBase}
 import lineup.testkit.ParallelAkkaSpec
-import lineup.analysis.outlier.{ HistoricalStatistics, DetectOutliersInSeries, DetectUsing, DetectionAlgorithmRouter }
+import lineup.analysis.outlier.{DetectOutliersInSeries, DetectUsing, DetectionAlgorithmRouter, HistoricalStatistics}
 import lineup.model.outlier._
+import org.scalatest.Tag
 
 
 /**
@@ -92,9 +93,9 @@ class SkylineAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
     }
 
     def spikeLast( data: Row[DataPoint] ): TimeSeries = {
-      val (front, last) = data.splitAt( data.size - 1 )
-      trace( s"""front = [${front.mkString(",")}]""")
-      trace( s"""last = [${last.mkString(",")}]""")
+      val (front, last) = data.sortBy{ _.timestamp.getMillis }.splitAt( data.size - 1 )
+      trace( s"""front[${front.size}] = [${front.mkString(",")}]""")
+      trace( s"""last[${last.size}] = [${last.mkString(",")}]""")
       val spiked = front ++ last.map { dp => dp.copy( value = 1000D ) }
       trace( s"""spiked = [${spiked.mkString(",")}]""")
       TimeSeries( "series", spiked )
@@ -107,8 +108,11 @@ class SkylineAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
 
   override def makeAkkaFixture(): Fixture = new Fixture
 
+  object DONE extends Tag( "done" )
+
+
   "SkylineAnalyzer" should {
-    "find outliers deviating from first hour" in { f: Fixture =>
+    "find outliers deviating from first hour" taggedAs (DONE) in { f: Fixture =>
       import f._
       val analyzer = TestActorRef[SkylineAnalyzer]( SkylineAnalyzer.props(router.ref) )
       val firstHour = analyzer.underlyingActor.firstHour
@@ -126,7 +130,7 @@ class SkylineAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       val algoS = SkylineAnalyzer.FirstHourAverageAlgorithm
       val algProps = ConfigFactory.parseString(
         s"""
-           |${algoS.name}.tolerance: 3
+           |${algoS.name}.tolerance: 4
         """.stripMargin
       )
 
@@ -137,13 +141,13 @@ class SkylineAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
           alg mustBe Set( algoS )
           source mustBe series
           m.hasAnomalies mustBe true
-          outliers.size mustBe 2
-          outliers mustBe Row( series.points(30), series.points.last )
+          outliers.size mustBe 1
+          outliers mustBe Row( series.points.last )
         }
       }
     }
 
-    "find outliers deviating stddev from average" taggedAs (WIP) in { f: Fixture =>
+    "find outliers deviating stddev from average" taggedAs (DONE) in { f: Fixture =>
       import f._
       val analyzer = TestActorRef[SkylineAnalyzer]( SkylineAnalyzer.props(router.ref) )
       val full = makeDataPoints(
@@ -174,8 +178,42 @@ class SkylineAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       }
     }
 
-    "find outliers via Grubbs Test" in { f: Fixture =>
+    "find outliers deviating stddev from moving average" taggedAs (DONE) in { f: Fixture =>
       import f._
+      val analyzer = TestActorRef[SkylineAnalyzer]( SkylineAnalyzer.props(router.ref) )
+      val full = makeDataPoints(
+        values = immutable.IndexedSeq.fill( 50 )( 1.0 ),
+        timeWiggle = (0.97, 1.03),
+        valueWiggle = (1.0, 1.0)
+      )
+
+      val series = spikeLast( full )
+      trace( s"test series = $series" )
+      val algoS = SkylineAnalyzer.StddevFromMovingAverageAlgorithm
+      val algProps = ConfigFactory.parseString(
+        s"""
+         |${algoS.name}.tolerance: 3
+        """.stripMargin
+      )
+
+      analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( SkylineAnalyzer.StddevFromMovingAverageAlgorithm ) )
+      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series, plan), historyWith(series), algProps ) )
+      aggregator.expectMsgPF( 2.seconds.dilated, "stddev from moving average" ) {
+        case m @ SeriesOutliers(alg, source, plan, outliers) => {
+          alg mustBe Set( algoS )
+          source mustBe series
+          m.hasAnomalies mustBe true
+          outliers.size mustBe 1
+          outliers mustBe Row( series.points.last )
+        }
+
+        case x => x mustBe 0
+      }
+    }
+
+    "find outliers via Grubbs Test" taggedAs (WIP) in { f: Fixture =>
+      import f._
+      // helpful online grubbs calculator: http://graphpad.com/quickcalcs/Grubbs1.cfm
 
       val full: Row[DataPoint] = makeDataPoints(
         values = IndexedSeq.fill( 10 )( 1.0 ).to[scala.collection.immutable.IndexedSeq],

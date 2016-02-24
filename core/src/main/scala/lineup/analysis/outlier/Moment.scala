@@ -1,19 +1,35 @@
 package lineup.analysis.outlier
 
-import scalaz._, Scalaz._
-import org.joda.{ time => joda }
-import peds.commons.Valid
+import com.typesafe.scalalogging.LazyLogging
 
+import scalaz._
+import Scalaz._
+import peds.commons.Valid
+import peds.commons.util._
 
 
 /**
   * Created by rolfsd on 1/26/16.
   */
-object Moment {
+trait Moment {
+  def id: String
+  def alpha: Double
+  def centerOfMass: Double
+  //    def halfLife: Double
+  def statistics: Option[Moment.Statistics]
+
+  def :+( value: Double ): Moment
+}
+
+object Moment extends LazyLogging {
   type ID = String
 
-  def withAlpha( id: ID, alpha: Double ): Valid[Moment] = checkAlpha( alpha ) map { a => Moment( id, alpha = a ) }
+  def withAlpha( id: ID, alpha: Double ): Valid[Moment] = {
+    checkAlpha( alpha ) map { a => SimpleMoment( id, alpha ) }
+  }
+
   def withCenterOfMass( id: ID, com: Double ): Valid[Moment] = withAlpha( id, 1D / ( 1D + com / 100D ) )
+
   def withHalfLife( id: ID, halfLife: Double ): Valid[Moment] = withAlpha( id, 1D - math.exp( math.log(0.5 ) / halfLife ) )
 
   def checkAlpha( alpha: Double ): Valid[Double] = {
@@ -23,14 +39,43 @@ object Moment {
 
 
   final case class Statistics private[outlier](
-    movingMax: Double = Double.NaN,
-    movingMin: Double = Double.NaN,
+    n: Int = 1,
+    alpha: Double,
+    movingMax: Double,
+    movingMin: Double,
 //      movingAverage: Double = Double.NaN,
 //      movingStandardDeviation: Double = Double.NaN,
-    ewma: Double = Double.NaN,
-    ewmsd: Double = Double.NaN
+    ewma: Double,
+    ewmsd: Double
   ) {
+    def :+( value: Double ): Statistics = {
+      val newMax = math.max( movingMax, value )
+      val newMin = math.min( movingMin, value )
+      val newEWMA = (alpha * value) + (1 - alpha) * ewma
+      val newEWMSD = math.sqrt( alpha * math.pow(ewmsd, 2) + (1 - alpha) * math.pow(value - ewma, 2) )
+      logger.debug( s"Moment adding [${value}] => max:[${newMax}] min:[${newMin}] ewma:[${newEWMA}] ewmsd:[${newEWMSD}]" )
+      this.copy( n = n+1, movingMax = newMax, movingMin = newMin, ewma = newEWMA, ewmsd = newEWMSD )
+    }
+
+    override def toString: String = {
+      s"${getClass.safeSimpleName}[${n}](max:[${movingMax}] min:[${movingMin}] ewma:[${ewma}] ewmsd:[${ewmsd}] alpha:[${alpha}])"
+    }
 //      def movingVariance: Double = movingStandardDeviation * movingStandardDeviation
+  }
+
+
+  final case class SimpleMoment private[outlier](
+    override val id: Moment.ID,
+    override val alpha: Double,
+    override val statistics: Option[Moment.Statistics] = None
+  ) extends Moment {
+    override def centerOfMass: Double = ( 1D / alpha ) - 1D
+    override def :+( value: Double ): Moment = {
+      val newStatistics = statistics map { _ :+ value } getOrElse {
+        Statistics( alpha = alpha, movingMax = value, movingMin = value, ewma = value, ewmsd = 0D )
+      }
+      copy( statistics = Option(newStatistics) )
+    }
   }
 
 
@@ -38,20 +83,6 @@ object Moment {
   extends IllegalArgumentException( s"cannot create MomentStatistics with alpha [${alpha}] outside [0, 1]" )
 }
 
-final case class Moment private[outlier](
-  id: Moment.ID,
-  alpha: Double,
-  statistics: Moment.Statistics = Moment.Statistics()
-) {
-  def centerOfMass: Double = ( 1D / alpha ) - 1D
-//    def halfLife: Double
-
-  def :+( value: Double ): Moment = {
-    val updatedEWMA = (alpha * value) + (1 - alpha) * statistics.ewma
-    val updatedEWMSD = math.sqrt( alpha * math.pow(statistics.ewmsd, 2) + (1 - alpha) * math.pow(value - statistics.ewma, 2) )
-    copy( statistics = Moment.Statistics( ewma = updatedEWMA, ewmsd = updatedEWMSD ) )
-  }
-}
 
 
 

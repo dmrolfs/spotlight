@@ -1,18 +1,19 @@
 package lineup.analysis.outlier.algorithm
 
+import scala.annotation.tailrec
 import akka.actor.{ ActorRef, Props }
 import akka.event.LoggingReceive
-import scalaz._, Scalaz._
+import scalaz.{ Lens => _, _ }, Scalaz._
 import scalaz.Kleisli.{ ask, kleisli }
+import shapeless.Lens
 import org.joda.{ time => joda }
 import com.github.nscala_time.time.Imports._
 import com.typesafe.config.Config
 import org.apache.commons.math3.ml.distance.DistanceMeasure
 import org.apache.commons.math3.distribution.TDistribution
 import org.apache.commons.math3.ml.clustering.DoublePoint
-import org.apache.commons.math3.stat.descriptive.{ MultivariateSummaryStatistics, SummaryStatistics, DescriptiveStatistics }
-import peds.commons.Valid
-import lineup.model.outlier.{ OutlierPlan, Outliers }
+import org.apache.commons.math3.stat.descriptive.{DescriptiveStatistics, MultivariateSummaryStatistics, SummaryStatistics}
+import lineup.model.outlier.{OutlierPlan, Outliers}
 import lineup.model.timeseries._
 import lineup.analysis.outlier._
 import lineup.analysis.outlier.algorithm.AlgorithmActor.TryV
@@ -38,7 +39,7 @@ object SkylineAnalyzer {
   type MomentHistogram = Map[MomentBinKey, Moment]
 
   class SkylineContext(
-    underlying: AlgorithmActor.Context,
+    private[algorithm] val underlying: AlgorithmActor.Context,
     val firstHour: SummaryStatistics,
     val movingStatistics: DescriptiveStatistics,
     val historicalMoment: Moment,
@@ -53,6 +54,20 @@ object SkylineAnalyzer {
     override def messageConfig: Config = underlying.messageConfig
     override def distanceMeasure: TryV[DistanceMeasure] = underlying.distanceMeasure
     override def tolerance: TryV[Option[Double]] = underlying.tolerance
+  }
+
+
+  val historicalMomentLens: Lens[SkylineContext, Moment] = new Lens[SkylineContext, Moment] {
+    override def get( c: SkylineContext ): Moment = c.historicalMoment
+    override def set( c: SkylineContext )( m: Moment ): SkylineContext = {
+      new SkylineContext(
+        underlying = c.underlying,
+        firstHour = c.firstHour,
+        movingStatistics = c.movingStatistics,
+        historicalMoment = m,
+        momentHistogram = c.momentHistogram
+      )
+    }
   }
 
 
@@ -97,10 +112,12 @@ class SkylineAnalyzer( override val router: ActorRef ) extends AlgorithmActor {
   }
 
   def runDetection( message: DetectUsing ): Unit = {
+    val toOutliers = kleisli[TryV, (Outliers, Context), Outliers] { case (o, _) => o.right }
+
     \/ fromTryCatchNonFatal {
       supportedAlgorithms( message.algorithm )
     } flatMap { op =>
-      ( algorithmContext >=> op ) run message
+      ( algorithmContext >=> op >=> toOutliers ) run message
     } match {
       case \/-( r ) => message.aggregator ! r
       case -\/( ex ) => {
@@ -169,7 +186,7 @@ class SkylineAnalyzer( override val router: ActorRef ) extends AlgorithmActor {
 //    .map { (key, _) }
   }
 
-  def updateMoment( moment: Moment, points: Seq[DataPoint] ): Moment = points.foldLeft( moment ) { case (m, dp) => m :+ dp.value }
+//  def updateMoment( moment: Moment, points: Seq[DataPoint] ): Moment = points.foldLeft( moment ) { case (m, dp) => m :+ dp.value }
 
   var _momentHistograms: Map[HistoryKey, MomentHistogram] = Map.empty[HistoryKey, MomentHistogram]
 
@@ -208,7 +225,7 @@ class SkylineAnalyzer( override val router: ActorRef ) extends AlgorithmActor {
     Map( binData.toList.flatMap{ case (key, points) => points map { p => ( p, key ) } }:_* )
   }
 
-  val momentInfoK: Op[Context, (Moment, MomentHistogram)] = Kleisli[TryV, Context, (Moment, MomentHistogram)] { context =>
+  val momentInfoK: Op[Context, (Moment, MomentHistogram)] = kleisli[TryV, Context, (Moment, MomentHistogram)] { context =>
     momentThenUpdate( context.source, context.plan )
   }
 
@@ -218,21 +235,22 @@ class SkylineAnalyzer( override val router: ActorRef ) extends AlgorithmActor {
     for {
       history <- historicalMoment( data, plan )
       histogram <- momentHistogram( data, plan )
-      groups <- groupPointsByMomentKey( data, plan )
-      dataKeys = dataBinKeys( groups )
+//      groups <- groupPointsByMomentKey( data, plan )
+//      dataKeys = dataBinKeys( groups )
     } yield {
-      val (updatedHistory, updatedHistogram) = data.points.foldLeft( (history, histogram) ) { case ( (hist, gram), pt ) =>
-        val mbkey: MomentBinKey = dataKeys( pt )
-        val moment: Moment = gram( mbkey )
-        val updatedMoment = moment :+ pt.value
-        (
-          hist :+ pt.value,
-          gram + (mbkey -> updatedMoment)
-        )
-      }
-
-      _historicalMoments += hkey -> updatedHistory
-      _momentHistograms += hkey -> updatedHistogram
+//WORK HERE DMR
+//      val (updatedHistory, updatedHistogram) = data.points.foldLeft( (history, histogram) ) { case ( (hist, gram), pt ) =>
+//        val mbkey: MomentBinKey = dataKeys( pt )
+//        val moment: Moment = gram( mbkey )
+//        val updatedMoment = moment :+ pt.value
+//        (
+//          hist :+ pt.value,
+//          gram + (mbkey -> updatedMoment)
+//        )
+//      }
+//
+//      _historicalMoments += hkey -> updatedHistory
+//      _momentHistograms += hkey -> updatedHistogram
 
       ( history, histogram )
     }
@@ -247,6 +265,11 @@ class SkylineAnalyzer( override val router: ActorRef ) extends AlgorithmActor {
       momentInfo <- momentInfoK <=< super.algorithmContext
       (history, histogram) = momentInfo
     } yield {
+      log.debug( "algorithmContext: first hour history: [{}]", firstHourHistory )
+      log.debug( "algorithmContext: moving stats: [{}]", movingStats )
+      log.debug( "algorithmContext: moment history: [{}]", history )
+      log.debug( "algorithmContext: moment histogram: [{}]", histogram )
+
       new SkylineContext(
         underlying = context,
         firstHour = firstHourHistory,
@@ -267,16 +290,28 @@ class SkylineAnalyzer( override val router: ActorRef ) extends AlgorithmActor {
   }
 
   val tailAverage: Op[Context, Seq[Point2D]] = Kleisli[TryV, Context, Seq[Point2D]] { context =>
-    val last = context.history.lastPoints.drop( context.history.lastPoints.size - 2 ) map { new DoublePoint( _ ) }
+    val data = context.data.map{ _.getPoint.apply( 1 ) }
+    val last = context.history.lastPoints.drop( context.history.lastPoints.size - 2 ) map { case Array(_, v) => v }
     log.debug( "tail-average: last=[{}]", last.mkString(",") )
-    context.data                            // data
-    .zip( last ++ context.data )            // (data, last_-2_-1 ::: data)
-    .zip( last.drop(1) ++ context.data )    // ((data, last1_-2_-1 ::: data), last_-1 :: data)
-    .map { case ((d, y), z) =>
-      log.debug( "tail-average: tuple=[({}, {}, {})]", d.getPoint.apply(1), y.getPoint.apply(1), z.getPoint.apply(1) )
-      val timestamp = d.getPoint.apply( 0 )
-      val average = ( d.getPoint.apply(1) + y.getPoint.apply(1) + z.getPoint.apply(1) ) / 3D
-      ( timestamp, average )
+
+    val TailLength = 3
+
+    context.data
+    .map{ _.getPoint.apply( 0 ) }
+    .zipWithIndex
+    .map { case (ts, i) =>
+      val setToAverage = if ( i < TailLength ) {
+        val all = last ++ data.take( i + 1 )
+        all.drop( all.size - TailLength )
+      } else {
+        data.drop( i - TailLength + 1 ).take( TailLength )
+      }
+
+      ( ts, setToAverage )
+    }
+    .map { case (ts, pts) =>
+      log.debug( "sets to tail average ({}, [{}]) = {}", ts.toLong, pts.mkString(","), pts.sum / pts.size )
+      (ts, pts.sum / pts.size)
     }
     .right
   }
@@ -287,23 +322,32 @@ class SkylineAnalyzer( override val router: ActorRef ) extends AlgorithmActor {
     * A timeseries is anomalous if the average of the last three datapoints
     * are outside of three standard deviations of this value.
     */
-  val firstHourAverage: Op[Context, Outliers] = {
-    val outliers: Op[Context, Row[DataPoint]] = for {
+  val firstHourAverage: Op[Context, (Outliers, Context)] = {
+    val outliers: Op[Context, (Row[DataPoint], Context)] = for {
       context <- toSkylineContext <=< ask[TryV, Context]
       tolerance <- tolerance <=< ask[TryV, Context]
       taverages <- tailAverage <=< ask[TryV, Context]
     } yield {
-      val mean = context.firstHour.getMean
-      val stddev = context.firstHour.getStandardDeviation
-      log.debug( "first hour mean[{}] and stdev[{}]", mean, stddev )
       val tol = tolerance getOrElse 3D
-      collectOutlierPoints( taverages, context ) { case (ts, v) => math.abs( v - mean ) > ( tol * stddev) }
+
+      collectOutlierPoints(
+        points = taverages,
+        context = context,
+        isOutlier = (p: Point2D, ctx: SkylineContext) => {
+          val (_, v) = p
+          val mean = ctx.firstHour.getMean
+          val stddev = ctx.firstHour.getStandardDeviation
+          log.debug( "first hour mean[{}] and stdev[{}]", mean, stddev )
+          math.abs( v - mean ) > ( tol * stddev)
+        },
+        update = (ctx: SkylineContext, pt: DataPoint) => ctx
+      )
     }
 
     makeOutliersK( FirstHourAverageAlgorithm, outliers )
   }
 
-  val meanSubtractionCumulation: Op[Context, Outliers] = Kleisli[TryV, Context, Outliers] { context => -\/( new IllegalStateException("tbd") ) }
+  val meanSubtractionCumulation: Op[Context, (Outliers, Context)] = Kleisli[TryV, Context, (Outliers, Context)] { context => -\/( new IllegalStateException("tbd") ) }
 
   /**
     * A timeseries is anomalous if the absolute value of the average of the latest
@@ -311,23 +355,29 @@ class SkylineAnalyzer( override val router: ActorRef ) extends AlgorithmActor {
     * deviations of the average. This does not exponentially weight the moving average
     * and so is better for detecting anomalies with respect to the entire series.
     */
-  val stddevFromAverage: Op[Context, Outliers] = {
+  val stddevFromAverage: Op[Context, (Outliers, Context)] = {
     val outliers = for {
       context <- toSkylineContext <=< ask[TryV, Context]
       tolerance <- tolerance <=< ask[TryV, Context]
       taverages <- tailAverage <=< ask[TryV, Context]
     } yield {
-      val source = context.source.points
       val tol = tolerance getOrElse 3D
-      collectOutlierPoints( taverages, context ) { case (ts, v) =>
-        val mean = context.movingStatistics.getMean
-        val stddev = context.movingStatistics.getStandardDeviation
-        log.debug( "mean[{}]\tstdev[{}]\ttolerance[{}]", mean, stddev, tol )
-        val test = math.abs( v - mean ) > ( tol * stddev)
-        val original = source.find{ dp => dp.timestamp.getMillis == ts.toLong }
-        original foreach { orig => context.movingStatistics addValue orig.value }
-        test
-      }
+
+      collectOutlierPoints(
+        points = taverages,
+        context = context,
+        isOutlier = (p: Point2D, ctx: SkylineContext) => {
+          val (_, v) = p
+          val mean = ctx.movingStatistics.getMean
+          val stddev = ctx.movingStatistics.getStandardDeviation
+          log.debug( "Stddev from simple moving Average: mean[{}]\tstdev[{}]\ttolerance[{}]", mean, stddev, tol )
+          math.abs( v - mean ) > ( tol * stddev)
+        },
+        update = (ctx: SkylineContext, pt: DataPoint) => {
+          ctx.movingStatistics addValue pt.value
+          ctx
+        }
+      )
     }
 
     makeOutliersK( StddevFromAverageAlgorithm, outliers )
@@ -339,115 +389,172 @@ class SkylineAnalyzer( override val router: ActorRef ) extends AlgorithmActor {
     * deviations of the moving average. This is better for finding anomalies with
     * respect to the short term trends.
     */
-  val stddevFromMovingAverage: Op[Context, Outliers] = {
+  val stddevFromMovingAverage: Op[Context, (Outliers, Context)] = {
     val outliers = for {
       context <- toSkylineContext <=< ask[TryV, Context]
       tolerance <- tolerance <=< ask[TryV, Context]
       taverages <- tailAverage <=< ask[TryV, Context]
     } yield {
-      val ewma = context.historicalMoment.statistics.ewma
-      val ewmsd = context.historicalMoment.statistics.ewmsd
       val tol = tolerance getOrElse 3D
-      collectOutlierPoints( taverages, context ) { case (ts, v) => math.abs( v - ewma ) > ( tol * ewmsd ) }
+
+      collectOutlierPoints(
+        points = taverages,
+        context = context,
+        isOutlier = (p: Point2D, ctx: SkylineContext) => {
+          ctx.historicalMoment.statistics map { stats =>
+            val (ts, v) = p
+            log.debug( "pt:[{}] - Stddev from exponential moving Average: mean[{}]\tstdev[{}]\ttolerance[{}]", (ts.toLong, v), stats.ewma, stats.ewmsd, tol )
+            math.abs( v - stats.ewma ) > ( tol * stats.ewmsd )
+          } getOrElse {
+            false
+          }
+        },
+        update = (ctx: SkylineContext, pt: DataPoint) => {
+          log.debug( "stddevFromMovingAverage: adding point ({}, {}) to historical moment: [{}]", pt.timestamp.getMillis, pt.value, context.historicalMoment.statistics )
+          historicalMomentLens.set( ctx )( ctx.historicalMoment :+ pt.value )
+        }
+      )
     }
 
     makeOutliersK( StddevFromMovingAverageAlgorithm, outliers )
   }
 
-  val leastSquares: Op[Context, Outliers] = Kleisli[TryV, Context, Outliers] { context => -\/( new IllegalStateException("tbd") ) }
+  val leastSquares: Op[Context, (Outliers, Context)] = Kleisli[TryV, Context, (Outliers, Context)] { context => -\/( new IllegalStateException("tbd") ) }
 
   /**
     * A timeseries is anomalous if the Z score is greater than the Grubb's score.
     */
-  val grubbs: Op[Context, Outliers] = {
+  val grubbs: Op[Context, (Outliers, Context)] = {
     // background: http://www.itl.nist.gov/div898/handbook/eda/section3/eda35h1.htm
     // background: http://graphpad.com/support/faqid/1598/
-    val outliers: Op[Context, Row[DataPoint]] = for {
+    val outliers: Op[Context, (Row[DataPoint], Context)] = for {
       context <- ask[TryV, Context]
       taverages <- tailAverage <=< ask[TryV, Context]
     } yield {
-      val data = context.data.map{ _.getPoint.apply( 1 ) }.toArray
+      val data = taverages.map{ case (_, v) => v }.toArray
       val stats = new DescriptiveStatistics( data )
-      val stddev: Double = stats.getStandardDeviation
-      val mean: Double = stats.getMean
-      val zScores = taverages map { case (ts, v) =>
-        val z = ( v - mean ) / stddev
-        ( ts, z )
-      }
-      log.debug( "Skyline[Grubbs]: moving-mean:[{}] moving-stddev:[{}] zScores:[{}]", mean, stddev, zScores.map{ case (z0, z1) => (z0, z1)}.mkString(",") )
+      val stddev = stats.getStandardDeviation
+      val mean = stats.getMean
+      val zScores = taverages map { case (ts, v) => ( ts, math.abs(v - mean) / stddev ) }
+      log.debug( "Skyline[Grubbs]: mean:[{}] stddev:[{}] zScores:[{}]", mean, stddev, zScores.mkString(",") )
 
       val Alpha = 0.05
       val threshold = new TDistribution( data.size - 2 ).inverseCumulativeProbability( Alpha / ( 2D * data.size ) )
-      val tsq = threshold * threshold
-      log.debug( "Skyline[Grubbs]: threshold^s:[{}]", tsq )
-      val grubbsScore = ((data.size - 1) / math.sqrt(data.size)) * math.sqrt( tsq / (data.size - 2 + tsq) )
+      val thresholdSquared = math.pow( threshold, 2 )
+      log.debug( "Skyline[Grubbs]: threshold^2:[{}]", thresholdSquared )
+      val grubbsScore = ((data.size - 1) / math.sqrt(data.size)) * math.sqrt( thresholdSquared / (data.size - 2 + thresholdSquared) )
       log.debug( "Skyline[Grubbs]: Grubbs Score:[{}]", grubbsScore )
-      collectOutlierPoints( zScores, context ) { case ( ts, z ) => z > grubbsScore }
+
+      collectOutlierPoints(
+        points = zScores,
+        context = context,
+        isOutlier = (p: Point2D, ctx: Context) => { p._2 > grubbsScore },
+        update = (ctx: Context, pt: DataPoint) => { ctx }
+      )
     }
 
     makeOutliersK( GrubbsAlgorithm, outliers )
   }
 
-  val histogramBins: Op[Context, Outliers] = Kleisli[TryV, Context, Outliers] { context => -\/( new IllegalStateException("tbd") ) }
+  val histogramBins: Op[Context, (Outliers, Context)] = Kleisli[TryV, Context, (Outliers, Context)] { context => -\/( new IllegalStateException("tbd") ) }
 
   /**
     * A timeseries is anomalous if the deviation of its latest datapoint with
     * respect to the median is [tolerance] times larger than the median of deviations.
     */
-  val medianAbsoluteDeviation: Op[Context, Outliers] = {
-    val outliers = for {
-      context <- toSkylineContext <=< ask[TryV, Context]
-      tolerance <- tolerance <=< ask[TryV, Context]
-    } yield {
-      val median = context.movingStatistics.getPercentile( 50 )
-      val deviationStats = new DescriptiveStatistics( context.data.size )
-      val deviations = context.data map { dp =>
-        val Array( ts, v ) = dp.getPoint
-        val dev = math.abs( v - median )
-        deviationStats addValue dev
-        ( ts, dev )
+  val medianAbsoluteDeviation: Op[Context, (Outliers, Context)] = Kleisli[TryV, Context, (Outliers, Context)] { context => -\/( new IllegalStateException("tbd") ) }
+//  val medianAbsoluteDeviation: Op[Context, (Outliers, Context)] = {
+//    val outliers = for {
+//      context <- toSkylineContext <=< ask[TryV, Context]
+//      tolerance <- tolerance <=< ask[TryV, Context]
+//    } yield {
+//      val deviationStats = new DescriptiveStatistics( context.data.size )
+//      val deviations = context.data map { dp =>
+//        val Array( ts, v ) = dp.getPoint
+//
+//        val median = context.movingStatistics.getPercentile( 50 )
+//
+//        context.source.points
+//        .find{ _.timestamp.getMillis == ts.toLong }
+//        .foreach { orig =>
+//          log.debug( "medianAbsoluteDeviation: adding point ({}, {}) to moving stats", orig.timestamp.getMillis, orig.value )
+//          context.movingStatistics addValue orig.value
+//        }
+//
+//        val dev = math.abs( v - median )
+//        deviationStats addValue dev
+//        ( ts, dev )
+//      }
+//
+//      val deviationMedian = deviationStats getPercentile 50
+//
+//      val tol = tolerance getOrElse 3D // skyline source uses 6.0 - admittedly arbitrary?
+//
+//      if ( deviationMedian == 0D ) (Row.empty[DataPoint], context)
+//      else collectOutlierPoints( deviations, context ) { case (ts, dev) =>
+//        val test = dev > ( tol * deviationMedian )
+//        log.debug( "medianAbsoluteDeviation: ({}, {}) > {} isOutlier={}", new DateTime(ts.toLong), dev, tol*deviationMedian, test )
+//        test
+//      }
+//    }
+//
+//    makeOutliersK( MedianAbsoluteDeviationAlgorithm, outliers )
+//  }
+
+  val ksTest: Op[Context, (Outliers, Context)] = Kleisli[TryV, Context, (Outliers, Context)] { context => -\/( new IllegalStateException("tbd") ) }
+
+
+  type UpdateContext[C <: Context] = (C, DataPoint) => C
+  type IsOutlier[C <: Context] = (Point2D, C) => Boolean
+
+  def collectOutlierPoints[C <: Context](
+    points: Seq[Point2D],
+    context: C,
+    isOutlier: IsOutlier[C],
+    update: UpdateContext[C]
+  ): (Row[DataPoint], Context) = {
+    @tailrec def loop( pts: List[Point2D], ctx: C, acc: Row[DataPoint] ): (Row[DataPoint], Context) = {
+      log.debug( "{} checking pt [{}] for outlier = {}", ctx.algorithm, pts.headOption.map{p=>(p._1.toLong, p._2)}, pts.headOption.map{ p => isOutlier(p,ctx) } )
+      pts match {
+        case Nil => ( acc, ctx )
+
+        case h :: tail if isOutlier( h, ctx ) => {
+          val (ts, _) = h
+          val original = ctx.source.points find { _.timestamp.getMillis == ts.toLong }
+          val (updatedContext, updatedAcc) = original map { orig =>
+            ( update(ctx, orig), acc :+ orig  )
+          } getOrElse {
+            (ctx, acc)
+          }
+
+          log.debug( "LOOP-HIT[({})]: updated context-stats=[{}] acc=[{}]", (ts.toLong, h._2), updatedContext.asInstanceOf[SkylineContext].historicalMoment.statistics, updatedAcc )
+          loop( tail, updatedContext, updatedAcc )
+        }
+
+        case h :: tail => {
+          val (ts, _) = h
+          val updatedContext = {
+            ctx.source.points
+            .find { _.timestamp.getMillis == ts.toLong }
+            .map { orig => update( ctx, orig ) }
+            .getOrElse { ctx }
+          }
+
+          log.debug( "LOOP-MISS[({})]: updated context-stats=[{}] acc=[{}]", (ts.toLong, h._2), updatedContext.asInstanceOf[SkylineContext].historicalMoment.statistics, acc )
+          loop( tail, updatedContext, acc )
+        }
       }
-
-      val deviationMedian = deviationStats getPercentile 50
-
-      val tol = tolerance getOrElse 3D // skyline source uses 6.0 - admittedly arbitrary?
-
-      if ( deviationMedian == 0D ) Row.empty[DataPoint]
-      else collectOutlierPoints( deviations, context ) { case (ts, dev) => dev > ( tol * deviationMedian ) }
     }
 
-    makeOutliersK( MedianAbsoluteDeviationAlgorithm, outliers )
+    loop( points.toList, context, Row.empty[DataPoint] )
   }
 
-  val ksTest: Op[Context, Outliers] = Kleisli[TryV, Context, Outliers] { context => -\/( new IllegalStateException("tbd") ) }
-
-
-  type IsOutlier = Point2D => Boolean
-
-  def collectOutlierPoints( points: Seq[Point2D], context: Context )( isOutlier: IsOutlier ): Row[DataPoint] = {
-    points
-    .collect {
-      case p @ (ts, v) if isOutlier( p ) => {
-        log.error( "OUTLIER FOUND @ ({}, {})", new DateTime(ts.toLong), v )
-        p
-      }
-
-      case p @ (ts, v) => {
-        log.info( "no outlier found @ ({}, {})", new DateTime(ts.toLong), v )
-        p
-      }
-    }
-    .filter( isOutlier )
-    .map { case (ts, v) => context.source.points find { _.timestamp.getMillis == ts.toLong } }
-    .flatten
-    .toIndexedSeq
-  }
-
-  def makeOutliersK( algorithm: Symbol, outliers: Op[Context, Row[DataPoint]] ): Op[Context, Outliers] = {
+  def makeOutliersK( algorithm: Symbol, outliers: Op[Context, (Row[DataPoint], Context)] ): Op[Context, (Outliers, Context)] = {
     for {
-      o <- outliers
-      result <- kleisli[TryV, Context, Outliers]( context => makeOutliers(o, algorithm, context) )
-    } yield result
+      outliersContext <- outliers
+      (outlierPoints, context) = outliersContext
+      result <- kleisli[TryV, Context, Outliers]{ context => makeOutliers(outlierPoints, algorithm, context) }
+    } yield (result, context)
   }
 
   def makeOutliers( outliers: Row[DataPoint], algorithm: Symbol, context: Context ): TryV[Outliers] = {
@@ -461,7 +568,7 @@ class SkylineAnalyzer( override val router: ActorRef ) extends AlgorithmActor {
     .leftMap { exs => exs.head }
   }
 
-  val supportedAlgorithms: Map[Symbol, Op[Context, Outliers]] = {
+  val supportedAlgorithms: Map[Symbol, Op[Context, (Outliers, Context)]] = {
     Map(
       FirstHourAverageAlgorithm -> firstHourAverage,
       MeanSubtractionCumulationAlgorithm -> meanSubtractionCumulation,
