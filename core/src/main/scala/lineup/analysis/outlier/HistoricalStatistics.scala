@@ -1,6 +1,8 @@
 package lineup.analysis.outlier
 
 import java.io.Serializable
+
+import lineup.model.timeseries.DataPoint
 //import scalaz._, Scalaz._
 import org.apache.commons.math3.linear.RealMatrix
 import org.apache.commons.math3.ml.clustering.DoublePoint
@@ -13,7 +15,11 @@ import org.apache.commons.math3.stat.descriptive.MultivariateSummaryStatistics
   */
 trait HistoricalStatistics extends Serializable {
   def :+( point: Point ): HistoricalStatistics
-  def record( points: Seq[Point] ): HistoricalStatistics
+  def recordLastPoints( points: Seq[Point] ): HistoricalStatistics
+  def recordLastDataPoints( datapoints: Seq[DataPoint] ): HistoricalStatistics = {
+    val points = DataPoint.toDoublePoints( datapoints ).map{ _.getPoint }
+    recordLastPoints( points )
+  }
 
   def covariance: RealMatrix
   def dimension: Int
@@ -51,7 +57,7 @@ object HistoricalStatistics {
       this
     }
 
-    override def record( points: Seq[Point] ): HistoricalStatistics = {
+    override def recordLastPoints( points: Seq[Point] ): HistoricalStatistics = {
       val recorded = points drop ( points.size - LastN )
       this.copy( lastPoints = this.lastPoints.drop(this.lastPoints.size - LastN + recorded.size) ++ recorded )
     }
