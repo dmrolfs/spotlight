@@ -6,6 +6,7 @@ import akka.event.LoggingReceive
 import scalaz.{ Lens => _, _ }, Scalaz._
 import scalaz.Kleisli.{ ask, kleisli }
 import shapeless.Lens
+import shapeless.syntax.typeable._
 import org.joda.{ time => joda }
 import com.github.nscala_time.time.Imports._
 import com.typesafe.config.Config
@@ -25,8 +26,8 @@ import lineup.analysis.outlier.algorithm.AlgorithmActor.TryV
 object SkylineAnalyzer {
   val FirstHourAverageAlgorithm = 'first_hour_average
   val MeanSubtractionCumulationAlgorithm = 'mean_subtraction_cumulation
-  val StddevFromAverageAlgorithm = 'stddev_from_average
-  val StddevFromMovingAverageAlgorithm = 'stddev_from_moving_average
+  val StddevFromSimpleMovingAverageAlgorithm = 'stddev_from_simple_moving_average
+  val StddevFromExponentialMovingAverageAlgorithm = 'stddev_from_exponential_moving_average
   val LeastSquaresAlgorithm = 'least_squares
   val GrubbsAlgorithm = 'grubbs
   val HistogramBinsAlgorithm = 'histogram_bins
@@ -48,7 +49,9 @@ object SkylineAnalyzer {
     override def message: DetectUsing = underlying.message
     override def data: Seq[DoublePoint] = underlying.data
     override def algorithm: Symbol = underlying.algorithm
+    override def topic: Topic = underlying.topic
     override def plan: OutlierPlan = underlying.plan
+    override def historyKey: HistoryKey = underlying.historyKey
     override def history: HistoricalStatistics = underlying.history
     override def source: TimeSeriesBase = underlying.source
     override def messageConfig: Config = underlying.messageConfig
@@ -137,17 +140,15 @@ class SkylineAnalyzer( override val router: ActorRef ) extends AlgorithmActor {
   var _firstHourHistory: Map[HistoryKey, SummaryStatistics] = Map.empty[HistoryKey, SummaryStatistics]
 
   val updateFirstHourHistory: Op[Context, SummaryStatistics] = Kleisli[TryV, Context, SummaryStatistics] { context =>
-    val key = HistoryKey( context.plan, context.source.topic )
-
     val points = context.data map { _.getPoint } collect { case Array(ts, v) if firstHour contains ts.toLong => v }
-    val initial = _firstHourHistory get key map { _.copy } getOrElse { new SummaryStatistics() }
+    val initial = _firstHourHistory get context.historyKey map { _.copy } getOrElse { new SummaryStatistics() }
 
     val result = {
       if ( points.nonEmpty ) {
         log.debug( "adding timestamps to first hour: [{}]", points.mkString(",") )
         val updated = points.foldLeft( initial ) { (h, v) => h.addValue( v ); h }
         log.debug( "updated first-hour stats: mean=[{}] stddev=[{}]", updated.getMean, updated.getStandardDeviation )
-        _firstHourHistory += key -> updated
+        _firstHourHistory += context.historyKey -> updated
         updated
       } else {
         initial
@@ -162,6 +163,11 @@ class SkylineAnalyzer( override val router: ActorRef ) extends AlgorithmActor {
     movingStatistics( HistoryKey(context.plan, context.source.topic) ).right
   }
 
+  def setMovingStatisticsFromContext( context: Context ): Unit = {
+    log.debug( "setting moving stats from context:  (n, mean)[{}]", context.cast[SkylineContext].map{ c => (c.movingStatistics.getN, c.movingStatistics.getMean) } )
+    context.cast[SkylineContext] foreach { c => _movingStatistics += c.historyKey -> c.movingStatistics }
+  }
+
   def movingStatistics( key: HistoryKey ): DescriptiveStatistics = {
     _movingStatistics
     .get( key )
@@ -174,23 +180,26 @@ class SkylineAnalyzer( override val router: ActorRef ) extends AlgorithmActor {
 
   var _historicalMoments: Map[HistoryKey, Moment] = Map.empty[HistoryKey, Moment]
 
-//  def historicalMoment( data: TimeSeriesBase, plan: OutlierPlan ): TryV[(HistoryKey, Moment)] = {
-  def historicalMoment( data: TimeSeriesBase, plan: OutlierPlan ): TryV[Moment] = {
+  def historicalMomentForPlan( plan: OutlierPlan, data: TimeSeriesBase ): TryV[Moment] = {
     val key = HistoryKey( plan, data.topic )
+    log.debug( "historicalMomentForPlan: key = [{}] for plan={} topic={}", key.toString, key.plan.name, key.topic )
     _historicalMoments
     .get( key )
     .map{ _.right }
     .getOrElse {
-      Moment.withAlpha( id = s"${plan.name}:${data.topic}", alpha = 0.05 ).disjunction.leftMap{ _.head }
+      Moment.withAlpha( id = key.toString, alpha = 0.05 ).disjunction.leftMap{ _.head }
     }
-//    .map { (key, _) }
   }
 
-//  def updateMoment( moment: Moment, points: Seq[DataPoint] ): Moment = points.foldLeft( moment ) { case (m, dp) => m :+ dp.value }
+  def setHistoricalMomentFromContext( context: Context ): Unit = {
+    log.debug( "setting historical moment from context: [{}]", context.cast[SkylineContext].map{ _.historicalMoment } )
+    context.cast[SkylineContext] foreach { c => _historicalMoments += c.historyKey -> c.historicalMoment }
+  }
+
 
   var _momentHistograms: Map[HistoryKey, MomentHistogram] = Map.empty[HistoryKey, MomentHistogram]
 
-  def momentHistogram( data: TimeSeriesBase, plan: OutlierPlan ): TryV[MomentHistogram] = {
+  def momentHistogramForPlan( plan: OutlierPlan, data: TimeSeriesBase ): TryV[MomentHistogram] = {
     def initMomentHistogram( hkey: HistoryKey ): TryV[MomentHistogram] = {
       val moments: List[TryV[(MomentBinKey, Moment)]] = for {
         day <- DayOfWeek.JodaDays.values.toList
@@ -207,6 +216,10 @@ class SkylineAnalyzer( override val router: ActorRef ) extends AlgorithmActor {
     _momentHistograms.get( hkey ).map{ _.right }.getOrElse{ initMomentHistogram( hkey ) }
   }
 
+  def setMomentHistogramFromContext( context: Context ): Unit = {
+    log.debug( "setting moment histogram from context" )
+    context.cast[SkylineContext] foreach { c => _momentHistograms += c.historyKey -> c.momentHistogram }
+  }
 
   def groupPointsByMomentKey(data: TimeSeriesBase, plan: OutlierPlan ): TryV[Map[MomentBinKey, Seq[DataPoint]]] = {
     val groups = data.points.groupBy { case DataPoint(ts, v) =>
@@ -226,36 +239,11 @@ class SkylineAnalyzer( override val router: ActorRef ) extends AlgorithmActor {
   }
 
   val momentInfoK: Op[Context, (Moment, MomentHistogram)] = kleisli[TryV, Context, (Moment, MomentHistogram)] { context =>
-    momentThenUpdate( context.source, context.plan )
-  }
-
-  def momentThenUpdate( data: TimeSeriesBase, plan: OutlierPlan ): TryV[(Moment, MomentHistogram)] = {
-    val hkey = HistoryKey( plan, data.topic )
-
     for {
-      history <- historicalMoment( data, plan )
-      histogram <- momentHistogram( data, plan )
-//      groups <- groupPointsByMomentKey( data, plan )
-//      dataKeys = dataBinKeys( groups )
-    } yield {
-//WORK HERE DMR
-//      val (updatedHistory, updatedHistogram) = data.points.foldLeft( (history, histogram) ) { case ( (hist, gram), pt ) =>
-//        val mbkey: MomentBinKey = dataKeys( pt )
-//        val moment: Moment = gram( mbkey )
-//        val updatedMoment = moment :+ pt.value
-//        (
-//          hist :+ pt.value,
-//          gram + (mbkey -> updatedMoment)
-//        )
-//      }
-//
-//      _historicalMoments += hkey -> updatedHistory
-//      _momentHistograms += hkey -> updatedHistogram
-
-      ( history, histogram )
-    }
+      history <- historicalMomentForPlan( context.plan, context.source )
+      histogram <- momentHistogramForPlan( context.plan, context.source )
+    } yield  ( history, histogram )
   }
-
 
   override val algorithmContext: Op[DetectUsing, Context] = {
     for {
@@ -265,10 +253,12 @@ class SkylineAnalyzer( override val router: ActorRef ) extends AlgorithmActor {
       momentInfo <- momentInfoK <=< super.algorithmContext
       (history, histogram) = momentInfo
     } yield {
+      log.debug( "algorithmContext: plan: [{}]", context.plan )
+      log.debug( "algorithmContext: topic: [{}]", context.topic )
       log.debug( "algorithmContext: first hour history: [{}]", firstHourHistory )
       log.debug( "algorithmContext: moving stats: [{}]", movingStats )
       log.debug( "algorithmContext: moment history: [{}]", history )
-      log.debug( "algorithmContext: moment histogram: [{}]", histogram )
+//      log.debug( "algorithmContext: moment histogram: [{}]", histogram )
 
       new SkylineContext(
         underlying = context,
@@ -300,17 +290,17 @@ class SkylineAnalyzer( override val router: ActorRef ) extends AlgorithmActor {
     .map{ _.getPoint.apply( 0 ) }
     .zipWithIndex
     .map { case (ts, i) =>
-      val setToAverage = if ( i < TailLength ) {
+      val pointsToAverage = if ( i < TailLength ) {
         val all = last ++ data.take( i + 1 )
         all.drop( all.size - TailLength )
       } else {
         data.drop( i - TailLength + 1 ).take( TailLength )
       }
 
-      ( ts, setToAverage )
+      ( ts, pointsToAverage )
     }
     .map { case (ts, pts) =>
-      log.debug( "sets to tail average ({}, [{}]) = {}", ts.toLong, pts.mkString(","), pts.sum / pts.size )
+      log.debug( "points to tail average ({}, [{}]) = {}", ts.toLong, pts.mkString(","), pts.sum / pts.size )
       (ts, pts.sum / pts.size)
     }
     .right
@@ -355,7 +345,7 @@ class SkylineAnalyzer( override val router: ActorRef ) extends AlgorithmActor {
     * deviations of the average. This does not exponentially weight the moving average
     * and so is better for detecting anomalies with respect to the entire series.
     */
-  val stddevFromAverage: Op[Context, (Outliers, Context)] = {
+  val stddevFromSimpleMovingAverage: Op[Context, (Outliers, Context)] = {
     val outliers = for {
       context <- toSkylineContext <=< ask[TryV, Context]
       tolerance <- tolerance <=< ask[TryV, Context]
@@ -380,16 +370,16 @@ class SkylineAnalyzer( override val router: ActorRef ) extends AlgorithmActor {
       )
     }
 
-    makeOutliersK( StddevFromAverageAlgorithm, outliers )
+    makeOutliersK( StddevFromSimpleMovingAverageAlgorithm, outliers )
   }
 
   /**
     * A timeseries is anomalous if the absolute value of the average of the latest
     * three datapoint minus the moving average is greater than tolerance * standard
-    * deviations of the moving average. This is better for finding anomalies with
-    * respect to the short term trends.
+    * deviations of the exponential moving average. This is better for finding anomalies
+    * with respect to the short term trends.
     */
-  val stddevFromMovingAverage: Op[Context, (Outliers, Context)] = {
+  val stddevFromExponentialMovingAverage: Op[Context, (Outliers, Context)] = {
     val outliers = for {
       context <- toSkylineContext <=< ask[TryV, Context]
       tolerance <- tolerance <=< ask[TryV, Context]
@@ -416,7 +406,7 @@ class SkylineAnalyzer( override val router: ActorRef ) extends AlgorithmActor {
       )
     }
 
-    makeOutliersK( StddevFromMovingAverageAlgorithm, outliers )
+    makeOutliersK( StddevFromExponentialMovingAverageAlgorithm, outliers )
   }
 
   val leastSquares: Op[Context, (Outliers, Context)] = Kleisli[TryV, Context, (Outliers, Context)] { context => -\/( new IllegalStateException("tbd") ) }
@@ -514,6 +504,10 @@ class SkylineAnalyzer( override val router: ActorRef ) extends AlgorithmActor {
     update: UpdateContext[C]
   ): (Row[DataPoint], Context) = {
     @tailrec def loop( pts: List[Point2D], ctx: C, acc: Row[DataPoint] ): (Row[DataPoint], Context) = {
+      setMovingStatisticsFromContext( ctx )
+      setHistoricalMomentFromContext( ctx )
+      setMomentHistogramFromContext( ctx )
+
       log.debug( "{} checking pt [{}] for outlier = {}", ctx.algorithm, pts.headOption.map{p=>(p._1.toLong, p._2)}, pts.headOption.map{ p => isOutlier(p,ctx) } )
       pts match {
         case Nil => ( acc, ctx )
@@ -572,8 +566,8 @@ class SkylineAnalyzer( override val router: ActorRef ) extends AlgorithmActor {
     Map(
       FirstHourAverageAlgorithm -> firstHourAverage,
       MeanSubtractionCumulationAlgorithm -> meanSubtractionCumulation,
-      StddevFromAverageAlgorithm -> stddevFromAverage,
-      StddevFromMovingAverageAlgorithm -> stddevFromMovingAverage,
+      StddevFromSimpleMovingAverageAlgorithm -> stddevFromSimpleMovingAverage,
+      StddevFromExponentialMovingAverageAlgorithm -> stddevFromExponentialMovingAverage,
       LeastSquaresAlgorithm -> leastSquares,
       GrubbsAlgorithm -> grubbs,
       HistogramBinsAlgorithm -> histogramBins,

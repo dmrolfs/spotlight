@@ -52,13 +52,14 @@ class SkylineAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
     val router = TestProbe()
     val aggregator = TestProbe()
     val plan = mock[OutlierPlan]
+    when( plan.name ).thenReturn( "mock-plan" )
     when( plan.appliesTo ).thenReturn( Fixture.appliesToAll )
     when( plan.algorithms ).thenReturn(
       Set(
         SkylineAnalyzer.FirstHourAverageAlgorithm,
         SkylineAnalyzer.MeanSubtractionCumulationAlgorithm,
-        SkylineAnalyzer.StddevFromAverageAlgorithm,
-        SkylineAnalyzer.StddevFromMovingAverageAlgorithm,
+        SkylineAnalyzer.StddevFromSimpleMovingAverageAlgorithm,
+        SkylineAnalyzer.StddevFromExponentialMovingAverageAlgorithm,
         SkylineAnalyzer.LeastSquaresAlgorithm,
         SkylineAnalyzer.GrubbsAlgorithm,
         SkylineAnalyzer.HistogramBinsAlgorithm,
@@ -92,17 +93,21 @@ class SkylineAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       }
     }
 
-    def spikeLast( data: Row[DataPoint] ): TimeSeries = {
-      val (front, last) = data.sortBy{ _.timestamp.getMillis }.splitAt( data.size - 1 )
+    def spike( data: Row[DataPoint], value: Double = 1000D )( position: Int = data.size - 1 ): TimeSeries = {
+      val (front, last) = data.sortBy{ _.timestamp.getMillis }.splitAt( position )
       trace( s"""front[${front.size}] = [${front.mkString(",")}]""")
       trace( s"""last[${last.size}] = [${last.mkString(",")}]""")
-      val spiked = front ++ last.map { dp => dp.copy( value = 1000D ) }
+      val spiked = ( front :+ last.head.copy( value = value ) ) ++ last.tail
       trace( s"""spiked = [${spiked.mkString(",")}]""")
-      TimeSeries( "series", spiked )
+      TimeSeries( "test-series", spiked )
     }
 
-    def historyWith( series: TimeSeries ): HistoricalStatistics = {
-      HistoricalStatistics.fromActivePoints( DataPoint.toDoublePoints(series.points).toArray, false )
+    def historyWith( prior: Option[HistoricalStatistics], series: TimeSeries ): HistoricalStatistics = {
+      prior map { h =>
+        series.points.foldLeft( h ){ (history, dp) => history :+ dp.getPoint }
+      } getOrElse {
+        HistoricalStatistics.fromActivePoints( DataPoint.toDoublePoints(series.points).toArray, false )
+      }
     }
   }
 
@@ -112,7 +117,7 @@ class SkylineAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
 
 
   "SkylineAnalyzer" should {
-    "find outliers deviating from first hour" taggedAs (DONE) in { f: Fixture =>
+    "find outliers deviating from first hour" taggedAs (WIP) in { f: Fixture =>
       import f._
       val analyzer = TestActorRef[SkylineAnalyzer]( SkylineAnalyzer.props(router.ref) )
       val firstHour = analyzer.underlyingActor.firstHour
@@ -125,7 +130,7 @@ class SkylineAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
         valueWiggle = (0.99, 1.01)
       )
 
-      val series = spikeLast( full )
+      val series = spike( full )()
       trace( s"test series = $series" )
       val algoS = SkylineAnalyzer.FirstHourAverageAlgorithm
       val algProps = ConfigFactory.parseString(
@@ -135,7 +140,8 @@ class SkylineAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       )
 
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( SkylineAnalyzer.FirstHourAverageAlgorithm ) )
-      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series, plan), historyWith(series), algProps ) )
+      val history1 = historyWith( None, series )
+      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series, plan), history1, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "first hour" ) {
         case m @ SeriesOutliers(alg, source, plan, outliers) => {
           alg mustBe Set( algoS )
@@ -145,28 +151,52 @@ class SkylineAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
           outliers mustBe Row( series.points.last )
         }
       }
+
+      val start2 = series.points.last.timestamp + 1.minute
+      val full2 = makeDataPoints(
+        values = points.map{ case DataPoint(_, v) => v },
+        start = start2,
+        period = 2.minutes,
+        timeWiggle = (0.97, 1.03),
+        valueWiggle = (0.99, 1.01)
+      )
+
+      val series2 = spike( full2 )( 0 )
+      val history2 = historyWith( Option(history1.recordLastDataPoints(series.points)), series2 )
+
+      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
+      aggregator.expectMsgPF( 2.seconds.dilated, "first hour again" ) {
+        case m @ SeriesOutliers(alg, source, plan, outliers) => {
+          alg mustBe Set( algoS )
+          source mustBe series2
+          m.hasAnomalies mustBe true
+          outliers.size mustBe 3
+          outliers mustBe series2.points.take(3)
+        }
+      }
     }
 
-    "find outliers deviating stddev from average" taggedAs (DONE) in { f: Fixture =>
+    "find outliers deviating stddev from simple moving average" in { f: Fixture =>
       import f._
       val analyzer = TestActorRef[SkylineAnalyzer]( SkylineAnalyzer.props(router.ref) )
       val full = makeDataPoints(
-        values = immutable.IndexedSeq.fill( 50 )( 1.0 ),
+        values = immutable.IndexedSeq.fill( 1000 )( 1.0 ),
         timeWiggle = (0.97, 1.03),
         valueWiggle = (1.0, 1.0)
       )
 
-      val series = spikeLast( full )
+      val series = spike( full )()
       trace( s"test series = $series" )
-      val algoS = SkylineAnalyzer.StddevFromAverageAlgorithm
+      val algoS = SkylineAnalyzer.StddevFromSimpleMovingAverageAlgorithm
       val algProps = ConfigFactory.parseString(
         s"""
            |${algoS.name}.tolerance: 3
         """.stripMargin
       )
 
-      analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( SkylineAnalyzer.StddevFromAverageAlgorithm ) )
-      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series, plan), historyWith(series), algProps ) )
+      analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( SkylineAnalyzer.StddevFromSimpleMovingAverageAlgorithm ) )
+      val history1 = historyWith( None, series )
+      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series, plan), history1, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "stddev from average" ) {
         case m @ SeriesOutliers(alg, source, plan, outliers) => {
           alg mustBe Set( algoS )
@@ -176,28 +206,48 @@ class SkylineAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
           outliers mustBe Row( series.points.last )
         }
       }
+
+      val full2 = makeDataPoints(
+        values = immutable.IndexedSeq.fill( 1000 )( 1.0 ),
+        timeWiggle = (0.97, 1.03),
+        valueWiggle = (1.0, 1.0)
+      )
+      val series2 = spike( full2 )( 0 )
+      val history2 = historyWith( Option(history1.recordLastDataPoints(series.points)), series2 )
+
+      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
+      aggregator.expectMsgPF( 2.seconds.dilated, "stddev from average again" ) {
+        case m @ SeriesOutliers(alg, source, plan, outliers) => {
+          alg mustBe Set( algoS )
+          source mustBe series2
+          m.hasAnomalies mustBe true
+          outliers.size mustBe 3
+          outliers mustBe series2.points.take(3)
+        }
+      }
     }
 
-    "find outliers deviating stddev from moving average" taggedAs (DONE) in { f: Fixture =>
+    "find outliers deviating stddev from exponential moving average" in { f: Fixture =>
       import f._
       val analyzer = TestActorRef[SkylineAnalyzer]( SkylineAnalyzer.props(router.ref) )
       val full = makeDataPoints(
-        values = immutable.IndexedSeq.fill( 50 )( 1.0 ),
+        values = immutable.IndexedSeq.fill( 5 )( 1.0 ),
         timeWiggle = (0.97, 1.03),
         valueWiggle = (1.0, 1.0)
       )
 
-      val series = spikeLast( full )
+      val series = spike( full )()
       trace( s"test series = $series" )
-      val algoS = SkylineAnalyzer.StddevFromMovingAverageAlgorithm
+      val algoS = SkylineAnalyzer.StddevFromExponentialMovingAverageAlgorithm
       val algProps = ConfigFactory.parseString(
         s"""
          |${algoS.name}.tolerance: 3
         """.stripMargin
       )
 
-      analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( SkylineAnalyzer.StddevFromMovingAverageAlgorithm ) )
-      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series, plan), historyWith(series), algProps ) )
+      analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( SkylineAnalyzer.StddevFromExponentialMovingAverageAlgorithm ) )
+      val history1 = historyWith( None, series )
+      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series, plan), history1, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "stddev from moving average" ) {
         case m @ SeriesOutliers(alg, source, plan, outliers) => {
           alg mustBe Set( algoS )
@@ -206,12 +256,28 @@ class SkylineAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
           outliers.size mustBe 1
           outliers mustBe Row( series.points.last )
         }
+      }
 
-        case x => x mustBe 0
+      val full2 = makeDataPoints(
+        values = immutable.IndexedSeq.fill( 5 )( 1.0 ),
+        timeWiggle = (0.97, 1.03),
+        valueWiggle = (1.0, 1.0)
+      )
+
+      val series2 = spike( full2 )( 0 )
+      val history2 = historyWith( Option(history1.recordLastDataPoints(series.points)), series2 )
+
+      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
+      aggregator.expectMsgPF( 2.seconds.dilated, "stddev from moving average again" ) {
+        case m @ NoOutliers(alg, source, plan) => {
+          alg mustBe Set( algoS )
+          source mustBe series2
+          m.hasAnomalies mustBe false
+        }
       }
     }
 
-    "find outliers via Grubbs Test" taggedAs (WIP) in { f: Fixture =>
+    "find outliers via Grubbs Test" in { f: Fixture =>
       import f._
       // helpful online grubbs calculator: http://graphpad.com/quickcalcs/Grubbs1.cfm
 
@@ -221,7 +287,7 @@ class SkylineAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
         valueWiggle = (0.98, 1.02)
       )
 
-      val series = spikeLast( full )
+      val series = spike( full )()
 
       val algoS = SkylineAnalyzer.GrubbsAlgorithm
       val algProps = ConfigFactory.parseString(
@@ -232,7 +298,8 @@ class SkylineAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
 
       val analyzer = TestActorRef[SkylineAnalyzer]( SkylineAnalyzer.props(router.ref) )
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( SkylineAnalyzer.GrubbsAlgorithm ) )
-      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series, plan), historyWith(series), algProps ) )
+      val history1 = historyWith( None, series )
+      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series, plan), history1, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "grubbs" ) {
         case m @ SeriesOutliers(alg, source, plan, outliers) => {
           alg mustBe Set( algoS )
@@ -240,6 +307,25 @@ class SkylineAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
           m.hasAnomalies mustBe true
           outliers.size mustBe 1
           outliers mustBe Row( series.points.last )
+        }
+      }
+
+
+      val full2: Row[DataPoint] = makeDataPoints(
+        values = IndexedSeq.fill( 10 )( 1.0 ).to[scala.collection.immutable.IndexedSeq],
+        timeWiggle = (0.98, 1.02),
+        valueWiggle = (0.98, 1.02)
+      )
+
+      val series2 = spike( full )( 0 )
+      val history2 = historyWith( Option(history1.recordLastDataPoints(series.points)), series2 )
+
+      analyzer.receive( DetectUsing(algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
+      aggregator.expectMsgPF( 2.seconds.dilated, "grubbs again" ) {
+        case m @ NoOutliers( alg, source, plan ) => {
+          alg mustBe Set( algoS )
+          source mustBe series2
+          m.hasAnomalies mustBe false
         }
       }
     }
