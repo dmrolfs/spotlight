@@ -164,7 +164,7 @@ class OutlierDetection extends Actor with InstrumentedActor with ActorLogging {
 
     val initialHistory = _history get key getOrElse { HistoricalStatistics( 2, false ) }
     val sentHistory = data.points.foldLeft( initialHistory ) { (h, dp) => h :+ dp.getPoint }
-    val updatedHistory = sentHistory record data.points.map{ _.getPoint }
+    val updatedHistory = sentHistory recordLastPoints data.points.map{_.getPoint }
     _history += key -> updatedHistory
 
 

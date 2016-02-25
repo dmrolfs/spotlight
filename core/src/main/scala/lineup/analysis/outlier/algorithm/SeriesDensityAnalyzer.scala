@@ -26,7 +26,9 @@ object SeriesDensityAnalyzer {
   ) extends AlgorithmActor.Context {
     override def message: DetectUsing = underlying.message
     override def algorithm: Symbol = underlying.algorithm
+    override def topic: Topic = underlying.topic
     override def plan: OutlierPlan = underlying.plan
+    override def historyKey: HistoryKey = underlying.historyKey
     override def data: Seq[DoublePoint] = underlying.data
     override def source: TimeSeriesBase = underlying.source
     override def messageConfig: Config = underlying.messageConfig

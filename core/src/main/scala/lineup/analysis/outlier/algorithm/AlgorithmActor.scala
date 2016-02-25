@@ -1,18 +1,20 @@
 package lineup.analysis.outlier.algorithm
 
-import akka.actor.{ Actor, ActorPath, ActorRef, ActorLogging }
+import akka.actor.{Actor, ActorLogging, ActorPath, ActorRef}
 import akka.event.LoggingReceive
 import com.typesafe.config.Config
 import lineup.model.outlier.OutlierPlan
-import lineup.model.timeseries.{ TimeSeriesBase, DataPoint }
+import lineup.model.timeseries.{DataPoint, TimeSeriesBase, Topic}
 import org.apache.commons.math3.linear.MatrixUtils
-import org.apache.commons.math3.ml.distance.{ EuclideanDistance, DistanceMeasure }
+import org.apache.commons.math3.ml.distance.{DistanceMeasure, EuclideanDistance}
 import peds.commons.math.MahalanobisDistance
-import scalaz._, Scalaz._
+
+import scalaz._
+import Scalaz._
 import scalaz.Kleisli.kleisli
-import org.apache.commons.math3.ml.clustering.{ Cluster, DoublePoint }
+import org.apache.commons.math3.ml.clustering.{Cluster, DoublePoint}
 import peds.akka.metrics.InstrumentedActor
-import lineup.analysis.outlier.{ HistoricalStatistics, UnrecognizedPayload, DetectUsing, DetectionAlgorithmRouter }
+import lineup.analysis.outlier._
 
 
 trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
@@ -74,7 +76,9 @@ object AlgorithmActor {
     def message: DetectUsing
     def data: Seq[DoublePoint]
     def algorithm: Symbol
+    def topic: Topic
     def plan: OutlierPlan
+    def historyKey: HistoryKey
     def history: HistoricalStatistics
     def source: TimeSeriesBase
     def messageConfig: Config
@@ -87,13 +91,15 @@ object AlgorithmActor {
 
 
     final case class SimpleContext private[algorithm]( message: DetectUsing, data: Seq[DoublePoint] ) extends Context {
-      val algorithm: Symbol = message.algorithm
-      def plan: OutlierPlan = message.plan
-      def history: HistoricalStatistics = message.history
-      def source: TimeSeriesBase = message.source
-      def messageConfig: Config = message.properties
+      override val algorithm: Symbol = message.algorithm
+      override val topic: Topic = message.topic
+      override def plan: OutlierPlan = message.plan
+      override val historyKey: HistoryKey = HistoryKey( plan, topic )
+      override def history: HistoricalStatistics = message.history
+      override def source: TimeSeriesBase = message.source
+      override def messageConfig: Config = message.properties
 
-      def distanceMeasure: TryV[DistanceMeasure] = {
+      override def distanceMeasure: TryV[DistanceMeasure] = {
         def makeMahalanobisDistance: TryV[DistanceMeasure] = {
           val mahal = if ( message.history.n > 0 ) {
             MahalanobisDistance.fromCovariance( message.history.covariance )
@@ -115,7 +121,7 @@ object AlgorithmActor {
         }
       }
 
-      def tolerance: TryV[Option[Double]] = {
+      override def tolerance: TryV[Option[Double]] = {
         val path = algorithm.name+".tolerance"
         \/ fromTryCatchNonFatal {
           if ( messageConfig hasPath path ) Some( messageConfig getDouble path ) else None
