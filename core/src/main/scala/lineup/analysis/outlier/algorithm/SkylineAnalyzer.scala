@@ -452,44 +452,35 @@ class SkylineAnalyzer( override val router: ActorRef ) extends AlgorithmActor {
     * A timeseries is anomalous if the deviation of its latest datapoint with
     * respect to the median is [tolerance] times larger than the median of deviations.
     */
-  val medianAbsoluteDeviation: Op[Context, (Outliers, Context)] = Kleisli[TryV, Context, (Outliers, Context)] { context => -\/( new IllegalStateException("tbd") ) }
-//  val medianAbsoluteDeviation: Op[Context, (Outliers, Context)] = {
-//    val outliers = for {
-//      context <- toSkylineContext <=< ask[TryV, Context]
-//      tolerance <- tolerance <=< ask[TryV, Context]
-//    } yield {
-//      val deviationStats = new DescriptiveStatistics( context.data.size )
-//      val deviations = context.data map { dp =>
-//        val Array( ts, v ) = dp.getPoint
-//
-//        val median = context.movingStatistics.getPercentile( 50 )
-//
-//        context.source.points
-//        .find{ _.timestamp.getMillis == ts.toLong }
-//        .foreach { orig =>
-//          log.debug( "medianAbsoluteDeviation: adding point ({}, {}) to moving stats", orig.timestamp.getMillis, orig.value )
-//          context.movingStatistics addValue orig.value
-//        }
-//
-//        val dev = math.abs( v - median )
-//        deviationStats addValue dev
-//        ( ts, dev )
-//      }
-//
-//      val deviationMedian = deviationStats getPercentile 50
-//
-//      val tol = tolerance getOrElse 3D // skyline source uses 6.0 - admittedly arbitrary?
-//
-//      if ( deviationMedian == 0D ) (Row.empty[DataPoint], context)
-//      else collectOutlierPoints( deviations, context ) { case (ts, dev) =>
-//        val test = dev > ( tol * deviationMedian )
-//        log.debug( "medianAbsoluteDeviation: ({}, {}) > {} isOutlier={}", new DateTime(ts.toLong), dev, tol*deviationMedian, test )
-//        test
-//      }
-//    }
-//
-//    makeOutliersK( MedianAbsoluteDeviationAlgorithm, outliers )
-//  }
+  val medianAbsoluteDeviation: Op[Context, (Outliers, Context)] = {
+    val outliers = for {
+      context <- toSkylineContext <=< ask[TryV, Context]
+      tolerance <- tolerance <=< ask[TryV, Context]
+    } yield {
+      val deviationStats = new DescriptiveStatistics( context.data.size )
+      val tol = tolerance getOrElse 3D  // skyline source uses 6.0 - admittedly arbitrary?
+
+      collectOutlierPoints(
+        points = context.data.map{ _.getPoint }.map{ case Array(ts, v) => (ts, v) },
+        context = context,
+        isOutlier = (p: Point2D, ctx: SkylineContext) => {
+          val (ts, v) = p
+          val movingMedian = ctx.movingStatistics getPercentile 50
+          val deviation = math.abs( v - movingMedian )
+          deviationStats addValue deviation
+          val deviationMedian = deviationStats getPercentile 50
+          log.debug( "medianAbsoluteDeviation: movingMedian:[{}] deviation:[{}] deviationMedian:[{}]", movingMedian, deviation, deviationMedian )
+          deviation > ( tol * deviationMedian )
+        },
+        update = (ctx: SkylineContext, dp: DataPoint) => {
+          ctx.movingStatistics addValue dp.value
+          ctx
+        }
+      )
+    }
+
+    makeOutliersK( MedianAbsoluteDeviationAlgorithm, outliers )
+  }
 
   val ksTest: Op[Context, (Outliers, Context)] = Kleisli[TryV, Context, (Outliers, Context)] { context => -\/( new IllegalStateException("tbd") ) }
 
