@@ -120,7 +120,7 @@ class SkylineAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
     "find outliers deviating from first hour" in { f: Fixture =>
       import f._
       val analyzer = TestActorRef[SkylineAnalyzer]( SkylineAnalyzer.props(router.ref) )
-      val firstHour = analyzer.underlyingActor.firstHour
+      val firstHour = SkylineAnalyzer.SkylineContext.firstHour
       trace( s"firstHour = $firstHour" )
       val full = makeDataPoints(
         values = points.map{ case DataPoint(_, v) => v },
@@ -133,11 +133,7 @@ class SkylineAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       val series = spike( full )()
       trace( s"test series = $series" )
       val algoS = SkylineAnalyzer.FirstHourAverageAlgorithm
-      val algProps = ConfigFactory.parseString(
-        s"""
-           |${algoS.name}.tolerance: 4
-        """.stripMargin
-      )
+      val algProps = ConfigFactory.parseString( s"""${algoS.name}.tolerance: 4""" )
 
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( SkylineAnalyzer.FirstHourAverageAlgorithm ) )
       val history1 = historyWith( None, series )
@@ -172,6 +168,59 @@ class SkylineAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
           m.hasAnomalies mustBe true
           outliers.size mustBe 3
           outliers mustBe series2.points.take(3)
+        }
+      }
+    }
+
+    "find outliers over 2 first hour messages" in { f: Fixture =>
+      import f._
+      val analyzer = TestActorRef[SkylineAnalyzer]( SkylineAnalyzer.props(router.ref) )
+      val firstHour = SkylineAnalyzer.SkylineContext.firstHour
+      trace( s"firstHour = $firstHour" )
+      val full = makeDataPoints(
+        values = points.map{ case DataPoint(_, v) => v },
+        start = firstHour.start,
+        period = 1.minute,
+        timeWiggle = (0.97, 1.03),
+        valueWiggle = (0.99, 1.01)
+      )
+
+      val series = spike( full )()
+      trace( s"test series = $series" )
+      val algoS = SkylineAnalyzer.FirstHourAverageAlgorithm
+      val algProps = ConfigFactory.parseString( s"""${algoS.name}.tolerance: 2""" )
+
+      analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( SkylineAnalyzer.FirstHourAverageAlgorithm ) )
+      val history1 = historyWith( None, series )
+      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series, plan), history1, algProps ) )
+      aggregator.expectMsgPF( 2.seconds.dilated, "first hour" ) {
+        case m @ NoOutliers(alg, source, plan) => {
+          alg mustBe Set( algoS )
+          source mustBe series
+          m.hasAnomalies mustBe false
+        }
+      }
+
+      val start2 = series.points.last.timestamp + 1.minute
+      val full2 = makeDataPoints(
+        values = points.map{ case DataPoint(_, v) => v },
+        start = start2,
+        period = 1.minute,
+        timeWiggle = (0.97, 1.03),
+        valueWiggle = (0.99, 1.01)
+      )
+
+      val series2 = spike( full2 )( 0 )
+      val history2 = historyWith( Option(history1.recordLastDataPoints(series.points)), series2 )
+
+      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
+      aggregator.expectMsgPF( 2.seconds.dilated, "first hour again" ) {
+        case m @ SeriesOutliers(alg, source, plan, outliers) => {
+          alg mustBe Set( algoS )
+          source mustBe series2
+          m.hasAnomalies mustBe true
+          outliers.size mustBe 2
+          outliers mustBe series2.points.take(2)
         }
       }
     }
@@ -371,8 +420,8 @@ class SkylineAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
           alg mustBe Set( algoS )
           source mustBe series2
           m.hasAnomalies mustBe true
-          outliers.size mustBe 3
-          outliers mustBe series2.points.take(3)
+          outliers.size mustBe 1
+          outliers mustBe series2.points.take(1)
         }
       }
     }
