@@ -16,6 +16,10 @@ import lineup.analysis.outlier.{ DetectOutliersInSeries, DetectUsing }
 /**
  * Created by rolfsd on 9/29/15.
  */
+object DBSCANAnalyzer {
+  type Clusters = Seq[Cluster[DoublePoint]]
+}
+
 trait DBSCANAnalyzer extends AlgorithmActor {
   import AlgorithmActor._
 
@@ -24,7 +28,7 @@ trait DBSCANAnalyzer extends AlgorithmActor {
 
   override val detect: Receive = LoggingReceive {
     case s @ DetectUsing( _, aggregator, payload: DetectOutliersInSeries, history, algorithmConfig ) => {
-      ( algorithmContext >==> cluster >==> findOutliers( payload.source ) ).run( s ) match {
+      ( algorithmContext >=> cluster >=> findOutliers( payload.source ) ).run( s ) match {
         case \/-( r ) => aggregator ! r
         case -\/( ex ) => {
           log.error(
@@ -39,7 +43,7 @@ trait DBSCANAnalyzer extends AlgorithmActor {
     }
   }
 
-  def findOutliers( source: TimeSeries ): Op[(Context, Seq[Cluster[DoublePoint]]), Outliers]
+  def findOutliers( source: TimeSeries ): Op[(AlgorithmContext, Seq[Cluster[DoublePoint]]), Outliers]
 
 
   val seedEps: Op[Config, Double] = Kleisli[TryV, Config, Double] { c =>
@@ -50,11 +54,11 @@ trait DBSCANAnalyzer extends AlgorithmActor {
     Kleisli[TryV, Config, Int] { c => \/ fromTryCatchNonFatal { c getInt algorithm.name+".minDensityConnectedPoints" } }
   }
 
-  val eps: Op[Context, Double] = {
+  val eps: Op[AlgorithmContext, Double] = {
     val epsContext = for {
-      context <- ask[TryV, Context]
+      context <- ask[TryV, AlgorithmContext]
       config <- messageConfig
-      tol <- kleisli[TryV, Context, Option[Double]] {_.tolerance }
+      tol <- kleisli[TryV, AlgorithmContext, Option[Double]] {_.tolerance }
     } yield ( context, config, context.history, tol )
 
     epsContext flatMapK { case (ctx, config, hist, tol) =>
@@ -87,13 +91,13 @@ trait DBSCANAnalyzer extends AlgorithmActor {
     }
   }
 
-  val cluster: Op[Context, (Context, Seq[Cluster[DoublePoint]])] = {
+  val cluster: Op[AlgorithmContext, (AlgorithmContext, Seq[Cluster[DoublePoint]])] = {
     for {
-      ctx <- ask[TryV, Context]
+      ctx <- ask[TryV, AlgorithmContext]
       data = ctx.data
       e <- eps
       minDensityPts <- minDensityConnectedPoints <=< messageConfig
-      distance <- kleisli[TryV, Context, DistanceMeasure] {_.distanceMeasure }
+      distance <- kleisli[TryV, AlgorithmContext, DistanceMeasure] {_.distanceMeasure }
     } yield {
       log.info( "cluster [{}]: eps = [{}]", ctx.message.topic, e )
       log.debug( "cluster: minDensityConnectedPoints = [{}]", minDensityPts )

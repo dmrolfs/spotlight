@@ -56,23 +56,26 @@ trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
 
   // -- algorithm functional elements --
 
-  def algorithmContext: Op[DetectUsing, Context] = {
-    Kleisli[TryV, DetectUsing, Context] { m => Context( m, DataPoint.toDoublePoints( m.source.points ) ).right }
+  def algorithmContext: Op[DetectUsing, AlgorithmContext] = {
+    Kleisli[TryV, DetectUsing, AlgorithmContext] { m => AlgorithmContext( m, DataPoint.toDoublePoints( m.source.points ) ).right }
   }
 
-  val tolerance: Op[Context, Option[Double]] = Kleisli[TryV, Context, Option[Double]] { _.tolerance }
+  val tolerance: Op[AlgorithmContext, Option[Double]] = Kleisli[TryV, AlgorithmContext, Option[Double]] {_.tolerance }
 
-  val messageConfig: Op[Context, Config] = kleisli[TryV, Context, Config] { _.messageConfig.right }
+  val messageConfig: Op[AlgorithmContext, Config] = kleisli[TryV, AlgorithmContext, Config] {_.messageConfig.right }
 
 }
 
 object AlgorithmActor {
   type TryV[T] = Throwable\/T
   type Op[I, O] = Kleisli[TryV, I, O]
-  type Clusters = Seq[Cluster[DoublePoint]]
+
+  type Points = Seq[DoublePoint]
+  type Point = Array[Double]
+  type Point2D = (Double, Double)
 
 
-  trait Context {
+  trait AlgorithmContext {
     def message: DetectUsing
     def data: Seq[DoublePoint]
     def algorithm: Symbol
@@ -86,11 +89,13 @@ object AlgorithmActor {
     def tolerance: TryV[Option[Double]]
   }
 
-  object Context {
-    def apply( message: DetectUsing, data: Seq[DoublePoint] ): Context = SimpleContext( message, data )
+  object AlgorithmContext {
+    def apply( message: DetectUsing, data: Seq[DoublePoint] ): AlgorithmContext = SimpleAlgorithmContext( message, data )
 
 
-    final case class SimpleContext private[algorithm]( message: DetectUsing, data: Seq[DoublePoint] ) extends Context {
+    final case class SimpleAlgorithmContext private[algorithm](
+      message: DetectUsing, data: Seq[DoublePoint]
+    ) extends AlgorithmContext {
       override val algorithm: Symbol = message.algorithm
       override val topic: Topic = message.topic
       override def plan: OutlierPlan = message.plan

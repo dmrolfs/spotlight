@@ -37,7 +37,7 @@ class CohortDensityAnalyzer( override val router: ActorRef ) extends DBSCANAnaly
         .toList
         .map { DataPoint.toDoublePoints }
         .map { frameDistances =>
-          val context = Context( message = c, data = frameDistances )
+          val context = AlgorithmContext( message = c, data = frameDistances )
 
           cluster.run( context )
           .map { case (_, clusters) =>
@@ -78,5 +78,5 @@ class CohortDensityAnalyzer( override val router: ActorRef ) extends DBSCANAnaly
   }
 
   //todo figure out how to unify into a single density algorithm
-  override def findOutliers( source: TimeSeries ): Op[(Context, Seq[Cluster[DoublePoint]]), Outliers] = ???
+  override def findOutliers( source: TimeSeries ): Op[(AlgorithmContext, Seq[Cluster[DoublePoint]]), Outliers] = ???
 }

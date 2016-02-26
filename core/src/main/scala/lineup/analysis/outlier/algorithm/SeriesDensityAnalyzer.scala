@@ -1,15 +1,19 @@
 package lineup.analysis.outlier.algorithm
 
-import akka.actor.{ ActorRef, Props }
+import akka.actor.{ActorRef, Props}
+
+import scalaz._
+import Scalaz._
 import com.typesafe.config.Config
-import lineup.analysis.outlier.algorithm.AlgorithmActor.TryV
 import org.apache.commons.math3.ml.clustering.DoublePoint
 import org.apache.commons.math3.ml.distance.DistanceMeasure
-import scalaz._, Scalaz._
-import scalaz.Kleisli.{ ask, kleisli }
+
+import scalaz.Kleisli.{ask, kleisli}
 import lineup.model.timeseries._
-import lineup.model.outlier.{ OutlierPlan, Outliers, NoOutliers, SeriesOutliers }
-import lineup.analysis.outlier.{ DetectUsing, HistoryKey, HistoricalStatistics }
+import lineup.model.outlier.{NoOutliers, OutlierPlan, Outliers, SeriesOutliers}
+import lineup.analysis.outlier.{DetectUsing, HistoricalStatistics, HistoryKey}
+import lineup.analysis.outlier.algorithm.AlgorithmActor.TryV
+import lineup.analysis.outlier.algorithm.DBSCANAnalyzer.Clusters
 
 
 /**
@@ -21,9 +25,9 @@ object SeriesDensityAnalyzer {
 
 
   class SeriesDensityContext(
-    underlying: AlgorithmActor.Context,
+    underlying: AlgorithmActor.AlgorithmContext,
     override val history: HistoricalStatistics
-  ) extends AlgorithmActor.Context {
+  ) extends AlgorithmActor.AlgorithmContext {
     override def message: DetectUsing = underlying.message
     override def algorithm: Symbol = underlying.algorithm
     override def topic: Topic = underlying.topic
@@ -43,10 +47,10 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends DBSCANAnaly
 
   override val algorithm: Symbol = SeriesDensityAnalyzer.Algorithm
 
-  override def algorithmContext: Op[DetectUsing, Context] = {
+  override def algorithmContext: Op[DetectUsing, AlgorithmContext] = {
     val distanceHistoryArgs = for {
-      context <- ask[TryV, Context]
-      distance <- kleisli { ctx: Context => ctx.distanceMeasure }
+      context <- ask[TryV, AlgorithmContext]
+      distance <- kleisli { ctx: AlgorithmContext => ctx.distanceMeasure }
     } yield ( context.plan, context.source, distance )
 
     for {
@@ -57,14 +61,14 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends DBSCANAnaly
     }
   }
 
-  override def findOutliers( source: TimeSeries ): Op[(Context, Clusters), Outliers] = {
-    val pullContext = Kleisli[TryV, (Context, Clusters), Context] { case (ctx, _) => ctx.right }
+  override def findOutliers( source: TimeSeries ): Op[(AlgorithmContext, Clusters), Outliers] = {
+    val pullContext = Kleisli[TryV, (AlgorithmContext, Clusters), AlgorithmContext] { case (ctx, _) => ctx.right }
 
-    val outliers: Op[(Context, Clusters), Seq[DataPoint]] = {
+    val outliers: Op[(AlgorithmContext, Clusters), Seq[DataPoint]] = {
       for {
-        contextAndClusters <- Kleisli.ask[TryV, (Context, Clusters)]
+        contextAndClusters <- Kleisli.ask[TryV, (AlgorithmContext, Clusters)]
         (context, clusters) = contextAndClusters
-        distance <- kleisli { ctx: Context => ctx.distanceMeasure } <=< pullContext
+        distance <- kleisli { ctx: AlgorithmContext => ctx.distanceMeasure } <=< pullContext
         isOutlier = makeOutlierTest( clusters )
       } yield {
         for {
