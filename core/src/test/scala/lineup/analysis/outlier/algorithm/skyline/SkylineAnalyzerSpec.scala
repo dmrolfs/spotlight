@@ -3,6 +3,7 @@ package lineup.analysis.outlier.algorithm.skyline
 import akka.testkit._
 import com.github.nscala_time.time.JodaImplicits._
 import com.typesafe.config.ConfigFactory
+import com.typesafe.scalalogging.LazyLogging
 import lineup.analysis.outlier.{DetectOutliersInSeries, DetectUsing, DetectionAlgorithmRouter, HistoricalStatistics}
 import lineup.model.outlier._
 import lineup.model.timeseries.{DataPoint, Row, TimeSeries, TimeSeriesBase}
@@ -21,7 +22,7 @@ import scala.concurrent.{ExecutionContext, Future}
 /**
   * Created by rolfsd on 2/15/16.
   */
-class SkylineAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
+class SkylineAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar with LazyLogging {
   import SkylineAnalyzerSpec._
 
   object Fixture {
@@ -54,7 +55,7 @@ class SkylineAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
     when( plan.algorithms ).thenReturn(
       Set(
         FirstHourAverageAnalyzer.Algorithm,
-//        SkylineAnalyzer.MeanSubtractionCumulationAlgorithm,
+        MeanSubtractionCumulationAnalyzer.Algorithm,
         SimpleMovingAverageAnalyzer.Algorithm,
         ExponentialMovingAverageAnalyzer.Algorithm,
 //        SkylineAnalyzer.LeastSquaresAlgorithm,
@@ -315,7 +316,7 @@ class SkylineAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       }
     }
 
-    "find outliers via Grubbs Test" taggedAs (WIP) in { f: Fixture =>
+    "find outliers via Grubbs Test" in { f: Fixture =>
       import f._
       // helpful online grubbs calculator: http://graphpad.com/quickcalcs/Grubbs1.cfm
 
@@ -356,10 +357,12 @@ class SkylineAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
 
       analyzer.receive( DetectUsing(algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "grubbs again" ) {
-        case m @ NoOutliers( alg, source, plan ) => {
+        case m @ SeriesOutliers(alg, source, plan, outliers) => {
           alg mustBe Set( algoS )
           source mustBe series2
-          m.hasAnomalies mustBe false
+          m.hasAnomalies mustBe true
+          outliers.size mustBe 1
+          outliers mustBe series.points.take(1)
         }
       }
     }
@@ -410,6 +413,56 @@ class SkylineAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
         }
       }
     }
+
+    "find outliers via cumulative mean subtraction Test" taggedAs (WIP) in { f: Fixture =>
+      import f._
+      val full: Row[DataPoint] = makeDataPoints(
+        values = IndexedSeq.fill( 50 )( 1.0 ).to[scala.collection.immutable.IndexedSeq],
+        timeWiggle = (0.98, 1.02),
+        valueWiggle = (0.98, 1.02)
+      )
+
+      val series = spike( full )()
+
+      val algoS = MeanSubtractionCumulationAnalyzer.Algorithm
+      val algProps = ConfigFactory.parseString( s"""${algoS.name}.tolerance: 3""" )
+
+      val analyzer = TestActorRef[MeanSubtractionCumulationAnalyzer]( MeanSubtractionCumulationAnalyzer.props(router.ref) )
+      analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
+      val history1 = historyWith( None, series )
+      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series, plan), history1, algProps ) )
+      aggregator.expectMsgPF( 2.seconds.dilated, "mean subtraction cumulation" ) {
+        case m @ SeriesOutliers(alg, source, plan, outliers) => {
+          alg mustBe Set( algoS )
+          source mustBe series
+          m.hasAnomalies mustBe true
+          outliers.size mustBe 1
+          outliers mustBe Row( series.points.last )
+        }
+      }
+
+
+      val full2: Row[DataPoint] = makeDataPoints(
+        values = IndexedSeq.fill( 50 )( 1.0 ).to[scala.collection.immutable.IndexedSeq],
+        timeWiggle = (0.98, 1.02),
+        valueWiggle = (0.98, 1.02)
+      )
+
+      val series2 = spike( full )( 0 )
+      val history2 = historyWith( Option(history1.recordLastDataPoints(series.points)), series2 )
+
+      analyzer.receive( DetectUsing(algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
+      aggregator.expectMsgPF( 2.seconds.dilated, "mean subtraction cumulation again" ) {
+        case m @ SeriesOutliers(alg, source, plan, outliers) => {
+          alg mustBe Set( algoS )
+          source mustBe series2
+          m.hasAnomalies mustBe true
+          outliers.size mustBe 1
+          outliers mustBe series2.points.take(1)
+        }
+      }
+    }
+
 
   }
 }

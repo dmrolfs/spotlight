@@ -1,28 +1,21 @@
 package lineup.analysis.outlier.algorithm.skyline
 
-
 import scala.annotation.tailrec
 import scala.reflect.ClassTag
 import akka.event.LoggingReceive
-
-import scalaz.Scalaz._
-import scalaz.{Lens => _, _}
+import scalaz._, scalaz.Scalaz._
 import shapeless.syntax.typeable._
-import shapeless.{:: => _, _}
-
-import scalaz.Kleisli.{ask, kleisli}
+import scalaz.Kleisli.kleisli
 import com.typesafe.config.Config
-import org.apache.commons.math3.distribution.TDistribution
 import org.apache.commons.math3.ml.clustering.DoublePoint
 import org.apache.commons.math3.ml.distance.DistanceMeasure
-import org.apache.commons.math3.stat.descriptive.{DescriptiveStatistics, SummaryStatistics}
 import peds.commons.Valid
 import peds.commons.util._
 import lineup.analysis.outlier._
 import lineup.analysis.outlier.algorithm.AlgorithmActor
 import lineup.analysis.outlier.algorithm.AlgorithmActor._
 import lineup.analysis.outlier.algorithm.skyline.SkylineAnalyzer.SkylineContextError
-import lineup.model.outlier.{OutlierPlan, Outliers}
+import lineup.model.outlier.{ OutlierPlan, Outliers }
 import lineup.model.timeseries._
 
 
@@ -30,12 +23,9 @@ import lineup.model.timeseries._
   * Created by rolfsd on 2/12/16.
   */
 object SkylineAnalyzer {
-//  val MeanSubtractionCumulationAlgorithm = 'mean_subtraction_cumulation
 //  val LeastSquaresAlgorithm = 'least_squares
 //  val HistogramBinsAlgorithm = 'histogram_bins
 //  val KsTestAlgorithm = 'ks_test
-
-//  type MomentHistogram = Map[MomentBinKey, Moment]
 
   trait SkylineContext extends AlgorithmContext {
     def underlying: AlgorithmContext
@@ -57,7 +47,7 @@ object SkylineAnalyzer {
 
   final case class SimpleSkylineContext private[skyline]( override val underlying: AlgorithmContext ) extends SkylineContext {
     override def withUnderlying( ctx: AlgorithmContext ): Valid[SkylineContext] = copy( underlying = ctx ).successNel
-    override def toString: String = s"""${getClass.safeSimpleName}(underlying:[${underlying}])"""
+    override def toString: String = s"""${getClass.safeSimpleName}()"""
   }
 
   // window size = 1d @ 1 pt per 10s
