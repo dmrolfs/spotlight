@@ -17,6 +17,7 @@ import org.apache.commons.math3.ml.clustering.DoublePoint
 import org.apache.commons.math3.ml.distance.DistanceMeasure
 import org.apache.commons.math3.stat.descriptive.{DescriptiveStatistics, SummaryStatistics}
 import peds.commons.Valid
+import peds.commons.util._
 import lineup.analysis.outlier._
 import lineup.analysis.outlier.algorithm.AlgorithmActor
 import lineup.analysis.outlier.algorithm.AlgorithmActor._
@@ -30,12 +31,8 @@ import lineup.model.timeseries._
   */
 object SkylineAnalyzer {
 //  val MeanSubtractionCumulationAlgorithm = 'mean_subtraction_cumulation
-//  val StddevFromSimpleMovingAverageAlgorithm = 'stddev_from_simple_moving_average
-//  val StddevFromExponentialMovingAverageAlgorithm = 'stddev_from_exponential_moving_average
 //  val LeastSquaresAlgorithm = 'least_squares
-//  val GrubbsAlgorithm = 'grubbs
 //  val HistogramBinsAlgorithm = 'histogram_bins
-//  val MedianAbsoluteDeviationAlgorithm = 'median_absolute_deviation
 //  val KsTestAlgorithm = 'ks_test
 
 //  type MomentHistogram = Map[MomentBinKey, Moment]
@@ -56,23 +53,15 @@ object SkylineAnalyzer {
     override def distanceMeasure: TryV[DistanceMeasure] = underlying.distanceMeasure
     override def tolerance: TryV[Option[Double]] = underlying.tolerance
   }
-//  case class SkylineContext private[algorithm](
-//    val underlying: AlgorithmActor.Context,
-//    val movingStatistics: DescriptiveStatistics,
-//    val deviationStatistics: DescriptiveStatistics,
-//    val historicalMoment: Moment,
-//    val momentHistogram: MomentHistogram
-//  ) extends AlgorithmActor.Context with LazyLogging {
-//
-//  }
 
 
-//  val underlyingLens: Lens[SkylineContext, AlgorithmActor.Context] = lens[SkylineContext] >> 'underlying
-//  val firstHourLens: Lens[SkylineContext, SummaryStatistics] = lens[SkylineContext] >> 'firstHour
-//  val movingStatisticsLens: Lens[SkylineContext, DescriptiveStatistics] = lens[SkylineContext] >> 'movingStatistics
-//  val deviationStatisticsLens: Lens[SkylineContext, DescriptiveStatistics] = lens[SkylineContext] >> 'deviationStatistics
-//  val historicalMomentLens: Lens[SkylineContext, Moment] = lens[SkylineContext] >> 'historicalMoment
-//  val momentHistogramLens: Lens[SkylineContext, MomentHistogram] = lens[SkylineContext] >> 'momentHistogram
+  final case class SimpleSkylineContext private[skyline]( override val underlying: AlgorithmContext ) extends SkylineContext {
+    override def withUnderlying( ctx: AlgorithmContext ): Valid[SkylineContext] = copy( underlying = ctx ).successNel
+    override def toString: String = s"""${getClass.safeSimpleName}(underlying:[${underlying}])"""
+  }
+
+  // window size = 1d @ 1 pt per 10s
+  val ApproximateDayWindow: Int = 6 * 60 * 24
 
 
   final case class SkylineContextError private[algorithm]( context: AlgorithmActor.AlgorithmContext )
@@ -146,11 +135,6 @@ trait SkylineAnalyzer[C <: SkylineAnalyzer.SkylineContext] extends AlgorithmActo
         case contextClassTag( ctx ) => ctx.right
         case _ => SkylineAnalyzer.SkylineContextError( context ).left
       }
-//
-//      if ( implicitly[ClassTag[C]].runtimeClass isAssignableFrom context.getClass ) {
-//        context.asInsatnce
-//        context.cast[C].map { _.right } getOrElse {  }
-//      }
     }
   }
 
