@@ -58,7 +58,7 @@ class SkylineAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar with LazyLo
         MeanSubtractionCumulationAnalyzer.Algorithm,
         SimpleMovingAverageAnalyzer.Algorithm,
         ExponentialMovingAverageAnalyzer.Algorithm,
-//        SkylineAnalyzer.LeastSquaresAlgorithm,
+        LeastSquaresAnalyzer.Algorithm,
         GrubbsAnalyzer.Algorithm,
 //        SkylineAnalyzer.HistogramBinsAlgorithm,
         MedianAbsoluteDeviationAnalyzer.Algorithm//,
@@ -414,7 +414,7 @@ class SkylineAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar with LazyLo
       }
     }
 
-    "find outliers via cumulative mean subtraction Test" taggedAs (WIP) in { f: Fixture =>
+    "find outliers via cumulative mean subtraction Test" in { f: Fixture =>
       import f._
       val full: Row[DataPoint] = makeDataPoints(
         values = IndexedSeq.fill( 50 )( 1.0 ).to[scala.collection.immutable.IndexedSeq],
@@ -459,6 +459,60 @@ class SkylineAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar with LazyLo
           m.hasAnomalies mustBe true
           outliers.size mustBe 1
           outliers mustBe series2.points.take(1)
+        }
+      }
+    }
+
+    "find outliers via least squares Test" taggedAs (WIP) in { f: Fixture =>
+      import f._
+      val full: Row[DataPoint] = makeDataPoints(
+        values = IndexedSeq.fill( 5 )( 1.0 ).to[scala.collection.immutable.IndexedSeq],
+        timeWiggle = (0.98, 1.02),
+        valueWiggle = (0.98, 1.02)
+      )
+
+      val series = spike( full, 10000 )()
+
+      val algoS = LeastSquaresAnalyzer.Algorithm
+      val algProps = ConfigFactory.parseString( s"""${algoS.name}.tolerance: 3""" )
+
+      val analyzer = TestActorRef[MeanSubtractionCumulationAnalyzer]( LeastSquaresAnalyzer.props(router.ref) )
+      analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
+      val history1 = historyWith( None, series )
+      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series, plan), history1, algProps ) )
+      aggregator.expectMsgPF( 2.seconds.dilated, "least squares" ) {
+        case m @ NoOutliers(alg, source, plan) => {
+          alg mustBe Set( algoS )
+          source mustBe series
+          m.hasAnomalies mustBe false
+        }
+//        case m @ SeriesOutliers(alg, source, plan, outliers) => {
+//          alg mustBe Set( algoS )
+//          source mustBe series
+//          m.hasAnomalies mustBe true
+//          outliers.size mustBe 1
+//          outliers mustBe Row( series.points.last )
+//        }
+      }
+
+
+      val full2: Row[DataPoint] = makeDataPoints(
+        values = IndexedSeq.fill( 5 )( 1.0 ).to[scala.collection.immutable.IndexedSeq],
+        timeWiggle = (0.98, 1.02),
+        valueWiggle = (0.98, 1.02)
+      )
+
+      val series2 = spike( full )( 0 )
+      val history2 = historyWith( Option(history1.recordLastDataPoints(series.points)), series2 )
+
+      analyzer.receive( DetectUsing(algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
+      aggregator.expectMsgPF( 2.seconds.dilated, "least squares again" ) {
+        case m @ SeriesOutliers(alg, source, plan, outliers) => {
+          alg mustBe Set( algoS )
+          source mustBe series2
+          m.hasAnomalies mustBe true
+          outliers.size mustBe 1
+          outliers mustBe series2.points.take(3).drop(2)
         }
       }
     }

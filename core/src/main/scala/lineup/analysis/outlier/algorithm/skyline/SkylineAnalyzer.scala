@@ -23,7 +23,6 @@ import lineup.model.timeseries._
   * Created by rolfsd on 2/12/16.
   */
 object SkylineAnalyzer {
-//  val LeastSquaresAlgorithm = 'least_squares
 //  val HistogramBinsAlgorithm = 'histogram_bins
 //  val KsTestAlgorithm = 'ks_test
 
