@@ -63,7 +63,10 @@ class GrubbsAnalyzer( override val router: ActorRef ) extends SkylineAnalyzer[Sk
       collectOutlierPoints(
         points = zScores,
         context = context,
-        isOutlier = (p: Point2D, ctx: Context) => { p._2 > grubbsScore },
+        isOutlier = (p: Point2D, ctx: Context) => {
+          log.debug( "{} > {}", (p._1.toLong, p._2), grubbsScore )
+          p._2 > grubbsScore
+        },
         update = (ctx: Context, pt: DataPoint) => { ctx }
       )
     }

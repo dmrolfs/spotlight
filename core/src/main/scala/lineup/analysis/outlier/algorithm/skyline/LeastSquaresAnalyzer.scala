@@ -68,6 +68,7 @@ class LeastSquaresAnalyzer( override val router: ActorRef ) extends SkylineAnaly
       val points2D = context.data.map{ _.getPoint }.map{ case Array(ts, v) => (ts, v) }
       val allByTimestamp = Map( groupWithLast( points2D, context ):_* )
 
+      //todo: this approach seems very wrong and not working out.
       collectOutlierPoints(
         points = points2D,
         context = context,
@@ -82,9 +83,9 @@ class LeastSquaresAnalyzer( override val router: ActorRef ) extends SkylineAnaly
             val errorsStddev = new DescriptiveStatistics( errors.toArray ).getStandardDeviation
             val t = errors.sum / errors.size
             log.debug( "least squares error[{}] errorStdDev[{}] t[{}]", errors.mkString(","), errorsStddev, t )
-            log.debug( "least squares 1: {} > {} = {}", math.abs(t), errorsStddev * tol, ( math.abs(t) > errorsStddev * tol ) )
-            log.debug( "least squares 2: {} != {} = {}", math.round( errorsStddev ), 0D, ( math.round( errorsStddev ) != 0D ) )
-            log.debug( "least squares 3: {} != {} = {}", math.round( t ), 0D, ( math.round( t ) != 0D ) )
+            log.debug( "least squares 1 avg error > tolerance: {} > {} = {}", math.abs(t), errorsStddev * tol, ( math.abs(t) > errorsStddev * tol ) )
+            log.debug( "least squares 2 non-zero errors stddev: {} != {} = {}", math.round( errorsStddev ), 0D, ( math.round( errorsStddev ) != 0D ) )
+            log.debug( "least squares 3 non-zero avg error: {} != {} = {}", math.round( t ), 0D, ( math.round( t ) != 0D ) )
             ( math.abs(t) > errorsStddev * tol ) && ( math.round( errorsStddev ) != 0D ) && ( math.round( t ) != 0 )
           }
 

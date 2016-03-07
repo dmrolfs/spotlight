@@ -23,8 +23,6 @@ import lineup.model.timeseries._
   * Created by rolfsd on 2/12/16.
   */
 object SkylineAnalyzer {
-//  val KsTestAlgorithm = 'ks_test
-
   trait SkylineContext extends AlgorithmContext {
     def underlying: AlgorithmContext
     def withUnderlying( ctx: AlgorithmContext ): Valid[SkylineContext]
@@ -94,11 +92,13 @@ trait SkylineAnalyzer[C <: SkylineAnalyzer.SkylineContext] extends AlgorithmActo
 
   def findOutliers: Op[AlgorithmContext, (Outliers, AlgorithmContext)]
 
+  //todo dmr place into Agent for use & concurrency *across* actor instances?
   var _scopedContexts: Map[HistoryKey, SkylineContext] = Map.empty[HistoryKey, SkylineContext]
 
   def setScopedContext( c: SkylineContext ): Unit = { _scopedContexts += c.historyKey -> c }
   def makeSkylineContext( c: AlgorithmContext ): Valid[SkylineContext]
   def preStartContext( context: AlgorithmContext, priorContext: SkylineContext ): TryV[SkylineContext] = {
+    log.debug( "preStartContext: [{}]", context )
     priorContext.withUnderlying( context ).disjunction.leftMap{ _.head }
   }
 
@@ -166,19 +166,14 @@ trait SkylineAnalyzer[C <: SkylineAnalyzer.SkylineContext] extends AlgorithmActo
     @tailrec def loop( pts: List[Point2D], ctx: CTX, acc: Row[DataPoint] ): (Row[DataPoint], AlgorithmContext) = {
       ctx.cast[SkylineContext] foreach {setScopedContext }
 
-      log.debug( "{} checking pt [{}] for outlier = {}", ctx.algorithm, pts.headOption.map{p=>(p._1.toLong, p._2)}, pts.headOption.map{ p => isOutlier(p,ctx) } )
+//      log.debug( "{} checking pt [{}] for outlier = {}", ctx.algorithm, pts.headOption.map{p=>(p._1.toLong, p._2)}, pts.headOption.map{ p => isOutlier(p,ctx) } )
       pts match {
         case Nil => ( acc, ctx )
 
         case h :: tail if isOutlier( h, ctx ) => {
           val (ts, _) = h
           val original = ctx.source.points find { _.timestamp.getMillis == ts.toLong }
-          val (updatedContext, updatedAcc) = original map { orig =>
-            ( update(ctx, orig), acc :+ orig  )
-          } getOrElse {
-            (ctx, acc)
-          }
-
+          val (updatedAcc, updatedContext) = original map { o => (acc :+ o, update(ctx, o)) } getOrElse { (acc, ctx) }
           log.debug( "LOOP-HIT[({})]: updated skyline-context=[{}] acc=[{}]", (ts.toLong, h._2), updatedContext, updatedAcc )
           loop( tail, updatedContext, updatedAcc )
         }
@@ -205,24 +200,24 @@ trait SkylineAnalyzer[C <: SkylineAnalyzer.SkylineContext] extends AlgorithmActo
     algorithm: Symbol,
     outliers: Op[AlgorithmContext, (Row[DataPoint], AlgorithmContext)]
   ): Op[AlgorithmContext, (Outliers, AlgorithmContext)] = {
-
-    def makeOutliers( os: Row[DataPoint] ): Op[AlgorithmContext, Outliers] = {
-      kleisli[TryV, AlgorithmContext, Outliers] { context =>
-        Outliers.forSeries(
-          algorithms = Set( algorithm ),
-          plan = context.plan,
-          source = context.source,
-          outliers = os
-        )
-        .disjunction
-        .leftMap { _.head }
-      }
-    }
-
     for {
       outliersContext <- outliers
       (outlierPoints, context) = outliersContext
       result <- makeOutliers( outlierPoints )
     } yield (result, context)
   }
+
+  def makeOutliers( os: Row[DataPoint] ): Op[AlgorithmContext, Outliers] = {
+    kleisli[TryV, AlgorithmContext, Outliers] { context =>
+      Outliers.forSeries(
+        algorithms = Set( algorithm ),
+        plan = context.plan,
+        source = context.source,
+        outliers = os
+      )
+      .disjunction
+      .leftMap { _.head }
+    }
+  }
+
 }

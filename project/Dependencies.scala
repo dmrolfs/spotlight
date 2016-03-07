@@ -21,7 +21,7 @@ object Dependencies {
   }
 
   object akka {
-    val version = "2.4.1"
+    val version = "2.4.2"
     def module( id: String ) = "com.typesafe.akka" %% s"akka-$id" % version
 
     val actor = module( "actor" )
@@ -100,12 +100,13 @@ object Dependencies {
     val uuid = "com.eaio.uuid" % "uuid" % "3.4"
     val config = "com.typesafe" % "config" % "1.3.0"
 //    val pureConfig = "com.github.melrief" %% "pureconfig" % "0.1.5"
-    val shapeless = "com.chuusai" %% "shapeless" % "2.2.5"
+    val shapeless = "com.chuusai" %% "shapeless" % "2.3.0"
     val parboiled = "org.parboiled" %% "parboiled" % "2.1.0"
     val inflector = "org.atteo" % "evo-inflector" % "1.2.1"
     val squants = "com.squants"  %% "squants"  % "0.5.3"
     val accord = "com.wix" %% "accord-core" % "0.5"
-    val math3 = "org.apache.commons" % "commons-math3" % "3.5"
+    val math3 = "org.apache.commons" % "commons-math3" % "3.6"
+//    val suanshu = "com.numericalmethod" % "suanshu" % "3.4.0" intransitive()  // don't want to use due to $$$
     val scopt = "com.github.scopt" %% "scopt" % "3.3.0"
     val pyrolite = "net.razorvine" % "pyrolite" % "4.10"
     val hadoopClient = "org.apache.hadoop" % "hadoop-client" % "2.7.1"
@@ -154,7 +155,9 @@ object Dependencies {
   )
 
   val defaultDependencyOverrides = Set(
-    scalaz.core
+    scalaz.core //,
+//    akka.actor,
+//    time.joda
   )
 
 
