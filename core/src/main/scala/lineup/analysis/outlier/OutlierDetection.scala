@@ -1,5 +1,8 @@
 package lineup.analysis.outlier
 
+import org.apache.commons.math3.stat.descriptive.SummaryStatistics
+import peds.commons.Valid
+
 import scala.collection.immutable
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
@@ -16,7 +19,7 @@ import nl.grons.metrics.scala.Meter
 import peds.akka.metrics.{ Instrumented, InstrumentedActor }
 import peds.commons.identifier.ShortUUID
 import peds.commons.log.Trace
-import lineup.model.timeseries.{ Topic, TimeSeriesBase, TimeSeries, TimeSeriesCohort }
+import lineup.model.timeseries._
 import lineup.model.outlier.{ Outliers, OutlierPlan }
 
 
@@ -142,7 +145,7 @@ class OutlierDetection extends Actor with InstrumentedActor with ActorLogging {
           algorithm = a,
           aggregator = aggregator,
           payload = m,
-          history = Some(history),
+          history = history,
           properties = p.algorithmConfig
         )
       }
@@ -158,20 +161,15 @@ class OutlierDetection extends Actor with InstrumentedActor with ActorLogging {
   var _history: Map[HistoryKey, HistoricalStatistics] = Map.empty[HistoryKey, HistoricalStatistics]
   def updateHistory( data: TimeSeriesBase, plan: OutlierPlan ): HistoricalStatistics = {
     val key = HistoryKey( plan, data.topic )
-    val result = _history get key getOrElse { HistoricalStatistics( 2, false ) }
 
-    for {
-      dp <- data match {
-        case s: TimeSeries => s.points
-        case c: TimeSeriesCohort => c.data flatMap { _.points }
-      }
-    } {
-      result add dp.getPoint
-      _history += key -> result
-    }
+    val initialHistory = _history get key getOrElse { HistoricalStatistics( 2, false ) }
+    val sentHistory = data.points.foldLeft( initialHistory ) { (h, dp) => h :+ dp.getPoint }
+    val updatedHistory = sentHistory recordLastPoints data.points.map{_.getPoint }
+    _history += key -> updatedHistory
 
-    log.debug( "HISTORY for [{}]: [{}]", data.topic, result )
-    result
+
+    log.debug( "HISTORY for [{}]: [{}]", data.topic, sentHistory )
+    sentHistory
   }
 
   var _score: Map[Topic, (Long, Long)] = Map.empty[Topic, (Long, Long)]

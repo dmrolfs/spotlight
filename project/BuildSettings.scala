@@ -49,6 +49,7 @@ object BuildSettings {
     resolvers += "Sonatype OSS Releases"  at "http://oss.sonatype.org/content/repositories/releases/",
     // resolvers += "Sonatype OSS Snapshots" at "https://oss.sonatype.org/content/repositories/snapshots/",
     resolvers += "Scalaz Bintray Repo" at "http://dl.bintray.com/scalaz/releases",
+//    resolvers += "Numerical Method's Repository" at "http://repo.numericalmethod.com/maven/",  // don't want to use due to $$$
     resolvers += Resolver.sonatypeRepo( "snapshots" ),
     // resolvers += "Scalaz Bintray Repo" at "http://dl.bintray.com/stew/snapshots",
     resolvers += Classpaths.sbtPluginReleases,

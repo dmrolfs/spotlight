@@ -124,10 +124,7 @@ extends Actor with InstrumentedActor with ActorLogging { outer: ConfigurationPro
   def logTally( result: Outliers, fulfilled: AnalysisFulfillment ): Unit = {
     result match {
       case o: NoOutliers => outlierLogger info o.toString
-      case o => {
-        outlierLogger info o.toString
-        fulfilled foreach { case (a, o) => outlierLogger.info( " + [{}][{} / {}] {}", Seq(a.name, o.anomalySize, o.size, o) ) }
-      }
+      case o => outlierLogger info o.toString
     }
   }
 }

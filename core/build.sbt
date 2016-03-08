@@ -15,6 +15,7 @@ libraryDependencies ++=
     //  facility.pureConfig,
     akka.streams,
     facility.math3,
+//    facility.suanshu, // don't want to use due to $$$
     facility.scopt,
     demesne.core,
     facility.parboiled,
@@ -84,6 +85,7 @@ dockerfile in docker := {
   val mainclass = mainClass.in( Compile, run ).value.getOrElse( sys.error("Expected exactly one main class") )
 
   new Dockerfile {
+//    from( "iron/java:1.8" )
     from( "java:8" )
     run( "apt-get", "update" )
     run( "apt-get", "-y", "install", "tmux" )

@@ -19,6 +19,8 @@ object CohortDensityAnalyzer {
 }
 
 class CohortDensityAnalyzer( override val router: ActorRef ) extends DBSCANAnalyzer {
+  import AlgorithmActor._
+
   override val algorithm: Symbol = CohortDensityAnalyzer.Algorithm
 
   //todo: consider sensitivity here and in series!!!
@@ -35,7 +37,9 @@ class CohortDensityAnalyzer( override val router: ActorRef ) extends DBSCANAnaly
         .toList
         .map { DataPoint.toDoublePoints }
         .map { frameDistances =>
-          cluster.run( AnalyzerContext( message = c, data = frameDistances ) )
+          val context = AlgorithmContext( message = c, data = frameDistances )
+
+          cluster.run( context )
           .map { case (_, clusters) =>
             val isOutlier = makeOutlierTest( clusters )
             val ms = frameDistances.zipWithIndex collect { case (fd, i) if isOutlier( fd ) => i }
@@ -74,5 +78,5 @@ class CohortDensityAnalyzer( override val router: ActorRef ) extends DBSCANAnaly
   }
 
   //todo figure out how to unify into a single density algorithm
-  override def findOutliers( source: TimeSeries ): Op[(AnalyzerContext, Seq[Cluster[DoublePoint]]), Outliers] = ???
+  override def findOutliers: Op[(AlgorithmContext, Seq[Cluster[DoublePoint]]), Outliers] = ???
 }

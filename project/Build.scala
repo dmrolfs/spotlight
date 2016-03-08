@@ -7,7 +7,7 @@ import spray.revolver.RevolverPlugin._
 import BuildSettings._
 
 
-object LineupBuild extends Build {
+object SpotlightBuild extends Build {
   lazy val core = (project in file("core")).
                   settings( defaultBuildSettings ).
                   enablePlugins( DockerPlugin )
