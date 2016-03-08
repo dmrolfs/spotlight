@@ -60,9 +60,9 @@ trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
     Kleisli[TryV, DetectUsing, AlgorithmContext] { m => AlgorithmContext( m, DataPoint.toDoublePoints( m.source.points ) ).right }
   }
 
-  val tolerance: Op[AlgorithmContext, Option[Double]] = Kleisli[TryV, AlgorithmContext, Option[Double]] {_.tolerance }
+  val tolerance: Op[AlgorithmContext, Option[Double]] = Kleisli[TryV, AlgorithmContext, Option[Double]] { _.tolerance }
 
-  val messageConfig: Op[AlgorithmContext, Config] = kleisli[TryV, AlgorithmContext, Config] {_.messageConfig.right }
+  val messageConfig: Op[AlgorithmContext, Config] = kleisli[TryV, AlgorithmContext, Config] { _.messageConfig.right }
 
 }
 
@@ -106,7 +106,7 @@ object AlgorithmActor {
 
       override def distanceMeasure: TryV[DistanceMeasure] = {
         def makeMahalanobisDistance: TryV[DistanceMeasure] = {
-          val mahal = if ( message.history.n > 0 ) {
+          val mahal = if ( message.history.N > 0 ) {
             MahalanobisDistance.fromCovariance( message.history.covariance )
           } else {
             MahalanobisDistance.fromPoints( MatrixUtils.createRealMatrix( data.toArray map { _.getPoint } ) )

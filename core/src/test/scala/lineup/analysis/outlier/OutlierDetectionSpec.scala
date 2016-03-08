@@ -52,7 +52,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
     actual.max mustBe expected.max
     actual.mean mustBe expected.mean
     actual.min mustBe expected.min
-    actual.n mustBe expected.n
+    actual.N mustBe expected.N
     actual.standardDeviation mustBe expected.standardDeviation
     actual.sum mustBe expected.sum
     actual.sumLog mustBe expected.sumLog
@@ -301,7 +301,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
         case m @ DetectUsing( algo, _, payload, history, properties ) => {
           m.topic mustBe metric
           algo must equal('foo)
-          history.n mustBe pointsA.size
+          history.N mustBe pointsA.size
           assertHistoricalStats( history, expectedA )
         }
       }
@@ -310,14 +310,15 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
         case m @ DetectUsing( algo, _, payload, history, properties ) => {
           m.topic mustBe metric
           algo must equal('bar)
-          history.n mustBe pointsA.size
+          history.N mustBe pointsA.size
           assertHistoricalStats( history, expectedA )
         }
       }
 
-      val expectedAB = DataPoint.toDoublePoints( pointsB ).foldLeft( expectedA ){ (h, dp) => h :+ dp.getPoint }
-      expectedAB.n mustBe (pointsA.size + pointsB.size)
+      val expectedAB = DataPoint.toDoublePoints( pointsB ).foldLeft( expectedA.recordLastDataPoints(pointsA) ){ (h, dp) => h :+ dp.getPoint }
+      expectedAB.N mustBe ( pointsA.size + pointsB.size)
       trace( s"expectedAB = $expectedAB" )
+      trace( s"""expectedAB LAST= [${expectedAB.lastPoints.map{case Array(t,v) => (t,v) }.mkString(",")}]""" )
 
       val msgB = OutlierDetectionMessage( TimeSeries( topic = metric, points = pointsB ), defaultPlan ).toOption.get
       detect receive msgB
@@ -327,7 +328,9 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
           trace( s"history = $history" )
           m.topic mustBe metric
           algo must equal('foo)
-          history.n mustBe (pointsA.size + pointsB.size)
+          history.N mustBe ( pointsA.size + pointsB.size)
+          trace( s"""   history LAST= [${history.lastPoints.map{case Array(t,v) => (t,v) }.mkString(",")}]""" )
+          trace( s"""expectedAB LAST= [${expectedAB.lastPoints.map{case Array(t,v) => (t,v) }.mkString(",")}]""" )
           assertHistoricalStats( history, expectedAB )
         }
       }
@@ -336,7 +339,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
         case m @ DetectUsing( algo, _, payload, history, properties ) => {
           m.topic mustBe metric
           algo must equal('bar)
-          history.n mustBe (pointsA.size + pointsB.size)
+          history.N mustBe ( pointsA.size + pointsB.size)
           assertHistoricalStats( history, expectedAB )
         }
       }

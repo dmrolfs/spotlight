@@ -1,16 +1,16 @@
 package lineup.analysis.outlier.algorithm
 
 import com.typesafe.config.ConfigFactory
-import org.apache.commons.math3.ml.clustering.DoublePoint
 import org.apache.commons.math3.ml.distance.EuclideanDistance
 
-import scala.concurrent.{ Future, ExecutionContext }
+import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
 import java.util.concurrent.atomic.AtomicInteger
+
 import akka.event.EventStream
 import akka.testkit._
 import shapeless._
-import org.joda.{ time => joda }
+import org.joda.{time => joda}
 import com.github.nscala_time.time.OrderingImplicits._
 import org.apache.commons.math3.random.RandomDataGenerator
 import org.scalatest.mock.MockitoSugar
@@ -22,6 +22,7 @@ import lineup.model.outlier._
 import lineup.model.timeseries._
 import lineup.analysis.outlier._
 import lineup.testkit.ParallelAkkaSpec
+import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 
 
 /**
@@ -66,22 +67,23 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       TimeSeries.pointsLens.set( s )( tweaked )
     }
 
-    def makeExpected( start: Option[HistoricalStatistics], points: Seq[DataPoint] ): HistoricalStatistics = {
-      val initialH = start getOrElse HistoricalStatistics( 2, false )
-      val last = initialH.lastPoints.lastOption map { new DoublePoint( _ ) }
+    def makeDensityExpectedHistory(points: Seq[DataPoint], start: Option[DescriptiveStatistics], last: Option[DataPoint] ): DescriptiveStatistics = {
+      val initial = start getOrElse { new DescriptiveStatistics }
+//      val last = initialH.lastPoints.lastOption map { new DoublePoint( _ ) }
       val dps = DataPoint toDoublePoints points
-      val basis = last map { l => dps.zip( l +: dps ) } getOrElse { (dps drop 1).zip( dps ) }
-      basis.foldLeft( initialH ) { case (h, (c, p)) =>
+      val basis = last map { l => dps.zip( DataPoint.toDoublePoint(l) +: dps ) } getOrElse { (dps drop 1).zip( dps ) }
+      basis.foldLeft( initial ) { case (s, (c, p)) =>
         val ts = c.getPoint.head
         val d = new EuclideanDistance().compute( p.getPoint, c.getPoint )
-        h :+ Array(ts, d)
+        s addValue d
+        s
       }
     }
   }
 
   def assertHistoricalStats( actual: HistoricalStatistics, expected: HistoricalStatistics ): Unit = {
     actual.dimension mustBe expected.dimension
-    actual.n mustBe expected.n
+    actual.N mustBe expected.N
     actual.max mustBe expected.max
     actual.mean mustBe expected.mean
     actual.min mustBe expected.min
@@ -92,6 +94,17 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
     actual.sumLog mustBe expected.sumLog
     actual.sumOfSquares mustBe expected.sumOfSquares
     actual.covariance mustBe expected.covariance
+  }
+
+  def assertDescriptiveStats(actual: DescriptiveStatistics, expected: DescriptiveStatistics ): Unit = {
+    actual.getN mustBe expected.getN
+    actual.getMax mustBe expected.getMax
+    actual.getMean mustBe expected.getMean
+    actual.getMin mustBe expected.getMin
+    actual.getSum mustBe expected.getSum
+    actual.getGeometricMean mustBe expected.getGeometricMean
+    actual.getStandardDeviation mustBe expected.getStandardDeviation
+    actual.getSumsq mustBe expected.getSumsq
   }
 
 
@@ -127,7 +140,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       )
     }
 
-    "detect outlying points in series" taggedAs (WIP) in { f: Fixture =>
+    "detect outlying points in series" in { f: Fixture =>
       import f._
       val analyzer = TestActorRef[SeriesDensityAnalyzer]( SeriesDensityAnalyzer.props(router.ref) )
       val series = TimeSeries( "series", points )
@@ -237,7 +250,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
     }
 
 
-    "history is updated with each detect request" in { f: Fixture =>
+    "history is updated with each detect request" taggedAs (WIP) in { f: Fixture =>
       import f._
 
       def detectUsing( message: OutlierDetectionMessage, history: HistoricalStatistics ): DetectUsing = {
@@ -256,49 +269,80 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       val analyzer = TestActorRef[SeriesDensityAnalyzer]( SeriesDensityAnalyzer.props( router.ref ) )
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
 
-      val historyA = HistoricalStatistics.fromActivePoints( DataPoint.toDoublePoints(pointsA).toArray, false )
+      val detectHistoryA = HistoricalStatistics.fromActivePoints( DataPoint.toDoublePoints(pointsA).toArray, false )
       val msgA = detectUsing(
-        message = OutlierDetectionMessage( TimeSeries( topic = metric, points = pointsA ), plan ).toOption.get,
-        history = historyA
+        message = OutlierDetectionMessage( TimeSeries(topic = metric, points = pointsA), plan ).toOption.get,
+        history = detectHistoryA
       )
 
-      val expectedA = makeExpected( None, pointsA )
-      expectedA.n mustBe (pointsA.size - 1)
-      assertHistoricalStats( analyzer.underlyingActor.algorithmContext.run(msgA).toOption.get.history, expectedA )
+      val densityExpectedA = makeDensityExpectedHistory( pointsA, None, None )
+      densityExpectedA.getN mustBe ( pointsA.size - 1)
 
-      val historyAB = DataPoint.toDoublePoints( pointsB ).foldLeft( historyA ){ (h, dp) => h :+ dp.getPoint }
+      assertDescriptiveStats(
+        analyzer.underlyingActor.algorithmContext.run(msgA).toOption.get.asInstanceOf[SeriesDensityAnalyzer.Context].distanceHistory,
+        densityExpectedA
+      )
+
+      detectHistoryA.N mustBe (pointsA.size)
+      val detectHistoryARecorded = detectHistoryA.recordLastDataPoints( pointsA )
+      detectHistoryARecorded.N mustBe (pointsA.size)
+      val detectHistoryAB = DataPoint.toDoublePoints( pointsB ).foldLeft( detectHistoryARecorded ){ (h, dp) => h :+ dp.getPoint }
+      detectHistoryAB.N mustBe (pointsA.size + pointsB.size )
+      val detectHistoryABLast: Seq[Point] = detectHistoryAB.lastPoints
+      val pointsALast: Seq[Point] = pointsA.drop( pointsA.size - 3 ).map{ dp => Array(dp.timestamp.getMillis.toDouble, dp.value) }.toList
+      detectHistoryABLast.size mustBe pointsALast.size
+      detectHistoryABLast.zip(pointsALast).foreach{ case (f, b) => f mustBe b }
+
       val msgAB = detectUsing(
         message = OutlierDetectionMessage( TimeSeries( topic = metric, points = pointsB ), plan ).toOption.get,
-        history = historyAB
+        history = detectHistoryAB
       )
-      val expectedAB = makeExpected( Some(expectedA), pointsB )
-      expectedAB.n mustBe (pointsA.size - 1 + pointsB.size)
-      trace( s"expectedAB = $expectedAB" )
-      assertHistoricalStats( analyzer.underlyingActor.algorithmContext.run(msgAB).toOption.get.history, expectedAB )
+      val densityExpectedAB = makeDensityExpectedHistory( pointsB, Some(densityExpectedA), pointsA.lastOption )
+
+      trace( s"pointsA.size = ${pointsA.size}" )
+      trace( s"pointsB.size = ${pointsB.size}" )
+      trace( s"expectedA.n = ${densityExpectedA.getN}" )
+      trace( s"expectedAB.N = ${densityExpectedAB.getN}" )
+      densityExpectedAB.getN mustBe ( pointsA.size - 1 + pointsB.size )
+      trace( s"historyAB.n = ${detectHistoryAB.N}" )
+      trace( s"expectedAB = $densityExpectedAB" )
+      trace( s"historyAB = ${detectHistoryAB}" )
+      assertDescriptiveStats(
+        analyzer.underlyingActor.algorithmContext.run(msgAB).toOption.get.asInstanceOf[SeriesDensityAnalyzer.Context].distanceHistory,
+        densityExpectedAB
+      )
 
       val analyzerB = TestActorRef[SeriesDensityAnalyzer]( SeriesDensityAnalyzer.props( router.ref ) )
       analyzerB.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
 
-      val expectedB_A = makeExpected( None, pointsA )
-      analyzerB.underlyingActor._distanceHistories.get( HistoryKey(plan, metric) ) mustBe None
+      val densityExpectedB_A = makeDensityExpectedHistory( pointsA, None, None )
+      analyzerB.underlyingActor._scopedContexts.get( HistoryKey(plan, metric) ) mustBe None
       analyzerB receive msgA
       aggregator.expectMsgPF( 2.seconds.dilated, "default-foo-A" ) {
         case m: SeriesOutliers => {
-          assertHistoricalStats( analyzerB.underlyingActor._distanceHistories( HistoryKey(plan, metric) ),  expectedB_A )
+          assertDescriptiveStats(
+            analyzerB.underlyingActor._scopedContexts( HistoryKey(plan, metric) ).distanceHistory,
+            densityExpectedB_A
+          )
           m.topic mustBe metric
           m.algorithms mustBe Set(algoS)
           m.anomalySize mustBe 10
+          m.outliers mustBe pointsA.take(9) :+ pointsA.last
         }
       }
 
-      val expectedB_AB = makeExpected( Option(expectedB_A), pointsB )
+      val densityExpectedB_AB = makeDensityExpectedHistory( pointsB, Option(densityExpectedB_A), pointsA.lastOption )
       analyzerB receive msgAB
       aggregator.expectMsgPF( 2.seconds.dilated, "default-foo-AB" ){
-        case m: NoOutliers => {
-          assertHistoricalStats( analyzerB.underlyingActor._distanceHistories( HistoryKey(plan, metric) ), expectedB_AB )
+        case m: SeriesOutliers => {
+          assertDescriptiveStats(
+            analyzerB.underlyingActor._scopedContexts( HistoryKey(plan, metric) ).distanceHistory,
+            densityExpectedB_AB
+          )
           m.topic mustBe metric
           m.algorithms mustBe Set(algoS)
-          m.anomalySize mustBe 0
+          m.anomalySize mustBe 6
+          m.outliers mustBe pointsB.take(6)
         }
       }
 //      router.expectMsgPF( 2.seconds.dilated, "default-routed-bar-A" ) {
@@ -414,34 +458,34 @@ object SeriesDensityAnalyzerSpec {
   )
 
   val pointsB = Row(
-    DataPoint( new joda.DateTime(440), 10.1 ),
-    DataPoint( new joda.DateTime(441), 10.1 ),
-    DataPoint( new joda.DateTime(442), 9.68 ),
-    DataPoint( new joda.DateTime(443), 9.46 ),
-    DataPoint( new joda.DateTime(444), 10.3 ),
-    DataPoint( new joda.DateTime(445), 11.6 ),
-    DataPoint( new joda.DateTime(446), 13.9 ),
-    DataPoint( new joda.DateTime(447), 13.9 ),
-    DataPoint( new joda.DateTime(448), 12.5 ),
-    DataPoint( new joda.DateTime(449), 11.9 ),
-    DataPoint( new joda.DateTime(450), 12.2 ),
-    DataPoint( new joda.DateTime(451), 13 ),
-    DataPoint( new joda.DateTime(452), 13.3 ),
-    DataPoint( new joda.DateTime(453), 13 ),
-    DataPoint( new joda.DateTime(454), 12.7 ),
-    DataPoint( new joda.DateTime(455), 11.9 ),
-    DataPoint( new joda.DateTime(456), 13.3 ),
-    DataPoint( new joda.DateTime(457), 12.5 ),
-    DataPoint( new joda.DateTime(458), 11.9 ),
-    DataPoint( new joda.DateTime(459), 11.6 ),
-    DataPoint( new joda.DateTime(460), 10.5 ),
-    DataPoint( new joda.DateTime(461), 10.1 ),
-    DataPoint( new joda.DateTime(462), 9.9 ),
-    DataPoint( new joda.DateTime(463), 9.68 ),
-    DataPoint( new joda.DateTime(464), 9.68 ),
-    DataPoint( new joda.DateTime(465), 9.9 ),
-    DataPoint( new joda.DateTime(466), 10.8 ),
-    DataPoint( new joda.DateTime(467), 11 )
+    DataPoint( new joda.DateTime(468), 10.1 ),
+    DataPoint( new joda.DateTime(469), 10.1 ),
+    DataPoint( new joda.DateTime(470), 9.68 ),
+    DataPoint( new joda.DateTime(471), 9.46 ),
+    DataPoint( new joda.DateTime(472), 10.3 ),
+    DataPoint( new joda.DateTime(473), 11.6 ),
+    DataPoint( new joda.DateTime(474), 13.9 ),
+    DataPoint( new joda.DateTime(475), 13.9 ),
+    DataPoint( new joda.DateTime(476), 12.5 ),
+    DataPoint( new joda.DateTime(477), 11.9 ),
+    DataPoint( new joda.DateTime(478), 12.2 ),
+    DataPoint( new joda.DateTime(479), 13 ),
+    DataPoint( new joda.DateTime(480), 13.3 ),
+    DataPoint( new joda.DateTime(481), 13 ),
+    DataPoint( new joda.DateTime(482), 12.7 ),
+    DataPoint( new joda.DateTime(483), 11.9 ),
+    DataPoint( new joda.DateTime(484), 13.3 ),
+    DataPoint( new joda.DateTime(485), 12.5 ),
+    DataPoint( new joda.DateTime(486), 11.9 ),
+    DataPoint( new joda.DateTime(487), 11.6 ),
+    DataPoint( new joda.DateTime(488), 10.5 ),
+    DataPoint( new joda.DateTime(489), 10.1 ),
+    DataPoint( new joda.DateTime(490), 9.9 ),
+    DataPoint( new joda.DateTime(491), 9.68 ),
+    DataPoint( new joda.DateTime(492), 9.68 ),
+    DataPoint( new joda.DateTime(493), 9.9 ),
+    DataPoint( new joda.DateTime(494), 10.8 ),
+    DataPoint( new joda.DateTime(495), 11 )
   )
 
 }

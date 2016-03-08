@@ -27,7 +27,7 @@ trait HistoricalStatistics extends Serializable {
   def max: Point
   def mean: Point
   def min: Point
-  def n: Long
+  def N: Long
   def standardDeviation: Point
   def sum: Point
   def sumLog: Point
@@ -62,7 +62,7 @@ object HistoricalStatistics {
       this.copy( lastPoints = this.lastPoints.drop(this.lastPoints.size - LastN + recorded.size) ++ recorded )
     }
 
-    override def n: Long = all.getN
+    override def N: Long = all.getN
     override def mean: Point = all.getMean
     override def sumOfSquares: Point = all.getSumSq
     override def max: Point = all.getMax

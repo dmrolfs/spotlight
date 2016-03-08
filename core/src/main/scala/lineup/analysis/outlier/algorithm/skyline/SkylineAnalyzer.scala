@@ -117,14 +117,7 @@ trait SkylineAnalyzer[C <: SkylineAnalyzer.SkylineContext] extends AlgorithmActo
     super.algorithmContext >=> toSkyline
   }
 
-  def toSkylineContext: Op[AlgorithmContext, C] = {
-    kleisli { context =>
-      context match {
-        case contextClassTag( ctx ) => ctx.right
-        case _ => SkylineAnalyzer.SkylineContextError( context ).left
-      }
-    }
-  }
+  def toSkylineContext: Op[AlgorithmContext, C] = kleisli { toConcreteContext }
 
   val tailAverage: Op[AlgorithmContext, Seq[Point2D]] = Kleisli[TryV, AlgorithmContext, Seq[Point2D]] { context =>
     val data = context.data.map{ _.getPoint.apply( 1 ) }

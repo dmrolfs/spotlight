@@ -78,5 +78,5 @@ class CohortDensityAnalyzer( override val router: ActorRef ) extends DBSCANAnaly
   }
 
   //todo figure out how to unify into a single density algorithm
-  override def findOutliers( source: TimeSeries ): Op[(AlgorithmContext, Seq[Cluster[DoublePoint]]), Outliers] = ???
+  override def findOutliers: Op[(AlgorithmContext, Seq[Cluster[DoublePoint]]), Outliers] = ???
 }

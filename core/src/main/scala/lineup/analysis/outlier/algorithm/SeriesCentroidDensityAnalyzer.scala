@@ -1,8 +1,8 @@
 package lineup.analysis.outlier.algorithm
 
+import scala.reflect.ClassTag
 import akka.actor.{ ActorRef, Props }
-import scalaz._
-import Scalaz._
+import scalaz._, Scalaz._
 import org.apache.commons.math3.ml.clustering.DoublePoint
 import lineup.model.outlier.{ NoOutliers, Outliers, SeriesOutliers }
 import lineup.model.timeseries.{ DataPoint, TimeSeries }
@@ -25,7 +25,7 @@ class SeriesCentroidDensityAnalyzer( override val router: ActorRef ) extends DBS
 
   override val algorithmContext: Op[DetectUsing, AlgorithmContext] = {
     def centroidDistances( points: Seq[DoublePoint], history: HistoricalStatistics ): Seq[DoublePoint] = {
-      val h = if ( history.n > 0 ) history else { HistoricalStatistics.fromActivePoints( points.toArray, false ) }
+      val h = if ( history.N > 0 ) history else {HistoricalStatistics.fromActivePoints( points.toArray, false ) }
       val mean = h.mean( 1 )
       val distFromCentroid = points map { _.getPoint } map { case Array(x, y) => new DoublePoint( Array(x, y - mean) ) }
       log.debug( "points             : [{}]", points.mkString(",") )
@@ -43,7 +43,7 @@ class SeriesCentroidDensityAnalyzer( override val router: ActorRef ) extends DBS
     }
   }
 
-  override def findOutliers( source: TimeSeries ): Op[(AlgorithmContext, Clusters), Outliers] = {
+  override def findOutliers: Op[(AlgorithmContext, Clusters), Outliers] = {
     Kleisli[TryV, (AlgorithmContext, Clusters), Outliers] { case (context, clusters) =>
       val isOutlier = makeOutlierTest( clusters )
       val centroidOutliers: Set[Long] = {
@@ -53,11 +53,19 @@ class SeriesCentroidDensityAnalyzer( override val router: ActorRef ) extends DBS
         .toSet
       }
 
-      val outliers = source.points filter { dp => centroidOutliers.contains( dp.getPoint.apply(0).toLong ) }
-      if ( outliers.nonEmpty ) {
-        SeriesOutliers( algorithms = Set(algorithm), source = source, outliers = outliers, plan = context.message.plan ).right
-      } else {
-        NoOutliers( algorithms = Set(algorithm), source = source, plan = context.message.plan ).right
+      val outliers = context.source.points filter { dp => centroidOutliers.contains( dp.getPoint.apply(0).toLong ) }
+      val tsTag = ClassTag[TimeSeries]( classOf[TimeSeries] )
+      context.source match {
+        case tsTag( src ) if outliers.nonEmpty => {
+          SeriesOutliers(
+            algorithms = Set(algorithm),
+            source = src,
+            outliers = outliers,
+            plan = context.message.plan
+          ).right
+        }
+
+        case src => NoOutliers( algorithms = Set(algorithm), source = src, plan = context.message.plan ).right
       }
     }
   }

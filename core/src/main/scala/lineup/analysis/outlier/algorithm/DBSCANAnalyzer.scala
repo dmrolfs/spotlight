@@ -9,7 +9,6 @@ import org.apache.commons.math3.ml.clustering.{ DBSCANClusterer, Cluster, Double
 import com.typesafe.config.Config
 import org.slf4j.LoggerFactory
 import lineup.model.outlier.Outliers
-import lineup.model.timeseries._
 import lineup.analysis.outlier.{ DetectOutliersInSeries, DetectUsing }
 
 
@@ -28,7 +27,7 @@ trait DBSCANAnalyzer extends AlgorithmActor {
 
   override val detect: Receive = LoggingReceive {
     case s @ DetectUsing( _, aggregator, payload: DetectOutliersInSeries, history, algorithmConfig ) => {
-      ( algorithmContext >=> cluster >=> findOutliers( payload.source ) ).run( s ) match {
+      ( algorithmContext >=> cluster >=> findOutliers ).run( s ) match {
         case \/-( r ) => aggregator ! r
         case -\/( ex ) => {
           log.error(
@@ -43,42 +42,37 @@ trait DBSCANAnalyzer extends AlgorithmActor {
     }
   }
 
-  def findOutliers( source: TimeSeries ): Op[(AlgorithmContext, Seq[Cluster[DoublePoint]]), Outliers]
+  def findOutliers: Op[(AlgorithmContext, Seq[Cluster[DoublePoint]]), Outliers]
 
-
-  val seedEps: Op[Config, Double] = Kleisli[TryV, Config, Double] { c =>
-    \/ fromTryCatchNonFatal { c getDouble algorithm.name +".seedEps" }
-  }
 
   val minDensityConnectedPoints: Op[Config, Int] = {
     Kleisli[TryV, Config, Int] { c => \/ fromTryCatchNonFatal { c getInt algorithm.name+".minDensityConnectedPoints" } }
   }
 
+  def historyStandardDeviation: Op[AlgorithmContext, Double] = kleisli[TryV, AlgorithmContext, Double] { context => context.history.standardDeviation( 1 ).right }
+
   val eps: Op[AlgorithmContext, Double] = {
     val epsContext = for {
       context <- ask[TryV, AlgorithmContext]
       config <- messageConfig
+      historyStdDev <- historyStandardDeviation
       tol <- kleisli[TryV, AlgorithmContext, Option[Double]] {_.tolerance }
-    } yield ( context, config, context.history, tol )
+    } yield ( context, config, historyStdDev, tol )
 
-    epsContext flatMapK { case (ctx, config, hist, tol) =>
+    epsContext flatMapK { case (ctx, config, hsd, tol) =>
       log.debug( "eps config = {}", config )
-      log.debug( "eps history = {}", hist )
       log.debug( "eps tolerance = {}", tol )
-
-      val sd = hist.standardDeviation( 1 )
-      log.debug( "eps historical std dev = {}", sd )
+      log.debug( "eps historical std dev = {}", hsd )
 
       val calculatedEps = for {
-        stddev <- if ( sd.isNaN ) None else Some( sd )
+        stddev <- if ( hsd.isNaN ) None else Some( hsd )
         t <- tol
       } yield { t * stddev }
 
       trainingLogger.debug(
-        "[{}][{}][{}] eps calculated = {}",
+        "[{}][{}] eps calculated = {}",
         ctx.message.plan.name,
         ctx.message.topic,
-        hist.n.toString,
         calculatedEps
       )
 
