@@ -2,7 +2,7 @@ import Dependencies._
 import sbtassembly.AssemblyPlugin.autoImport.MergeStrategy
 
 
-name := "lineup-core"
+name := "spotlight-core"
 
 description := "lorem ipsum."
 
@@ -36,9 +36,9 @@ libraryDependencies += "org.velvia" % "msgpack4s_2.11" % "0.5.1"
 
 testOptions in Test += Tests.Argument( "-oDF" )
 
-mainClass in (Compile, run) := Some("lineup.app.GraphiteLineup")
+mainClass in (Compile, run) := Some("spotlight.app.GraphiteSpotlight")
 
-mainClass in assembly := Some("lineup.stream.GraphiteModel")
+mainClass in assembly := Some("spotlight.stream.GraphiteModel")
 
 assemblyJarName in assembly := s"${organizationName.value}-${name.value}-${version.value}.jar"
 
@@ -79,7 +79,7 @@ dockerfile in docker := {
   val targetBase = "/app"
   val artifactTargetPath = s"${targetBase}/${artifact.name}"
   val coreosPath = baseDirectory.value / ".." / "coreos"
-  val entryScript = ( coreosPath ** "lineup.sh" ).get.headOption
+  val entryScript = ( coreosPath ** "spotlight.sh" ).get.headOption
   val aspectjArtifactName = ( coreosPath ** "aspectjweaver-*.jar" ).get.headOption
   val sigarBinary = ( coreosPath ** "libsigar-amd64-linux.so" ).get.headOption
   val mainclass = mainClass.in( Compile, run ).value.getOrElse( sys.error("Expected exactly one main class") )
@@ -105,14 +105,14 @@ dockerfile in docker := {
         entryPointShell(
           s"${targetBase}/${entry.name}",
           mainclass,
-          "/etc/lineup:" + artifactTargetPath,
-          "-Dconfig.resource=application-${LINEUP_ENV}.conf",
+          "/etc/spotlight:" + artifactTargetPath,
+          "-Dconfig.resource=application-${SPOTLIGHT_ENV}.conf",
           s"-Djava.library.path=${targetBase}/sigar-bin/",
           s"-javaagent:${targetBase}/${aspectj.name}"
         )
 //        entryPoint(
 //          targetBase + "/" + entry.name,
-//          "`-Dconfig.resource=application-$LINEUP_ENV.conf`",
+//          "`-Dconfig.resource=application-$SPOTLIGHT_ENV.conf`",
 //          s"-Djava.library.path=${targetBase}/sigar-bin/",
 //          s"-javaagent:${targetBase}/${aspectj.name}",
 //          mainclass
@@ -125,7 +125,7 @@ dockerfile in docker := {
 //
 //        entryPoint(
 //          "java",
-//          "-cp", "/etc/lineup:" + artifactTargetPath,
+//          "-cp", "/etc/spotlight:" + artifactTargetPath,
 //          "-Dconfig.resource=application-devdocker.conf",
 //          s"-Djava.library.path=${targetBase}/sigar-bin/",
 //          s"-javaagent:${targetBase}/${aspectj.name}",
@@ -138,7 +138,7 @@ dockerfile in docker := {
 //
 //        entryPoint(
 //          targetBase + "/" + entry.name,
-//          "`-Dconfig.resource=application-$LINEUP_ENV.conf`",
+//          "`-Dconfig.resource=application-$SPOTLIGHT_ENV.conf`",
 //          mainclass
 //        )
 //      }
@@ -146,15 +146,15 @@ dockerfile in docker := {
 //      case ( None, None ) => {
 //        entryPoint(
 //          "java",
-//          "-cp", "/etc/lineup:" + artifactTargetPath ,
+//          "-cp", "/etc/spotlight:" + artifactTargetPath ,
 //          mainclass
 //        )
 //      }
     }
 
     env( "LOG_HOME", "/var/log" )
-//    env( "CONFIG_HOME", "/etc/lineup" )
-    env( "LINEUP_ENV", "prod" )
+//    env( "CONFIG_HOME", "/etc/spotlight" )
+    env( "SPOTLIGHT_ENV", "prod" )
     expose( 2004 )
 
     expose( 22 )
