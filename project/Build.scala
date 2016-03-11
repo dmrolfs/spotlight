@@ -17,7 +17,7 @@ object SpotlightBuild extends Build {
                   aggregate( core )
 
 //  lazy val root = Project(
-//           id = "lineup-root",
+//           id = "spotlight-root",
 //           base = file( "." ),
 //           settings = defaultBuildSettings ++ Seq(
 //                                                   publish := { },
