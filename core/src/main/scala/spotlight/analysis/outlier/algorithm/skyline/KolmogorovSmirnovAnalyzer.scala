@@ -4,19 +4,20 @@ import scala.collection.immutable.Queue
 import scala.reflect.ClassTag
 import akka.actor.{ActorRef, Props}
 
-import scalaz._, Scalaz._
-import scalaz.Kleisli.{ ask, kleisli }
-import org.joda.{ time => joda }
+import scalaz._
+import Scalaz._
+import scalaz.Kleisli.{ask, kleisli}
+import org.joda.{time => joda}
 import com.github.nscala_time.time.Imports._
 import org.apache.commons.math3.stat.inference.TestUtils
-import org.apache.commons.math3.exception.InsufficientDataException
+import org.apache.commons.math3.exception.{InsufficientDataException, MathInternalError}
 import peds.commons.Valid
 import peds.commons.util._
-import spotlight.analysis.outlier.algorithm.AlgorithmActor.{ AlgorithmContext, Op, TryV }
+import spotlight.analysis.outlier.algorithm.AlgorithmActor.{AlgorithmContext, Op, TryV}
 import spotlight.analysis.outlier.algorithm.skyline.SkylineAnalyzer.SkylineContext
 import spotlight.analysis.outlier.algorithm.skyline.adf.AugmentedDickeyFuller
 import spotlight.model.outlier.Outliers
-import spotlight.model.timeseries.{ DataPoint, Row }
+import spotlight.model.timeseries.{DataPoint, Row}
 
 
 /**
@@ -135,9 +136,18 @@ _ = log.debug( "KS CONTEXT = [{}]", context )
       ( pValue < 0.05 ) && ( testStatisticD > 0.5 ) && isStationary( reference )
     }
 
-    same.recover {
+    same
+    .leftMap {
+      case ex: MathInternalError => {
+        log.error( "ks-test internal math error. reference.size:[{}], series.size:[{}]: {}", reference.size, series.size, ex )
+        ex
+      }
+
+      case ex => ex
+    }
+    .recover {
       case ex: InsufficientDataException => {
-        log.warning( "[{}][{}]: no outliers - ignoring series sample: {}", context.plan, context.topic, ex.getMessage  )
+        log.debug( "[{}][{}]: no outliers - ignoring series sample: {}", context.plan, context.topic, ex.getMessage  )
         false
       }
     }

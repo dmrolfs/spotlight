@@ -92,7 +92,7 @@ trait DBSCANAnalyzer extends AlgorithmActor {
       minDensityPts <- minDensityConnectedPoints <=< messageConfig
       distance <- kleisli[TryV, AlgorithmContext, DistanceMeasure] {_.distanceMeasure }
     } yield {
-      log.info( "cluster [{}]: eps = [{}]", ctx.message.topic, e )
+      log.debug( "cluster [{}]: eps = [{}]", ctx.message.topic, e )
       log.debug( "cluster: minDensityConnectedPoints = [{}]", minDensityPts )
       log.debug( "cluster: distanceMeasure = [{}]", distance )
       log.debug( "cluster: data = [{}]", data.mkString(",") )

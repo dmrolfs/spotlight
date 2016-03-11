@@ -3,7 +3,7 @@ package spotlight.analysis.outlier.algorithm.skyline
 import scala.reflect.ClassTag
 import akka.actor.{ ActorRef, Props }
 import scalaz._, Scalaz._
-import scalaz.Kleisli.ask
+import scalaz.Kleisli.{ ask, kleisli }
 import org.apache.commons.math3.distribution.TDistribution
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import peds.commons.Valid
@@ -38,11 +38,20 @@ class GrubbsAnalyzer( override val router: ActorRef ) extends SkylineAnalyzer[Sk
     * A timeseries is anomalous if the Z score is greater than the Grubb's score.
     */
   override val findOutliers: Op[AlgorithmContext, (Outliers, AlgorithmContext)] = {
+    def dataThreshold( data: Seq[Point2D] ) = kleisli[TryV, AlgorithmContext, Double] { context =>
+      val Alpha = 0.05  //todo drive from context's algoConfig
+      val degreesOfFreedom = math.max( data.size - 2, 1 ) //todo: not a great idea but for now avoiding error if size <= 2
+      \/ fromTryCatchNonFatal {
+        new TDistribution( degreesOfFreedom ).inverseCumulativeProbability( Alpha / (2D * data.size) )
+      }
+    }
+
     // background: http://www.itl.nist.gov/div898/handbook/eda/section3/eda35h1.htm
     // background: http://graphpad.com/support/faqid/1598/
     val outliers: Op[AlgorithmContext, (Row[DataPoint], AlgorithmContext)] = for {
-      context <- toSkylineContext <=< ask[TryV, AlgorithmContext]
-      taverages <- tailAverage <=< ask[TryV, AlgorithmContext]
+      context <- toSkylineContext
+      taverages <- tailAverage
+      threshold <- dataThreshold( taverages )
     } yield {
       val data = taverages.map{ case (_, v) => v }.toArray
       val stats = new DescriptiveStatistics( data )
@@ -51,8 +60,6 @@ class GrubbsAnalyzer( override val router: ActorRef ) extends SkylineAnalyzer[Sk
       val zScores = taverages map { case (ts, v) => ( ts, math.abs(v - mean) / stddev ) }
       log.debug( "Skyline[Grubbs]: mean:[{}] stddev:[{}] zScores:[{}]", mean, stddev, zScores.mkString(",") )
 
-      val Alpha = 0.05  //todo drive from context's algoConfig
-      val threshold = new TDistribution( data.size - 2 ).inverseCumulativeProbability( Alpha / ( 2D * data.size ) )
       val thresholdSquared = math.pow( threshold, 2 )
       log.debug( "Skyline[Grubbs]: threshold^2:[{}]", thresholdSquared )
       val grubbsScore = {

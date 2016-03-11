@@ -3,8 +3,11 @@ package spotlight.analysis.outlier.algorithm.skyline
 import scala.annotation.tailrec
 import scala.reflect.ClassTag
 import akka.event.LoggingReceive
-import scalaz._, scalaz.Scalaz._
+
+import scalaz._
+import scalaz.Scalaz._
 import shapeless.syntax.typeable._
+
 import scalaz.Kleisli.kleisli
 import com.typesafe.config.Config
 import org.apache.commons.math3.ml.clustering.DoublePoint
@@ -15,7 +18,7 @@ import spotlight.analysis.outlier._
 import spotlight.analysis.outlier.algorithm.AlgorithmActor
 import spotlight.analysis.outlier.algorithm.AlgorithmActor._
 import spotlight.analysis.outlier.algorithm.skyline.SkylineAnalyzer.SkylineContextError
-import spotlight.model.outlier.{ OutlierPlan, Outliers }
+import spotlight.model.outlier.{NoOutliers, OutlierPlan, Outliers}
 import spotlight.model.timeseries._
 
 
@@ -88,6 +91,8 @@ trait SkylineAnalyzer[C <: SkylineAnalyzer.SkylineContext] extends AlgorithmActo
             payload.plan.name + "][" + payload.topic,
             payload.source.interval
           )
+          // don't let aggregator time out just due to error in algorithm
+          aggregator ! NoOutliers( algorithms = Set(algorithm), source = payload.source, plan = payload.plan )
         }
       }
     }
