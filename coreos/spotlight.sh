@@ -9,4 +9,4 @@ shift
 shift
 
 echo "java -cp $CP $CONFIG $MAINCLASS"
-java -cp "$CP" "$@" "$MAINCLASS"
+java -cp "$CP" "$@" -XX:MaxMetaspaceSize=512m "$MAINCLASS"

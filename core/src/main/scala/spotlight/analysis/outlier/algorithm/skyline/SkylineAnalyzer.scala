@@ -76,7 +76,10 @@ trait SkylineAnalyzer[C <: SkylineAnalyzer.SkylineContext] extends AlgorithmActo
       val toOutliers = kleisli[TryV, (Outliers, AlgorithmContext), Outliers] { case (o, _) => o.right }
 
       ( algorithmContext >=> findOutliers >=> toOutliers ).run( msg ) match {
-        case \/-( r ) => aggregator ! r
+        case \/-( r ) => {
+          log.debug( "sending detect result to aggregator[{}]: [{}]", aggregator.path, r )
+          aggregator ! r
+        }
         case -\/( ex ) => {
           log.error(
             ex,

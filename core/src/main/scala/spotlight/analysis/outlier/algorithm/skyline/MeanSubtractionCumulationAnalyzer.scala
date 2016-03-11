@@ -15,7 +15,7 @@ import spotlight.model.timeseries.DataPoint
   * Created by rolfsd on 2/25/16.
   */
 object MeanSubtractionCumulationAnalyzer {
-  val Algorithm = 'mean_subtraction_cumulation
+  val Algorithm = Symbol( "mean-subtraction-cumulation" )
 
   def props( router: ActorRef ): Props = Props { new MeanSubtractionCumulationAnalyzer( router ) }
 }

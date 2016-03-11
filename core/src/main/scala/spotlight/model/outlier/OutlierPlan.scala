@@ -2,9 +2,9 @@ package spotlight.model.outlier
 
 import scala.concurrent.duration._
 import scala.util.matching.Regex
-import com.typesafe.config.{Config, ConfigFactory, ConfigObject, ConfigOrigin}
+import com.typesafe.config.{ Config, ConfigFactory, ConfigOrigin }
 import peds.commons._
-import peds.commons.identifier.{ShortUUID, TaggedID}
+import peds.commons.identifier.{ ShortUUID, TaggedID }
 import peds.commons.util._
 import spotlight.model.timeseries.Topic
 

@@ -17,7 +17,7 @@ import spotlight.model.timeseries.{ DataPoint, Row }
   * Created by rolfsd on 2/25/16.
   */
 object MedianAbsoluteDeviationAnalyzer {
-  val Algorithm = 'median_absolute_deviation
+  val Algorithm = Symbol( "median-absolute-deviation" )
 
   def props( router: ActorRef ): Props = Props { new MedianAbsoluteDeviationAnalyzer( router ) }
 

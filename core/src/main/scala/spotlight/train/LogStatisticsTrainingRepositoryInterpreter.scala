@@ -37,14 +37,14 @@ case class LogStatisticsTrainingRepositoryInterpreter(
     }
   }
 
-  def writeHeader(): Task[Unit] = trace.block( "writeHeader" ) { log( Statistics.header ) }
+  def writeHeader(): Task[Unit] = log( Statistics.header )
 
-  def write( stats: V[Statistics] ): Task[Unit] = trace.block( "write(stats)" ) {
+  def write( stats: V[Statistics] ): Task[Unit] = {
     implicit val showErrors = Show.shows[NonEmptyList[Throwable]]{ _.map{ _.getMessage }.toList.mkString("; ") }
     log( stats.map{ _.toString }.shows )
   }
 
-  def log( line: String ): Task[Unit] = trace.block( s"log(${line.take(10)})" ) { Task { logger debug line }( pool ) }
+  def log( line: String ): Task[Unit] = Task { logger debug line }( pool )
 }
 
 object LogStatisticsTrainingRepositoryInterpreter {

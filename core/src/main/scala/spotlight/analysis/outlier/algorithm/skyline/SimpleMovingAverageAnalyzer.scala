@@ -17,7 +17,7 @@ import spotlight.model.timeseries.DataPoint
   * Created by rolfsd on 2/25/16.
   */
 object SimpleMovingAverageAnalyzer {
-  val Algorithm = 'stddev_from_simple_moving_average
+  val Algorithm = Symbol( "simple-moving-average" )
 
   def props( router: ActorRef ): Props = Props { new SimpleMovingAverageAnalyzer( router ) }
 

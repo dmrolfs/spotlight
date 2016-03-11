@@ -10,14 +10,12 @@ import akka.pattern.AskTimeoutException
 import akka.stream.{ ActorAttributes, Supervision }
 import akka.stream.scaladsl.Flow
 import scalaz.{ Success => SuccessZ }
-import org.apache.commons.math3.stat.descriptive.SummaryStatistics
 import org.slf4j.LoggerFactory
 import com.typesafe.scalalogging.{ Logger, StrictLogging }
 import nl.grons.metrics.scala.Meter
 import peds.akka.metrics.{ Instrumented, InstrumentedActor }
 import peds.commons.identifier.ShortUUID
 import peds.commons.log.Trace
-import peds.commons.Valid
 import spotlight.model.timeseries._
 import spotlight.model.outlier.{ Outliers, OutlierPlan }
 
@@ -112,13 +110,15 @@ class OutlierDetection extends Actor with InstrumentedActor with ActorLogging {
 
   val detection: Receive = LoggingReceive {
     case result: Outliers if outstanding.contains( sender() ) => {
+      log.debug( "OutlierDetection results: [{}:{}]", result.topic, result.plan )
       val aggregator = sender()
       outstanding( aggregator ) ! DetectionResult( result )
       outstanding -= aggregator
       updateScore( result )
     }
 
-    case m: OutlierDetectionMessage => trace.block( s"RECEIVE: [$m]" ) {
+    case m: OutlierDetectionMessage =>  {
+      log.debug( "OutlierDetection request: [{}:{}]", m.topic, m.plan )
       val requester = sender()
       val aggregator = dispatch( m, m.plan )( context.dispatcher )
       outstanding += ( aggregator -> requester )
@@ -133,7 +133,8 @@ class OutlierDetection extends Actor with InstrumentedActor with ActorLogging {
 
   val fullExtractId: OutlierPlan.ExtractTopic = OutlierDetection.extractOutlierDetectionTopic orElse { case _ => None }
 
-  def dispatch( m: OutlierDetectionMessage, p: OutlierPlan )( implicit ec: ExecutionContext ): ActorRef = trace.block( s"dispatch(${m.topic}, ${p.name}:${p.id})" ) {
+  def dispatch( m: OutlierDetectionMessage, p: OutlierPlan )( implicit ec: ExecutionContext ): ActorRef = {
+    log.debug( "OutlierDetection disptaching: [{}][{}:{}]", m.topic, m.plan, m.plan.id )
     val aggregatorName = s"quorum-${p.name}-${fullExtractId(m) getOrElse "!NULL-ID!"}-${ShortUUID()}"
     val aggregator = context.actorOf( OutlierQuorumAggregator.props( p, m.source ), aggregatorName )
     val history = updateHistory( m.source, p )
@@ -182,7 +183,7 @@ class OutlierDetection extends Actor with InstrumentedActor with ActorLogging {
     }
     _score += os.topic -> s
     outlierLogger.debug(
-      "[{}]:[{}] outlier rate:[{}%] in [{}] points",
+      "\t\t[{}]:[{}] outlier rate:[{}%] in [{}] points",
       os.plan.name,
       os.topic,
       (s._1.toDouble / s._2.toDouble).toString,

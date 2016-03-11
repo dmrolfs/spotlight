@@ -1,29 +1,21 @@
 package spotlight.analysis.outlier.algorithm.skyline
 
 import scala.reflect.ClassTag
-import akka.actor.{ActorRef, Props}
-
-import scalaz._
-import Scalaz._
+import akka.actor.{ ActorRef, Props }
+import scalaz._, Scalaz._
 import scalaz.Kleisli.ask
 import peds.commons.Valid
-import peds.commons.util._
-import spotlight.analysis.outlier.Moment
-import spotlight.analysis.outlier.algorithm.AlgorithmActor.{AlgorithmContext, Op, Point2D, TryV}
+import spotlight.analysis.outlier.algorithm.AlgorithmActor.{ AlgorithmContext, Op, Point2D, TryV }
 import spotlight.analysis.outlier.algorithm.skyline.SkylineAnalyzer.SkylineContext
 import spotlight.model.outlier.Outliers
 import spotlight.model.timeseries.DataPoint
-import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
-import org.apache.commons.math3.stat.regression.MillerUpdatingRegression
-
-import scala.annotation.tailrec
 
 
 /**
   * Created by rolfsd on 2/25/16.
   */
 object HistogramBinsAnalyzer {
-  val Algorithm = 'histogram_bins
+  val Algorithm = Symbol( "histogram-bins" )
 
   def props( router: ActorRef ): Props = Props { new HistogramBinsAnalyzer( router ) }
 
@@ -104,23 +96,9 @@ class HistogramBinsAnalyzer( override val router: ActorRef ) extends SkylineAnal
     min: Double = data.map{ _._2 }.min,
     max: Double = data.map{ _._2 }.max
   ): Histogram = {
-    val binSize = ( max - min ) / numBins
-    val binData = data groupBy { case (ts, v) => ( ( v - min ) / binSize ).toInt }
-    binData foreach { case (bin, pts) =>
-      bin match {
-        case b if b < 0 => {
-          log.warning( "ignoring points [{}] since value is smaller than recognized minimum [{}]", pts.mkString(","), min )
-        }
-
-        case b if numBins <= b => {
-          log.warning( "ignoring points [{}] since value is bigger than recognized maximum [{}]", pts.mkString(","), max )
-        }
-
-        case b => { /* no op - good */ }
-      }
-    }
-
-    val bins = ( 0 until numBins ) map { i =>
+    val binSize = ( max - min ) / ( numBins + 1).toDouble
+    val binData = data groupBy { case (_, v) => ( ( v - min ) / binSize ).toInt }
+    val bins = ( 0 to numBins ) map { i =>
       val binPoints = binData.get( i ) map { pts => Map( pts:_* ) }
 
       Bin(
@@ -129,6 +107,13 @@ class HistogramBinsAnalyzer( override val router: ActorRef ) extends SkylineAnal
         points = binPoints getOrElse { Map.empty[Double, Double] }
       )
     }
+
+    log.debug(
+      "histogram bins = [{}]",
+      bins
+      .zipWithIndex
+      .map{ bi => (bi._2, bi._1.lowerBoundInclusive, bi._1.upperBoundExclusive, bi._1.points.size) }.mkString(",")
+    )
 
     Histogram( bins, binSize, min, max )
   }

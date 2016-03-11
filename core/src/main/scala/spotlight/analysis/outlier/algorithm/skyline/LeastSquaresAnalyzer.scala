@@ -19,7 +19,7 @@ import spotlight.model.timeseries.DataPoint
   * Created by rolfsd on 2/25/16.
   */
 object LeastSquaresAnalyzer {
-  val Algorithm = 'least_squares
+  val Algorithm = Symbol( "least-squares" )
 
   def props( router: ActorRef ): Props = Props { new LeastSquaresAnalyzer( router ) }
 

@@ -1,12 +1,12 @@
-package spotlight.model.timeseries
+package spotlight.model.outlier
 
-import spotlight.model.outlier.IsQuorum.{ MajorityQuorumSpecification, AtLeastQuorumSpecification }
-import spotlight.model.outlier.{ OutlierPlan, Outliers, SeriesOutliers, NoOutliers }
+import spotlight.model.outlier.IsQuorum.{AtLeastQuorumSpecification, MajorityQuorumSpecification}
 import org.scalatest._
 import org.scalatest.mock.MockitoSugar
-import org.joda.{ time => joda }
+import org.joda.{time => joda}
 import com.github.nscala_time.time.Imports._
 import peds.commons.log.Trace
+import spotlight.model.timeseries.{DataPoint, Row, TimeSeries}
 
 
 class IsQuorumSpec
@@ -30,7 +30,7 @@ with TryValues {
     val twoOutliers = SeriesOutliers( Set('algo), source = series, outliers = IndexedSeq( points(0), points(1) ), plan = plan )
   }
 
-  def createTestFixture(): Fixture = trace.block( "createTestFixture" ) { new Fixture }
+  def createTestFixture(): Fixture = new Fixture
 
   override def withFixture( test: OneArgTest ): Outcome = {
     val fixture = createTestFixture()
@@ -106,7 +106,7 @@ with TryValues {
         val fn1 = MajorityQuorumSpecification( 3, 0.33 )
         val fn2 = MajorityQuorumSpecification( 3, 0.66 )
         val fn3 = MajorityQuorumSpecification( 3, 1.0 )
-        fn0( Map.empty[Symbol, Outliers] ) mustBe true
+        fn0( Map.empty[Symbol, Outliers] ) mustBe false
         fn1( Map.empty[Symbol, Outliers] ) mustBe false
         fn2( Map.empty[Symbol, Outliers] ) mustBe false
         fn3( Map.empty[Symbol, Outliers] ) mustBe false
@@ -138,7 +138,7 @@ with TryValues {
 
       "majority: answer true for minimal anomalies" in { f: Fixture =>
         val fn0 = MajorityQuorumSpecification( 3, 0.0 )
-        fn0( Map(f.noOutliers.algorithms.head -> f.noOutliers) ) mustBe true
+        fn0( Map(f.noOutliers.algorithms.head -> f.noOutliers) ) mustBe false
 
         val fn1 = MajorityQuorumSpecification( 3, 0.33 )
         fn1( Map('a -> f.oneOutlier) ) mustBe true
@@ -153,6 +153,11 @@ with TryValues {
 
         val fn1 = MajorityQuorumSpecification( 3, 0.33 )
         fn1( Map('a -> f.twoOutliers, 'b -> f.twoOutliers) ) mustBe true
+      }
+
+      "majority: answer false for exact trigger point" in { f: Fixture =>
+        val fn0 = MajorityQuorumSpecification( 4, 0.25 )
+        fn0( Map('a -> f.oneOutlier) ) mustBe false
       }
     }
   }

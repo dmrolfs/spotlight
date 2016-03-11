@@ -20,7 +20,7 @@ import spotlight.model.timeseries.DataPoint
   * Created by rolfsd on 2/25/16.
   */
 object FirstHourAverageAnalyzer {
-  val Algorithm = 'first_hour_average
+  val Algorithm = Symbol( "first-hour-average" )
 
   def props( router: ActorRef ): Props = Props { new FirstHourAverageAnalyzer( router ) }
 

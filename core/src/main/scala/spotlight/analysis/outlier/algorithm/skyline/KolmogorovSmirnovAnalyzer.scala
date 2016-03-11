@@ -23,7 +23,7 @@ import spotlight.model.timeseries.{ DataPoint, Row }
   * Created by rolfsd on 2/25/16.
   */
 object KolmogorovSmirnovAnalyzer {
-  val Algorithm = 'ks_test
+  val Algorithm = Symbol( "ks-test" )
 
   def props( router: ActorRef ): Props = Props { new KolmogorovSmirnovAnalyzer( router ) }
 
@@ -41,7 +41,7 @@ object KolmogorovSmirnovAnalyzer {
 
     def referenceSeries: Seq[DataPoint] = {
       referenceInterval map { reference =>
-        referenceHistory filter { rdp => reference.contains( rdp.timestamp ) }
+        ( referenceHistory ++ underlying.source.points ) filter { rdp => reference contains rdp.timestamp }
       } getOrElse {
         Seq.empty[DataPoint]
       }

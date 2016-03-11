@@ -144,6 +144,7 @@ object Dependencies {
 
   val commonDependencies = log.all ++ peds.all ++ time.all ++ Seq(
     akka.actor,
+    akka.slf4j,
     facility.uuid,
     facility.config,
     facility.shapeless,

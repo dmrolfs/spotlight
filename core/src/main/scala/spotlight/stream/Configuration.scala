@@ -219,6 +219,19 @@ object Configuration {
     override def workflowBufferSize: Int = getInt( Directory.WORKFLOW_BUFFER_SIZE )
     override def tcpInboundBufferSize: Int = getInt( Directory.TCP_INBOUND_BUFFER_SIZE )
 
+    private def makeIsQuorum( spec: Config, algorithmSize: Int ): IsQuorum = {
+      val MAJORITY = "majority"
+      val AT_LEAST = "at-least"
+      if ( spec hasPath AT_LEAST ) {
+        val trigger = spec getInt AT_LEAST
+        IsQuorum.AtLeastQuorumSpecification( totalIssued = algorithmSize, triggerPoint = trigger )
+      } else {
+        val trigger = if ( spec hasPath MAJORITY ) spec.getDouble( MAJORITY ) else 50D
+        IsQuorum.MajorityQuorumSpecification( totalIssued = algorithmSize, triggerPoint = ( trigger / 100D) )
+      }
+    }
+
+
     private def makePlans( planSpecifications: Config ): immutable.Seq[OutlierPlan] = {
       import scala.collection.JavaConversions._
 
@@ -228,6 +241,7 @@ object Configuration {
           val TOPICS = "topics"
           val REGEX = "regex"
 
+          //todo: add configuration for at-least and majority
           val ( timeout, algorithms ) = pullCommonPlanFacets( spec )
 
           if ( spec.hasPath(IS_DEFAULT) && spec.getBoolean(IS_DEFAULT) ) {
@@ -235,7 +249,7 @@ object Configuration {
               OutlierPlan.default(
                 name = name,
                 timeout = timeout,
-                isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = algorithms.size, triggerPoint = 1 ),
+                isQuorum = makeIsQuorum( spec, algorithms.size ),
                 reduce = defaultOutlierReducer,
                 algorithms = algorithms,
                 planSpecification = spec
@@ -249,7 +263,7 @@ object Configuration {
               OutlierPlan.forTopics(
                 name = name,
                 timeout = timeout,
-                isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = algorithms.size, triggerPoint = 1 ),
+                isQuorum = makeIsQuorum( spec, algorithms.size ),
                 reduce = defaultOutlierReducer,
                 algorithms = algorithms,
                 planSpecification = spec,
@@ -262,7 +276,7 @@ object Configuration {
               OutlierPlan.forRegex(
                 name = name,
                 timeout = timeout,
-                isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = algorithms.size, triggerPoint = 1 ),
+                isQuorum = makeIsQuorum( spec, algorithms.size ),
                 reduce = defaultOutlierReducer,
                 algorithms = algorithms,
                 planSpecification = spec,

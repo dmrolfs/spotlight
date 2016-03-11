@@ -1,22 +1,23 @@
 package spotlight.stream
 
-import java.net.{ Socket, InetSocketAddress }
+import java.net.{InetSocketAddress, Socket}
+
 import scala.concurrent.duration._
 import akka.actor.SupervisorStrategy._
 import akka.actor._
 import akka.event.LoggingReceive
-
 import com.typesafe.config.Config
-import nl.grons.metrics.scala.{ MetricName, Meter }
+import nl.grons.metrics.scala.{Meter, MetricName}
 import peds.akka.supervision.IsolatedLifeCycleSupervisor.ChildStarted
 import peds.akka.metrics.InstrumentedActor
 import peds.akka.stream.Limiter
-import peds.akka.supervision.{ OneForOneStrategyFactory, SupervisionStrategyFactory, IsolatedLifeCycleSupervisor }
-import spotlight.analysis.outlier.algorithm.{ CohortDensityAnalyzer, SeriesCentroidDensityAnalyzer, SeriesDensityAnalyzer }
-import spotlight.analysis.outlier.{ algorithm, OutlierDetection, DetectionAlgorithmRouter }
+import peds.akka.supervision.{IsolatedLifeCycleSupervisor, OneForOneStrategyFactory, SupervisionStrategyFactory}
+import spotlight.analysis.outlier.algorithm.skyline._
+import spotlight.analysis.outlier.algorithm.{CohortDensityAnalyzer, SeriesCentroidDensityAnalyzer, SeriesDensityAnalyzer}
+import spotlight.analysis.outlier.{DetectionAlgorithmRouter, OutlierDetection, algorithm}
 import spotlight.model.outlier.Outliers
 import spotlight.model.timeseries.Topic
-import spotlight.publish.{ LogPublisher, GraphitePublisher }
+import spotlight.publish.{GraphitePublisher, LogPublisher}
 import spotlight.protocol.GraphiteSerializationProtocol
 
 
@@ -84,7 +85,16 @@ object OutlierDetectionWorkflow {
       Map(
         SeriesDensityAnalyzer.Algorithm -> SeriesDensityAnalyzer.props( router ),
         SeriesCentroidDensityAnalyzer.Algorithm -> SeriesCentroidDensityAnalyzer.props( router ),
-        CohortDensityAnalyzer.Algorithm -> CohortDensityAnalyzer.props( router )
+        CohortDensityAnalyzer.Algorithm -> CohortDensityAnalyzer.props( router ),
+        ExponentialMovingAverageAnalyzer.Algorithm -> ExponentialMovingAverageAnalyzer.props( router ),
+        FirstHourAverageAnalyzer.Algorithm -> FirstHourAverageAnalyzer.props( router ),
+        GrubbsAnalyzer.Algorithm -> GrubbsAnalyzer.props( router ),
+        HistogramBinsAnalyzer.Algorithm -> HistogramBinsAnalyzer.props( router ),
+        KolmogorovSmirnovAnalyzer.Algorithm -> KolmogorovSmirnovAnalyzer.props( router ),
+        LeastSquaresAnalyzer.Algorithm -> LeastSquaresAnalyzer.props( router ),
+        MeanSubtractionCumulationAnalyzer.Algorithm -> MeanSubtractionCumulationAnalyzer.props( router ),
+        MedianAbsoluteDeviationAnalyzer.Algorithm -> MedianAbsoluteDeviationAnalyzer.props( router ),
+        SimpleMovingAverageAnalyzer.Algorithm -> SimpleMovingAverageAnalyzer.props( router )
       ) map { case (n, p) =>
         n -> context.actorOf( p.withDispatcher("outlier-algorithm-dispatcher"), n.name )
       }
