@@ -1,23 +1,23 @@
 package spotlight.stream
 
-import java.net.{InetSocketAddress, Socket}
-
+import java.net.{ InetSocketAddress, Socket }
 import scala.concurrent.duration._
 import akka.actor.SupervisorStrategy._
 import akka.actor._
 import akka.event.LoggingReceive
 import com.typesafe.config.Config
-import nl.grons.metrics.scala.{Meter, MetricName}
+import nl.grons.metrics.scala.{ Meter, MetricName }
 import peds.akka.supervision.IsolatedLifeCycleSupervisor.ChildStarted
 import peds.akka.metrics.InstrumentedActor
 import peds.akka.stream.Limiter
-import peds.akka.supervision.{IsolatedLifeCycleSupervisor, OneForOneStrategyFactory, SupervisionStrategyFactory}
+import peds.akka.supervision.{ IsolatedLifeCycleSupervisor, OneForOneStrategyFactory, SupervisionStrategyFactory }
+import spotlight.analysis.outlier.algorithm.density.{ CohortDensityAnalyzer, SeriesCentroidDensityAnalyzer }
 import spotlight.analysis.outlier.algorithm.skyline._
-import spotlight.analysis.outlier.algorithm.{CohortDensityAnalyzer, SeriesCentroidDensityAnalyzer, SeriesDensityAnalyzer}
-import spotlight.analysis.outlier.{DetectionAlgorithmRouter, OutlierDetection, algorithm}
+import spotlight.analysis.outlier.algorithm.density.SeriesDensityAnalyzer
+import spotlight.analysis.outlier.{ DetectionAlgorithmRouter, OutlierDetection }
 import spotlight.model.outlier.Outliers
 import spotlight.model.timeseries.Topic
-import spotlight.publish.{GraphitePublisher, LogPublisher}
+import spotlight.publish.{ GraphitePublisher, LogPublisher }
 import spotlight.protocol.GraphiteSerializationProtocol
 
 

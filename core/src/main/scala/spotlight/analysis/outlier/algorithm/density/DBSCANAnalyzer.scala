@@ -1,14 +1,16 @@
-package spotlight.analysis.outlier.algorithm
+package spotlight.analysis.outlier.algorithm.density
 
 import akka.event.LoggingReceive
 import scalaz._, Scalaz._
 import scalaz.Kleisli.{ ask, kleisli }
-import org.apache.commons.math3.ml.clustering.{ DBSCANClusterer, Cluster, DoublePoint }
-import org.apache.commons.math3.ml.distance.DistanceMeasure
 import com.typesafe.config.Config
+import org.apache.commons.math3.ml.clustering.{ Cluster, DBSCANClusterer, DoublePoint }
+import org.apache.commons.math3.ml.distance.DistanceMeasure
 import org.slf4j.LoggerFactory
-import spotlight.model.outlier.Outliers
+import spotlight.analysis.outlier.algorithm.AlgorithmActor
 import spotlight.analysis.outlier.{ DetectOutliersInSeries, DetectUsing }
+import spotlight.model.outlier.Outliers
+
 
 
 /**

@@ -1,13 +1,16 @@
-package spotlight.analysis.outlier.algorithm
+package spotlight.analysis.outlier.algorithm.density
 
-import akka.actor.{ ActorRef, Props }
+import akka.actor.{ActorRef, Props}
 import akka.event.LoggingReceive
-import scalaz._, Scalaz._
-import org.apache.commons.math3.ml.clustering.{ Cluster, DoublePoint }
-import org.apache.commons.math3.stat.{ descriptive => stat }
-import spotlight.model.timeseries.{ TimeSeries, Matrix, DataPoint }
-import spotlight.model.outlier.{ Outliers, CohortOutliers, NoOutliers }
-import spotlight.analysis.outlier.{ DetectUsing, DetectOutliersInCohort }
+import org.apache.commons.math3.ml.clustering.{Cluster, DoublePoint}
+import org.apache.commons.math3.stat.{descriptive => stat}
+import spotlight.analysis.outlier.algorithm.AlgorithmActor
+import spotlight.analysis.outlier.{DetectOutliersInCohort, DetectUsing}
+import spotlight.model.outlier.{CohortOutliers, NoOutliers, Outliers}
+import spotlight.model.timeseries.{DataPoint, Matrix}
+
+import scalaz.Scalaz._
+import scalaz._
 
 
 /**

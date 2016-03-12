@@ -2,32 +2,33 @@ package spotlight.stream
 
 import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicInteger
+
 import scala.collection.immutable
-import scala.concurrent.{ Future, Await }
+import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 import scala.util.Failure
-
 import akka.pattern
 import akka.stream.OverflowStrategy
-import akka.stream.testkit.scaladsl.{ TestSource, TestSink }
+import akka.stream.testkit.scaladsl.{TestSink, TestSource}
 import akka.stream.scaladsl._
 import akka.util.ByteString
 import akka.testkit._
 import akka.actor.ActorRef
+
 import scalaz.Scalaz._
 import com.typesafe.config.ConfigFactory
 import org.scalatest.Tag
 import com.typesafe.scalalogging.LazyLogging
 import org.apache.commons.math3.random.RandomDataGenerator
-import org.joda.{ time => joda }
-import com.github.nscala_time.time.Imports.{ richSDuration, richDateTime }
+import org.joda.{time => joda}
+import com.github.nscala_time.time.Imports.{richDateTime, richSDuration}
 import peds.commons.log.Trace
+import spotlight.analysis.outlier.algorithm.density.SeriesDensityAnalyzer
 import spotlight.protocol.PythonPickleProtocol
 import spotlight.testkit.ParallelAkkaSpec
-import spotlight.analysis.outlier.{ DetectionAlgorithmRouter, OutlierDetection }
-import spotlight.analysis.outlier.algorithm.SeriesDensityAnalyzer
-import spotlight.model.outlier.{ SeriesOutliers, IsQuorum, OutlierPlan }
-import spotlight.model.timeseries.{ TimeSeries, DataPoint, Row }
+import spotlight.analysis.outlier.{DetectionAlgorithmRouter, OutlierDetection}
+import spotlight.model.outlier.{IsQuorum, OutlierPlan, SeriesOutliers}
+import spotlight.model.timeseries.{DataPoint, Row, TimeSeries}
 
 
 /**

@@ -1,13 +1,15 @@
-package spotlight.analysis.outlier.algorithm
+package spotlight.analysis.outlier.algorithm.density
 
 import scala.reflect.ClassTag
-import akka.actor.{ ActorRef, Props }
 import scalaz._, Scalaz._
+import akka.actor.{ ActorRef, Props }
 import org.apache.commons.math3.ml.clustering.DoublePoint
+import spotlight.analysis.outlier.algorithm.AlgorithmActor
+import spotlight.analysis.outlier.algorithm.density.DBSCANAnalyzer.Clusters
+import spotlight.analysis.outlier.{ DetectUsing, HistoricalStatistics }
 import spotlight.model.outlier.{ NoOutliers, Outliers, SeriesOutliers }
 import spotlight.model.timeseries.{ DataPoint, TimeSeries }
-import spotlight.analysis.outlier.{ DetectUsing, HistoricalStatistics }
-import spotlight.analysis.outlier.algorithm.DBSCANAnalyzer.Clusters
+
 
 
 /**

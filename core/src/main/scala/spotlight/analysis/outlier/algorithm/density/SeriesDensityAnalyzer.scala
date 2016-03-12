@@ -1,4 +1,4 @@
-package spotlight.analysis.outlier.algorithm
+package spotlight.analysis.outlier.algorithm.density
 
 import scala.reflect.ClassTag
 import akka.actor.{ ActorRef, Props }
@@ -11,12 +11,12 @@ import org.apache.commons.math3.ml.distance.DistanceMeasure
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import peds.commons.Valid
 import peds.commons.log.Trace
-import spotlight.model.timeseries._
-import spotlight.model.outlier.{ NoOutliers, OutlierPlan, Outliers, SeriesOutliers }
+import spotlight.analysis.outlier.algorithm.AlgorithmActor._
+import spotlight.analysis.outlier.algorithm.density.DBSCANAnalyzer.Clusters
 import spotlight.analysis.outlier.{ DetectUsing, HistoricalStatistics, HistoryKey }
-import spotlight.analysis.outlier.algorithm.AlgorithmActor.TryV
-import spotlight.analysis.outlier.algorithm.DBSCANAnalyzer.Clusters
-import AlgorithmActor.{ AlgorithmContext, Op }
+import spotlight.model.outlier.{ NoOutliers, OutlierPlan, Outliers, SeriesOutliers }
+import spotlight.model.timeseries._
+
 
 
 /**

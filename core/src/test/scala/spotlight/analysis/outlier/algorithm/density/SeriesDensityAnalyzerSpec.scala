@@ -1,28 +1,26 @@
-package spotlight.analysis.outlier.algorithm
+package spotlight.analysis.outlier.algorithm.density
 
-import com.typesafe.config.ConfigFactory
-import org.apache.commons.math3.ml.distance.EuclideanDistance
-
-import scala.concurrent.{ExecutionContext, Future}
-import scala.concurrent.duration._
 import java.util.concurrent.atomic.AtomicInteger
 
 import akka.event.EventStream
 import akka.testkit._
-import shapeless._
-import org.joda.{time => joda}
 import com.github.nscala_time.time.OrderingImplicits._
+import com.typesafe.config.ConfigFactory
+import org.apache.commons.math3.ml.distance.EuclideanDistance
 import org.apache.commons.math3.random.RandomDataGenerator
-import org.scalatest.mock.MockitoSugar
+import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
+import org.joda.{time => joda}
 import org.mockito.Mockito._
-import org.mockito.Matchers._
-import org.mockito.invocation.InvocationOnMock
-import org.mockito.stubbing.Answer
+import org.scalatest.mock.MockitoSugar
+import shapeless._
+import spotlight.analysis.outlier._
+import spotlight.analysis.outlier.algorithm.AlgorithmActor
 import spotlight.model.outlier._
 import spotlight.model.timeseries._
-import spotlight.analysis.outlier._
 import spotlight.testkit.ParallelAkkaSpec
-import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
+
+import scala.concurrent.duration._
+import scala.concurrent.{ExecutionContext, Future}
 
 
 /**

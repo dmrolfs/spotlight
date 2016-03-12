@@ -122,18 +122,23 @@ _ = log.debug( "KS CONTEXT = [{}]", context )
   )(
     implicit context: AlgorithmContext
   ): TryV[Boolean] = {
-    val same = for {
-      pValue <- \/ fromTryCatchNonFatal { TestUtils.kolmogorovSmirnovTest( reference, series ) }
-      testStatisticD <- \/ fromTryCatchNonFatal { TestUtils.kolmogorovSmirnovStatistic( reference, series ) }
-    } yield {
-      val isStationary = (s: Array[Double]) => {
-        val adf = AugmentedDickeyFuller( s ).statistic
-        log.debug( "ks-test :: ADF[{}]: adf:[{}]", adf < 0.05, adf )
-        adf < 0.05
-      }
+    val same = {
+      if ( reference.isEmpty ) false.right
+      else {
+        for {
+          pValue <- \/ fromTryCatchNonFatal { TestUtils.kolmogorovSmirnovTest( reference, series ) }
+          testStatisticD <- \/ fromTryCatchNonFatal { TestUtils.kolmogorovSmirnovStatistic( reference, series ) }
+        } yield {
+          val isStationary = (s: Array[Double]) => {
+            val adf = AugmentedDickeyFuller( s ).statistic
+            log.debug( "ks-test :: ADF[{}]: adf:[{}]", adf < 0.05, adf )
+            adf < 0.05
+          }
 
-      log.debug( "ks-test[{}]: p-value=[{}], D-statistic=[{}]", ( pValue < 0.05 ) && ( testStatisticD > 0.5 ), pValue, testStatisticD )
-      ( pValue < 0.05 ) && ( testStatisticD > 0.5 ) && isStationary( reference )
+          log.debug( "ks-test[{}]: p-value=[{}], D-statistic=[{}]", ( pValue < 0.05 ) && ( testStatisticD > 0.5 ), pValue, testStatisticD )
+          ( pValue < 0.05 ) && ( testStatisticD > 0.5 ) && isStationary( reference )
+        }
+      }
     }
 
     same
