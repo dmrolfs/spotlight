@@ -128,11 +128,11 @@ trait SkylineAnalyzer[C <: SkylineAnalyzer.SkylineContext] extends AlgorithmActo
   def toSkylineContext: Op[AlgorithmContext, C] = kleisli { toConcreteContext }
 
   val tailAverage: Op[AlgorithmContext, Seq[Point2D]] = Kleisli[TryV, AlgorithmContext, Seq[Point2D]] { context =>
-    val data = context.data.map{ _.getPoint.apply( 1 ) }
-    val last = context.history.lastPoints.drop( context.history.lastPoints.size - 2 ) map { case Array(_, v) => v }
-    log.debug( "tail-average: last=[{}]", last.mkString(",") )
-
     val TailLength = 3
+
+    val data = context.data.map{ _.getPoint.apply( 1 ) }
+    val last = context.history.lastPoints.drop( context.history.lastPoints.size - TailLength + 1 ) map { case Array(_, v) => v }
+    log.debug( "tail-average: last=[{}]", last.mkString(",") )
 
     context.data
     .map{ _.getPoint.apply( 0 ) }
@@ -165,30 +165,33 @@ trait SkylineAnalyzer[C <: SkylineAnalyzer.SkylineContext] extends AlgorithmActo
     update: UpdateContext[CTX]
   ): (Row[DataPoint], AlgorithmContext) = {
     @tailrec def loop( pts: List[Point2D], ctx: CTX, acc: Row[DataPoint] ): (Row[DataPoint], AlgorithmContext) = {
-      ctx.cast[SkylineContext] foreach {setScopedContext }
+      ctx.cast[SkylineContext] foreach { setScopedContext }
 
 //      log.debug( "{} checking pt [{}] for outlier = {}", ctx.algorithm, pts.headOption.map{p=>(p._1.toLong, p._2)}, pts.headOption.map{ p => isOutlier(p,ctx) } )
       pts match {
         case Nil => ( acc, ctx )
 
-        case h :: tail if isOutlier( h, ctx ) => {
-          val (ts, _) = h
+        case pt :: tail if isOutlier( pt, ctx ) => {
+          val (ts, _) = pt
           val original = ctx.source.points find { _.timestamp.getMillis == ts.toLong }
-          val (updatedAcc, updatedContext) = original map { o => (acc :+ o, update(ctx, o)) } getOrElse { (acc, ctx) }
-          log.debug( "LOOP-HIT[({})]: updated skyline-context=[{}] acc=[{}]", (ts.toLong, h._2), updatedContext, updatedAcc )
+          val updatedAcc = original map { o => acc :+ o} getOrElse { acc }
+          val dp = DataPoint fromPoint2D pt
+          val updatedContext = update( ctx, dp )
+          log.debug( "LOOP-HIT[({})]: updated skyline-context=[{}] acc=[{}]", dp, updatedContext, updatedAcc )
           loop( tail, updatedContext, updatedAcc )
         }
 
-        case h :: tail => {
-          val (ts, _) = h
-          val updatedContext = {
-            ctx.source.points
-            .find { _.timestamp.getMillis == ts.toLong }
-            .map { orig => update( ctx, orig ) }
-            .getOrElse { ctx }
-          }
-
-          log.debug( "LOOP-MISS[({})]: updated skyline-context=[{}] acc=[{}]", (ts.toLong, h._2), updatedContext, acc )
+        case pt :: tail => {
+//          val (ts, _) = pt
+          val dp = DataPoint fromPoint2D pt
+//          val updatedContext = {
+//            ctx.source.points
+//            .find { _.timestamp.getMillis == ts.toLong }
+//            .map { orig => update( ctx, orig ) }
+//            .getOrElse { ctx }
+//          }
+          val updatedContext = update( ctx, dp )
+          log.debug( "LOOP-MISS[({})]: updated skyline-context=[{}] acc=[{}]", dp, updatedContext, acc )
           loop( tail, updatedContext, acc )
         }
       }

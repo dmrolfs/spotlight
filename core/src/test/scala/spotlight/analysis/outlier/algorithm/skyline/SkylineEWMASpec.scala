@@ -2,9 +2,11 @@ package spotlight.analysis.outlier.algorithm.skyline
 
 import akka.testkit._
 import com.typesafe.config.ConfigFactory
-import spotlight.analysis.outlier.{DetectOutliersInSeries, DetectUsing, DetectionAlgorithmRouter }
+import org.mockito.Mockito._
+import spotlight.analysis.outlier.{DetectOutliersInSeries, DetectUsing, DetectionAlgorithmRouter}
 import spotlight.model.outlier._
-import spotlight.model.timeseries.{Row }
+import spotlight.model.timeseries.Row
+
 import scala.collection.immutable
 import scala.concurrent.duration._
 
@@ -18,6 +20,11 @@ class SkylineEWMASpec extends SkylineBaseSpec {
   class Fixture extends SkylineFixture {
     val algoS = ExponentialMovingAverageAnalyzer.Algorithm
     val algProps = ConfigFactory.parseString( s"""${algoS.name}.tolerance: 3""" )
+
+    val plan = mock[OutlierPlan]
+    when( plan.name ).thenReturn( "mock-plan" )
+    when( plan.appliesTo ).thenReturn( SkylineFixture.appliesToAll )
+    when( plan.algorithms ).thenReturn( Set(algoS) )
   }
 
   override def makeAkkaFixture(): Fixture = new Fixture

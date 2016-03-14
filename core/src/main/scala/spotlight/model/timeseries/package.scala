@@ -1,19 +1,30 @@
 package spotlight.model
 
 import scala.collection.immutable
-import scalaz._, Scalaz._
-import org.joda.{ time => joda }
+import scalaz._
+import Scalaz._
+import org.joda.{time => joda}
 import com.github.nscala_time.time.Imports._
-import org.apache.commons.math3.ml.{ clustering => ml }
+import org.apache.commons.math3.ml.clustering.DoublePoint
+import org.apache.commons.math3.ml.{clustering => ml}
 import peds.commons.Valid
 
 
 package object timeseries {
+  type Points = Seq[DoublePoint]
+  type Point = Array[Double]
+  type Point2D = (Double, Double)
+
   case class DataPoint( timestamp: joda.DateTime, value: Double ) {
     override def toString: String = s"(${timestamp}[${timestamp.getMillis}], ${value})"
   }
 
   object DataPoint {
+    def fromPoint2D( pt: Point2D ): DataPoint = {
+      val (ts, v) = pt
+      DataPoint( timestamp = new joda.DateTime(ts.toLong), value = v )
+    }
+
     implicit def toDoublePoint( dp: DataPoint ): ml.DoublePoint = {
       new ml.DoublePoint( Array(dp.timestamp.getMillis.toDouble, dp.value) )
     }
@@ -37,6 +48,7 @@ package object timeseries {
   trait TimeSeriesBase {
     def topic: Topic
     def points: Row[DataPoint]
+    def pointsAsPairs: Seq[Point2D] = points.map{ dp => (dp.timestamp.getMillis.toDouble, dp.value) }
     def size: Int
     def start: Option[joda.DateTime]
     def end: Option[joda.DateTime]

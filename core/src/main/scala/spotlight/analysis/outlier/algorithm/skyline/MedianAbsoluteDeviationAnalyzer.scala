@@ -1,16 +1,18 @@
 package spotlight.analysis.outlier.algorithm.skyline
 
 import scala.reflect.ClassTag
-import akka.actor.{ ActorRef, Props }
-import scalaz._, Scalaz._
+import akka.actor.{ActorRef, Props}
+
+import scalaz._
+import Scalaz._
 import scalaz.Kleisli.ask
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import peds.commons.Valid
 import peds.commons.util._
-import spotlight.analysis.outlier.algorithm.AlgorithmActor.{ AlgorithmContext, Op, Point2D, TryV }
+import spotlight.analysis.outlier.algorithm.AlgorithmActor.{AlgorithmContext, Op, TryV}
 import spotlight.analysis.outlier.algorithm.skyline.SkylineAnalyzer.SkylineContext
 import spotlight.model.outlier.Outliers
-import spotlight.model.timeseries.{ DataPoint, Row }
+import spotlight.model.timeseries.{DataPoint, Point2D, Row}
 
 
 /**
@@ -20,19 +22,6 @@ object MedianAbsoluteDeviationAnalyzer {
   val Algorithm = Symbol( "median-absolute-deviation" )
 
   def props( router: ActorRef ): Props = Props { new MedianAbsoluteDeviationAnalyzer( router ) }
-
-//    def makeMomentHistogram( context: Context ): Valid[MomentHistogram] = {
-//      val moments: List[TryV[(MomentBinKey, Moment)]] = for {
-//        day <- DayOfWeek.JodaDays.values.toList
-//        hour <- 0 to 23
-//      } yield {
-//        val mbkey = MomentBinKey( day, hour )
-//        Moment.withAlpha( mbkey.id, alpha = 0.05 ).map{ (mbkey, _) }.disjunction.leftMap{ _.head }
-//      }
-//
-//      moments.sequenceU.map{ ms => Map( ms:_* ) }.validationNel
-//    }
-//  }
 
   final case class Context private[skyline](
     override val underlying: AlgorithmContext,
@@ -91,7 +80,7 @@ extends SkylineAnalyzer[MedianAbsoluteDeviationAnalyzer.Context] {
       }
 
       collectOutlierPoints(
-        points = context.data.map{ _.getPoint }.map{ case Array(ts, v) => (ts, v) },
+        points = context.source.pointsAsPairs,
         context = context,
         isOutlier = (p: Point2D, ctx: Context) => {
           val (ts, v) = p

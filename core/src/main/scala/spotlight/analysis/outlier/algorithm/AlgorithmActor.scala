@@ -68,10 +68,6 @@ object AlgorithmActor {
   type TryV[T] = Throwable\/T
   type Op[I, O] = Kleisli[TryV, I, O]
 
-  type Points = Seq[DoublePoint]
-  type Point = Array[Double]
-  type Point2D = (Double, Double)
-
 
   trait AlgorithmContext {
     def message: DetectUsing

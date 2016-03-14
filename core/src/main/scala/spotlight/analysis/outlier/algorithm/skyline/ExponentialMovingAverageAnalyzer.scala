@@ -1,16 +1,18 @@
 package spotlight.analysis.outlier.algorithm.skyline
 
 import scala.reflect.ClassTag
-import akka.actor.{ ActorRef, Props }
-import scalaz._, Scalaz._
+import akka.actor.{ActorRef, Props}
+
+import scalaz._
+import Scalaz._
 import scalaz.Kleisli.ask
 import peds.commons.Valid
 import peds.commons.util._
 import spotlight.analysis.outlier.Moment
-import spotlight.analysis.outlier.algorithm.AlgorithmActor.{ AlgorithmContext, Op, Point2D, TryV }
+import spotlight.analysis.outlier.algorithm.AlgorithmActor.{AlgorithmContext, Op, TryV}
 import spotlight.analysis.outlier.algorithm.skyline.SkylineAnalyzer.SkylineContext
 import spotlight.model.outlier.Outliers
-import spotlight.model.timeseries.DataPoint
+import spotlight.model.timeseries.{DataPoint, Point2D}
 
 
 /**
@@ -56,12 +58,11 @@ class ExponentialMovingAverageAnalyzer(
     val outliers = for {
       context <- toSkylineContext <=< ask[TryV, AlgorithmContext]
       tolerance <- tolerance <=< ask[TryV, AlgorithmContext]
-      taverages <- tailAverage <=< ask[TryV, AlgorithmContext]
     } yield {
       val tol = tolerance getOrElse 3D
 
       collectOutlierPoints(
-        points = taverages,
+        points = context.source.pointsAsPairs,
         context = context,
         isOutlier = (p: Point2D, ctx: Context) => {
           ctx.moment.statistics map { stats =>

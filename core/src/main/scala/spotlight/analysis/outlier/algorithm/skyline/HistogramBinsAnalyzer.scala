@@ -1,14 +1,16 @@
 package spotlight.analysis.outlier.algorithm.skyline
 
 import scala.reflect.ClassTag
-import akka.actor.{ ActorRef, Props }
-import scalaz._, Scalaz._
+import akka.actor.{ActorRef, Props}
+
+import scalaz._
+import Scalaz._
 import scalaz.Kleisli.ask
 import peds.commons.Valid
-import spotlight.analysis.outlier.algorithm.AlgorithmActor.{ AlgorithmContext, Op, Point2D, TryV }
+import spotlight.analysis.outlier.algorithm.AlgorithmActor.{AlgorithmContext, Op, TryV}
 import spotlight.analysis.outlier.algorithm.skyline.SkylineAnalyzer.SkylineContext
 import spotlight.model.outlier.Outliers
-import spotlight.model.timeseries.DataPoint
+import spotlight.model.timeseries.{DataPoint, Point2D}
 
 
 /**

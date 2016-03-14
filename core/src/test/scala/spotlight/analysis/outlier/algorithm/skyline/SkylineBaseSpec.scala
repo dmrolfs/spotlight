@@ -43,22 +43,6 @@ abstract class SkylineBaseSpec extends ParallelAkkaSpec with MockitoSugar with L
 
     val router = TestProbe()
     val aggregator = TestProbe()
-    val plan = mock[OutlierPlan]
-    when( plan.name ).thenReturn( "mock-plan" )
-    when( plan.appliesTo ).thenReturn( SkylineFixture.appliesToAll )
-    when( plan.algorithms ).thenReturn(
-      Set(
-        FirstHourAverageAnalyzer.Algorithm,
-        MeanSubtractionCumulationAnalyzer.Algorithm,
-        SimpleMovingAverageAnalyzer.Algorithm,
-        ExponentialMovingAverageAnalyzer.Algorithm,
-        LeastSquaresAnalyzer.Algorithm,
-        GrubbsAnalyzer.Algorithm,
-        HistogramBinsAnalyzer.Algorithm,
-        MedianAbsoluteDeviationAnalyzer.Algorithm,
-        KolmogorovSmirnovAnalyzer.Algorithm
-      )
-    )
 
     def makeDataPoints(
       values: Row[Double],
@@ -97,6 +81,25 @@ abstract class SkylineBaseSpec extends ParallelAkkaSpec with MockitoSugar with L
       } getOrElse {
         HistoricalStatistics.fromActivePoints( DataPoint.toDoublePoints(series.points).toArray, false )
       }
+    }
+
+    def tailAverage( data: Row[DataPoint], last: Row[DataPoint] = Row.empty[DataPoint], tailLength: Int = 3 ): Row[DataPoint] = {
+      val l = last.drop( last.size - tailLength + 1 )
+
+      data
+      .map { _.timestamp }
+      .zipWithIndex
+      .map { case (ts, i) =>
+        val valuesToAverage = if ( i < tailLength ) {
+          val all = l ++ data.take( i + 1 )
+          all.drop( all.size - tailLength )
+        } else {
+          data.drop( i - tailLength + 1 ).take( tailLength )
+        }
+
+        ( ts, valuesToAverage.map{ _.value } )
+      }
+      .map { case (ts, vs) => DataPoint( timestamp = ts, value = vs.sum / vs.size ) }
     }
   }
 

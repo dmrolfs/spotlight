@@ -1,18 +1,20 @@
 package spotlight.analysis.outlier.algorithm.skyline
 
 import scala.reflect.ClassTag
-import akka.actor.{ ActorRef, Props }
-import scalaz._, Scalaz._
+import akka.actor.{ActorRef, Props}
+
+import scalaz._
+import Scalaz._
 import scalaz.Kleisli.ask
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import org.apache.commons.math3.stat.regression.MillerUpdatingRegression
 import peds.commons.Valid
 import peds.commons.util._
 import spotlight.analysis.outlier.Moment
-import spotlight.analysis.outlier.algorithm.AlgorithmActor.{ AlgorithmContext, Op, Point2D, TryV }
+import spotlight.analysis.outlier.algorithm.AlgorithmActor.{AlgorithmContext, Op, TryV}
 import spotlight.analysis.outlier.algorithm.skyline.SkylineAnalyzer.SkylineContext
 import spotlight.model.outlier.Outliers
-import spotlight.model.timeseries.DataPoint
+import spotlight.model.timeseries.{DataPoint, Point2D}
 
 
 /**
@@ -63,12 +65,11 @@ class LeastSquaresAnalyzer( override val router: ActorRef ) extends SkylineAnaly
     } yield {
       val tol = tolerance getOrElse 3D
 
-      val points2D = context.data.map{ _.getPoint }.map{ case Array(ts, v) => (ts, v) }
-      val allByTimestamp = Map( groupWithLast( points2D, context ):_* )
+      val allByTimestamp = Map( groupWithLast( context.source.pointsAsPairs, context ):_* )
 
       //todo: this approach seems very wrong and not working out.
       collectOutlierPoints(
-        points = points2D,
+        points = context.source.pointsAsPairs,
         context = context,
         isOutlier = (p: Point2D, ctx: Context) => {
           val (ts, v) = p

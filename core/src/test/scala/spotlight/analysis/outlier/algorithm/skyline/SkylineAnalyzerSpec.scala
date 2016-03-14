@@ -22,36 +22,13 @@ import scala.concurrent.{ExecutionContext, Future}
 /**
   * Created by rolfsd on 2/15/16.
   */
-class SkylineAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar with LazyLogging {
+class SkylineAnalyzerSpec extends SkylineBaseSpec {
   import SkylineAnalyzerSpec._
 
-  object Fixture {
-    val appliesToAll: OutlierPlan.AppliesTo = {
-      val isQuorun: IsQuorum = IsQuorum.AtLeastQuorumSpecification(0, 0)
-      val reduce: ReduceOutliers = new ReduceOutliers {
-        override def apply(
-          results: OutlierAlgorithmResults,
-          source: TimeSeriesBase,
-          plan: OutlierPlan
-        )
-        (
-          implicit ec: ExecutionContext
-        ): Future[Outliers] = Future.failed( new IllegalStateException("should not use" ) )
-      }
-
-      import scala.concurrent.duration._
-      OutlierPlan.default( "", 1.second, isQuorun, reduce, Set.empty[Symbol] ).appliesTo
-    }
-  }
-
-  class Fixture extends AkkaFixture {
-    implicit def scalaDurationToJoda( d: FiniteDuration ): joda.Duration = new joda.Duration( d.toMillis )
-
-    val router = TestProbe()
-    val aggregator = TestProbe()
+  class Fixture extends SkylineFixture {
     val plan = mock[OutlierPlan]
     when( plan.name ).thenReturn( "mock-plan" )
-    when( plan.appliesTo ).thenReturn( Fixture.appliesToAll )
+    when( plan.appliesTo ).thenReturn( SkylineFixture.appliesToAll )
     when( plan.algorithms ).thenReturn(
       Set(
         FirstHourAverageAnalyzer.Algorithm,
@@ -64,53 +41,9 @@ class SkylineAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar with LazyLo
         KolmogorovSmirnovAnalyzer.Algorithm
       )
     )
-
-    def makeDataPoints(
-      values: Row[Double],
-      start: joda.DateTime = joda.DateTime.now,
-      period: FiniteDuration = 1.second,
-      timeWiggle: (Double, Double) = (1D, 1D),
-      valueWiggle: (Double, Double) = (1D, 1D)
-    ): Row[DataPoint] = {
-      val secs = start.getMillis / 1000L
-      val epochStart = new joda.DateTime( secs * 1000L )
-      val random = new RandomDataGenerator
-      def nextFactor( wiggle: (Double, Double) ): Double = {
-        val (lower, upper) = wiggle
-        if ( upper <= lower ) upper else random.nextUniform( lower, upper )
-      }
-
-      values.zipWithIndex map { vi =>
-        import com.github.nscala_time.time.Imports._
-        val (v, i) = vi
-        val tadj = ( i * nextFactor(timeWiggle) ) * period
-        val ts = epochStart + tadj.toJodaDuration
-        val vadj = nextFactor( valueWiggle )
-        DataPoint( timestamp = ts, value = (v * vadj) )
-      }
-    }
-
-    def spike( data: Row[DataPoint], value: Double = 1000D )( position: Int = data.size - 1 ): TimeSeries = {
-      val (front, last) = data.sortBy{ _.timestamp.getMillis }.splitAt( position )
-//      trace( s"""front[${front.size}] = [${front.mkString(",")}]""")
-//      trace( s"""last[${last.size}] = [${last.mkString(",")}]""")
-      val spiked = ( front :+ last.head.copy( value = value ) ) ++ last.tail
-//      trace( s"""spiked = [${spiked.mkString(",")}]""")
-      TimeSeries( "test-series", spiked )
-    }
-
-    def historyWith( prior: Option[HistoricalStatistics], series: TimeSeries ): HistoricalStatistics = {
-      prior map { h =>
-        series.points.foldLeft( h ){ (history, dp) => history :+ dp.getPoint }
-      } getOrElse {
-        HistoricalStatistics.fromActivePoints( DataPoint.toDoublePoints(series.points).toArray, false )
-      }
-    }
   }
 
   override def makeAkkaFixture(): Fixture = new Fixture
-
-  object DONE extends Tag( "done" )
 
 
   "SkylineAnalyzer" should {
