@@ -89,9 +89,10 @@ extends SkylineAnalyzer[MedianAbsoluteDeviationAnalyzer.Context] {
           log.debug( "medianAbsoluteDeviation: N:[{}] deviation:[{}] deviationMedian:[{}]", ctx.deviationStatistics.getN, d, deviationMedian )
           d > ( tol * deviationMedian )
         },
-        update = (ctx: Context, dp: DataPoint) => {
-          ctx.movingStatistics addValue dp.value
-          ctx.deviationStatistics addValue deviation( dp.value, ctx )
+        update = (ctx: Context, pt: Point2D) => {
+          val (_, v) = pt
+          ctx.movingStatistics addValue v
+          ctx.deviationStatistics addValue deviation( v, ctx )
           ctx
         }
       )

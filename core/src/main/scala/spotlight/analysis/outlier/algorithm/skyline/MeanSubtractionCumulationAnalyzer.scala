@@ -54,7 +54,7 @@ extends SkylineAnalyzer[SkylineAnalyzer.SimpleSkylineContext] {
           val cumulativeStddev = ctx.history.standardDeviation( 1 )
           math.abs( v - cumulativeMean ) > ( tol * cumulativeStddev )
         },
-        update = (ctx: Context, pt: DataPoint) => { ctx }
+        update = (ctx: Context, pt: Point2D) => { ctx }
       )
     }
 

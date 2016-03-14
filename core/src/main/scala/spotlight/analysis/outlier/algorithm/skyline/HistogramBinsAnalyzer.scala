@@ -84,7 +84,7 @@ class HistogramBinsAnalyzer( override val router: ActorRef ) extends SkylineAnal
           }
           .getOrElse { v < h.min }
         },
-        update = (ctx: Context, pt: DataPoint) => ctx
+        update = (ctx: Context, pt: Point2D) => { ctx }
       )
     }
 

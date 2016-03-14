@@ -155,7 +155,7 @@ trait SkylineAnalyzer[C <: SkylineAnalyzer.SkylineContext] extends AlgorithmActo
   }
 
 
-  type UpdateContext[CTX <: AlgorithmContext] = (CTX, DataPoint) => CTX
+  type UpdateContext[CTX <: AlgorithmContext] = (CTX, Point2D) => CTX
   type IsOutlier[CTX <: AlgorithmContext] = (Point2D, CTX) => Boolean
 
   def collectOutlierPoints[CTX <: AlgorithmContext](
@@ -167,7 +167,6 @@ trait SkylineAnalyzer[C <: SkylineAnalyzer.SkylineContext] extends AlgorithmActo
     @tailrec def loop( pts: List[Point2D], ctx: CTX, acc: Row[DataPoint] ): (Row[DataPoint], AlgorithmContext) = {
       ctx.cast[SkylineContext] foreach { setScopedContext }
 
-//      log.debug( "{} checking pt [{}] for outlier = {}", ctx.algorithm, pts.headOption.map{p=>(p._1.toLong, p._2)}, pts.headOption.map{ p => isOutlier(p,ctx) } )
       pts match {
         case Nil => ( acc, ctx )
 
@@ -175,23 +174,15 @@ trait SkylineAnalyzer[C <: SkylineAnalyzer.SkylineContext] extends AlgorithmActo
           val (ts, _) = pt
           val original = ctx.source.points find { _.timestamp.getMillis == ts.toLong }
           val updatedAcc = original map { o => acc :+ o} getOrElse { acc }
-          val dp = DataPoint fromPoint2D pt
-          val updatedContext = update( ctx, dp )
-          log.debug( "LOOP-HIT[({})]: updated skyline-context=[{}] acc=[{}]", dp, updatedContext, updatedAcc )
+          val updatedContext = update( ctx, pt )
+          log.debug( "LOOP-HIT[({})]: updated skyline-context=[{}] acc=[{}]", (pt._1.toLong, pt._2), updatedContext, updatedAcc )
           loop( tail, updatedContext, updatedAcc )
         }
 
         case pt :: tail => {
-//          val (ts, _) = pt
-          val dp = DataPoint fromPoint2D pt
-//          val updatedContext = {
-//            ctx.source.points
-//            .find { _.timestamp.getMillis == ts.toLong }
-//            .map { orig => update( ctx, orig ) }
-//            .getOrElse { ctx }
-//          }
-          val updatedContext = update( ctx, dp )
-          log.debug( "LOOP-MISS[({})]: updated skyline-context=[{}] acc=[{}]", dp, updatedContext, acc )
+//          val dp = DataPoint fromPoint2D pt
+          val updatedContext = update( ctx, pt )
+          log.debug( "LOOP-MISS[({})]: updated skyline-context=[{}] acc=[{}]", (pt._1.toLong, pt._2), updatedContext, acc )
           loop( tail, updatedContext, acc )
         }
       }

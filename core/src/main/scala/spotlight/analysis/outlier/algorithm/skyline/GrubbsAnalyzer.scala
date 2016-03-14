@@ -76,7 +76,7 @@ class GrubbsAnalyzer( override val router: ActorRef ) extends SkylineAnalyzer[Sk
           log.debug( "{} > {}", (p._1.toLong, p._2), grubbsScore )
           p._2 > grubbsScore
         },
-        update = (ctx: Context, pt: DataPoint) => { ctx }
+        update = (ctx: Context, pt: Point2D) => { ctx }
       )
     }
 

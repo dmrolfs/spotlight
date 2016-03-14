@@ -77,8 +77,9 @@ class SimpleMovingAverageAnalyzer( override val router: ActorRef ) extends Skyli
           log.debug( "Stddev from simple moving Average: mean[{}]\tstdev[{}]\ttolerance[{}]", mean, stddev, tol )
           math.abs( v - mean ) > ( tol * stddev)
         },
-        update = (ctx: Context, pt: DataPoint) => {
-          ctx.movingStatistics addValue pt.value
+        update = (ctx: Context, pt: Point2D) => {
+          val (_, v) = pt
+          ctx.movingStatistics addValue v
           ctx
         }
       )

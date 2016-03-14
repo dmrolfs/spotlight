@@ -120,7 +120,7 @@ class FirstHourAverageAnalyzer( override val router: ActorRef ) extends SkylineA
           log.debug( "first hour mean[{}] and stdev[{}]", mean, stddev )
           math.abs( v - mean ) > ( tol * stddev)
         },
-        update = (ctx: Context, pt: DataPoint) => ctx  //todo update with point for first hour?
+        update = (ctx: Context, pt: Point2D) => ctx  //todo update with point for first hour?
       )
     }
 

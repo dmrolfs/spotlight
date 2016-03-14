@@ -53,7 +53,7 @@ class SkylineSeasonalEWMASpec extends SkylineBaseSpec {
       concreteModel.moments mustBe expectedMoments.toVector
     }
 
-    "identifies season start for date" taggedAs (WIP) in { f: Fixture =>
+    "identifies season start for date" in { f: Fixture =>
       import SeasonalExponentialMovingAverageAnalyzer.SeasonalModel
       val startOfToday = joda.LocalDate.now.toDateTimeAtStartOfDay
       val today = joda.LocalDate.now
@@ -68,7 +68,7 @@ class SkylineSeasonalEWMASpec extends SkylineBaseSpec {
       model.seasonStartFor( weekFromToday.toDateTime( new joda.LocalTime(7, 0, 0, 1) ) ) mustBe (startOfToday plus joda.Weeks.ONE)
     }
 
-    "identifies bin start for date" taggedAs(WIP) in { f: Fixture =>
+    "identifies bin start for date" in { f: Fixture =>
       import SeasonalExponentialMovingAverageAnalyzer.SeasonalModel
       val startOfToday = joda.LocalDate.now.toDateTimeAtStartOfDay
       val today = joda.LocalDate.now
@@ -88,7 +88,7 @@ class SkylineSeasonalEWMASpec extends SkylineBaseSpec {
       model.binStartFor( weekFromToday.toDateTime( new joda.LocalTime(7, 0, 0, 1) ) ) mustBe weekFromToday.toDateTime( new joda.LocalTime(7,0,0) )
     }
 
-    "identified bin for date" taggedAs (WIP) in { f: Fixture =>
+    "identified bin for date" in { f: Fixture =>
       import SeasonalExponentialMovingAverageAnalyzer.SeasonalModel
       val startOfToday = joda.LocalDate.now.toDateTimeAtStartOfDay
       val today = joda.LocalDate.now
@@ -131,7 +131,7 @@ class SkylineSeasonalEWMASpec extends SkylineBaseSpec {
         values = immutable.IndexedSeq.fill( 60 )( 1.0 ),
         start = (referencePoint plus 1.second),
         period = 1.minute,
-        timeWiggle = (0.97, 1.03),
+        timeWiggle = (0.97, 1.00),
         valueWiggle = (1.0, 1.0)
       )
 
@@ -153,9 +153,9 @@ class SkylineSeasonalEWMASpec extends SkylineBaseSpec {
 
       val full2 = makeDataPoints(
         values = immutable.IndexedSeq.fill( 60 )( 1.0 ),
-        start = (now plus 1.minute),
+        start = (now plus 70.seconds),
         period = 1.minute,
-        timeWiggle = (0.97, 1.03),
+        timeWiggle = (1.0, 1.03),
         valueWiggle = (1.0, 1.0)
       )
 

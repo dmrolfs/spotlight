@@ -91,18 +91,19 @@ class LeastSquaresAnalyzer( override val router: ActorRef ) extends SkylineAnaly
           log.debug( "least squares [{}] = {}", p, result )
           result getOrElse false
         },
-        update = (ctx: Context, pt: DataPoint) => {
-          ctx.regression.addObservation( Array(pt.timestamp.getMillis.toDouble), pt.value )
-          log.debug( "after update [{}] regression-adj r sq=[{}]", pt, \/.fromTryCatchNonFatal(ctx.regression.regress.getAdjustedRSquared) )
-          log.debug( "after update [{}] regression-error of sum squared=[{}]", pt, \/.fromTryCatchNonFatal(ctx.regression.regress.getErrorSumSquares) )
-          log.debug( "after update [{}] regression-mean sq error=[{}]", pt, \/.fromTryCatchNonFatal(ctx.regression.regress.getMeanSquareError) )
-          log.debug( "after update [{}] regression-N=[{}]", pt, \/.fromTryCatchNonFatal(ctx.regression.regress.getN) )
-          log.debug( "after update [{}] regression-# of params=[{}]", pt, \/.fromTryCatchNonFatal(ctx.regression.regress.getNumberOfParameters) )
-          log.debug( "after update [{}] regression-regression sum squares=[{}]", pt, \/.fromTryCatchNonFatal(ctx.regression.regress.getRegressionSumSquares) )
-          log.debug( "after update [{}] regression-r squared=[{}]", pt, \/.fromTryCatchNonFatal(ctx.regression.regress.getRSquared) )
-          log.debug( "after update [{}] regression-std error of estimates=[{}]", pt, \/.fromTryCatchNonFatal(ctx.regression.regress.getStdErrorOfEstimates.mkString(",")) )
-          log.debug( "after update [{}] regression-total sum squared=[{}]", pt, \/.fromTryCatchNonFatal(ctx.regression.regress.getTotalSumSquares) )
-          log.debug( "after update [{}] regression-has intercept=[{}]", pt, \/.fromTryCatchNonFatal(ctx.regression.regress.hasIntercept) )
+        update = (ctx: Context, pt: Point2D) => {
+          val (ts, v) = pt
+          ctx.regression.addObservation( Array(ts), v )
+          log.debug( "after update [{}] regression-adj r sq=[{}]", (pt._1.toLong, pt._2), \/.fromTryCatchNonFatal(ctx.regression.regress.getAdjustedRSquared) )
+          log.debug( "after update [{}] regression-error of sum squared=[{}]", (pt._1.toLong, pt._2), \/.fromTryCatchNonFatal(ctx.regression.regress.getErrorSumSquares) )
+          log.debug( "after update [{}] regression-mean sq error=[{}]", (pt._1.toLong, pt._2), \/.fromTryCatchNonFatal(ctx.regression.regress.getMeanSquareError) )
+          log.debug( "after update [{}] regression-N=[{}]", (pt._1.toLong, pt._2), \/.fromTryCatchNonFatal(ctx.regression.regress.getN) )
+          log.debug( "after update [{}] regression-# of params=[{}]", (pt._1.toLong, pt._2), \/.fromTryCatchNonFatal(ctx.regression.regress.getNumberOfParameters) )
+          log.debug( "after update [{}] regression-regression sum squares=[{}]", (pt._1.toLong, pt._2), \/.fromTryCatchNonFatal(ctx.regression.regress.getRegressionSumSquares) )
+          log.debug( "after update [{}] regression-r squared=[{}]", (pt._1.toLong, pt._2), \/.fromTryCatchNonFatal(ctx.regression.regress.getRSquared) )
+          log.debug( "after update [{}] regression-std error of estimates=[{}]", (pt._1.toLong, pt._2), \/.fromTryCatchNonFatal(ctx.regression.regress.getStdErrorOfEstimates.mkString(",")) )
+          log.debug( "after update [{}] regression-total sum squared=[{}]", (pt._1.toLong, pt._2), \/.fromTryCatchNonFatal(ctx.regression.regress.getTotalSumSquares) )
+          log.debug( "after update [{}] regression-has intercept=[{}]", (pt._1.toLong, pt._2), \/.fromTryCatchNonFatal(ctx.regression.regress.hasIntercept) )
           ctx
         }
       )

@@ -73,9 +73,10 @@ class ExponentialMovingAverageAnalyzer(
             false
           }
         },
-        update = (ctx: Context, pt: DataPoint) => {
-          log.debug( "stddevFromMovingAverage: adding point ({}, {}) to historical moment: [{}]", pt.timestamp.getMillis, pt.value, context.moment.statistics )
-          ctx.copy( moment = ctx.moment :+ pt.value )
+        update = (ctx: Context, pt: Point2D) => {
+          val (ts, v) = pt
+          log.debug( "stddevFromMovingAverage: adding point ({}, {}) to historical moment: [{}]", ts.toLong, v, context.moment.statistics )
+          ctx.copy( moment = ctx.moment :+ v )
         }
       )
     }

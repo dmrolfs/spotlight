@@ -190,11 +190,13 @@ class SeasonalExponentialMovingAverageAnalyzer(
             false
           }
         },
-        update = (ctx: Context, pt: DataPoint) => {
+        update = (ctx: Context, pt: Point2D) => {
+          val ts = new joda.DateTime( pt._1.toLong )
+          val v = pt._2
           val model = ctx.seasonalModel
-          val m = model.moment( pt.timestamp )
-          log.debug( "FromSeasonalMovingAverage: adding point ({}, {}) to historical moment: [{}]", pt.timestamp.getMillis, pt.value, m.statistics )
-          ctx.copy( seasonalModel = model.withMomentAtDateTime( m :+ pt.value, pt.timestamp ) )
+          val m = model.moment( ts )
+          log.debug( "FromSeasonalMovingAverage: adding point ({}, {}) to historical moment: [{}]", ts.getMillis, v, m.statistics )
+          ctx.copy( seasonalModel = model.withMomentAtDateTime( m :+ v, ts ) )
         }
       )
     }
