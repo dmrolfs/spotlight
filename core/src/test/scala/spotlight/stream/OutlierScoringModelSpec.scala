@@ -28,7 +28,7 @@ import spotlight.protocol.PythonPickleProtocol
 import spotlight.testkit.ParallelAkkaSpec
 import spotlight.analysis.outlier.{DetectionAlgorithmRouter, OutlierDetection}
 import spotlight.model.outlier.{IsQuorum, OutlierPlan, SeriesOutliers}
-import spotlight.model.timeseries.{DataPoint, Row, TimeSeries}
+import spotlight.model.timeseries.{DataPoint, TimeSeries}
 
 
 /**
@@ -90,7 +90,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
       val now = joda.DateTime.now
       val dp = makeDataPoints( points, start = now ).take( 5 )
       val expected = List( TimeSeries( "foobar", dp ) )
-      val actual = protocol.toDataPoints( pickled(dp) )
+      val actual = protocol.toDataPoints( pickledWithDefaultTopic(dp) )
       actual mustBe expected
     }
 
@@ -102,7 +102,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
 
       val flowUnderTest = protocol.unmarshalTimeSeriesData
       //      val flowUnderTest = Flow[ByteString].mapConcat( PythonPickleProtocol.toDataPoints )
-      val future = Source( List(pickled(dp)) ).via( flowUnderTest ).runWith( Sink.head )
+      val future = Source( List(pickledWithDefaultTopic(dp)) ).via( flowUnderTest ).runWith( Sink.head )
       val result = Await.result( future, 100.millis.dilated )
       result mustBe expected
     }
@@ -117,7 +117,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
         .via( protocol.framingFlow() )
         .via( protocol.unmarshalTimeSeriesData )
 
-      val future = Source( List(withHeader(pickled(dp))) ).via( flowUnderTest ).runWith( Sink.head )
+      val future = Source( List(withHeader(pickledWithDefaultTopic(dp))) ).via( flowUnderTest ).runWith( Sink.head )
       val result = Await.result( future, 1.second.dilated )
       result mustBe expected
     }
@@ -215,9 +215,9 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
 //      val dp2 = makeDataPoints( pointsA, start = joda.DateTime.now )
 //      val dp3 = makeDataPoints( pointsB, start = joda.DateTime.now )
 
-//      val expectedValues = Row( 18.8, 25.2, 31.5, 22.0, 24.1, 39.2 )
+//      val expectedValues = Seq( 18.8, 25.2, 31.5, 22.0, 24.1, 39.2 )
 //      val expectedPoints = dp1 filter { expectedValues contains _.value } sortBy { _.timestamp }
-      val largestCluster = Row(
+      val largestCluster = Seq(
         DataPoint( new joda.DateTime(now.getMillis + 10000L), 8.58),
         DataPoint( new joda.DateTime(now.getMillis + 11000L), 8.36),
         DataPoint( new joda.DateTime(now.getMillis + 12000L), 8.58),
@@ -441,9 +441,9 @@ object OutlierScoringModelSpec {
     ByteString( result )
   }
 
-  def pickled( dp: Row[DataPoint] ): ByteString = pickled( Seq(("foobar", dp)) )
+  def pickledWithDefaultTopic( dp: Seq[DataPoint] ): ByteString = pickled( Seq(("foobar", dp)) )
 
-  def pickled(metrics: Seq[(String, Row[DataPoint])] ): ByteString = trace.block( s"pickled($metrics)" ) {
+  def pickled(metrics: Seq[(String, Seq[DataPoint])] ): ByteString = trace.block( s"pickled($metrics)" ) {
     import net.razorvine.pickle.Pickler
     import scala.collection.convert.wrapAll._
 
@@ -467,11 +467,11 @@ object OutlierScoringModelSpec {
   }
 
   def makeDataPoints(
-    values: Row[Double],
+    values: Seq[Double],
     start: joda.DateTime = joda.DateTime.now,
     period: FiniteDuration = 1.second,
     wiggleFactor: (Double, Double) = (1.0, 1.0)
-  ): Row[DataPoint] = {
+  ): Seq[DataPoint] = {
     val secs = start.getMillis / 1000L
     val epochStart = new joda.DateTime( secs * 1000L )
     val random = new RandomDataGenerator
@@ -488,7 +488,7 @@ object OutlierScoringModelSpec {
     }
   }
 
-  val points: Row[Double] = Row(
+  val points: Seq[Double] = Seq(
     9.46,
     9.9,
     11.6,
@@ -526,7 +526,7 @@ object OutlierScoringModelSpec {
   )
 
 
-  val pointsA: Row[Double] = Row(
+  val pointsA: Seq[Double] = Seq(
     9.46,
     9.9,
     11.6,
@@ -557,7 +557,7 @@ object OutlierScoringModelSpec {
     14.2
   )
 
-  val pointsB: Row[Double] = Row(
+  val pointsB: Seq[Double] = Seq(
     10.1,
     10.1,
     9.68,

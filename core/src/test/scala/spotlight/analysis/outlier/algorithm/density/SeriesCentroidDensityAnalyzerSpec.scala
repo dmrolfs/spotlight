@@ -77,7 +77,7 @@ class SeriesCentroidDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSug
       import f._
       val analyzer = TestActorRef[SeriesCentroidDensityAnalyzer]( SeriesCentroidDensityAnalyzer.props(router.ref) )
       val series = TimeSeries( "series", points )
-      val expectedValues = Row( 18.8, 25.2, 31.5, 22.0, 24.1, 39.2 )
+      val expectedValues = Seq( 18.8, 25.2, 31.5, 22.0, 24.1, 39.2 )
       val expected = points filter { expectedValues contains _.value } sortBy { _.timestamp }
 
       val algProps = ConfigFactory.parseString(
@@ -106,7 +106,7 @@ class SeriesCentroidDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSug
       import f._
       val analyzer = TestActorRef[SeriesCentroidDensityAnalyzer]( SeriesCentroidDensityAnalyzer.props(router.ref) )
       val series = TimeSeries( "series", points )
-      val expectedValues = Row( 18.8, 25.2, 31.5, 22.0, 24.1, 39.2 )
+      val expectedValues = Seq( 18.8, 25.2, 31.5, 22.0, 24.1, 39.2 )
       val expected = points filter { expectedValues contains _.value } sortBy { _.timestamp }
 
       val algProps = ConfigFactory.parseString(
@@ -137,7 +137,7 @@ class SeriesCentroidDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSug
       import f._
       val analyzer = TestActorRef[SeriesCentroidDensityAnalyzer]( SeriesCentroidDensityAnalyzer.props(router.ref) )
 
-      val myPoints = Row(
+      val myPoints = Seq(
         DataPoint( new joda.DateTime(448), 8.46 ),
         DataPoint( new joda.DateTime(449), 8.9 ),
         DataPoint( new joda.DateTime(450), 8.58 ),
@@ -221,7 +221,7 @@ class SeriesCentroidDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSug
 object SeriesCentroidDensityAnalyzerSpec {
   val sysId = new AtomicInteger()
 
-  val points = Row(
+  val points = Seq(
     DataPoint( new joda.DateTime(440), 9.46 ),
     DataPoint( new joda.DateTime(441), 9.9 ),
     DataPoint( new joda.DateTime(442), 11.6 ),
@@ -259,7 +259,7 @@ object SeriesCentroidDensityAnalyzerSpec {
   )
 
 
-  val pointsA = Row(
+  val pointsA = Seq(
     DataPoint( new joda.DateTime(440), 9.46 ),
     DataPoint( new joda.DateTime(441), 9.9 ),
     DataPoint( new joda.DateTime(442), 11.6 ),
@@ -290,7 +290,7 @@ object SeriesCentroidDensityAnalyzerSpec {
     DataPoint( new joda.DateTime(467), 14.2 )
   )
 
-  val pointsB = Row(
+  val pointsB = Seq(
     DataPoint( new joda.DateTime(440), 10.1 ),
     DataPoint( new joda.DateTime(441), 10.1 ),
     DataPoint( new joda.DateTime(442), 9.68 ),

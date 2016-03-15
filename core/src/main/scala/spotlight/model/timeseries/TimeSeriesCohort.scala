@@ -12,7 +12,7 @@ import peds.commons.math.Interpolator
 
 trait TimeSeriesCohort extends TimeSeriesBase {
   override def size: Int = data.size
-  def data: Row[TimeSeries]
+  def data: IndexedSeq[TimeSeries]
   def precision: TimeUnit
   def toMatrix: Matrix[(joda.DateTime, Double)]
 }
@@ -20,13 +20,15 @@ trait TimeSeriesCohort extends TimeSeriesBase {
 object TimeSeriesCohort {
   val trace = Trace[TimeSeriesCohort.type]
 
-  def apply( topic: Topic, data: Row[TimeSeries], precision: TimeUnit ): TimeSeriesCohort = {
+  def apply( topic: Topic, data: IndexedSeq[TimeSeries], precision: TimeUnit ): TimeSeriesCohort = {
     SimpleTimeSeriesCohort( topic, data, precision )
   }
 
-  def apply( topic: Topic, data: Row[TimeSeries] = Row.empty[TimeSeries] ): TimeSeriesCohort = apply( topic, data, SECONDS )
+  def apply( topic: Topic, data: IndexedSeq[TimeSeries] = IndexedSeq.empty[TimeSeries] ): TimeSeriesCohort = {
+    apply( topic, data, SECONDS )
+  }
 
-  def apply( data: Row[TimeSeries], precision: TimeUnit ): TimeSeriesCohort = {
+  def apply( data: IndexedSeq[TimeSeries], precision: TimeUnit ): TimeSeriesCohort = {
     val prefix = Topic.findAncestor( data.map( _.topic ):_* )
     SimpleTimeSeriesCohort( prefix, data, precision )
   }
@@ -40,9 +42,9 @@ object TimeSeriesCohort {
     }
   }
 
-  val dataLens: Lens[TimeSeriesCohort, Row[TimeSeries]] = new Lens[TimeSeriesCohort, Row[TimeSeries]] {
-    override def get( c: TimeSeriesCohort ): Row[TimeSeries] = c.data
-    override def set( c: TimeSeriesCohort )( d: Row[TimeSeries] ): TimeSeriesCohort = {
+  val dataLens: Lens[TimeSeriesCohort, IndexedSeq[TimeSeries]] = new Lens[TimeSeriesCohort, IndexedSeq[TimeSeries]] {
+    override def get( c: TimeSeriesCohort ): IndexedSeq[TimeSeries] = c.data
+    override def set( c: TimeSeriesCohort )( d: IndexedSeq[TimeSeries] ): TimeSeriesCohort = {
       TimeSeriesCohort( topic = c.topic, data = d, precision = c.precision )
     }
   }
@@ -82,11 +84,11 @@ object TimeSeriesCohort {
     }
 
     private def combineSeries(
-      lhs: Row[TimeSeries],
-      rhs: Row[TimeSeries]
+      lhs: IndexedSeq[TimeSeries],
+      rhs: IndexedSeq[TimeSeries]
     )(
       implicit seriesMerge: Merging[TimeSeries]
-    ): Valid[Row[TimeSeries]] = {
+    ): Valid[IndexedSeq[TimeSeries]] = {
       import scalaz.Validation.FlatMap._
 
       val merged = lhs ++ rhs
@@ -94,7 +96,7 @@ object TimeSeriesCohort {
       val dupsMerged = for {
         d <- dups
       } yield {
-        val zero: Valid[TimeSeries] = TimeSeries( d.head.topic, Row.empty[DataPoint] ).successNel
+        val zero: Valid[TimeSeries] = TimeSeries( d.head.topic, IndexedSeq.empty[DataPoint] ).successNel
         d.foldLeft( zero ) { (acc: Valid[TimeSeries], c: TimeSeries) =>
           acc flatMap { seriesMerge.merge( _, c ) }
         }
@@ -108,12 +110,12 @@ object TimeSeriesCohort {
 
   final case class SimpleTimeSeriesCohort private[timeseries](
     override val topic: Topic,
-    override val data: Row[TimeSeries],
+    override val data: IndexedSeq[TimeSeries],
     override val precision: TimeUnit
   ) extends TimeSeriesCohort {
     val trace = Trace[SimpleTimeSeriesCohort]
 
-    override def points: Row[DataPoint] = data flatMap { _.points }
+    override def points: Seq[DataPoint] = data flatMap { _.points }
 
     override val start: Option[joda.DateTime] = {
       val result = for {
@@ -185,7 +187,7 @@ object TimeSeriesCohort {
         }
       }
 
-      result getOrElse Row.empty[Row[(joda.DateTime, Double)]]
+      result getOrElse IndexedSeq.empty[IndexedSeq[(joda.DateTime, Double)]]
     }
   }
 }

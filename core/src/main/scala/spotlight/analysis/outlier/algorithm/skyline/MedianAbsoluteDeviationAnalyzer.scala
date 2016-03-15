@@ -12,7 +12,7 @@ import peds.commons.util._
 import spotlight.analysis.outlier.algorithm.AlgorithmActor.{AlgorithmContext, Op, TryV}
 import spotlight.analysis.outlier.algorithm.skyline.SkylineAnalyzer.SkylineContext
 import spotlight.model.outlier.Outliers
-import spotlight.model.timeseries.{DataPoint, Point2D, Row}
+import spotlight.model.timeseries.{DataPoint, Point2D}
 
 
 /**

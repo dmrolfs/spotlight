@@ -4,7 +4,7 @@ import akka.testkit._
 import com.typesafe.scalalogging.LazyLogging
 import spotlight.analysis.outlier.HistoricalStatistics
 import spotlight.model.outlier._
-import spotlight.model.timeseries.{DataPoint, Row, TimeSeries, TimeSeriesBase}
+import spotlight.model.timeseries.{DataPoint, TimeSeries, TimeSeriesBase}
 import spotlight.testkit.ParallelAkkaSpec
 import org.apache.commons.math3.random.RandomDataGenerator
 import org.joda.{time => joda}
@@ -45,12 +45,12 @@ abstract class SkylineBaseSpec extends ParallelAkkaSpec with MockitoSugar with L
     val aggregator = TestProbe()
 
     def makeDataPoints(
-      values: Row[Double],
+      values: Seq[Double],
       start: joda.DateTime = joda.DateTime.now,
       period: FiniteDuration = 1.second,
       timeWiggle: (Double, Double) = (1D, 1D),
       valueWiggle: (Double, Double) = (1D, 1D)
-    ): Row[DataPoint] = {
+    ): Seq[DataPoint] = {
       val secs = start.getMillis / 1000L
       val epochStart = new joda.DateTime( secs * 1000L )
       val random = new RandomDataGenerator
@@ -69,7 +69,7 @@ abstract class SkylineBaseSpec extends ParallelAkkaSpec with MockitoSugar with L
       }
     }
 
-    def spike( data: Row[DataPoint], value: Double = 1000D )( position: Int = data.size - 1 ): TimeSeries = {
+    def spike( data: Seq[DataPoint], value: Double = 1000D )( position: Int = data.size - 1 ): TimeSeries = {
       val (front, last) = data.sortBy{ _.timestamp.getMillis }.splitAt( position )
       val spiked = ( front :+ last.head.copy( value = value ) ) ++ last.tail
       TimeSeries( "test-series", spiked )
@@ -83,7 +83,7 @@ abstract class SkylineBaseSpec extends ParallelAkkaSpec with MockitoSugar with L
       }
     }
 
-    def tailAverage( data: Row[DataPoint], last: Row[DataPoint] = Row.empty[DataPoint], tailLength: Int = 3 ): Row[DataPoint] = {
+    def tailAverage( data: Seq[DataPoint], last: Seq[DataPoint] = Seq.empty[DataPoint], tailLength: Int = 3 ): Seq[DataPoint] = {
       val l = last.drop( last.size - tailLength + 1 )
 
       data
@@ -107,7 +107,7 @@ abstract class SkylineBaseSpec extends ParallelAkkaSpec with MockitoSugar with L
 }
 
 object SkylineBaseSpec {
-  val points = Row(
+  val points = Seq(
     DataPoint( new joda.DateTime(440), 9.46 ),
     DataPoint( new joda.DateTime(441), 9.9 ),
     DataPoint( new joda.DateTime(442), 11.6 ),
@@ -145,7 +145,7 @@ object SkylineBaseSpec {
   )
 
 
-  val pointsA = Row(
+  val pointsA = Seq(
     DataPoint( new joda.DateTime(440), 9.46 ),
     DataPoint( new joda.DateTime(441), 9.9 ),
     DataPoint( new joda.DateTime(442), 11.6 ),
@@ -176,7 +176,7 @@ object SkylineBaseSpec {
     DataPoint( new joda.DateTime(467), 14.2 )
   )
 
-  val pointsB = Row(
+  val pointsB = Seq(
     DataPoint( new joda.DateTime(440), 10.1 ),
     DataPoint( new joda.DateTime(441), 10.1 ),
     DataPoint( new joda.DateTime(442), 9.68 ),

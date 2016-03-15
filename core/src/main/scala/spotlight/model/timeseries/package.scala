@@ -32,22 +32,12 @@ package object timeseries {
     implicit def toDoublePoints( dps: Seq[DataPoint] ): Seq[ml.DoublePoint] = dps map { toDoublePoint }
   }
 
-  type Row[T] = immutable.IndexedSeq[T]
-  object Row {
-    def apply[T]( data: T* ): Row[T] = immutable.IndexedSeq( data:_* )
-    def empty[T]: Row[T] = immutable.IndexedSeq.empty[T]
-  }
-
-  implicit class ConvertSeqToRow[T]( val seq: Seq[T] ) extends AnyVal {
-    def toRow: Row[T] = Row( seq:_* )
-  }
-
-  type Matrix[T] = Row[Row[T]]
+  type Matrix[T] = IndexedSeq[IndexedSeq[T]]
 
 
   trait TimeSeriesBase {
     def topic: Topic
-    def points: Row[DataPoint]
+    def points: Seq[DataPoint]
     def pointsAsPairs: Seq[Point2D] = points.map{ dp => (dp.timestamp.getMillis.toDouble, dp.value) }
     def size: Int
     def start: Option[joda.DateTime]

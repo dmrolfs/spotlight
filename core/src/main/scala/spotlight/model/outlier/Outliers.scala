@@ -59,7 +59,7 @@ object Outliers {
 
   type OutlierGroups = Map[joda.DateTime, Double]
 
-  def forSeries( algorithms: Set[Symbol], plan: OutlierPlan, source: TimeSeriesBase, outliers: Row[DataPoint] ): Valid[Outliers] = {
+  def forSeries( algorithms: Set[Symbol], plan: OutlierPlan, source: TimeSeriesBase, outliers: Seq[DataPoint] ): Valid[Outliers] = {
     ( checkAlgorithms( algorithms, plan ) |@| checkSeriesSource( source, plan ) |@| checkOutliers( outliers, source ) ) { (a, s, o) =>
       if ( o.isEmpty ) NoOutliers( algorithms = a, source = s, plan = plan )
       else SeriesOutliers( algorithms = a, source = s, plan = plan, outliers = o )
@@ -67,7 +67,7 @@ object Outliers {
   }
 
   //todo
-  def forCohort( algorithms: Set[Symbol], plan: OutlierPlan, source: TimeSeriesBase, outliers: Row[TimeSeries] ): Valid[Outliers] = ???
+  def forCohort( algorithms: Set[Symbol], plan: OutlierPlan, source: TimeSeriesBase, outliers: Seq[TimeSeries] ): Valid[Outliers] = ???
 
   def unapply( so: Outliers ): Option[(Topic, Set[Symbol], Boolean, so.Source)] = {
     Some( (so.topic, so.algorithms, so.hasAnomalies, so.source) )
@@ -90,7 +90,7 @@ object Outliers {
     }
   }
 
-  def checkOutliers( outliers: Row[DataPoint], source: TimeSeriesBase ): Valid[Row[DataPoint]] = {
+  def checkOutliers( outliers: Seq[DataPoint], source: TimeSeriesBase ): Valid[Seq[DataPoint]] = {
     val timestamps = source.points.map{ _.timestamp }.toSet
     val notIncluded = outliers filter { o => !timestamps.contains( o.timestamp ) }
     if ( notIncluded.isEmpty ) outliers.successNel
@@ -106,7 +106,7 @@ object Outliers {
     extends IllegalArgumentException( s"""cannot create Outliers since plan [$plan] does not apply to source[${source.topic}]""" )
 
 
-  final case class SourceOutliersMismatchError private[outlier](outliers: Row[DataPoint], source: TimeSeriesBase )
+  final case class SourceOutliersMismatchError private[outlier](outliers: Seq[DataPoint], source: TimeSeriesBase )
     extends IllegalArgumentException( s"""cannot create Outliers for outliers[${outliers.mkString(",")}] not included in source [${source}]""" )
 
 }
@@ -129,7 +129,7 @@ case class SeriesOutliers(
   override val algorithms: Set[Symbol],
   override val source: TimeSeries,
   override val plan: OutlierPlan,
-  outliers: IndexedSeq[DataPoint]
+  outliers: Seq[DataPoint]
 ) extends Outliers {
   import Outliers._
   private val trace: Trace[_] = Trace[SeriesOutliers]

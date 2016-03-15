@@ -2,17 +2,15 @@ package spotlight.analysis.outlier.algorithm.skyline
 
 import scala.reflect.ClassTag
 import akka.actor.{ActorRef, Props}
-
-import scalaz._
-import Scalaz._
-import scalaz.Kleisli.{ask, kleisli}
+import scalaz._, Scalaz._
+import scalaz.Kleisli.kleisli
 import org.apache.commons.math3.distribution.TDistribution
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import peds.commons.Valid
 import spotlight.analysis.outlier.algorithm.AlgorithmActor.{AlgorithmContext, Op, TryV}
 import spotlight.analysis.outlier.algorithm.skyline.SkylineAnalyzer.SkylineContext
 import spotlight.model.outlier.Outliers
-import spotlight.model.timeseries.{DataPoint, Point2D, Row}
+import spotlight.model.timeseries.{DataPoint, Point2D}
 
 
 /**
@@ -50,7 +48,7 @@ class GrubbsAnalyzer( override val router: ActorRef ) extends SkylineAnalyzer[Sk
 
     // background: http://www.itl.nist.gov/div898/handbook/eda/section3/eda35h1.htm
     // background: http://graphpad.com/support/faqid/1598/
-    val outliers: Op[AlgorithmContext, (Row[DataPoint], AlgorithmContext)] = for {
+    val outliers = for {
       context <- toSkylineContext
       taverages <- tailAverage
       threshold <- dataThreshold( taverages )

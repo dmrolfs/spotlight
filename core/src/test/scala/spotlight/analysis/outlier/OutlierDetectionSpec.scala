@@ -84,7 +84,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
 
       detect.underlyingActor.router mustBe f.router.ref
 
-      val msg = OutlierDetectionMessage( TimeSeries( topic = "dummy", points = Row.empty[DataPoint] ), defaultPlan ).toOption.get
+      val msg = OutlierDetectionMessage( TimeSeries( topic = "dummy", points = Seq.empty[DataPoint] ), defaultPlan ).toOption.get
 
       detect receive msg
 
@@ -129,7 +129,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
         }
       )
 
-      val msg = OutlierDetectionMessage( TimeSeries( topic = metric, points = Row.empty[DataPoint] ), defaultPlan ).toOption.get
+      val msg = OutlierDetectionMessage( TimeSeries( topic = metric, points = Seq.empty[DataPoint] ), defaultPlan ).toOption.get
 
       detect receive msg
 
@@ -174,7 +174,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
       )
 
       val msgForDefault = OutlierDetectionMessage(
-        TimeSeries( topic = "dummy", points = Row.empty[DataPoint] ),
+        TimeSeries( topic = "dummy", points = Seq.empty[DataPoint] ),
         defaultPlan
       ).toOption.get
 
@@ -190,7 +190,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
       }
 
       val metricMsg = OutlierDetectionMessage(
-        TimeSeries( topic = metric, points = Row.empty[DataPoint] ),
+        TimeSeries( topic = metric, points = Seq.empty[DataPoint] ),
         defaultPlan
       ).toOption.get
 
@@ -213,7 +213,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
 
 
       import org.joda.{ time => joda }
-      val pointsA = Row(
+      val pointsA = Seq(
         DataPoint( new joda.DateTime(440), 9.46 ),
         DataPoint( new joda.DateTime(441), 9.9 ),
         DataPoint( new joda.DateTime(442), 11.6 ),
@@ -244,7 +244,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
         DataPoint( new joda.DateTime(467), 14.2 )
       )
 
-      val pointsB = Row(
+      val pointsB = Seq(
         DataPoint( new joda.DateTime(440), 10.1 ),
         DataPoint( new joda.DateTime(441), 10.1 ),
         DataPoint( new joda.DateTime(442), 9.68 ),

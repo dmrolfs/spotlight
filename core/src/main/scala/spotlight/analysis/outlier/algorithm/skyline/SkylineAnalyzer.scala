@@ -3,12 +3,9 @@ package spotlight.analysis.outlier.algorithm.skyline
 import scala.annotation.tailrec
 import scala.reflect.ClassTag
 import akka.event.LoggingReceive
-
-import scalaz._
-import scalaz.Scalaz._
-import shapeless.syntax.typeable._
-
+import scalaz._, Scalaz._
 import scalaz.Kleisli.kleisli
+import shapeless.syntax.typeable._
 import com.typesafe.config.Config
 import org.apache.commons.math3.ml.clustering.DoublePoint
 import org.apache.commons.math3.ml.distance.DistanceMeasure
@@ -163,8 +160,8 @@ trait SkylineAnalyzer[C <: SkylineAnalyzer.SkylineContext] extends AlgorithmActo
     context: CTX,
     isOutlier: IsOutlier[CTX],
     update: UpdateContext[CTX]
-  ): (Row[DataPoint], AlgorithmContext) = {
-    @tailrec def loop( pts: List[Point2D], ctx: CTX, acc: Row[DataPoint] ): (Row[DataPoint], AlgorithmContext) = {
+  ): (Seq[DataPoint], AlgorithmContext) = {
+    @tailrec def loop( pts: List[Point2D], ctx: CTX, acc: Seq[DataPoint] ): (Seq[DataPoint], AlgorithmContext) = {
       ctx.cast[SkylineContext] foreach { setScopedContext }
 
       pts match {
@@ -188,12 +185,12 @@ trait SkylineAnalyzer[C <: SkylineAnalyzer.SkylineContext] extends AlgorithmActo
       }
     }
 
-    loop( points.toList, context, Row.empty[DataPoint] )
+    loop( points.toList, context, Seq.empty[DataPoint] )
   }
 
   def makeOutliersK(
     algorithm: Symbol,
-    outliers: Op[AlgorithmContext, (Row[DataPoint], AlgorithmContext)]
+    outliers: Op[AlgorithmContext, (Seq[DataPoint], AlgorithmContext)]
   ): Op[AlgorithmContext, (Outliers, AlgorithmContext)] = {
     for {
       outliersContext <- outliers
@@ -202,7 +199,7 @@ trait SkylineAnalyzer[C <: SkylineAnalyzer.SkylineContext] extends AlgorithmActo
     } yield (result, context)
   }
 
-  def makeOutliers( os: Row[DataPoint] ): Op[AlgorithmContext, Outliers] = {
+  def makeOutliers( os: Seq[DataPoint] ): Op[AlgorithmContext, Outliers] = {
     kleisli[TryV, AlgorithmContext, Outliers] { context =>
       Outliers.forSeries(
         algorithms = Set( algorithm ),
