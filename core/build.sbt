@@ -13,7 +13,7 @@ libraryDependencies ++=
   facility.avro.all ++
   Seq(
     //  facility.pureConfig,
-    akka.streams,
+//    akka.streams,
     facility.math3,
 //    facility.suanshu, // don't want to use due to $$$
     facility.scopt,

@@ -33,10 +33,10 @@ object Dependencies {
     val remote = module( "remote" )
     val slf4j = module( "slf4j" )
     val testkit = module( "testkit" )
-
-    val streamsVersion = "2.0.3"
-    val streams = "com.typesafe.akka" % "akka-stream-experimental_2.11" % streamsVersion
-    val streamsTestkit = "com.typesafe.akka" % "akka-stream-testkit-experimental_2.11" % streamsVersion
+//
+//    val streamsVersion = "2.0.3"
+//    val streams = "com.typesafe.akka" % "akka-stream-experimental_2.11" % streamsVersion
+    val streamsTestkit = module( "stream-testkit" )
   }
 
   object scalaz {
