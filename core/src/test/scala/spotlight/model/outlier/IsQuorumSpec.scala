@@ -6,7 +6,7 @@ import org.scalatest.mock.MockitoSugar
 import org.joda.{time => joda}
 import com.github.nscala_time.time.Imports._
 import peds.commons.log.Trace
-import spotlight.model.timeseries.{DataPoint, Row, TimeSeries}
+import spotlight.model.timeseries.{DataPoint, TimeSeries}
 
 
 class IsQuorumSpec
@@ -22,7 +22,7 @@ with TryValues {
 
   class TestFixture { outer =>
     val now = joda.DateTime.now
-    val points = Row( DataPoint(now, 1.01), DataPoint(now+1.second, 2.02), DataPoint(now+2.seconds, 3.02) )
+    val points = Seq( DataPoint(now, 1.01), DataPoint(now+1.second, 2.02), DataPoint(now+2.seconds, 3.02) )
     val series = TimeSeries( "foo", points )
     val plan = mock[OutlierPlan]
     val noOutliers = NoOutliers( Set('algo), source = series, plan = plan )

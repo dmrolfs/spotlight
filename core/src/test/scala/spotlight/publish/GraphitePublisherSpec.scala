@@ -10,7 +10,7 @@ import akka.actor.Props
 import akka.testkit.TestActorRef
 import akka.util.ByteString
 import spotlight.model.outlier.{ Outliers, OutlierPlan, NoOutliers, SeriesOutliers }
-import spotlight.model.timeseries.{ Topic, DataPoint, Row, TimeSeries }
+import spotlight.model.timeseries.{ Topic, DataPoint, TimeSeries }
 import spotlight.protocol.PythonPickleProtocol
 import spotlight.testkit.ParallelAkkaSpec
 import org.joda.{ time => joda }
@@ -187,7 +187,7 @@ with MockitoSugar {
       import f._
       val outliers = NoOutliers(
         algorithms = Set('dbscan),
-        source = TimeSeries("foo", Row(dp1)),
+        source = TimeSeries("foo", Seq(dp1)),
         plan = plan
       )
       graphite.receive( Publish(outliers) )
@@ -200,8 +200,8 @@ with MockitoSugar {
       import f._
       val outliers = SeriesOutliers(
         algorithms = Set('dbscan),
-        source = TimeSeries("foo", Row(dp1, dp2)),
-        outliers = Row(dp2),
+        source = TimeSeries("foo", Seq(dp1, dp2)),
+        outliers = Seq(dp2),
         plan = plan
       )
       // NoOutlier pickle will be include 0.0 for each second in source range
@@ -232,8 +232,8 @@ with MockitoSugar {
 
       val outliers = SeriesOutliers(
         algorithms = Set('dbscan),
-        source = TimeSeries("foo", Row(dp1, dp2, dp3)),
-        outliers = Row(dp1),
+        source = TimeSeries("foo", Seq(dp1, dp2, dp3)),
+        outliers = Seq(dp1),
         plan = plan
       )
       graphite2.receive( Publish(outliers) )
@@ -245,7 +245,7 @@ with MockitoSugar {
       import f._
       val outliers = NoOutliers(
         algorithms = Set('dbscan),
-        source = TimeSeries("foo", Row(dp1, dp1b)),
+        source = TimeSeries("foo", Seq(dp1, dp1b)),
         plan = plan
       )
       // NoOutlier pickle will be include 0.0 for each second in source range
@@ -258,8 +258,8 @@ with MockitoSugar {
       import f._
       val outliers = SeriesOutliers(
         algorithms = Set('dbscan),
-        source = TimeSeries("foo bar", Row(dp1, dp2, dp3)),
-        outliers = Row(dp1),
+        source = TimeSeries("foo bar", Seq(dp1, dp2, dp3)),
+        outliers = Seq(dp1),
         plan = plan
       )
       graphite.receive( Publish(outliers) )

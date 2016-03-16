@@ -1,5 +1,7 @@
 package spotlight.analysis.outlier.algorithm.skyline
 
+import scala.collection.immutable
+import scala.concurrent.duration._
 import akka.actor.Props
 import akka.testkit._
 import com.typesafe.config.ConfigFactory
@@ -7,10 +9,6 @@ import org.joda.{time => joda}
 import org.mockito.Mockito._
 import spotlight.analysis.outlier.{DetectOutliersInSeries, DetectUsing, DetectionAlgorithmRouter, Moment}
 import spotlight.model.outlier._
-import spotlight.model.timeseries.Row
-
-import scala.collection.immutable
-import scala.concurrent.duration._
 
 
 /**
@@ -88,10 +86,12 @@ class SkylineSeasonalEWMASpec extends SkylineBaseSpec {
       model.binStartFor( weekFromToday.toDateTime( new joda.LocalTime(7, 0, 0, 1) ) ) mustBe weekFromToday.toDateTime( new joda.LocalTime(7,0,0) )
     }
 
-    "identified bin for date" in { f: Fixture =>
+    "identified bin for date" taggedAs (WIP) in { f: Fixture =>
       import SeasonalExponentialMovingAverageAnalyzer.SeasonalModel
       val startOfToday = joda.LocalDate.now.toDateTimeAtStartOfDay
-      val today = joda.LocalDate.now
+      // would be nice to use now() but joda smartly handles DST which makes calculating expected bin slightly more than involved
+      // than I prefer to handle at this time
+      val today = new joda.LocalDate( 2016, 8, 30 )
       val tomorrow = today plus joda.Days.ONE
       val weekFromToday = today plus joda.Weeks.ONE
       val model = {
@@ -108,7 +108,29 @@ class SkylineSeasonalEWMASpec extends SkylineBaseSpec {
       model.binFor( weekFromToday.toDateTime( new joda.LocalTime(7, 0, 0, 1) ) ) mustBe 7
     }
 
-    "find outliers deviating stddev from seasonal exponential moving average" taggedAs (WIP) in { f: Fixture =>
+    "identified bin for earlier date" taggedAs (WIP) in { f: Fixture =>
+      import SeasonalExponentialMovingAverageAnalyzer.SeasonalModel
+      // would be nice to use now() but joda smartly handles DST which makes calculating expected bin slightly more than involved
+      // than I prefer to handle at this time
+      val startOfToday = joda.LocalDate.now.toDateTimeAtStartOfDay
+      val today = new joda.LocalDate( 2016, 8, 30 )
+      val yesterday = today minus joda.Days.ONE
+      val weekBeforeToday = today minus joda.Weeks.ONE
+      val model = {
+        SeasonalModel( reference = startOfToday, waveLength = joda.Days.ONE.toStandardDuration, bins = 24 )
+        .toOption
+        .get
+        .asInstanceOf[SeasonalModel.SimpleSeasonalModel]
+      }
+      model.binFor( yesterday.toDateTime( new joda.LocalTime(0, 0, 0) ) ) mustBe 0
+      model.binFor( yesterday.toDateTime( new joda.LocalTime(1, 0, 37, 746) ) ) mustBe 1
+      model.binFor( yesterday.toDateTime( new joda.LocalTime(23, 59, 37, 746) ) ) mustBe 23
+      model.binFor( yesterday.toDateTime( new joda.LocalTime(23, 59, 59, 999) ) ) mustBe 23
+      model.binFor( yesterday.toDateTime( new joda.LocalTime(13, 37, 59, 999) ) ) mustBe 13
+      model.binFor( weekBeforeToday.toDateTime( new joda.LocalTime(7, 0, 0, 1) ) ) mustBe 7
+    }
+
+    "find outliers deviating stddev from seasonal exponential moving average" in { f: Fixture =>
       import f._
 
       trace( s"plan.algorithms = ${plan.algorithms}")
@@ -147,7 +169,7 @@ class SkylineSeasonalEWMASpec extends SkylineBaseSpec {
           source mustBe series
           m.hasAnomalies mustBe true
           outliers.size mustBe 1
-          outliers mustBe Row( series.points.last )
+          outliers mustBe Seq( series.points.last )
         }
       }
 

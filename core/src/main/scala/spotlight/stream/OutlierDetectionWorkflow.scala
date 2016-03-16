@@ -94,7 +94,8 @@ object OutlierDetectionWorkflow {
         LeastSquaresAnalyzer.Algorithm -> LeastSquaresAnalyzer.props( router ),
         MeanSubtractionCumulationAnalyzer.Algorithm -> MeanSubtractionCumulationAnalyzer.props( router ),
         MedianAbsoluteDeviationAnalyzer.Algorithm -> MedianAbsoluteDeviationAnalyzer.props( router ),
-        SimpleMovingAverageAnalyzer.Algorithm -> SimpleMovingAverageAnalyzer.props( router )
+        SimpleMovingAverageAnalyzer.Algorithm -> SimpleMovingAverageAnalyzer.props( router ),
+        SeasonalExponentialMovingAverageAnalyzer.Algorithm -> SeasonalExponentialMovingAverageAnalyzer.props( router )
       ) map { case (n, p) =>
         n -> context.actorOf( p.withDispatcher("outlier-algorithm-dispatcher"), n.name )
       }

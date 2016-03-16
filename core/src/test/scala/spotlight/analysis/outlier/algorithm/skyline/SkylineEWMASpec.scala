@@ -1,14 +1,12 @@
 package spotlight.analysis.outlier.algorithm.skyline
 
+import scala.collection.immutable
+import scala.concurrent.duration._
 import akka.testkit._
 import com.typesafe.config.ConfigFactory
 import org.mockito.Mockito._
 import spotlight.analysis.outlier.{DetectOutliersInSeries, DetectUsing, DetectionAlgorithmRouter}
 import spotlight.model.outlier._
-import spotlight.model.timeseries.Row
-
-import scala.collection.immutable
-import scala.concurrent.duration._
 
 
 /**
@@ -52,7 +50,7 @@ class SkylineEWMASpec extends SkylineBaseSpec {
           source mustBe series
           m.hasAnomalies mustBe true
           outliers.size mustBe 1
-          outliers mustBe Row( series.points.last )
+          outliers mustBe Seq( series.points.last )
         }
       }
 

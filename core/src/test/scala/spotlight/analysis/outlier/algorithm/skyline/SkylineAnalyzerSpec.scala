@@ -6,7 +6,7 @@ import com.typesafe.config.ConfigFactory
 import com.typesafe.scalalogging.LazyLogging
 import spotlight.analysis.outlier.{DetectOutliersInSeries, DetectUsing, DetectionAlgorithmRouter, HistoricalStatistics}
 import spotlight.model.outlier._
-import spotlight.model.timeseries.{DataPoint, Row, TimeSeries, TimeSeriesBase}
+import spotlight.model.timeseries.{DataPoint, TimeSeries, TimeSeriesBase}
 import spotlight.testkit.ParallelAkkaSpec
 import org.apache.commons.math3.random.RandomDataGenerator
 import org.joda.{time => joda}
@@ -74,7 +74,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
           source mustBe series
           m.hasAnomalies mustBe true
           outliers.size mustBe 1
-          outliers mustBe Row( series.points.last )
+          outliers mustBe Seq( series.points.last )
         }
       }
 
@@ -178,7 +178,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
           source mustBe series
           m.hasAnomalies mustBe true
           outliers.size mustBe 1
-          outliers mustBe Row( series.points.last )
+          outliers mustBe Seq( series.points.last )
         }
       }
 
@@ -206,7 +206,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
       import f._
       // helpful online grubbs calculator: http://graphpad.com/quickcalcs/Grubbs1.cfm
 
-      val full: Row[DataPoint] = makeDataPoints(
+      val full: Seq[DataPoint] = makeDataPoints(
         values = IndexedSeq.fill( 10 )( 1.0 ).to[scala.collection.immutable.IndexedSeq],
         timeWiggle = (0.98, 1.02),
         valueWiggle = (0.98, 1.02)
@@ -227,12 +227,12 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
           source mustBe series
           m.hasAnomalies mustBe true
           outliers.size mustBe 1
-          outliers mustBe Row( series.points.last )
+          outliers mustBe Seq( series.points.last )
         }
       }
 
 
-      val full2: Row[DataPoint] = makeDataPoints(
+      val full2: Seq[DataPoint] = makeDataPoints(
         values = IndexedSeq.fill( 10 )( 1.0 ).to[scala.collection.immutable.IndexedSeq],
         timeWiggle = (0.98, 1.02),
         valueWiggle = (0.98, 1.02)
@@ -274,7 +274,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
           source mustBe series
           m.hasAnomalies mustBe true
           outliers.size mustBe 1
-          outliers mustBe Row( series.points.last )
+          outliers mustBe Seq( series.points.last )
         }
       }
 
@@ -300,7 +300,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
 
     "find outliers via cumulative mean subtraction Test" in { f: Fixture =>
       import f._
-      val full: Row[DataPoint] = makeDataPoints(
+      val full: Seq[DataPoint] = makeDataPoints(
         values = IndexedSeq.fill( 50 )( 1.0 ).to[scala.collection.immutable.IndexedSeq],
         timeWiggle = (0.98, 1.02),
         valueWiggle = (0.98, 1.02)
@@ -321,12 +321,12 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
           source mustBe series
           m.hasAnomalies mustBe true
           outliers.size mustBe 1
-          outliers mustBe Row( series.points.last )
+          outliers mustBe Seq( series.points.last )
         }
       }
 
 
-      val full2: Row[DataPoint] = makeDataPoints(
+      val full2: Seq[DataPoint] = makeDataPoints(
         values = IndexedSeq.fill( 50 )( 1.0 ).to[scala.collection.immutable.IndexedSeq],
         timeWiggle = (0.98, 1.02),
         valueWiggle = (0.98, 1.02)
@@ -349,7 +349,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
 
     "find outliers via least squares Test" in { f: Fixture =>
       import f._
-      val full: Row[DataPoint] = makeDataPoints(
+      val full: Seq[DataPoint] = makeDataPoints(
         values = IndexedSeq.fill( 10 )( 1.0 ).to[scala.collection.immutable.IndexedSeq],
         timeWiggle = (0.98, 1.02),
         valueWiggle = (0.98, 1.02)
@@ -375,12 +375,12 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
 //          source mustBe series
 //          m.hasAnomalies mustBe true
 //          outliers.size mustBe 1
-//          outliers mustBe Row( series.points.last )
+//          outliers mustBe Seq( series.points.last )
 //        }
       }
 
 
-      val full2: Row[DataPoint] = makeDataPoints(
+      val full2: Seq[DataPoint] = makeDataPoints(
         values = IndexedSeq.fill( 10 )( 1.0 ).to[scala.collection.immutable.IndexedSeq],
         timeWiggle = (0.98, 1.02),
         valueWiggle = (0.98, 1.02)
@@ -409,7 +409,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
 
     "find outliers via histogram bins Test" in { f: Fixture =>
       import f._
-      val full: Row[DataPoint] = makeDataPoints(
+      val full: Seq[DataPoint] = makeDataPoints(
         values = IndexedSeq.fill( 20 )( 1.0 ).to[scala.collection.immutable.IndexedSeq],
         timeWiggle = (0.98, 1.02),
         valueWiggle = (0.98, 1.02)
@@ -430,12 +430,12 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
           source mustBe series
           m.hasAnomalies mustBe true
           outliers.size mustBe 1
-          outliers mustBe Row( series.points.last )
+          outliers mustBe Seq( series.points.last )
         }
       }
 
 
-      val full2: Row[DataPoint] = makeDataPoints(
+      val full2: Seq[DataPoint] = makeDataPoints(
         values = IndexedSeq.fill( 20 )( 1.0 ).to[scala.collection.immutable.IndexedSeq],
         timeWiggle = (0.98, 1.02),
         valueWiggle = (0.98, 1.02)
@@ -461,7 +461,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
       import f._
       val now = joda.DateTime.now
 
-      val reference: Row[DataPoint] = makeDataPoints(
+      val reference: Seq[DataPoint] = makeDataPoints(
         values = IndexedSeq.fill( 20 )( 1.0 ).to[scala.collection.immutable.IndexedSeq],
         start = now - 1.hour,
         period = 10.seconds,
@@ -486,7 +486,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
         }
       }
 
-      val next1: Row[DataPoint] = makeDataPoints(
+      val next1: Seq[DataPoint] = makeDataPoints(
         values = IndexedSeq.fill( 20 )( 1.0 ).to[scala.collection.immutable.IndexedSeq],
         start = now,
         period = 10.seconds,
@@ -507,7 +507,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
       }
 
 
-      val next3: Row[DataPoint] = makeDataPoints(
+      val next3: Seq[DataPoint] = makeDataPoints(
         values = points.map{ _.value },
         start = now,
         period = 10.seconds,
@@ -534,7 +534,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
 }
 
 object SkylineAnalyzerSpec {
-  val points = Row(
+  val points = Seq(
     DataPoint( new joda.DateTime(440), 9.46 ),
     DataPoint( new joda.DateTime(441), 9.9 ),
     DataPoint( new joda.DateTime(442), 11.6 ),
@@ -572,7 +572,7 @@ object SkylineAnalyzerSpec {
   )
 
 
-  val pointsA = Row(
+  val pointsA = Seq(
     DataPoint( new joda.DateTime(440), 9.46 ),
     DataPoint( new joda.DateTime(441), 9.9 ),
     DataPoint( new joda.DateTime(442), 11.6 ),
@@ -603,7 +603,7 @@ object SkylineAnalyzerSpec {
     DataPoint( new joda.DateTime(467), 14.2 )
   )
 
-  val pointsB = Row(
+  val pointsB = Seq(
     DataPoint( new joda.DateTime(440), 10.1 ),
     DataPoint( new joda.DateTime(441), 10.1 ),
     DataPoint( new joda.DateTime(442), 9.68 ),

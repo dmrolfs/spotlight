@@ -17,7 +17,7 @@ import spotlight.analysis.outlier.algorithm.AlgorithmActor.{AlgorithmContext, Op
 import spotlight.analysis.outlier.algorithm.skyline.SkylineAnalyzer.SkylineContext
 import spotlight.analysis.outlier.algorithm.skyline.adf.AugmentedDickeyFuller
 import spotlight.model.outlier.Outliers
-import spotlight.model.timeseries.{DataPoint, Row}
+import spotlight.model.timeseries.DataPoint
 
 
 /**
@@ -91,27 +91,26 @@ class KolmogorovSmirnovAnalyzer( override val router: ActorRef ) extends Skyline
   * on a projected least squares model is greater than three sigma.
   */
   override val findOutliers: Op[AlgorithmContext, (Outliers, AlgorithmContext)] = {
-    val isDistributionUnlikeReference = kleisli[TryV, Context, Boolean] { implicit context =>
-      val reference = context.referenceSeries.map{ _.value }.toArray
-      log.debug( "reference-history[{}] = [{}]", context.referenceHistory.size, context.referenceHistory.mkString(",") )
-      log.debug( "reference-offset = [{}]", context.referenceOffset )
-      log.debug( "reference-interval = [{}]", context.referenceInterval )
-      log.debug( "reference-series[{}] = [{}]", reference.size, reference.mkString(",") )
-      log.debug( "CURRENT[{}] = [{}]", context.data.size, context.data )
-      val current = context.data.map{ _.getPoint }.map{ case Array(_, v) => v }.toArray
-      distributionUnlikeReference( current, reference )
+    def isDistributionUnlikeReference( tol: Double ): Op[Context, Boolean] = {
+      kleisli[TryV, Context, Boolean] { implicit context =>
+        val reference = context.referenceSeries.map{ _.value }.toArray
+        log.debug( "reference-history[{}] = [{}]", context.referenceHistory.size, context.referenceHistory.mkString(",") )
+        log.debug( "reference-offset = [{}]", context.referenceOffset )
+        log.debug( "reference-interval = [{}]", context.referenceInterval )
+        log.debug( "reference-series[{}] = [{}]", reference.size, reference.mkString(",") )
+        log.debug( "CURRENT[{}] = [{}]", context.data.size, context.data )
+        val current = context.data.map{ _.getPoint }.map{ case Array(_, v) => v }.toArray
+        distributionUnlikeReference( current, reference )
+      }
     }
 
-    val outliers: Op[AlgorithmContext, (Row[DataPoint], AlgorithmContext)] = for {
-      context <- toSkylineContext <=< ask[TryV, AlgorithmContext]
-_ = log.debug( "KS CONTEXT = [{}]", context )
+    val outliers = for {
+      context <- ask[TryV, AlgorithmContext]
       tolerance <- tolerance <=< ask[TryV, AlgorithmContext]
-      unlike <- isDistributionUnlikeReference <=< toSkylineContext <=< ask[TryV, AlgorithmContext]
+      unlike <- isDistributionUnlikeReference( tolerance getOrElse 3D ) <=< toSkylineContext <=< ask[TryV, AlgorithmContext]
     } yield {
-//      val tol = tolerance getOrElse 3D
-      if ( unlike ) (context.source.points, context) else (Row.empty[DataPoint], context)
+      if ( unlike ) ( context.source.points, context ) else ( Seq.empty[DataPoint], context )
     }
-
 
     makeOutliersK( algorithm, outliers )
   }

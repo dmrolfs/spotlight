@@ -15,7 +15,7 @@ sealed trait TimeSeries extends TimeSeriesBase {
 }
 
 object TimeSeries {
-  def apply( topic: Topic, points: Row[DataPoint] = Row.empty[DataPoint] ): TimeSeries = {
+  def apply( topic: Topic, points: Seq[DataPoint] = Seq.empty[DataPoint] ): TimeSeries = {
     val sorted = points sortBy { _.timestamp }
     val (start, end) = if ( sorted.nonEmpty ) (Some(sorted.head.timestamp), Some(sorted.last.timestamp)) else (None, None)
     SimpleTimeSeries( topic = topic, points = sorted, start = start, end = end )
@@ -26,9 +26,9 @@ object TimeSeries {
     override def set( ts: TimeSeries )( t: Topic ): TimeSeries = TimeSeries( topic = t, points = ts.points )
   }
 
-  val pointsLens: Lens[TimeSeries, Row[DataPoint]] = new Lens[TimeSeries, Row[DataPoint]] {
-    override def get( ts: TimeSeries ): Row[DataPoint] = ts.points
-    override def set( ts: TimeSeries )( ps: Row[DataPoint] ): TimeSeries = TimeSeries( topic = ts.topic, points = ps )
+  val pointsLens: Lens[TimeSeries, Seq[DataPoint]] = new Lens[TimeSeries, Seq[DataPoint]] {
+    override def get( ts: TimeSeries ): Seq[DataPoint] = ts.points
+    override def set( ts: TimeSeries )( ps: Seq[DataPoint] ): TimeSeries = TimeSeries( topic = ts.topic, points = ps )
   }
 
 
@@ -41,7 +41,7 @@ object TimeSeries {
       }
     }
 
-    private def combinePoints( lhs: Row[DataPoint], rhs: Row[DataPoint] ): Valid[Row[DataPoint]] = {
+    private def combinePoints( lhs: Seq[DataPoint], rhs: Seq[DataPoint] ): Valid[Seq[DataPoint]] = {
       val merged = lhs ++ rhs
       val (uniques, dups) = merged.groupBy{ _.timestamp }.values.partition{ _.size == 1 }
 
@@ -61,7 +61,7 @@ object TimeSeries {
 
   final case class SimpleTimeSeries private[timeseries](
     override val topic: Topic,
-    override val points: Row[DataPoint],
+    override val points: Seq[DataPoint],
     override val start: Option[joda.DateTime],
     override val end: Option[joda.DateTime]
   ) extends TimeSeries

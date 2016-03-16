@@ -183,7 +183,7 @@ with MockitoSugar {
 
     val ts1 = TimeSeries(
       "series.one",
-      Row(
+      Seq(
         DataPoint( new joda.DateTime("2015-10-15T10:45:28.595-07:00"), 0.8034021258073109 ),
         DataPoint( new joda.DateTime("2015-10-15T10:45:29.256-07:00" ), 0.631788600222419 ),
         DataPoint( new joda.DateTime("2015-10-15T10:45:29.917-07:00"), 0.9305270594056617 ),
@@ -205,7 +205,7 @@ with MockitoSugar {
 
     val ts2 = TimeSeries(
       "series.two",
-      Row(
+      Seq(
         DataPoint( new joda.DateTime("2015-10-15T10:45:28.596-07:00"), 0.0160711903220879 ),
         DataPoint( new joda.DateTime("2015-10-15T10:45:29.596-07:00"), 0.0632516286548765 ),
         DataPoint( new joda.DateTime("2015-10-15T10:45:30.596-07:00"), 0.2370034405095286 ),
@@ -219,7 +219,7 @@ with MockitoSugar {
 
     val ts3 = TimeSeries(
       "series.three",
-      Row(
+      Seq(
         DataPoint( new joda.DateTime("2015-10-15T10:45:28.596-07:00"), 0.6567099579829515 ),
         DataPoint( new joda.DateTime("2015-10-15T10:45:30.596-07:00"), 0.9017679562759263 ),
         DataPoint( new joda.DateTime("2015-10-15T10:45:32.596-07:00"), 0.3543300372394615 ),
@@ -229,7 +229,7 @@ with MockitoSugar {
 
     val ts4 = TimeSeries(
       "series.four",
-      Row(
+      Seq(
         DataPoint( new joda.DateTime("2015-10-15T10:45:28.597-07:00"), 0.1443239738645753 ),
         DataPoint( new joda.DateTime("2015-10-15T10:45:29.264-07:00"), 0.4939782577300506 ),
         DataPoint( new joda.DateTime("2015-10-15T10:45:29.931-07:00"), 0.9998549544801372 ),

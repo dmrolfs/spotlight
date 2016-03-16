@@ -7,7 +7,7 @@ import akka.testkit._
 import org.joda.{ time => joda }
 import spotlight.testkit.ParallelAkkaSpec
 import org.scalatest.mock.MockitoSugar
-import spotlight.model.timeseries.{Row, TimeSeries, DataPoint}
+import spotlight.model.timeseries.{TimeSeries, DataPoint}
 
 
 /**
@@ -37,7 +37,7 @@ class DetectionAlgorithmRouterSpec extends ParallelAkkaSpec with MockitoSugar {
       val algo = TestProbe()
       router.receive( RegisterDetectionAlgorithm('foo, algo.ref) )
 
-      val myPoints = Row(
+      val myPoints = Seq(
         DataPoint( new joda.DateTime(448), 8.46 ),
         DataPoint( new joda.DateTime(449), 8.9 ),
         DataPoint( new joda.DateTime(450), 8.58 ),

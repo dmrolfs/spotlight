@@ -16,7 +16,7 @@ import spotlight.analysis.outlier.Moment
 import spotlight.analysis.outlier.algorithm.AlgorithmActor.{AlgorithmContext, Op, TryV}
 import spotlight.analysis.outlier.algorithm.skyline.SkylineAnalyzer.SkylineContext
 import spotlight.model.outlier.Outliers
-import spotlight.model.timeseries.{DataPoint, Point2D}
+import spotlight.model.timeseries.Point2D
 
 
 /**
@@ -67,6 +67,41 @@ object SeasonalExponentialMovingAverageAnalyzer {
       }
     }
 
+//    def coarsestStartFor( ts: joda.DateTime, waveLength: joda.Duration ): joda.DateTime = {
+//      import scala.concurrent.duration._
+//      val d = Duration( waveLength.getMillis, MILLISECONDS ).toCoarsest
+//      d.unit match {
+//        case MILLISECONDS => ts
+//        case MICROSECONDS => new joda.DateTime( ts.getYear, ts.getMonthOfYear, ts.getDayOfMonth, ts.getHourOfDay, ts.getMinuteOfDay, ts.getSecondOfMinute, )
+//        case SECONDS =>
+//        case MINUTES =>
+//        case HOURS =>
+//        case _ =>
+//      }
+//    }
+//final def toCoarsest: Duration = {
+//  def loop(length: Long, unit: TimeUnit): FiniteDuration = {
+//    def coarserOrThis(coarser: TimeUnit, divider: Int) =
+//      if (length % divider == 0) loop(length / divider, coarser)
+//      else if (unit == this.unit) this
+//      else FiniteDuration(length, unit)
+//
+//    unit match {
+//      case DAYS => FiniteDuration(length, unit)
+//      case HOURS => coarserOrThis(DAYS, 24)
+//      case MINUTES => coarserOrThis(HOURS, 60)
+//      case SECONDS => coarserOrThis(MINUTES, 60)
+//      case MILLISECONDS => coarserOrThis(SECONDS, 1000)
+//      case MICROSECONDS => coarserOrThis(MILLISECONDS, 1000)
+//      case NANOSECONDS => coarserOrThis(MICROSECONDS, 1000)
+//    }
+//  }
+//
+//  if (unit == DAYS || length == 0) this
+//  else loop(length, unit)
+//}
+
+
     final case class SimpleSeasonalModel private[skyline](
       override val reference: joda.DateTime,
       override val waveLength: joda.Duration,
@@ -77,12 +112,18 @@ object SeasonalExponentialMovingAverageAnalyzer {
 
       override val binLength: joda.Duration = waveLength / bins
 
-      def binLengths( ts: joda.DateTime ): Double = {
-        val diff = new joda.Interval( reference, ts ).toDurationMillis
+      def binLengths( ts: joda.DateTime ): Double = trace.block( s"binLengths( $ts )" ) {
+        val diff = {
+          if ( reference < ts ) new joda.Interval( reference, ts ).toDurationMillis
+          else new joda.Interval( ts, reference ).toDuration.negated.getMillis
+        }
         diff.toDouble / binLength.millis.toDouble
       }
 
-      def binFor( ts: joda.DateTime ): Int = math.floor( binLengths( ts ) % bins ).toInt
+      def binFor( ts: joda.DateTime ): Int = trace.block( s"binFor( $ts )" ) {
+        val bin = math.floor( binLengths(ts) % bins ).toInt
+        if ( bin < 0 ) bins + bin else bin
+      }
 
       override def withMomentAtDateTime( m: Moment, ts: DateTime ): SeasonalModel = {
         copy( moments = moments.updated( binFor(ts), m ) )

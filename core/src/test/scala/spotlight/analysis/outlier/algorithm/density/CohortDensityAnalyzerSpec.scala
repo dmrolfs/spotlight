@@ -158,7 +158,7 @@ class CohortDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       val analyzer = TestActorRef[CohortDensityAnalyzer]( CohortDensityAnalyzer.props(router.ref) )
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered(algoC) )
 
-      val myPoints = Row(
+      val myPoints = Seq(
         DataPoint( new joda.DateTime(448), 8.46 ),
         DataPoint( new joda.DateTime(449), 8.9 ),
         DataPoint( new joda.DateTime(450), 8.58 ),
@@ -206,7 +206,7 @@ class CohortDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
 object CohortDensityAnalyzerSpec {
   val sysId = new AtomicInteger()
 
-  val points = Row(
+  val points = Seq(
     DataPoint( new joda.DateTime(440), 9.46 ),
     DataPoint( new joda.DateTime(441), 9.9 ),
     DataPoint( new joda.DateTime(442), 11.6 ),
@@ -244,7 +244,7 @@ object CohortDensityAnalyzerSpec {
   )
 
 
-  val pointsA = Row(
+  val pointsA = Seq(
     DataPoint( new joda.DateTime(440), 9.46 ),
     DataPoint( new joda.DateTime(441), 9.9 ),
     DataPoint( new joda.DateTime(442), 11.6 ),
@@ -275,7 +275,7 @@ object CohortDensityAnalyzerSpec {
     DataPoint( new joda.DateTime(467), 14.2 )
   )
 
-  val pointsB = Row(
+  val pointsB = Seq(
     DataPoint( new joda.DateTime(440), 10.1 ),
     DataPoint( new joda.DateTime(441), 10.1 ),
     DataPoint( new joda.DateTime(442), 9.68 ),

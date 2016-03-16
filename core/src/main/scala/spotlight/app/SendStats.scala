@@ -144,11 +144,11 @@ object SendStats extends StrictLogging {
 
 
   def makeDataPoints(
-    values: Row[Double],
+    values: Seq[Double],
     start: joda.DateTime = joda.DateTime.now,
     period: FiniteDuration = 1.second,
     wiggleFactor: (Double, Double) = (1.0, 1.0)
-  ): Row[DataPoint] = {
+  ): Seq[DataPoint] = {
     val secs = start.getMillis / 1000L
     val epochStart = new joda.DateTime( secs * 1000L )
     val random = new RandomDataGenerator
@@ -165,7 +165,7 @@ object SendStats extends StrictLogging {
     }
   }
 
-  val points: Row[Double] = Row(
+  val points: Seq[Double] = Seq(
     9.46,
     9.9,
     11.6,
