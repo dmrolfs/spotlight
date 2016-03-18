@@ -10,7 +10,7 @@ import spotlight.model.timeseries._
 
 
 //todo re-seal with FanOutShape Outlier Detection
-trait Outliers extends Equals {
+abstract class Outliers extends Equals {
   private val trace = Trace[Outliers]
   type Source <: TimeSeriesBase
   def topic: Topic
@@ -59,8 +59,13 @@ object Outliers {
 
   type OutlierGroups = Map[joda.DateTime, Double]
 
-  def forSeries( algorithms: Set[Symbol], plan: OutlierPlan, source: TimeSeriesBase, outliers: Seq[DataPoint] ): Valid[Outliers] = {
-    ( checkAlgorithms( algorithms, plan ) |@| checkSeriesSource( source, plan ) |@| checkOutliers( outliers, source ) ) { (a, s, o) =>
+  def forSeries(
+    algorithms: Set[Symbol],
+    plan: OutlierPlan,
+    source: TimeSeriesBase,
+    outliers: Seq[DataPoint]
+  ): Valid[Outliers] = {
+    ( checkAlgorithms(algorithms, plan) |@| checkSeriesSource(source, plan) |@| checkOutliers(outliers, source) ) { (a, s, o) =>
       if ( o.isEmpty ) NoOutliers( algorithms = a, source = s, plan = plan )
       else SeriesOutliers( algorithms = a, source = s, plan = plan, outliers = o )
     }
@@ -201,7 +206,7 @@ case class CohortOutliers(
   override val algorithms: Set[Symbol],
   override val source: TimeSeriesCohort,
   override val plan: OutlierPlan,
-  outliers: Set[TimeSeries] = Set()
+  outliers: Set[TimeSeries]
 ) extends Outliers {
   private val trace: Trace[_] = Trace[CohortOutliers]
 

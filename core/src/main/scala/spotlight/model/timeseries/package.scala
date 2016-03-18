@@ -1,13 +1,8 @@
 package spotlight.model
 
-import scala.collection.immutable
-import scalaz._
-import Scalaz._
 import org.joda.{time => joda}
-import com.github.nscala_time.time.Imports._
 import org.apache.commons.math3.ml.clustering.DoublePoint
 import org.apache.commons.math3.ml.{clustering => ml}
-import peds.commons.Valid
 
 
 package object timeseries {
@@ -15,62 +10,14 @@ package object timeseries {
   type Point = Array[Double]
   type Point2D = (Double, Double)
 
-  case class DataPoint( timestamp: joda.DateTime, value: Double ) {
-    override def toString: String = s"(${timestamp}[${timestamp.getMillis}], ${value})"
-  }
-
-  object DataPoint {
-    def fromPoint2D( pt: Point2D ): DataPoint = {
-      val (ts, v) = pt
-      DataPoint( timestamp = new joda.DateTime(ts.toLong), value = v )
-    }
-
-    implicit def toDoublePoint( dp: DataPoint ): ml.DoublePoint = {
-      new ml.DoublePoint( Array(dp.timestamp.getMillis.toDouble, dp.value) )
-    }
-
-    implicit def toDoublePoints( dps: Seq[DataPoint] ): Seq[ml.DoublePoint] = dps map { toDoublePoint }
-  }
 
   type Matrix[T] = IndexedSeq[IndexedSeq[T]]
-
-
-  trait TimeSeriesBase {
-    def topic: Topic
-    def points: Seq[DataPoint]
-    def pointsAsPairs: Seq[Point2D] = points.map{ dp => (dp.timestamp.getMillis.toDouble, dp.value) }
-    def size: Int
-    def start: Option[joda.DateTime]
-    def end: Option[joda.DateTime]
-    def interval: Option[joda.Interval] = {
-      for {
-        s <- start
-        e <- end
-      } yield new joda.Interval( s, e + 1.millis )
-    }
-  }
-
-  object TimeSeriesBase {
-    final case class IncompatibleTopicsError private[timeseries]( originalTopic: Topic, newTopic: Topic )
-    extends IllegalArgumentException( s"cannot merge time series topics: original [${originalTopic}] amd mew topic [${newTopic}]" )
-    with TimeSeriesError
-
-
-    trait Merging[T <: TimeSeriesBase] {
-      def merge( lhs: T, rhs: T ): Valid[T]
-      def zero( topic: Topic ): T
-
-      protected def checkTopic( lhs: Topic, rhs: Topic ): Valid[Topic] = {
-        if ( lhs == rhs ) lhs.successNel[Throwable]
-        else Validation.failureNel( IncompatibleTopicsError(originalTopic = lhs, newTopic = rhs) )
-      }
-    }
-  }
 
 
   case class Topic( name: String ) {
     override def toString: String = name
   }
+
 
   object Topic {
     implicit def fromString( topic: String ): Topic = Topic( name = topic )

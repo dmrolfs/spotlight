@@ -40,12 +40,12 @@ object GraphitePublisher extends LazyLogging {
   ): Flow[Outliers, Outliers, Unit] = {
     val decider: Supervision.Decider = {
       case ex: CircuitBreakerOpenException => {
-        logger.warn( "GRAPHITE CIRCUIT BREAKER OPENED: [{}]", ex.getMessage )
+        logger.warn( "GraphitePublisher: Graphite circuit breaker opened: [{}]", ex.getMessage )
         Supervision.Resume
       }
 
       case ex => {
-        logger.warn( "GraphitePublisher restarting after error: [{}]", ex.getMessage )
+        logger.warn( "GraphitePublisher: restarting after error: [{}]", ex.getMessage )
         Supervision.Restart
       }
     }

@@ -122,7 +122,7 @@ class KolmogorovSmirnovAnalyzer( override val router: ActorRef ) extends Skyline
     implicit context: AlgorithmContext
   ): TryV[Boolean] = {
     val same = {
-      if ( reference.isEmpty ) false.right
+      if ( reference.isEmpty || series.isEmpty ) false.right
       else {
         for {
           pValue <- \/ fromTryCatchNonFatal { TestUtils.kolmogorovSmirnovTest( reference, series ) }
@@ -143,7 +143,8 @@ class KolmogorovSmirnovAnalyzer( override val router: ActorRef ) extends Skyline
     same
     .leftMap {
       case ex: MathInternalError => {
-        log.error( "ks-test internal math error. reference.size:[{}], series.size:[{}]: {}", reference.size, series.size, ex )
+        log.error( "ks-test internal math error. reference[size:{}][{}], series[size:{}][{}]: {}", reference.size, reference.mkString(","), series.size, series.mkString(",") )
+        log.error( "ks-test internal math error: {}", ex )
         ex
       }
 
