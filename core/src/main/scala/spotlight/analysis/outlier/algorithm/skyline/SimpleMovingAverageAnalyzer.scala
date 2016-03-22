@@ -12,7 +12,7 @@ import peds.commons.util._
 import spotlight.analysis.outlier.algorithm.AlgorithmActor.{AlgorithmContext, Op, TryV}
 import spotlight.analysis.outlier.algorithm.skyline.SkylineAnalyzer.SkylineContext
 import spotlight.model.outlier.Outliers
-import spotlight.model.timeseries.{DataPoint, Point2D}
+import spotlight.model.timeseries.{ControlBoundary, Point2D, TimeSeriesBase}
 
 
 /**
@@ -29,6 +29,14 @@ object SimpleMovingAverageAnalyzer {
     movingStatistics: DescriptiveStatistics
   ) extends SkylineContext {
     override def withUnderlying( ctx: AlgorithmContext ): Valid[SkylineContext] = copy( underlying = ctx ).successNel
+
+    override type That = Context
+    override def withSource( newSource: TimeSeriesBase ): That = {
+      val updated = underlying withSource newSource
+      copy( underlying = updated )
+    }
+
+    override def addControlBoundary( control: ControlBoundary ): That = copy(underlying = underlying.addControlBoundary(control))
 
     override def toString: String = {
       s"""${getClass.safeSimpleName}(moving-stats:[${movingStatistics}])"""
@@ -70,12 +78,18 @@ class SimpleMovingAverageAnalyzer( override val router: ActorRef ) extends Skyli
       collectOutlierPoints(
         points = taverages,
         context = context,
-        isOutlier = (p: Point2D, ctx: Context) => {
-          val (_, v) = p
+        evaluateOutlier = (p: Point2D, ctx: Context) => {
+          val (ts, v) = p
           val mean = ctx.movingStatistics.getMean
           val stddev = ctx.movingStatistics.getStandardDeviation
           log.debug( "Stddev from simple moving Average: mean[{}]\tstdev[{}]\ttolerance[{}]", mean, stddev, tol )
-          math.abs( v - mean ) > ( tol * stddev)
+          val control = ControlBoundary.fromExpectedAndDistance(
+            timestamp = ts.toLong,
+            expected = mean,
+            distance = tol * stddev
+          )
+          ( control isOutlier v, control )
+//          math.abs( v - mean ) > ( tol * stddev)
         },
         update = (ctx: Context, pt: Point2D) => {
           val (_, v) = pt

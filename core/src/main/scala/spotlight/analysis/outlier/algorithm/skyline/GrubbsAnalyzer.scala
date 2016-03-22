@@ -2,15 +2,18 @@ package spotlight.analysis.outlier.algorithm.skyline
 
 import scala.reflect.ClassTag
 import akka.actor.{ActorRef, Props}
-import scalaz._, Scalaz._
+
+import scalaz._
+import Scalaz._
 import scalaz.Kleisli.kleisli
+import org.joda.{ time => joda }
 import org.apache.commons.math3.distribution.TDistribution
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import peds.commons.Valid
 import spotlight.analysis.outlier.algorithm.AlgorithmActor.{AlgorithmContext, Op, TryV}
 import spotlight.analysis.outlier.algorithm.skyline.SkylineAnalyzer.SkylineContext
 import spotlight.model.outlier.Outliers
-import spotlight.model.timeseries.{DataPoint, Point2D}
+import spotlight.model.timeseries.{ControlBoundary, Point2D}
 
 
 /**
@@ -70,9 +73,9 @@ class GrubbsAnalyzer( override val router: ActorRef ) extends SkylineAnalyzer[Sk
       collectOutlierPoints(
         points = zScores,
         context = context,
-        isOutlier = (p: Point2D, ctx: Context) => {
+        evaluateOutlier = (p: Point2D, ctx: Context) => {
           log.debug( "{} > {}", (p._1.toLong, p._2), grubbsScore )
-          p._2 > grubbsScore
+          ( p._2 > grubbsScore, ControlBoundary( timestamp = new joda.DateTime(p._1.toLong), ceiling = Some(grubbsScore) ) )
         },
         update = (ctx: Context, pt: Point2D) => { ctx }
       )

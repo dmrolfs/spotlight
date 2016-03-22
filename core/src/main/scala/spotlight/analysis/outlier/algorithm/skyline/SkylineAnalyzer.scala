@@ -6,6 +6,7 @@ import akka.event.LoggingReceive
 import scalaz._, Scalaz._
 import scalaz.Kleisli.kleisli
 import shapeless.syntax.typeable._
+import org.joda.{ time => joda }
 import com.typesafe.config.Config
 import org.apache.commons.math3.ml.clustering.DoublePoint
 import org.apache.commons.math3.ml.distance.DistanceMeasure
@@ -38,11 +39,23 @@ object SkylineAnalyzer {
     override def messageConfig: Config = underlying.messageConfig
     override def distanceMeasure: TryV[DistanceMeasure] = underlying.distanceMeasure
     override def tolerance: TryV[Option[Double]] = underlying.tolerance
+    override def controlBoundaries: Seq[ControlBoundary] = underlying.controlBoundaries
   }
 
 
   final case class SimpleSkylineContext private[skyline]( override val underlying: AlgorithmContext ) extends SkylineContext {
     override def withUnderlying( ctx: AlgorithmContext ): Valid[SkylineContext] = copy( underlying = ctx ).successNel
+
+    override type That = SimpleSkylineContext
+    override def withSource( newSource: TimeSeriesBase ): That = {
+      val updated = underlying withSource newSource
+      copy( underlying = updated )
+    }
+
+    override def addControlBoundary( control: ControlBoundary ): That = {
+      copy( underlying = underlying.addControlBoundary(control) )
+    }
+
     override def toString: String = s"""${getClass.safeSimpleName}()"""
   }
 
@@ -89,7 +102,12 @@ trait SkylineAnalyzer[C <: SkylineAnalyzer.SkylineContext] extends AlgorithmActo
             payload.source.interval
           )
           // don't let aggregator time out just due to error in algorithm
-          aggregator ! NoOutliers( algorithms = Set(algorithm), source = payload.source, plan = payload.plan )
+          aggregator ! NoOutliers(
+            algorithms = Set(algorithm),
+            source = payload.source,
+            plan = payload.plan,
+            algorithmControlBoundaries = Map.empty[Symbol, Seq[ControlBoundary]]
+          )
         }
       }
     }
@@ -153,34 +171,48 @@ trait SkylineAnalyzer[C <: SkylineAnalyzer.SkylineContext] extends AlgorithmActo
 
 
   type UpdateContext[CTX <: AlgorithmContext] = (CTX, Point2D) => CTX
-  type IsOutlier[CTX <: AlgorithmContext] = (Point2D, CTX) => Boolean
+  type EvaluateOutlier[CTX <: AlgorithmContext] = (Point2D, CTX) => (Boolean, ControlBoundary)
 
   def collectOutlierPoints[CTX <: AlgorithmContext](
     points: Seq[Point2D],
     context: CTX,
-    isOutlier: IsOutlier[CTX],
+    evaluateOutlier: EvaluateOutlier[CTX],
     update: UpdateContext[CTX]
   ): (Seq[DataPoint], AlgorithmContext) = {
+//    def replaceSourcePoint( ctx: CTX , timestamp: joda.DateTime, control: ControlBoundary ): CTX = {
+//      val source = ctx.source.withControlBoundary( timestamp, control )
+//      ctx.withSource( source ).asInstanceOf[CTX] //todo: not a fan of this cast.
+//    }
+
     @tailrec def loop( pts: List[Point2D], ctx: CTX, acc: Seq[DataPoint] ): (Seq[DataPoint], AlgorithmContext) = {
       ctx.cast[SkylineContext] foreach { setScopedContext }
 
       pts match {
         case Nil => ( acc, ctx )
 
-        case pt :: tail if isOutlier( pt, ctx ) => {
-          val (ts, _) = pt
-          val original = ctx.source.points find { _.timestamp.getMillis == ts.toLong }
-          val updatedAcc = original map { o => acc :+ o} getOrElse { acc }
-          val updatedContext = update( ctx, pt )
-          log.debug( "LOOP-HIT[({})]: updated skyline-context=[{}] acc=[{}]", (pt._1.toLong, pt._2), updatedContext, updatedAcc )
-          loop( tail, updatedContext, updatedAcc )
-        }
-
         case pt :: tail => {
-//          val dp = DataPoint fromPoint2D pt
-          val updatedContext = update( ctx, pt )
-          log.debug( "LOOP-MISS[({})]: updated skyline-context=[{}] acc=[{}]", (pt._1.toLong, pt._2), updatedContext, acc )
-          loop( tail, updatedContext, acc )
+          val ts = new joda.DateTime( pt._1.toLong  )
+          val (isOutlier, control) = evaluateOutlier( pt, ctx )
+          val updatedAcc = {
+            if ( isOutlier ) {
+              ctx.source.points
+              .find { _.timestamp.getMillis == ts.getMillis }
+              .map { original => acc :+ original }
+              .getOrElse { acc }
+            } else {
+              acc
+            }
+          }
+
+          val updatedContext = update( ctx.addControlBoundary(control).asInstanceOf[CTX], pt ) //todo: not a fan of this cast.
+
+          if ( isOutlier ) {
+            log.info( "LOOP-HIT[{}]: control:[{}] acc:[{}]", (pt._1.toLong, pt._2), control, updatedAcc.size )
+          } else {
+            log.debug( "LOOP-MISS[{}]: control:[{}] acc:[{}]", (pt._1.toLong, pt._2), control, updatedAcc.size )
+          }
+
+          loop( tail, updatedContext, updatedAcc )
         }
       }
     }
@@ -205,7 +237,8 @@ trait SkylineAnalyzer[C <: SkylineAnalyzer.SkylineContext] extends AlgorithmActo
         algorithms = Set( algorithm ),
         plan = context.plan,
         source = context.source,
-        outliers = os
+        outliers = os,
+        algorithmControlBoundaries = Map( algorithm -> context.controlBoundaries )
       )
       .disjunction
       .leftMap { _.head }

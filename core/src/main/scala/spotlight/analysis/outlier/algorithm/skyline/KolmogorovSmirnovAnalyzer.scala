@@ -17,7 +17,7 @@ import spotlight.analysis.outlier.algorithm.AlgorithmActor.{AlgorithmContext, Op
 import spotlight.analysis.outlier.algorithm.skyline.SkylineAnalyzer.SkylineContext
 import spotlight.analysis.outlier.algorithm.skyline.adf.AugmentedDickeyFuller
 import spotlight.model.outlier.Outliers
-import spotlight.model.timeseries.DataPoint
+import spotlight.model.timeseries.{ControlBoundary, DataPoint, TimeSeriesBase}
 
 
 /**
@@ -39,6 +39,14 @@ object KolmogorovSmirnovAnalyzer {
       val updatedHistory = boundary map { b => referenceHistory.dropWhile{ _.timestamp < b } } getOrElse { referenceHistory }
       copy( underlying = ctx, referenceHistory = updatedHistory ).successNel
     }
+
+    override type That = Context
+    override def withSource( newSource: TimeSeriesBase ): That = {
+      val updated = underlying withSource newSource
+      copy( underlying = updated )
+    }
+
+    override def addControlBoundary( control: ControlBoundary ): That = copy(underlying = underlying.addControlBoundary(control))
 
     def referenceSeries: Seq[DataPoint] = {
       referenceInterval map { reference =>

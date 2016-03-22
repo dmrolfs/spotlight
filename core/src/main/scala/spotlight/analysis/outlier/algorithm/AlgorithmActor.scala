@@ -2,7 +2,9 @@ package spotlight.analysis.outlier.algorithm
 
 import akka.actor.{Actor, ActorLogging, ActorPath, ActorRef}
 import akka.event.LoggingReceive
-import scalaz._, Scalaz._
+
+import scalaz._
+import Scalaz._
 import scalaz.Kleisli.kleisli
 import com.typesafe.config.Config
 import org.apache.commons.math3.linear.MatrixUtils
@@ -11,7 +13,7 @@ import org.apache.commons.math3.ml.clustering.{Cluster, DoublePoint}
 import peds.akka.metrics.InstrumentedActor
 import peds.commons.math.MahalanobisDistance
 import spotlight.model.outlier.OutlierPlan
-import spotlight.model.timeseries.{DataPoint, TimeSeriesBase, Topic}
+import spotlight.model.timeseries.{ControlBoundary, DataPoint, TimeSeriesBase, Topic}
 import spotlight.analysis.outlier._
 
 
@@ -78,24 +80,33 @@ object AlgorithmActor {
     def historyKey: HistoryKey
     def history: HistoricalStatistics
     def source: TimeSeriesBase
+    def controlBoundaries: Seq[ControlBoundary]
     def messageConfig: Config
     def distanceMeasure: TryV[DistanceMeasure]
     def tolerance: TryV[Option[Double]]
+
+    type That <: AlgorithmContext
+    def withSource( newSource: TimeSeriesBase ): That
+    def addControlBoundary( control: ControlBoundary ): That
   }
 
   object AlgorithmContext {
-    def apply( message: DetectUsing, data: Seq[DoublePoint] ): AlgorithmContext = SimpleAlgorithmContext( message, data )
+    def apply( message: DetectUsing, data: Seq[DoublePoint] ): AlgorithmContext = {
+      SimpleAlgorithmContext( message, message.source, data )
+    }
 
 
     final case class SimpleAlgorithmContext private[algorithm](
-      message: DetectUsing, data: Seq[DoublePoint]
+      override val message: DetectUsing,
+      override val source: TimeSeriesBase,
+      override val data: Seq[DoublePoint],
+      override val controlBoundaries: Seq[ControlBoundary] = Seq.empty[ControlBoundary]
     ) extends AlgorithmContext {
       override val algorithm: Symbol = message.algorithm
       override val topic: Topic = message.topic
       override def plan: OutlierPlan = message.plan
       override val historyKey: HistoryKey = HistoryKey( plan, topic )
       override def history: HistoricalStatistics = message.history
-      override def source: TimeSeriesBase = message.source
       override def messageConfig: Config = message.properties
 
       override def distanceMeasure: TryV[DistanceMeasure] = {
@@ -126,6 +137,10 @@ object AlgorithmActor {
           if ( messageConfig hasPath path ) Some( messageConfig getDouble path ) else None
         }
       }
+
+      override type That = SimpleAlgorithmContext
+      override def withSource( newSource: TimeSeriesBase ): That = copy( source = newSource )
+      override def addControlBoundary( control: ControlBoundary ): That = copy( controlBoundaries = controlBoundaries :+ control )
     }
   }
 

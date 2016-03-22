@@ -66,6 +66,7 @@ with MockitoSugar {
     val socketFactory: SocketFactory = mock[SocketFactory]
 
     val plan = mock[OutlierPlan]
+    when( plan.name ).thenReturn( "plan" )
 
     val socket: Socket = mock[Socket]
     when( socket.isConnected ).thenAnswer(
@@ -114,6 +115,7 @@ with MockitoSugar {
             openCount.incrementAndGet()
             outer.socket
           }
+          override def publishingTopic( p: OutlierPlan, t: Topic ): Topic = t
         }
       )
     )
@@ -160,7 +162,7 @@ with MockitoSugar {
   val DONE = Tag("done")
 
   "GraphitePublisher" should {
-    "disconnects from graphite" taggedAs (WIP) in { f: Fixture =>
+    "disconnects from graphite" in { f: Fixture =>
       import f._
       graphite ! Close
 //      graphite.receive( Close )
@@ -170,11 +172,12 @@ with MockitoSugar {
     "first replicate python protocol test" in { f: Fixture =>
       import f._
       import org.joda.{ time => joda }
+      import spotlight.model.timeseries._
 
       val batch = Seq(
-        ("foo", new joda.DateTime(100000L), 1D),
-        ("bar", new joda.DateTime(117000L), 0D),
-        ("zed", new joda.DateTime(9821000L), 0D)
+        ("foo".toTopic, new joda.DateTime(100000L), 1D),
+        ("bar".toTopic, new joda.DateTime(117000L), 0D),
+        ("zed".toTopic, new joda.DateTime(9821000L), 0D)
       )
 
       unpickleOutput( new PythonPickleProtocol().pickleFlattenedTimeSeries( batch:_* )) mustBe {
@@ -210,7 +213,7 @@ with MockitoSugar {
       unpickleOutput() mustBe "foo 0.0 100\nfoo 1.0 117\n"
     }
 
-    "write past full batch" in { f: Fixture =>
+    "write past full batch" taggedAs (WIP) in { f: Fixture =>
       import f._
 
       val graphite2 = TestActorRef[GraphitePublisher](
@@ -224,8 +227,7 @@ with MockitoSugar {
               openCount.incrementAndGet()
               f.socket
             }
-
-            override def augmentTopic( o: Outliers ): Topic = "spotlight.outlier." + o.topic
+            override def publishingTopic( p: OutlierPlan, t: Topic ): Topic = "spotlight.outlier." + super.publishingTopic( p, t )
           }
         )
       )
@@ -238,7 +240,7 @@ with MockitoSugar {
       )
       graphite2.receive( Publish(outliers) )
       graphite2.receive( Flush )
-      unpickleOutput() mustBe "spotlight.outlier.foo 1.0 100\nspotlight.outlier.foo 0.0 117\nspotlight.outlier.foo 0.0 9821\n"
+      unpickleOutput() mustBe "spotlight.outlier.plan.foo 1.0 100\nspotlight.outlier.plan.foo 0.0 117\nspotlight.outlier.plan.foo 0.0 9821\n"
     }
 
     "write full no-outlier batch" in { f: Fixture =>

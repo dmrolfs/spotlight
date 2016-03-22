@@ -1,23 +1,25 @@
 package spotlight.publish
 
-import java.net.{ InetSocketAddress, Socket }
+import java.net.{InetSocketAddress, Socket}
+
 import scala.annotation.tailrec
 import scala.collection.immutable
 import scala.concurrent.duration._
-import scala.concurrent.{ ExecutionContext, Future }
-import scala.util.{ Failure, Success, Try }
+import scala.concurrent.{ExecutionContext, Future}
+import scala.util.{Failure, Success, Try}
 import akka.actor._
 import akka.event.LoggingReceive
-import akka.pattern.{ CircuitBreaker, CircuitBreakerOpenException, ask }
+import akka.pattern.{CircuitBreaker, CircuitBreakerOpenException, ask}
 import akka.stream.scaladsl.Flow
-import akka.stream.{ ActorAttributes, Supervision }
-import akka.util.{ ByteString, Timeout }
+import akka.stream.{ActorAttributes, Supervision}
+import akka.util.{ByteString, Timeout}
+import org.joda.{time => joda}
 import com.typesafe.scalalogging.LazyLogging
-import nl.grons.metrics.scala.{ Timer, Meter }
+import nl.grons.metrics.scala.{Meter, Timer}
 import peds.akka.stream.Limiter
 import peds.commons.log.Trace
 import spotlight.model.timeseries.Topic
-import spotlight.model.outlier.Outliers
+import spotlight.model.outlier.{OutlierPlan, Outliers}
 import spotlight.protocol.PythonPickleProtocol
 
 
@@ -82,7 +84,7 @@ object GraphitePublisher extends LazyLogging {
     def createSocket( address: InetSocketAddress ): Socket
     def batchSize: Int = 100
     def batchInterval: FiniteDuration = 1.second
-    def augmentTopic( o: Outliers ): Topic = o.topic
+    def publishingTopic( p: OutlierPlan, t: Topic ): Topic = s"${p.name}.${t}"
   }
 
 
@@ -104,7 +106,7 @@ class GraphitePublisher extends DenseOutlierPublisher {
 
   val pickler: PythonPickleProtocol = new PythonPickleProtocol
   var socket: Option[Socket] = None //todo: if socket fails supervisor should restart actor
-  var waitQueue: immutable.Queue[MarkPoint] = immutable.Queue.empty[MarkPoint]
+  var waitQueue: immutable.Queue[TopicPoint] = immutable.Queue.empty[TopicPoint]
   override val fillSeparation: FiniteDuration = outer.separation
 
 
@@ -211,13 +213,43 @@ class GraphitePublisher extends DenseOutlierPublisher {
 
   override def publish( o: Outliers ): Unit = {
     val points = markPoints( o )
-    waitQueue = points.foldLeft( waitQueue ){ _.enqueue( _ ) }
+    waitQueue = points.foldLeft( waitQueue ){ _ enqueue _ }
     log.debug( "publish[{}]: added [{} / {}] to wait queue - now at [{}]", o.topic, o.anomalySize, o.size, waitQueue.size )
   }
 
-  override def markPoints( o: Outliers ): Seq[MarkPoint] = {
-    val augmentedName = outer.augmentTopic( o ).name
-    super.markPoints( o ) map { case (_, ts, v) => (augmentedName, ts, v) }
+  object ControlLabeling {
+    type ControlLabel = Symbol => String
+    val FloorLabel: ControlLabel = (algorithm: Symbol) => algorithm.name + ".floor."
+    val ExpectedLabel: ControlLabel = (algorithm: Symbol) => algorithm.name + ".expected."
+    val CeilingLabel: ControlLabel = (algorithm: Symbol) => algorithm.name + ".ceiling."
+  }
+
+  def flattenControlPoints( o: Outliers ): Seq[TopicPoint] = {
+    import ControlLabeling._
+    def algorithmControlTopic( algorithm: Symbol, labeling: ControlLabel ): Topic = {
+      outer.publishingTopic( o.plan, labeling(algorithm) + o.topic )
+    }
+
+    o.algorithmControlBoundaries.toSeq flatMap { case (algorithm, controlBoundaries) =>
+      val floorTopic = algorithmControlTopic( algorithm, FloorLabel )
+      val expectedTopic = algorithmControlTopic( algorithm, ExpectedLabel )
+      val ceilingTopic = algorithmControlTopic( algorithm, CeilingLabel )
+      controlBoundaries flatMap { c =>
+        Seq( floorTopic, expectedTopic, ceilingTopic )
+        .zipAll( Seq.empty[joda.DateTime], Topic(""), c.timestamp ) // tuple topics with c.timestamp
+        .zip( Seq(c.floor, c.expected, c.ceiling) ) // add control values to tuple
+        .map { case ((topic, ts), value) => value map { v => ( topic, ts, v ) } } // make tuple
+        .flatten // trim out unprovided control values
+      }
+    }
+  }
+
+  override def markPoints( o: Outliers ): Seq[TopicPoint] = {
+    val dataPoints = super.markPoints( o ) map { case (t, ts, v) => ( outer.publishingTopic(o.plan, t), ts, v ) }
+    log.debug( "GraphitePublisher: marked data points: [{}]", dataPoints.mkString(","))
+    val controlPoints = flattenControlPoints( o )
+    log.debug( "GraphitePublisher: cotrol data points: [{}]", controlPoints.mkString(","))
+    dataPoints ++ controlPoints
   }
 
   def isConnected: Boolean = socket map { s => s.isConnected && !s.isClosed } getOrElse { false }
@@ -273,7 +305,7 @@ class GraphitePublisher extends DenseOutlierPublisher {
     }
   }
 
-  def serialize( payload: MarkPoint* ): ByteString = pickler.pickleFlattenedTimeSeries( payload:_* )
+  def serialize( payload: TopicPoint* ): ByteString = pickler.pickleFlattenedTimeSeries( payload:_* )
 
   def batchAndSend(): Unit = {
     log.debug(

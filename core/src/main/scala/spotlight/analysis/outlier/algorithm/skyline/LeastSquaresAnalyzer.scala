@@ -10,11 +10,10 @@ import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import org.apache.commons.math3.stat.regression.MillerUpdatingRegression
 import peds.commons.Valid
 import peds.commons.util._
-import spotlight.analysis.outlier.Moment
 import spotlight.analysis.outlier.algorithm.AlgorithmActor.{AlgorithmContext, Op, TryV}
 import spotlight.analysis.outlier.algorithm.skyline.SkylineAnalyzer.SkylineContext
 import spotlight.model.outlier.Outliers
-import spotlight.model.timeseries.{DataPoint, Point2D}
+import spotlight.model.timeseries.{ControlBoundary, Point2D, TimeSeriesBase}
 
 
 /**
@@ -31,6 +30,15 @@ object LeastSquaresAnalyzer {
     regression: MillerUpdatingRegression
   ) extends SkylineContext {
     override def withUnderlying( ctx: AlgorithmContext ): Valid[SkylineContext] = copy( underlying = ctx ).successNel
+
+    override type That = Context
+    override def withSource( newSource: TimeSeriesBase ): That = {
+      val updated = underlying withSource newSource
+      copy( underlying = updated )
+    }
+
+    override def addControlBoundary( control: ControlBoundary ): That = copy(underlying = underlying.addControlBoundary(control))
+
     override def toString: String = s"""${getClass.safeSimpleName}(regression:[${regression}])"""
   }
 }
@@ -71,7 +79,7 @@ class LeastSquaresAnalyzer( override val router: ActorRef ) extends SkylineAnaly
       collectOutlierPoints(
         points = context.source.pointsAsPairs,
         context = context,
-        isOutlier = (p: Point2D, ctx: Context) => {
+        evaluateOutlier = (p: Point2D, ctx: Context) => {
           val (ts, v) = p
           val result = \/ fromTryCatchNonFatal {
             ctx.regression.regress.getParameterEstimates
@@ -85,11 +93,17 @@ class LeastSquaresAnalyzer( override val router: ActorRef ) extends SkylineAnaly
             log.debug( "least squares 1 avg error > tolerance: {} > {} = {}", math.abs(t), errorsStddev * tol, ( math.abs(t) > errorsStddev * tol ) )
             log.debug( "least squares 2 non-zero errors stddev: {} != {} = {}", math.round( errorsStddev ), 0D, ( math.round( errorsStddev ) != 0D ) )
             log.debug( "least squares 3 non-zero avg error: {} != {} = {}", math.round( t ), 0D, ( math.round( t ) != 0D ) )
-            ( math.abs(t) > errorsStddev * tol ) && ( math.round( errorsStddev ) != 0D ) && ( math.round( t ) != 0 )
+            val control = ControlBoundary.fromExpectedAndDistance(
+              timestamp = ts.toLong,
+              expected = t,
+              distance = tol * errorsStddev
+            )
+            val isOutlier = ( math.abs(t) > errorsStddev * tol ) && ( math.round( errorsStddev ) != 0D ) && ( math.round( t ) != 0 )
+            ( isOutlier, control )
           }
 
           log.debug( "least squares [{}] = {}", p, result )
-          result getOrElse false
+          result getOrElse ( false, ControlBoundary.empty(ts.toLong) )
         },
         update = (ctx: Context, pt: Point2D) => {
           val (ts, v) = pt

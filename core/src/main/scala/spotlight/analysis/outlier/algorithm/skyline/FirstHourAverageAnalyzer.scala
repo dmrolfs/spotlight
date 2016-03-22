@@ -15,7 +15,7 @@ import peds.commons.util._
 import spotlight.analysis.outlier.algorithm.AlgorithmActor.{AlgorithmContext, Op, TryV}
 import spotlight.analysis.outlier.algorithm.skyline.SkylineAnalyzer.SkylineContext
 import spotlight.model.outlier.Outliers
-import spotlight.model.timeseries.{DataPoint, Point2D}
+import spotlight.model.timeseries.{ControlBoundary, Point2D, TimeSeriesBase}
 
 
 /**
@@ -37,6 +37,16 @@ object FirstHourAverageAnalyzer {
     firstHour: SummaryStatistics
   ) extends SkylineContext with LazyLogging {
     override def withUnderlying( ctx: AlgorithmContext ): Valid[SkylineContext] = copy( underlying = ctx ).successNel
+
+    override type That = Context
+    override def withSource( newSource: TimeSeriesBase ): That = {
+      val updated = underlying withSource newSource
+      copy( underlying = updated )
+    }
+
+    override def addControlBoundary( control: ControlBoundary ): That = {
+      copy( underlying = underlying.addControlBoundary(control) )
+    }
 
     def withPoints( points: Seq[DoublePoint] ): Context = {
       val firstHourPoints = {
@@ -113,14 +123,18 @@ class FirstHourAverageAnalyzer( override val router: ActorRef ) extends SkylineA
       collectOutlierPoints(
         points = taverages,
         context = context,
-        isOutlier = (p: Point2D, ctx: Context) => {
-          val (_, v) = p
-          val mean = ctx.firstHour.getMean
-          val stddev = ctx.firstHour.getStandardDeviation
-          log.debug( "first hour mean[{}] and stdev[{}]", mean, stddev )
-          math.abs( v - mean ) > ( tol * stddev)
+        evaluateOutlier = (p: Point2D, ctx: Context) => {
+          val (ts, v) = p
+          val control = ControlBoundary.fromExpectedAndDistance(
+            timestamp = ts.toLong,
+            expected = ctx.firstHour.getMean,
+            distance = tol * ctx.firstHour.getStandardDeviation
+          )
+          log.debug( "first hour mean[{}] and stdev[{}]", ctx.firstHour.getMean, ctx.firstHour.getStandardDeviation )
+//          math.abs( v - mean ) > ( tol * stddev)
+          ( control.isOutlier(v), control )
         },
-        update = (ctx: Context, pt: Point2D) => ctx  //todo update with point for first hour?
+        update = (ctx: Context, pt: Point2D) => ctx
       )
     }
 

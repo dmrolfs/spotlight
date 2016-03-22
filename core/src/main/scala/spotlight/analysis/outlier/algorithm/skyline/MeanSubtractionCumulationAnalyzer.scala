@@ -10,7 +10,7 @@ import peds.commons.Valid
 import spotlight.analysis.outlier.algorithm.AlgorithmActor.{AlgorithmContext, Op, TryV}
 import spotlight.analysis.outlier.algorithm.skyline.SkylineAnalyzer.SkylineContext
 import spotlight.model.outlier.Outliers
-import spotlight.model.timeseries.{DataPoint, Point2D}
+import spotlight.model.timeseries.{ControlBoundary, Point2D}
 
 
 /**
@@ -48,11 +48,18 @@ extends SkylineAnalyzer[SkylineAnalyzer.SimpleSkylineContext] {
       collectOutlierPoints(
         points = context.source.pointsAsPairs,
         context = context,
-        isOutlier = (p: Point2D, ctx: Context) => {
+        evaluateOutlier = (p: Point2D, ctx: Context) => {
           val (ts, v) = p
-          val cumulativeMean = ctx.history.mean( 1 )
-          val cumulativeStddev = ctx.history.standardDeviation( 1 )
-          math.abs( v - cumulativeMean ) > ( tol * cumulativeStddev )
+          val control = ControlBoundary.fromExpectedAndDistance(
+            timestamp = ts.toLong,
+            expected = ctx.history.mean( 1 ),
+            distance = tol * ctx.history.standardDeviation( 1 )
+          )
+
+          ( control isOutlier v, control )
+//          val cumulativeMean = ctx.history.mean( 1 )
+//          val cumulativeStddev = ctx.history.standardDeviation( 1 )
+//          math.abs( v - cumulativeMean ) > ( tol * cumulativeStddev )
         },
         update = (ctx: Context, pt: Point2D) => { ctx }
       )

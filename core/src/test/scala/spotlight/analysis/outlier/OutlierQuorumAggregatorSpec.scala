@@ -1,17 +1,17 @@
 package spotlight.analysis.outlier
 
-import scala.concurrent.{ Future, ExecutionContext, Await }
+import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
 import akka.actor.Terminated
 import akka.testkit._
-import org.scalatest.{ Outcome, Tag }
+import org.scalatest.{Outcome, Tag}
 import org.scalatest.mock.MockitoSugar
 import org.mockito.Mockito._
 import com.typesafe.config.ConfigFactory
-import spotlight.model.timeseries.{ TimeSeriesBase, TimeSeries, Topic }
-import demesne.testkit.ParallelAkkaSpec
+import peds.commons.V
+import spotlight.model.timeseries.{ControlBoundary, TimeSeries, TimeSeriesBase, Topic}
+import spotlight.testkit.ParallelAkkaSpec
 import peds.commons.log.Trace
-import peds.akka.envelope._
 import spotlight.model.outlier._
 
 
@@ -19,23 +19,18 @@ import spotlight.model.outlier._
  * Created by damonrolfs on 9/18/14.
  */
 class OutlierQuorumAggregatorSpec extends ParallelAkkaSpec with MockitoSugar {
-  val trace = Trace[OutlierQuorumAggregatorSpec]
+  override val trace = Trace[OutlierQuorumAggregatorSpec]
 
-  class Fixture extends AkkaFixture {
-    def before(): Unit = { }
-    def after(): Unit = { }
+  class Fixture extends AkkaFixture { fixture =>
+    val none = mock[NoOutliers]
+    val some = mock[SeriesOutliers]
 
     val demoReduce = new ReduceOutliers {
-      override def apply(
-        results: OutlierAlgorithmResults,
-        source: TimeSeriesBase,
-        plan: OutlierPlan
-      )(
-        implicit ec: ExecutionContext
-      ): Future[Outliers] = {
-        Future {
-          results.headOption map { _._2 } getOrElse { NoOutliers( algorithms = Set('foobar), source = source, plan = plan ) }
-        }
+      override def apply( results: OutlierAlgorithmResults, source: TimeSeriesBase, plan: OutlierPlan ): V[ Outliers ] = {
+        import scalaz.Scalaz._
+        val outlierCount = results.foldLeft( 0 ) { (cnt, r) => cnt + r._2.anomalySize }
+        val result = if ( outlierCount > 0 ) fixture.some else fixture.none
+        result.right
       }
     }
 
@@ -45,15 +40,15 @@ class OutlierQuorumAggregatorSpec extends ParallelAkkaSpec with MockitoSugar {
       isQuorum = IsQuorum.AtLeastQuorumSpecification( 1, 1 ),
       reduce = demoReduce,
       algorithms = Set( 'foobar ),
-                                                          planSpecification = ConfigFactory.empty
+      planSpecification = ConfigFactory.empty
     )
 
   }
 
-  override def createAkkaFixture(): Fixture = new Fixture
+  override def makeAkkaFixture(): Fixture = new Fixture
 
   override def withFixture( test: OneArgTest ): Outcome = trace.block( s"withFixture($test)" ) {
-    val f = createAkkaFixture()
+    val f = makeAkkaFixture()
 
     try {
       f.before()
@@ -66,7 +61,6 @@ class OutlierQuorumAggregatorSpec extends ParallelAkkaSpec with MockitoSugar {
     }
   }
 
-  case object WIP extends Tag( "wip" )
 
   "OutlierQuorumAggregator" should  {
     "die after no timely response" in { f: Fixture =>
@@ -83,21 +77,8 @@ class OutlierQuorumAggregatorSpec extends ParallelAkkaSpec with MockitoSugar {
       }
     }
 
-    "send results upon satisfying quorum" taggedAs(WIP) in { f: Fixture =>
+    "send results upon satisfying quorum" in { f: Fixture =>
       import f._
-//      when( plan.timeout ) thenReturn 2.seconds
-//      when( plan.isQuorum ) thenReturn new IsQuorum {
-//        override def apply( results: SeriesOutlierResults ): Boolean = true
-//        override val totalIssued: Int = 1
-//      }
-//      when( plan.reduce ) thenReturn new ReduceOutliers {
-//        override def apply(
-//          results: SeriesOutlierResults,
-//          source: TimeSeriesBase
-//        )(
-//          implicit ec: ExecutionContext
-//        ): Future[Outliers] = Future { results.head._2 }
-//      }
       val p = plan( 2.seconds )
 
       val destination = TestProbe()
@@ -109,10 +90,11 @@ class OutlierQuorumAggregatorSpec extends ParallelAkkaSpec with MockitoSugar {
 
       val outliers = mock[Outliers]
       when( outliers.topic ) thenReturn Topic( "metric.name" )
-      when( outliers.algorithms ) thenReturn Set('fooAlgorithm)
+      when( outliers.algorithms ) thenReturn p.algorithms.take(1)
+      when( outliers.algorithmControlBoundaries ) thenReturn Map.empty[Symbol, Seq[ControlBoundary]]
 
       aggregator.receive( outliers )
-      destination.expectMsg( outliers )
+      destination.expectMsg( none )
     }
   }
 }

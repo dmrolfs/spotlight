@@ -7,6 +7,7 @@ import org.python.core.{ PyTuple, PyList }
 import org.scalatest._
 import org.scalatest.mock.MockitoSugar
 import peds.commons.log.Trace
+import spotlight.model.timeseries._
 
 
 /**
@@ -42,6 +43,9 @@ with MockitoSugar {
 
   class TestFixture { outer =>
     val protocol: PythonPickleProtocol = new PythonPickleProtocol
+
+    implicit def deTopics[D, V]( ts: Seq[(Topic, D, V)] ): Seq[(String, D, V)] = ts map { deTopic }
+    implicit def deTopic[D, V]( t: (Topic, D, V) ): (String, D, V) = ( t._1.name, t._2, t._3 )
 
     def unpickleOutput( pickle: ByteString ): String = {
       import scala.collection.JavaConverters._
@@ -97,8 +101,8 @@ with MockitoSugar {
     "write full batch" in { f: Fixture =>
       import f._
       val batch = Seq(
-        ("foo", 100L, "value"),
-        ("bar", 117L, "value2")
+        ("foo".toTopic, 100L, "value"),
+        ("bar".toTopic, 117L, "value2")
       )
       unpickleOutput( protocol.pickle( batch:_* ) ) mustBe "foo value 100\nbar value2 117\n"
     }
@@ -106,9 +110,9 @@ with MockitoSugar {
     "writes past full batch" in { f: Fixture =>
       import f._
       val batch = Seq(
-        ("foo", 100L, "value"),
-        ("bar", 117L, "value2"),
-        ("zed", 9821L, "value3")
+        ("foo".toTopic, 100L, "value"),
+        ("bar".toTopic, 117L, "value2"),
+        ("zed".toTopic, 9821L, "value3")
       )
       unpickleOutput( protocol.pickle( batch:_* ) ) mustBe "foo value 100\nbar value2 117\nzed value3 9821\n"
     }
@@ -118,9 +122,9 @@ with MockitoSugar {
       import org.joda.{ time => joda }
 
       val batch = Seq(
-        ("foo", new joda.DateTime(100000L), 17D),
-        ("bar", new joda.DateTime(117000L), 3.1415926D),
-        ("zed", new joda.DateTime(9821000L), 983.120D)
+        ("foo".toTopic, new joda.DateTime(100000L), 17D),
+        ("bar".toTopic, new joda.DateTime(117000L), 3.1415926D),
+        ("zed".toTopic, new joda.DateTime(9821000L), 983.120D)
       )
 
       unpickleOutput( protocol.pickleFlattenedTimeSeries( batch:_* ) ) mustBe {
@@ -134,9 +138,9 @@ with MockitoSugar {
       import org.joda.{ time => joda }
 
       val batch = Seq(
-        ("foo", new joda.DateTime(100000L), 1D),
-        ("bar", new joda.DateTime(117000L), 0D),
-        ("zed", new joda.DateTime(9821000L), 0D)
+        ("foo".toTopic, new joda.DateTime(100000L), 1D),
+        ("bar".toTopic, new joda.DateTime(117000L), 0D),
+        ("zed".toTopic, new joda.DateTime(9821000L), 0D)
       )
       unpickleOutput( protocol.pickleFlattenedTimeSeries( batch:_* ) ) mustBe {
         // timestamp long are be divided by 1000L to match graphite's epoch time
@@ -146,20 +150,20 @@ with MockitoSugar {
 
     "write santized name" in { f: Fixture =>
       import f._
-      val batch = ("name woo", 100L, "value")
+      val batch = ("name woo".toTopic, 100L, "value")
       unpickleOutput( protocol.pickle( batch ) ) mustBe "name-woo value 100\n"
     }
 
     "write santized value" in { f: Fixture =>
       import f._
-      val batch = ("name", 100L, "value woo")
+      val batch = ("name".toTopic, 100L, "value woo")
       unpickleOutput( protocol.pickle( batch ) ) mustBe "name value-woo 100\n"
     }
 
 
     "match dropwizard pickle" in { f: Fixture =>
       import f._
-      val tuple = ( "name", 100L, "value" )
+      val tuple = ( "name".toTopic, 100L, "value" )
       val pickler = new com.codahale.metrics.graphite.PicklerStub
       val expected = pickler.pickle( tuple )
       val actual = protocol.pickle( tuple )
@@ -169,8 +173,8 @@ with MockitoSugar {
     "match dropwizard pickled full batch" in { f: Fixture =>
       import f._
       val tuples = Seq(
-        ( "name", 100L, "value" ),
-        ( "name", 100L, "value2" )
+        ( "name".toTopic, 100L, "value" ),
+        ( "name".toTopic, 100L, "value2" )
       )
       val pickler = new com.codahale.metrics.graphite.PicklerStub
       val expected = pickler.pickle( tuples:_* )
@@ -182,9 +186,9 @@ with MockitoSugar {
       import f._
 
       val tuples = Seq(
-        ( "name", 100L, "value" ),
-        ( "name", 100L, "value2" ),
-        ( "name", 100L, "value3" )
+        ( "name".toTopic, 100L, "value" ),
+        ( "name".toTopic, 100L, "value2" ),
+        ( "name".toTopic, 100L, "value3" )
       )
       val pickler = new com.codahale.metrics.graphite.PicklerStub
       val expected = pickler.pickle( tuples:_* )

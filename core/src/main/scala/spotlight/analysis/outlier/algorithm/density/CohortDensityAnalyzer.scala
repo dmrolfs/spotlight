@@ -2,15 +2,13 @@ package spotlight.analysis.outlier.algorithm.density
 
 import akka.actor.{ActorRef, Props}
 import akka.event.LoggingReceive
+import scalaz._, Scalaz._
 import org.apache.commons.math3.ml.clustering.{Cluster, DoublePoint}
 import org.apache.commons.math3.stat.{descriptive => stat}
 import spotlight.analysis.outlier.algorithm.AlgorithmActor
 import spotlight.analysis.outlier.{DetectOutliersInCohort, DetectUsing}
 import spotlight.model.outlier.{CohortOutliers, NoOutliers, Outliers}
 import spotlight.model.timeseries.{DataPoint, Matrix}
-
-import scalaz.Scalaz._
-import scalaz._
 
 
 /**
@@ -56,9 +54,15 @@ class CohortDensityAnalyzer( override val router: ActorRef ) extends DBSCANAnaly
         .sequenceU
         .map { oms: List[List[Int]] =>
           val outlierSeries = oms.flatten.toSet[Int] map { index => payload.source.data( index ) }
-          if ( outlierSeries.isEmpty ) NoOutliers( algorithms = Set(algorithm), source = payload.source, plan = payload.plan )
-          else {
-            CohortOutliers( algorithms = Set(algorithm), source = payload.source, outliers = outlierSeries, plan = payload.plan )
+          if ( outlierSeries.isEmpty ) {
+            NoOutliers( algorithms = Set(algorithm), source = payload.source, plan = payload.plan )
+          } else {
+            CohortOutliers(
+              algorithms = Set(algorithm),
+              source = payload.source,
+              outliers = outlierSeries,
+              plan = payload.plan
+            )
           }
         }
       }

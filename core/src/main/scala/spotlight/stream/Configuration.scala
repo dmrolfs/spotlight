@@ -186,20 +186,7 @@ object Configuration {
     )
   }
 
-  val defaultOutlierReducer: ReduceOutliers = new ReduceOutliers {
-    override def apply(
-      results: OutlierAlgorithmResults,
-      source: TimeSeriesBase,
-      plan: OutlierPlan
-    )(
-      implicit ec: ExecutionContext
-    ): Future[Outliers] = {
-      Future {
-        results.headOption map { _._2 } getOrElse { NoOutliers( algorithms = results.keySet, source = source, plan = plan ) }
-      }
-    }
-  }
-
+  val defaultOutlierReducer: ReduceOutliers = ReduceOutliers.seriesIntersection
 
 
   final case class SimpleConfiguration private[stream](

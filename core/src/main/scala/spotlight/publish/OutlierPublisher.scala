@@ -16,18 +16,20 @@ object OutlierPublisher {
   sealed trait Protocol
   case class Publish( outliers: Outliers ) extends Protocol
   case class Published( outliers: Outliers ) extends Protocol
+
+  type TopicPoint = ( Topic, joda.DateTime, Double )
 }
 
 trait OutlierPublisher extends Actor with InstrumentedActor with ActorLogging {
+  import OutlierPublisher.TopicPoint
+
   def publish( o: Outliers ): Unit
 
-  type MarkPoint = (String, joda.DateTime, Double)
-
-  def markPoints( o: Outliers ): Seq[MarkPoint] = mark( o ) map { dp => ( o.topic.name, dp.timestamp, dp.value ) }
+  def markPoints( o: Outliers ): Seq[TopicPoint] = mark( o ) map { dp => ( o.topic, dp.timestamp, dp.value ) }
 
   def mark( o: Outliers ): Seq[DataPoint] = {
     o match {
-      case SeriesOutliers(_, source, _, outliers) => {
+      case SeriesOutliers(_, source, _, outliers, _ ) => {
         val identified = outliers.map{ _.timestamp }.toSet
         source.points.collect{
           case dp if identified contains dp.timestamp => dp.copy( value = 1D )

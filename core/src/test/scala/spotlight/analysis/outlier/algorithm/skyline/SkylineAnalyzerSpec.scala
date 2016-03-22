@@ -45,6 +45,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
 
   override def makeAkkaFixture(): Fixture = new Fixture
 
+  val NEXT = Tag( "next" )
 
   "SkylineAnalyzer" should {
     "find outliers deviating from first hour" in { f: Fixture =>
@@ -69,7 +70,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
       val history1 = historyWith( None, series )
       analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series, plan), history1, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "first hour" ) {
-        case m @ SeriesOutliers(alg, source, plan, outliers) => {
+        case m @ SeriesOutliers(alg, source, plan, outliers, control) => {
           alg mustBe Set( algoS )
           source mustBe series
           m.hasAnomalies mustBe true
@@ -92,7 +93,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
 
       analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "first hour again" ) {
-        case m @ SeriesOutliers(alg, source, plan, outliers) => {
+        case m @ SeriesOutliers(alg, source, plan, outliers, control) => {
           alg mustBe Set( algoS )
           source mustBe series2
           m.hasAnomalies mustBe true
@@ -124,7 +125,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
       val history1 = historyWith( None, series )
       analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series, plan), history1, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "first hour" ) {
-        case m @ NoOutliers(alg, source, plan) => {
+        case m @ NoOutliers(alg, source, plan, control) => {
           alg mustBe Set( algoS )
           source mustBe series
           m.hasAnomalies mustBe false
@@ -145,7 +146,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
 
       analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "first hour again" ) {
-        case m @ SeriesOutliers(alg, source, plan, outliers) => {
+        case m @ SeriesOutliers(alg, source, plan, outliers, control) => {
           alg mustBe Set( algoS )
           source mustBe series2
           m.hasAnomalies mustBe true
@@ -155,7 +156,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
       }
     }
 
-    "find outliers deviating stddev from simple moving average" in { f: Fixture =>
+    "find outliers deviating stddev from simple moving average" taggedAs (WIP) in { f: Fixture =>
       import f._
       val analyzer = TestActorRef[SimpleMovingAverageAnalyzer]( SimpleMovingAverageAnalyzer.props( router.ref ) )
       val full = makeDataPoints(
@@ -173,7 +174,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
       val history1 = historyWith( None, series )
       analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series, plan), history1, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "stddev from average" ) {
-        case m @ SeriesOutliers(alg, source, plan, outliers) => {
+        case m @ SeriesOutliers(alg, source, plan, outliers, control) => {
           alg mustBe Set( algoS )
           source mustBe series
           m.hasAnomalies mustBe true
@@ -192,7 +193,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
 
       analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "stddev from average again" ) {
-        case m @ SeriesOutliers(alg, source, plan, outliers) => {
+        case m @ SeriesOutliers(alg, source, plan, outliers, control) => {
           alg mustBe Set( algoS )
           source mustBe series2
           m.hasAnomalies mustBe true
@@ -222,7 +223,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
       val history1 = historyWith( None, series )
       analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series, plan), history1, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "grubbs" ) {
-        case m @ SeriesOutliers(alg, source, plan, outliers) => {
+        case m @ SeriesOutliers(alg, source, plan, outliers, control) => {
           alg mustBe Set( algoS )
           source mustBe series
           m.hasAnomalies mustBe true
@@ -243,7 +244,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
 
       analyzer.receive( DetectUsing(algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "grubbs again" ) {
-        case m @ NoOutliers(alg, source, plan) => {
+        case m @ NoOutliers(alg, source, plan, control) => {
           alg mustBe Set( algoS )
           source mustBe series2
           m.hasAnomalies mustBe false
@@ -251,7 +252,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
       }
     }
 
-    "find outliers based on absolute median deviation" in { f: Fixture =>
+    "find outliers based on absolute median deviation" taggedAs (NEXT) in { f: Fixture =>
       import f._
       val analyzer = TestActorRef[MedianAbsoluteDeviationAnalyzer]( MedianAbsoluteDeviationAnalyzer.props(router.ref) )
       val full = makeDataPoints(
@@ -269,7 +270,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
       val history1 = historyWith( None, series )
       analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series, plan), history1, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "median absolute deviation" ) {
-        case m @ SeriesOutliers(alg, source, plan, outliers) => {
+        case m @ SeriesOutliers(alg, source, plan, outliers, control) => {
           alg mustBe Set( algoS )
           source mustBe series
           m.hasAnomalies mustBe true
@@ -288,7 +289,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
 
       analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "median absolute deviation again" ) {
-        case m @ SeriesOutliers(alg, source, plan, outliers) => {
+        case m @ SeriesOutliers(alg, source, plan, outliers, control) => {
           alg mustBe Set( algoS )
           source mustBe series2
           m.hasAnomalies mustBe true
@@ -316,7 +317,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
       val history1 = historyWith( None, series )
       analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series, plan), history1, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "mean subtraction cumulation" ) {
-        case m @ SeriesOutliers(alg, source, plan, outliers) => {
+        case m @ SeriesOutliers(alg, source, plan, outliers, control) => {
           alg mustBe Set( algoS )
           source mustBe series
           m.hasAnomalies mustBe true
@@ -337,7 +338,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
 
       analyzer.receive( DetectUsing(algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "mean subtraction cumulation again" ) {
-        case m @ SeriesOutliers(alg, source, plan, outliers) => {
+        case m @ SeriesOutliers(alg, source, plan, outliers, control) => {
           alg mustBe Set( algoS )
           source mustBe series2
           m.hasAnomalies mustBe true
@@ -365,7 +366,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
       val history1 = historyWith( None, series )
       analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series, plan), history1, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "least squares" ) {
-        case m @ NoOutliers(alg, source, plan) => {
+        case m @ NoOutliers(alg, source, plan, control) => {
           alg mustBe Set( algoS )
           source mustBe series
           m.hasAnomalies mustBe false
@@ -391,7 +392,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
 
       analyzer.receive( DetectUsing(algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "least squares again" ) {
-        case m @ NoOutliers(alg, source, plan) => {
+        case m @ NoOutliers(alg, source, plan, control) => {
           alg mustBe Set( algoS )
           source mustBe series2
           m.hasAnomalies mustBe false
@@ -425,7 +426,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
       val history1 = historyWith( None, series )
       analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series, plan), history1, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "histogram bins" ) {
-        case m @ SeriesOutliers(alg, source, plan, outliers) => {
+        case m @ SeriesOutliers(alg, source, plan, outliers, control) => {
           alg mustBe Set( algoS )
           source mustBe series
           m.hasAnomalies mustBe true
@@ -446,7 +447,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
 
       analyzer.receive( DetectUsing(algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "histogram bins again" ) {
-        case m @ SeriesOutliers(alg, source, plan, outliers) => {
+        case m @ SeriesOutliers(alg, source, plan, outliers, control) => {
           alg mustBe Set( algoS )
           source mustBe series2
           m.hasAnomalies mustBe true
@@ -457,7 +458,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
     }
 
 
-    "find outliers via kolmogorov-smirnov (with augmented dickey fuller) Test" taggedAs (WIP) in { f: Fixture =>
+    "find outliers via kolmogorov-smirnov (with augmented dickey fuller) Test" in { f: Fixture =>
       import f._
       val now = joda.DateTime.now
 
@@ -479,7 +480,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
       val history1 = historyWith( None, series )
       analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series, plan), history1, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "ks-test" ) {
-        case m @ NoOutliers(alg, source, plan) => {
+        case m @ NoOutliers(alg, source, plan, control) => {
           alg mustBe Set( algoS )
           source mustBe series
           m.hasAnomalies mustBe false
@@ -499,7 +500,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
 
       analyzer.receive( DetectUsing(algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "ks-test II" ) {
-        case m @ NoOutliers(alg, source, plan) => {
+        case m @ NoOutliers(alg, source, plan, control) => {
           alg mustBe Set( algoS )
           source mustBe series2
           m.hasAnomalies mustBe false
@@ -520,7 +521,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
 
       analyzer.receive( DetectUsing(algoS, aggregator.ref, DetectOutliersInSeries(series3, plan), history3, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "ks-test III" ) {
-        case m @ SeriesOutliers(alg, source, plan, outliers) => {
+        case m @ SeriesOutliers(alg, source, plan, outliers, control) => {
           alg mustBe Set( algoS )
           source mustBe series3
           m.hasAnomalies mustBe true

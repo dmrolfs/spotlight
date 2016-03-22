@@ -45,7 +45,7 @@ class SkylineEWMASpec extends SkylineBaseSpec {
       val history1 = historyWith( None, series )
       analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series, plan), history1, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "stddev from moving average" ) {
-        case m @ SeriesOutliers(alg, source, plan, outliers) => {
+        case m @ SeriesOutliers(alg, source, plan, outliers, control) => {
           alg mustBe Set( algoS )
           source mustBe series
           m.hasAnomalies mustBe true
@@ -65,7 +65,7 @@ class SkylineEWMASpec extends SkylineBaseSpec {
 
       analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "stddev from moving average again" ) {
-        case m @ NoOutliers(alg, source, plan) => {
+        case m @ NoOutliers(alg, source, plan, control) => {
           alg mustBe Set( algoS )
           source mustBe series2
           m.hasAnomalies mustBe false

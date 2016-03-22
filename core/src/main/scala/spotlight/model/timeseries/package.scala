@@ -1,8 +1,6 @@
 package spotlight.model
 
-import org.joda.{time => joda}
 import org.apache.commons.math3.ml.clustering.DoublePoint
-import org.apache.commons.math3.ml.{clustering => ml}
 
 
 package object timeseries {
@@ -36,6 +34,11 @@ package object timeseries {
         }
       )
     }
+  }
+
+
+  implicit class TopicString( val underlying: String ) extends AnyVal {
+    def toTopic: Topic = Topic fromString underlying
   }
 
 

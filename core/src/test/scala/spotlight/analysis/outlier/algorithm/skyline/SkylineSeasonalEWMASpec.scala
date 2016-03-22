@@ -164,7 +164,7 @@ class SkylineSeasonalEWMASpec extends SkylineBaseSpec {
       val history1 = historyWith( None, series )
       analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series, plan), history1, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "stddev from seasonal ewma" ) {
-        case m @ SeriesOutliers(alg, source, plan, outliers) => {
+        case m @ SeriesOutliers(alg, source, plan, outliers, control) => {
           alg mustBe Set( algoS )
           source mustBe series
           m.hasAnomalies mustBe true
@@ -186,7 +186,7 @@ class SkylineSeasonalEWMASpec extends SkylineBaseSpec {
 
       analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "stddev from seasonal ewma again" ) {
-        case m @ SeriesOutliers(alg, source, plan, outliers) => {
+        case m @ SeriesOutliers(alg, source, plan, outliers, control) => {
           alg mustBe Set(algoS)
           source mustBe series2
           m.hasAnomalies mustBe true

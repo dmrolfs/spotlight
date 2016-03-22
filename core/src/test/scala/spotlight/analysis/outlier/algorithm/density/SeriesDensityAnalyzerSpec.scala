@@ -12,6 +12,7 @@ import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import org.joda.{time => joda}
 import org.mockito.Mockito._
 import org.scalatest.mock.MockitoSugar
+import peds.commons.V
 import shapeless._
 import spotlight.analysis.outlier._
 import spotlight.analysis.outlier.algorithm.AlgorithmActor
@@ -20,7 +21,6 @@ import spotlight.model.timeseries._
 import spotlight.testkit.ParallelAkkaSpec
 
 import scala.concurrent.duration._
-import scala.concurrent.{ExecutionContext, Future}
 
 
 /**
@@ -30,6 +30,8 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
   import SeriesDensityAnalyzerSpec._
 
   object Fixture {
+    import scalaz._
+
     val appliesToAll: OutlierPlan.AppliesTo = {
       val isQuorun: IsQuorum = IsQuorum.AtLeastQuorumSpecification(0, 0)
       val reduce: ReduceOutliers = new ReduceOutliers {
@@ -37,10 +39,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
           results: OutlierAlgorithmResults,
           source: TimeSeriesBase,
           plan: OutlierPlan
-        )
-        (
-          implicit ec: ExecutionContext
-        ): Future[Outliers] = Future.failed( new IllegalStateException("should not use" ) )
+        ): V[Outliers] = Validation.failureNel[Throwable, Outliers]( new IllegalStateException("should not use" ) ).disjunction
       }
 
       OutlierPlan.default( "", 1.second, isQuorun, reduce, Set.empty[Symbol] ).appliesTo
@@ -156,7 +155,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
       analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries( series, plan ), HistoricalStatistics(2, false), algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "detect" ) {
-        case m @ SeriesOutliers(alg, source, plan, outliers) => {
+        case m @ SeriesOutliers(alg, source, plan, outliers, control) => {
           alg mustBe Set( algoS )
           source mustBe series
           m.hasAnomalies mustBe true
@@ -210,7 +209,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
         //          source mustBe series
         //          outliers.size mustBe 6
         //        }
-        case m @ NoOutliers(alg, source, plan) => {
+        case m @ NoOutliers(alg, source, plan, control) => {
           alg mustBe Set( algoS )
           source mustBe series
           m.hasAnomalies mustBe false

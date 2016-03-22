@@ -92,7 +92,7 @@ class SeriesCentroidDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSug
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
       analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries( series, plan ), HistoricalStatistics(2, false ), algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "detect" ) {
-        case m @ SeriesOutliers(alg, source, plan, outliers) => {
+        case m @ SeriesOutliers(alg, source, plan, outliers, control) => {
           alg mustBe Set( algoS )
           source mustBe series
           m.hasAnomalies mustBe true
@@ -123,7 +123,7 @@ class SeriesCentroidDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSug
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
       analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries( series, plan ), history, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "detect" ) {
-        case m @ SeriesOutliers(alg, source, plan, outliers) => {
+        case m @ SeriesOutliers(alg, source, plan, outliers, control) => {
           alg mustBe Set( algoS )
           source mustBe series
           m.hasAnomalies mustBe true
@@ -177,7 +177,7 @@ class SeriesCentroidDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSug
         //          source mustBe series
         //          outliers.size mustBe 6
         //        }
-        case m @ NoOutliers(alg, source, plan) => {
+        case m @ NoOutliers(alg, source, plan, control) => {
           alg mustBe Set( algoS )
           source mustBe series
           m.hasAnomalies mustBe false

@@ -124,7 +124,7 @@ class PythonPickleProtocol extends GraphiteSerializationProtocol with LazyLoggin
     }
   }
 
-  type DataPointTuple = (String, Long, String)
+  type DataPointTuple = (Topic, Long, String)
 
   def pickle( points: DataPointTuple* )( implicit charset: Charset = Opcodes.charset ): ByteString = {
     val out = new ByteArrayOutputStream( points.size * 75 ) // Extremely rough estimate of 75 bytes per message
@@ -136,7 +136,7 @@ class PythonPickleProtocol extends GraphiteSerializationProtocol with LazyLoggin
     pickled append LIST
 
     points map { case (n, ts, v) =>
-      (sanitize(n), ts, sanitize(v))
+      (sanitize(n.name), ts, sanitize(v))
     } foreach { case (name, timestamp, value) =>
       // start the outer tuple
       pickled append MARK
@@ -182,15 +182,15 @@ class PythonPickleProtocol extends GraphiteSerializationProtocol with LazyLoggin
 
 
   def pickleFlattenedTimeSeries(
-    points: (String, joda.DateTime, Double)*
+    points: (Topic, joda.DateTime, Double)*
   )(
     implicit charset: Charset = Opcodes.charset
   ): ByteString = {
-    pickle( points map { case (name, timestamp, value) => ( name, timestamp.getMillis / 1000L, value.toString ) }:_* )
+    pickle( points map { case (topic, timestamp, value) => ( topic, timestamp.getMillis / 1000L, value.toString ) }:_* )
   }
 
   def pickleTimeSeries( ts: TimeSeries )( implicit charset: Charset = Opcodes.charset ): ByteString = {
-    pickleFlattenedTimeSeries( ts.points map { dp => ( ts.topic.name, dp.timestamp, dp.value ) }:_* )
+    pickleFlattenedTimeSeries( ts.points map { dp => ( ts.topic, dp.timestamp, dp.value ) }:_* )
   }
 
   val Whitespace = "[\\s]+".r

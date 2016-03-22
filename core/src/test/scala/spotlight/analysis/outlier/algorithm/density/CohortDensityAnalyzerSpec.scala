@@ -103,7 +103,7 @@ class CohortDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
         //          outliers.size mustBe 1
         //          outliers.head.name mustBe "series.one"
         //        }
-        case m @ CohortOutliers(alg, source, plan, outliers) => {
+        case m @ CohortOutliers(alg, source, plan, outliers, _) => {
           trace( s"""outliers=[${outliers.mkString(",")}]""" )
           alg mustBe Set( algoC )
           source mustBe cohort
@@ -145,7 +145,7 @@ class CohortDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
         //          outliers.size mustBe 1
         //          outliers.head.name mustBe "series.one"
         //        }
-        case m @ NoOutliers(alg, source, plan) => {
+        case m @ NoOutliers(alg, source, plan, _) => {
           alg mustBe Set( algoC )
           source mustBe cohort
           m.hasAnomalies mustBe false

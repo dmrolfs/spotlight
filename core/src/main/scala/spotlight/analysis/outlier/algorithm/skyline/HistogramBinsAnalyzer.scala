@@ -10,7 +10,7 @@ import peds.commons.Valid
 import spotlight.analysis.outlier.algorithm.AlgorithmActor.{AlgorithmContext, Op, TryV}
 import spotlight.analysis.outlier.algorithm.skyline.SkylineAnalyzer.SkylineContext
 import spotlight.model.outlier.Outliers
-import spotlight.model.timeseries.{DataPoint, Point2D}
+import spotlight.model.timeseries.{ControlBoundary, Point2D}
 
 
 /**
@@ -21,7 +21,7 @@ object HistogramBinsAnalyzer {
 
   def props( router: ActorRef ): Props = Props { new HistogramBinsAnalyzer( router ) }
 
-
+  //todo rewrite because it's not working. Consider http://stackoverflow.com/questions/10786465/how-to-generate-bins-for-histogram-using-apache-math-3-0-in-java
   final case class Histogram private[skyline]( bins: IndexedSeq[Bin], binSize: Double, min: Double, max: Double ) {
     def binFor( p: Point2D ): Option[Bin] = bins.lift( binIndexFor(p) )
     def binIndexFor( p: Point2D ): Int = ( ( p._2 - min ) / binSize ).toInt
@@ -75,14 +75,17 @@ class HistogramBinsAnalyzer( override val router: ActorRef ) extends SkylineAnal
       collectOutlierPoints(
         points = taverages,
         context = context,
-        isOutlier = (p: Point2D, ctx: Context) => {
-          val (_, v) = p
-          h.binFor( p )
+        evaluateOutlier = (p: Point2D, ctx: Context) => {
+          val (ts, v) = p
+          val isOutlier = h.binFor( p )
           .map { bin =>
             log.debug( "histogram-bins: identified bin[{}] :: size:{} < {}: [{}]", h.binIndexFor(p), bin.size, minimumBinSize, bin )
             bin.size < minimumBinSize
           }
           .getOrElse { v < h.min }
+
+          //todo: outlier based more on frequency than past some threshold, so does control apply?
+          ( isOutlier, ControlBoundary.empty(ts.toLong) )
         },
         update = (ctx: Context, pt: Point2D) => { ctx }
       )

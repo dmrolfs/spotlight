@@ -11,6 +11,8 @@ import org.joda.{time => joda}
 import org.mockito.Mockito._
 import org.scalatest.Tag
 import org.scalatest.mock.MockitoSugar
+import peds.commons.V
+
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -23,14 +25,12 @@ abstract class SkylineBaseSpec extends ParallelAkkaSpec with MockitoSugar with L
     val appliesToAll: OutlierPlan.AppliesTo = {
       val isQuorun: IsQuorum = IsQuorum.AtLeastQuorumSpecification(0, 0)
       val reduce: ReduceOutliers = new ReduceOutliers {
+        import scalaz._
         override def apply(
           results: OutlierAlgorithmResults,
           source: TimeSeriesBase,
           plan: OutlierPlan
-        )
-        (
-          implicit ec: ExecutionContext
-        ): Future[Outliers] = Future.failed( new IllegalStateException("should not use" ) )
+        ): V[Outliers] = Validation.failureNel[Throwable, Outliers]( new IllegalStateException("should not use" ) ).disjunction
       }
 
       import scala.concurrent.duration._

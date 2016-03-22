@@ -4,11 +4,7 @@ import org.joda.{ time => joda }
 import org.apache.commons.math3.ml.{ clustering => ml }
 
 
-case class ControlBoundary( floor: Double, expected: Double, ceiling: Double ) {
-  override def toString: String = s"[${floor}, ${expected}, ${ceiling}] )"
-}
-
-case class DataPoint( timestamp: joda.DateTime, value: Double, control: Option[ControlBoundary] = None ) {
+case class DataPoint( timestamp: joda.DateTime, value: Double ) {
   override def toString: String = s"(${timestamp}[${timestamp.getMillis}], ${value})"
 }
 

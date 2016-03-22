@@ -37,6 +37,14 @@ object SeriesDensityAnalyzer extends LazyLogging {
       makeDistanceHistory( ctx, Some(distanceHistory) ) map { dh => copy( underlying = ctx, distanceHistory = dh ) }
     }
 
+    override type That = Context
+    override def withSource( newSource: TimeSeriesBase ): That = {
+      val updated = underlying withSource newSource
+      copy( underlying = updated )
+    }
+
+    override def addControlBoundary( control: ControlBoundary ): That = copy(underlying = underlying.addControlBoundary(control))
+
     override def message: DetectUsing = underlying.message
     override def algorithm: Symbol = underlying.algorithm
     override def topic: Topic = underlying.topic
@@ -48,6 +56,7 @@ object SeriesDensityAnalyzer extends LazyLogging {
     override def messageConfig: Config = underlying.messageConfig
     override def distanceMeasure: TryV[DistanceMeasure] = underlying.distanceMeasure
     override def tolerance: TryV[Option[Double]] = underlying.tolerance
+    override def controlBoundaries: Seq[ControlBoundary] = underlying.controlBoundaries
   }
 
   def makeDistanceHistory( c: AlgorithmContext, prior: Option[DescriptiveStatistics] ): Valid[DescriptiveStatistics] = trace.block( "makeDistanceHistory" ) {
