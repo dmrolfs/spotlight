@@ -3,16 +3,18 @@ package spotlight.analysis.outlier
 import scala.util.Success
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.FiniteDuration
-import akka.actor.{ Cancellable, Actor, ActorLogging, Props }
+import akka.actor.{Actor, ActorLogging, Cancellable, Props}
 import akka.event.LoggingReceive
 import com.typesafe.scalalogging.Logger
 import org.slf4j.LoggerFactory
-import nl.grons.metrics.scala.{MetricName, Meter}
+import nl.grons.metrics.scala.{Meter, MetricName}
 import peds.akka.metrics.InstrumentedActor
 import peds.commons.log.Trace
 import spotlight.analysis.outlier.OutlierQuorumAggregator.ConfigurationProvider
 import spotlight.model.outlier._
-import spotlight.model.timeseries.{ Topic, TimeSeriesBase }
+import spotlight.model.timeseries.{ControlBoundary, TimeSeriesBase, Topic}
+
+import scalaz.{-\/, \/-}
 
 
 object OutlierQuorumAggregator {
@@ -67,8 +69,7 @@ extends Actor with InstrumentedActor with ActorLogging { outer: ConfigurationPro
 
   override def postStop(): Unit = cancelWhistle()
 
-  type AnalysisFulfillment = Map[Symbol, Outliers]
-  var _fulfilled: AnalysisFulfillment = Map()
+  var _fulfilled: OutlierAlgorithmResults = Map()
 
   override def receive: Receive = around( quorum() )
 
@@ -80,9 +81,10 @@ extends Actor with InstrumentedActor with ActorLogging { outer: ConfigurationPro
     }
 
     case unknown: UnrecognizedPayload => {
-      log.info( "converting unrecognized response to NoOutliers for [{}]", unknown.topic )
-      _fulfilled += unknown.algorithm -> NoOutliers( algorithms = Set(unknown.algorithm), source = unknown.source, plan = plan )
-      process( _fulfilled )
+      warningsMeter.mark()
+      log.warning( "dropping unrecognized response [{}]", unknown)
+//      _fulfilled += unknown.algorithm -> NoOutliers( algorithms = Set(unknown.algorithm), source = unknown.source, plan = plan, algorithmControlBoundaries = Map.empty[Symbol, Seq[ControlBoundary]] )
+//      process( _fulfilled )
     }
 
     //todo: this whole retry approach is wrong; should simply increase timeout
@@ -109,17 +111,24 @@ extends Actor with InstrumentedActor with ActorLogging { outer: ConfigurationPro
     }
   }
 
-  def process( fulfilled: AnalysisFulfillment )( implicit ec: ExecutionContext ): Unit = {
+  def process( fulfilled: OutlierAlgorithmResults )( implicit ec: ExecutionContext ): Unit = {
     if ( plan isQuorum fulfilled ) {
       conclusionsMeter.mark()
-      import akka.pattern.pipe
-      plan.reduce( fulfilled, source, plan ) pipeTo context.parent andThen { case Success(r) => logTally( r, fulfilled ) }
+      plan.reduce( fulfilled, source, plan ) match {
+        case \/-( o ) => {
+          context.parent ! o
+          logTally( o, fulfilled )
+        }
+
+        case -\/( exs ) => exs.foreach{ ex => log.error( "failed to create Outliers for plan [{}] due to: {}", plan, ex ) }
+      }
+
       context stop self
     }
   }
 
   val outlierLogger: Logger = Logger( LoggerFactory getLogger "Outliers" )
-  def logTally( result: Outliers, fulfilled: AnalysisFulfillment ): Unit = {
+  def logTally( result: Outliers, fulfilled: OutlierAlgorithmResults ): Unit = {
     result match {
       case o: NoOutliers => outlierLogger info o.toString
       case o => outlierLogger info o.toString
