@@ -226,19 +226,19 @@ trait SkylineAnalyzer[C <: SkylineAnalyzer.SkylineContext] extends AlgorithmActo
   ): Op[AlgorithmContext, (Outliers, AlgorithmContext)] = {
     for {
       outliersContext <- outliers
-      (outlierPoints, context) = outliersContext
-      result <- makeOutliers( outlierPoints )
-    } yield (result, context)
+      (outlierPoints, resultingContext) = outliersContext
+      result <- makeOutliers( outlierPoints, resultingContext )
+    } yield (result, resultingContext)
   }
 
-  def makeOutliers( os: Seq[DataPoint] ): Op[AlgorithmContext, Outliers] = {
-    kleisli[TryV, AlgorithmContext, Outliers] { context =>
+  def makeOutliers( outliers: Seq[DataPoint], resultingContext: AlgorithmContext ): Op[AlgorithmContext, Outliers] = {
+    kleisli[TryV, AlgorithmContext, Outliers] { originalContext =>
       Outliers.forSeries(
         algorithms = Set( algorithm ),
-        plan = context.plan,
-        source = context.source,
-        outliers = os,
-        algorithmControlBoundaries = Map( algorithm -> context.controlBoundaries )
+        plan = originalContext.plan,
+        source = originalContext.source,
+        outliers = outliers,
+        algorithmControlBoundaries = Map( algorithm -> resultingContext.controlBoundaries )
       )
       .disjunction
       .leftMap { _.head }
