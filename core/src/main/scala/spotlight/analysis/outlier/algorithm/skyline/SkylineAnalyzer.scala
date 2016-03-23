@@ -229,13 +229,13 @@ trait SkylineAnalyzer[C <: SkylineAnalyzer.SkylineContext] extends AlgorithmActo
     } yield (result, resultingContext)
   }
 
-  def makeOutliers( os: Seq[DataPoint], resultingContext: AlgorithmContext ): Op[AlgorithmContext, Outliers] = {
+  def makeOutliers( outliers: Seq[DataPoint], resultingContext: AlgorithmContext ): Op[AlgorithmContext, Outliers] = {
     kleisli[TryV, AlgorithmContext, Outliers] { originalContext =>
       Outliers.forSeries(
         algorithms = Set( algorithm ),
         plan = originalContext.plan,
         source = originalContext.source,
-        outliers = os,
+        outliers = outliers,
         algorithmControlBoundaries = Map( algorithm -> resultingContext.controlBoundaries )
       )
       .disjunction

@@ -152,7 +152,7 @@ class KolmogorovSmirnovAnalyzer( override val router: ActorRef ) extends Skyline
     .leftMap {
       case ex: MathInternalError => {
         log.error( "ks-test internal math error. reference[size:{}][{}], series[size:{}][{}]: {}", reference.size, reference.mkString(","), series.size, series.mkString(",") )
-        log.error( "ks-test internal math error: {}", ex )
+        log.error( "ks-test internal math error: {}", ex.getMessage )
         ex
       }
 

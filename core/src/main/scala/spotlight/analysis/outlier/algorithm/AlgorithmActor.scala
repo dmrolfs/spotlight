@@ -26,6 +26,7 @@ trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
 
   override def preStart(): Unit = {
     context watch router
+    log.info( "attempting to register [{}] @ [{}] with {}", algorithm.name, self.path, sender().path )
     router ! DetectionAlgorithmRouter.RegisterDetectionAlgorithm( algorithm, self )
   }
 
@@ -33,7 +34,7 @@ trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
 
   def quiescent: Receive = LoggingReceive {
     case DetectionAlgorithmRouter.AlgorithmRegistered( a ) if a == algorithm => {
-      log.info( "{} registered [{}] with {}", self.path, algorithm.name, sender().path )
+      log.info( "registration confirmed for [{}] @ [{}] with {}", algorithm.name, self.path, sender().path )
       context become around( detect )
     }
 

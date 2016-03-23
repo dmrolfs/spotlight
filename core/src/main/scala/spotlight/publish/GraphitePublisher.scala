@@ -163,7 +163,7 @@ class GraphitePublisher extends DenseOutlierPublisher {
 
   override def preStart(): Unit = {
     initializeMetrics()
-    log.info( "{} dispatcher: [{}]", self.path, context.dispatcher )
+    log.debug( "{} dispatcher: [{}]", self.path, context.dispatcher )
     self ! Open
   }
 
@@ -216,9 +216,7 @@ class GraphitePublisher extends DenseOutlierPublisher {
   }
 
   override def publish( o: Outliers ): Unit = {
-//    log.error( "PUBLISH OUTLIER-CONTROLS: [{}]", o.algorithmControlBoundaries.mkString(","))
     val points = markPoints( o )
-//    log.error( "PUBLISH-POINTS: [{}]", points.mkString("\n", ",", "\n") )
     waitQueue = points.foldLeft( waitQueue ){ _ enqueue _ }
     log.debug( "publish[{}]: added [{} / {}] to wait queue - now at [{}]", o.topic, o.anomalySize, o.size, waitQueue.size )
   }
@@ -256,9 +254,9 @@ class GraphitePublisher extends DenseOutlierPublisher {
 
   override def markPoints( o: Outliers ): Seq[TopicPoint] = {
     val dataPoints = super.markPoints( o ) map { case (t, ts, v) => ( outer.publishingTopic(o.plan, t), ts, v ) }
-    log.error( "GraphitePublisher: marked data points: [{}]", dataPoints.mkString(","))
+    log.debug( "GraphitePublisher: marked data points: [{}]", dataPoints.mkString(","))
     val controlPoints = flattenControlPoints( o )
-    log.error( "GraphitePublisher: control data points: [{}]", controlPoints.mkString(","))
+    log.debug( "GraphitePublisher: control data points: [{}]", controlPoints.mkString(","))
     dataPoints ++ controlPoints
   }
 
@@ -305,7 +303,7 @@ class GraphitePublisher extends DenseOutlierPublisher {
       val (toBePublished, remainingQueue) = waitQueue splitAt outer.batchSize
       waitQueue = remainingQueue
 
-      log.info( "flush: batch=[{}]", toBePublished.mkString(",") )
+      log.debug( "flush: batch=[{}]", toBePublished.mkString(",") )
       val report = serialize( toBePublished:_* )
       breaker withSyncCircuitBreaker {
         circuitRequestsMeter.mark()
