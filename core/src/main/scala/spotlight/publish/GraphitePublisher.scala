@@ -85,6 +85,10 @@ object GraphitePublisher extends LazyLogging {
     def batchSize: Int = 100
     def batchInterval: FiniteDuration = 1.second
     def publishingTopic( p: OutlierPlan, t: Topic ): Topic = s"${p.name}.${t}"
+    def publishAlgorithmControlBoundaries( p: OutlierPlan, algorithm: Symbol ): Boolean = {
+      val publishKey = algorithm.name + ".publish-controls"
+      if ( p.algorithmConfig hasPath publishKey ) p.algorithmConfig getBoolean publishKey else false
+    }
   }
 
 
@@ -212,7 +216,9 @@ class GraphitePublisher extends DenseOutlierPublisher {
   }
 
   override def publish( o: Outliers ): Unit = {
+//    log.error( "PUBLISH OUTLIER-CONTROLS: [{}]", o.algorithmControlBoundaries.mkString(","))
     val points = markPoints( o )
+//    log.error( "PUBLISH-POINTS: [{}]", points.mkString("\n", ",", "\n") )
     waitQueue = points.foldLeft( waitQueue ){ _ enqueue _ }
     log.debug( "publish[{}]: added [{} / {}] to wait queue - now at [{}]", o.topic, o.anomalySize, o.size, waitQueue.size )
   }
@@ -230,25 +236,29 @@ class GraphitePublisher extends DenseOutlierPublisher {
       outer.publishingTopic( o.plan, labeling(algorithm) + o.topic )
     }
 
-    o.algorithmControlBoundaries.toSeq flatMap { case (algorithm, controlBoundaries) =>
-      val floorTopic = algorithmControlTopic( algorithm, FloorLabel )
-      val expectedTopic = algorithmControlTopic( algorithm, ExpectedLabel )
-      val ceilingTopic = algorithmControlTopic( algorithm, CeilingLabel )
-      controlBoundaries flatMap { c =>
-        Seq( floorTopic, expectedTopic, ceilingTopic )
-        .zipAll( Seq.empty[joda.DateTime], Topic(""), c.timestamp ) // tuple topics with c.timestamp
-        .zip( Seq(c.floor, c.expected, c.ceiling) ) // add control values to tuple
-        .map { case ((topic, ts), value) => value map { v => ( topic, ts, v ) } } // make tuple
-        .flatten // trim out unprovided control values
+    o.algorithmControlBoundaries.toSeq flatMap {
+      case (algorithm, controlBoundaries) if outer.publishAlgorithmControlBoundaries( o.plan, algorithm ) => {
+        val floorTopic = algorithmControlTopic( algorithm, FloorLabel )
+        val expectedTopic = algorithmControlTopic( algorithm, ExpectedLabel )
+        val ceilingTopic = algorithmControlTopic( algorithm, CeilingLabel )
+        controlBoundaries flatMap { c =>
+          Seq( floorTopic, expectedTopic, ceilingTopic )
+          .zipAll( Seq.empty[joda.DateTime], Topic(""), c.timestamp ) // tuple topics with c.timestamp
+          .zip( Seq(c.floor, c.expected, c.ceiling) ) // add control values to tuple
+          .map { case ((topic, ts), value) => value map { v => ( topic, ts, v ) } } // make tuple
+          .flatten // trim out unprovided control values
+        }
       }
+
+      case (algorithm, controlBoundaries) => Seq.empty[TopicPoint]
     }
   }
 
   override def markPoints( o: Outliers ): Seq[TopicPoint] = {
     val dataPoints = super.markPoints( o ) map { case (t, ts, v) => ( outer.publishingTopic(o.plan, t), ts, v ) }
-    log.debug( "GraphitePublisher: marked data points: [{}]", dataPoints.mkString(","))
+    log.error( "GraphitePublisher: marked data points: [{}]", dataPoints.mkString(","))
     val controlPoints = flattenControlPoints( o )
-    log.debug( "GraphitePublisher: cotrol data points: [{}]", controlPoints.mkString(","))
+    log.error( "GraphitePublisher: control data points: [{}]", controlPoints.mkString(","))
     dataPoints ++ controlPoints
   }
 

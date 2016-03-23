@@ -28,5 +28,17 @@ class LogPublisher extends OutlierPublisher {
     }
   }
 
-  override def publish( outliers: Outliers ): Unit = outlierLogger info outliers.toString
+  override def publish( outliers: Outliers ): Unit = {
+    outlierLogger info outliers.toString
+
+    outliers.algorithmControlBoundaries foreach { case (algorithm, controls) =>
+      outlierLogger.info(
+        "\t\tcontrol-boundaries[{}]:[{}]:[{}]: [{}]",
+        outliers.plan.name,
+        outliers.topic,
+        algorithm.name,
+        controls.mkString(",")
+      )
+    }
+  }
 }

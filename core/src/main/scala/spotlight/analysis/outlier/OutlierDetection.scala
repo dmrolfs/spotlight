@@ -172,18 +172,19 @@ class OutlierDetection extends Actor with InstrumentedActor with ActorLogging {
     sentHistory
   }
 
-  var _score: Map[Topic, (Long, Long)] = Map.empty[Topic, (Long, Long)]
+  var _score: Map[(OutlierPlan, Topic), (Long, Long)] = Map.empty[(OutlierPlan, Topic), (Long, Long)]
   val outlierLogger: Logger = Logger( LoggerFactory getLogger "Outliers" )
 
   def updateScore( os: Outliers ): Unit = {
-    val s = _score.get( os.topic ) map { case (o, t) =>
+    val key = (os.plan, os.topic)
+    val s = _score.get( key ) map { case (o, t) =>
       ( o + os.anomalySize.toLong, t + os.size.toLong )
     } getOrElse {
       ( os.anomalySize.toLong, os.size.toLong )
     }
-    _score += os.topic -> s
+    _score += key -> s
     outlierLogger.debug(
-      "\t\t[{}]:[{}] outlier rate:[{}%] in [{}] points",
+      "\t\toutlier-rate[{}]:[{}] = [{}%] in [{}] points",
       os.plan.name,
       os.topic,
       (s._1.toDouble / s._2.toDouble).toString,

@@ -129,9 +129,13 @@ extends Actor with InstrumentedActor with ActorLogging { outer: ConfigurationPro
 
   val outlierLogger: Logger = Logger( LoggerFactory getLogger "Outliers" )
   def logTally( result: Outliers, fulfilled: OutlierAlgorithmResults ): Unit = {
-    result match {
-      case o: NoOutliers => outlierLogger info o.toString
-      case o => outlierLogger info o.toString
-    }
+    val tally = fulfilled map { case (a, o) => (a, o.anomalySize) }
+    outlierLogger.debug(
+      "\t\talgorithm-tally[{}]:[{}] = final:[{}] algorithms:[{}]",
+      result.plan.name,
+      result.topic,
+      result.anomalySize.toString,
+      tally.mkString( "[", ",", "]" )
+    )
   }
 }

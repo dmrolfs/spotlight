@@ -1,24 +1,25 @@
 package spotlight.publish
 
 import java.io.ByteArrayOutputStream
-import java.net.{ InetAddress, InetSocketAddress, Socket }
-import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger }
+import java.net.{InetAddress, InetSocketAddress, Socket}
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
 import javax.net._
-import javax.script.{ Compilable, ScriptEngineManager, SimpleBindings }
+import javax.script.{Compilable, ScriptEngineManager, SimpleBindings}
 
 import akka.actor.Props
 import akka.testkit.TestActorRef
 import akka.util.ByteString
-import spotlight.model.outlier.{ Outliers, OutlierPlan, NoOutliers, SeriesOutliers }
-import spotlight.model.timeseries.{ Topic, DataPoint, TimeSeries }
+import com.typesafe.config.ConfigFactory
+import spotlight.model.outlier.{NoOutliers, OutlierPlan, Outliers, SeriesOutliers}
+import spotlight.model.timeseries.{ControlBoundary, DataPoint, TimeSeries, Topic}
 import spotlight.protocol.PythonPickleProtocol
 import spotlight.testkit.ParallelAkkaSpec
-import org.joda.{ time => joda }
+import org.joda.{time => joda}
 import org.mockito.Mockito._
 import org.mockito.Matchers._
 import org.mockito.invocation.InvocationOnMock
 import org.mockito.stubbing.Answer
-import org.python.core.{ PyTuple, PyList }
+import org.python.core.{PyList, PyTuple}
 import org.scalatest.Tag
 import org.scalatest.mock.MockitoSugar
 import peds.commons.log.Trace
@@ -66,7 +67,8 @@ with MockitoSugar {
     val socketFactory: SocketFactory = mock[SocketFactory]
 
     val plan = mock[OutlierPlan]
-    when( plan.name ).thenReturn( "plan" )
+    when( plan.name ) thenReturn "plan"
+//    when( plan.algorithmConfig ) thenReturn ConfigFactory.parseString( "" )
 
     val socket: Socket = mock[Socket]
     when( socket.isConnected ).thenAnswer(
@@ -213,7 +215,7 @@ with MockitoSugar {
       unpickleOutput() mustBe "foo 0.0 100\nfoo 1.0 117\n"
     }
 
-    "write past full batch" taggedAs (WIP) in { f: Fixture =>
+    "write past full batch" in { f: Fixture =>
       import f._
 
       val graphite2 = TestActorRef[GraphitePublisher](
@@ -275,6 +277,69 @@ with MockitoSugar {
       graphite.receive( Open )
       openCount.get mustBe 1
     }
+
+
+
+    "write past full batch with control boundaries" taggedAs (WIP) in { f: Fixture =>
+      import f._
+
+      val algos = Set( 'dbscan, 'x, 'y )
+      val algConfig = ConfigFactory.parseString( algos.map{ a => s"${a.name}.publish-controls: yes" }.mkString("\n") )
+      when( plan.algorithmConfig ) thenReturn algConfig
+
+      algos foreach { a => plan.algorithmConfig.getBoolean( s"${a.name}.publish-controls" ) mustBe true }
+
+
+      val graphite2 = TestActorRef[GraphitePublisher](
+        Props(
+          new GraphitePublisher with GraphitePublisher.PublishProvider {
+            import scala.concurrent.duration._
+            override def separation: FiniteDuration = 1.second
+            override def initializeMetrics(): Unit = { }
+            override def destinationAddress: InetSocketAddress = f.address
+            override def createSocket( address: InetSocketAddress ): Socket = {
+              openCount.incrementAndGet()
+              f.socket
+            }
+            override def publishingTopic( p: OutlierPlan, t: Topic ): Topic = "spotlight.outlier." + super.publishingTopic( p, t )
+          }
+        )
+      )
+
+      val controlBoundaries = Map(
+        'x -> Seq(
+          ControlBoundary.fromExpectedAndDistance(dp1.timestamp, 1, 0.1),
+          ControlBoundary.fromExpectedAndDistance(dp2.timestamp, 1, 0.25),
+          ControlBoundary.fromExpectedAndDistance(dp3.timestamp, 1, 0.3)
+        ),
+        'y -> Seq(
+          ControlBoundary.fromExpectedAndDistance(dp1.timestamp, 3, 0.3),
+          ControlBoundary.fromExpectedAndDistance(dp2.timestamp, 3, 0.5),
+          ControlBoundary.fromExpectedAndDistance(dp3.timestamp, 3, 0.7)
+        )
+      )
+
+      val outliers = SeriesOutliers(
+        algorithms = algos,
+        source = TimeSeries("foo", Seq(dp1, dp2, dp3)),
+        outliers = Seq(dp1),
+        plan = plan,
+        algorithmControlBoundaries = controlBoundaries
+      )
+
+      graphite2.receive( Publish(outliers) )
+      graphite2.receive( Flush )
+      unpickleOutput() mustBe (
+        "spotlight.outlier.plan.foo 1.0 100\nspotlight.outlier.plan.foo 0.0 117\nspotlight.outlier.plan.foo 0.0 9821\n" +
+        "spotlight.outlier.plan.x.floor.foo 0.9 100\nspotlight.outlier.plan.x.expected.foo 1.0 100\nspotlight.outlier.plan.x.ceiling.foo 1.1 100\n" +
+        "spotlight.outlier.plan.x.floor.foo 0.75 117\nspotlight.outlier.plan.x.expected.foo 1.0 117\nspotlight.outlier.plan.x.ceiling.foo 1.25 117\n" +
+        "spotlight.outlier.plan.x.floor.foo 0.7 9821\nspotlight.outlier.plan.x.expected.foo 1.0 9821\nspotlight.outlier.plan.x.ceiling.foo 1.3 9821\n" +
+        "spotlight.outlier.plan.y.floor.foo 2.7 100\nspotlight.outlier.plan.y.expected.foo 3.0 100\nspotlight.outlier.plan.y.ceiling.foo 3.3 100\n" +
+        "spotlight.outlier.plan.y.floor.foo 2.5 117\nspotlight.outlier.plan.y.expected.foo 3.0 117\nspotlight.outlier.plan.y.ceiling.foo 3.5 117\n" +
+        "spotlight.outlier.plan.y.floor.foo 2.3 9821\nspotlight.outlier.plan.y.expected.foo 3.0 9821\nspotlight.outlier.plan.y.ceiling.foo 3.7 9821\n"
+      )
+    }
+
   }
 }
 

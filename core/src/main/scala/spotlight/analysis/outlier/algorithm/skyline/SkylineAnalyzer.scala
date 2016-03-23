@@ -179,11 +179,6 @@ trait SkylineAnalyzer[C <: SkylineAnalyzer.SkylineContext] extends AlgorithmActo
     evaluateOutlier: EvaluateOutlier[CTX],
     update: UpdateContext[CTX]
   ): (Seq[DataPoint], AlgorithmContext) = {
-//    def replaceSourcePoint( ctx: CTX , timestamp: joda.DateTime, control: ControlBoundary ): CTX = {
-//      val source = ctx.source.withControlBoundary( timestamp, control )
-//      ctx.withSource( source ).asInstanceOf[CTX] //todo: not a fan of this cast.
-//    }
-
     @tailrec def loop( pts: List[Point2D], ctx: CTX, acc: Seq[DataPoint] ): (Seq[DataPoint], AlgorithmContext) = {
       ctx.cast[SkylineContext] foreach { setScopedContext }
 
@@ -206,11 +201,14 @@ trait SkylineAnalyzer[C <: SkylineAnalyzer.SkylineContext] extends AlgorithmActo
 
           val updatedContext = update( ctx.addControlBoundary(control).asInstanceOf[CTX], pt ) //todo: not a fan of this cast.
 
-          if ( isOutlier ) {
-            log.info( "LOOP-HIT[{}]: control:[{}] acc:[{}]", (pt._1.toLong, pt._2), control, updatedAcc.size )
-          } else {
-            log.debug( "LOOP-MISS[{}]: control:[{}] acc:[{}]", (pt._1.toLong, pt._2), control, updatedAcc.size )
-          }
+          log.debug( "LOOP ControlBoundaries: [{}]", updatedContext.controlBoundaries.mkString(","))
+          log.debug(
+            "LOOP-{}[{}]: control:[{}] acc:[{}]",
+            if ( isOutlier ) "HIT" else "MISS",
+            (pt._1.toLong, pt._2),
+            control,
+            updatedAcc.size
+          )
 
           loop( tail, updatedContext, updatedAcc )
         }
@@ -226,19 +224,19 @@ trait SkylineAnalyzer[C <: SkylineAnalyzer.SkylineContext] extends AlgorithmActo
   ): Op[AlgorithmContext, (Outliers, AlgorithmContext)] = {
     for {
       outliersContext <- outliers
-      (outlierPoints, context) = outliersContext
-      result <- makeOutliers( outlierPoints )
-    } yield (result, context)
+      (outlierPoints, resultingContext) = outliersContext
+      result <- makeOutliers( outlierPoints, resultingContext )
+    } yield (result, resultingContext)
   }
 
-  def makeOutliers( os: Seq[DataPoint] ): Op[AlgorithmContext, Outliers] = {
-    kleisli[TryV, AlgorithmContext, Outliers] { context =>
+  def makeOutliers( os: Seq[DataPoint], resultingContext: AlgorithmContext ): Op[AlgorithmContext, Outliers] = {
+    kleisli[TryV, AlgorithmContext, Outliers] { originalContext =>
       Outliers.forSeries(
         algorithms = Set( algorithm ),
-        plan = context.plan,
-        source = context.source,
+        plan = originalContext.plan,
+        source = originalContext.source,
         outliers = os,
-        algorithmControlBoundaries = Map( algorithm -> context.controlBoundaries )
+        algorithmControlBoundaries = Map( algorithm -> resultingContext.controlBoundaries )
       )
       .disjunction
       .leftMap { _.head }
