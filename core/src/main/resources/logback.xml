@@ -120,6 +120,23 @@
     </triggeringPolicy>
   </appender>
 
+  <appender name="PUBLISH_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+    <file>${LOG_HOME}/publish.log</file>
+    <append>false</append>
+    <encoder>
+      <pattern>%msg%n</pattern>
+    </encoder>
+    <rollingPolicy class="ch.qos.logback.core.rolling.FixedWindowRollingPolicy">
+      <fileNamePattern>${LOG_HOME}/publish-%i.log.gz</fileNamePattern>
+      <cleanHistoryOnStart>true</cleanHistoryOnStart>
+      <minIndex>1</minIndex>
+      <maxIndex>3</maxIndex>
+    </rollingPolicy>
+    <triggeringPolicy class="ch.qos.logback.core.rolling.SizeBasedTriggeringPolicy">
+      <maxFileSize>1GB</maxFileSize>
+    </triggeringPolicy>
+  </appender>
+
   <logger name="Metrics" level="DEBUG" additivity="false">
     <appender-ref ref="METRIC_FILE" />
   </logger>
@@ -138,6 +155,10 @@
 
   <logger name="Outliers" level="DEBUG" additivity="false">
     <appender-ref ref="OUTLIERS_FILE" />
+  </logger>
+
+  <logger name="Publish" level="DEBUG" additivity="false">
+    <appender-ref ref="PUBLISH_FILE" />
   </logger>
 
   <!--<root level="WARN">-->
