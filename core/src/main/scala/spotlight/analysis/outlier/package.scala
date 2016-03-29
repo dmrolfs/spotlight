@@ -13,8 +13,6 @@ import spotlight.model.timeseries.{ Topic, TimeSeriesBase, TimeSeriesCohort, Tim
  * Created by rolfsd on 10/4/15.
  */
 package object outlier {
-  type Point = Array[Double]
-
   sealed trait OutlierDetectionMessage {
     def topic: Topic
     type Source <: TimeSeriesBase

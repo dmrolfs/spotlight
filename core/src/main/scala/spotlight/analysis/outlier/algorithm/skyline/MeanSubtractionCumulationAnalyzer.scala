@@ -53,7 +53,7 @@ extends SkylineAnalyzer[SkylineAnalyzer.SimpleSkylineContext] {
           val control = ControlBoundary.fromExpectedAndDistance(
             timestamp = ts.toLong,
             expected = ctx.history.mean( 1 ),
-            distance = tol * ctx.history.standardDeviation( 1 )
+            distance = math.abs( tol * ctx.history.standardDeviation(1) )
           )
 
           ( control isOutlier v, control )

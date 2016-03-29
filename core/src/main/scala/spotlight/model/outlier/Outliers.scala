@@ -50,7 +50,8 @@ abstract class Outliers extends Equals {
   }
 
   override def toString: String = {
-    s"""${getClass.safeSimpleName}:[${plan.name}][${topic}][source:[${source.size}] interval:[${source.interval getOrElse "No Interval"}]"""
+    s"""${getClass.safeSimpleName}outliers:[${anomalySize}].plan:[${plan.name}].topic:[${topic}].source:[${source.size}].""" +
+    s"""interval:[${source.interval getOrElse "No Interval"}]"""
   }
 }
 
@@ -220,7 +221,7 @@ case class SeriesOutliers(
   }
 
 
-  override def toString: String = super.toString + s"""[outliers[${outliers.size}]:[${outliers.mkString(",")}]]"""
+  override def toString: String = super.toString + s""".outliers:[${outliers.mkString(",")}]"""
 }
 
 
@@ -261,5 +262,5 @@ case class CohortOutliers(
     }
   }
 
-  override def toString: String = super.toString + s"""[outliers:[${outliers.mkString(",")}]"""
+  override def toString: String = super.toString + s""".outliers:[${outliers.mkString(",")}]"""
 }

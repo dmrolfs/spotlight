@@ -11,10 +11,11 @@ import akka.actor._
 import akka.event.LoggingReceive
 import akka.pattern.{CircuitBreaker, CircuitBreakerOpenException, ask}
 import akka.stream.scaladsl.Flow
-import akka.stream.{ActorAttributes, Supervision}
+import akka.stream.{ActorAttributes, OverflowStrategy, Supervision}
 import akka.util.{ByteString, Timeout}
 import org.joda.{time => joda}
-import com.typesafe.scalalogging.LazyLogging
+import com.typesafe.scalalogging.{LazyLogging, Logger}
+import org.slf4j.LoggerFactory
 import nl.grons.metrics.scala.{Meter, Timer}
 import peds.akka.stream.Limiter
 import peds.commons.log.Trace
@@ -53,12 +54,10 @@ object GraphitePublisher extends LazyLogging {
     }
 
     implicit val to = Timeout( timeout )
-
+//todo DMR WORK HERE: GROUP up to graphite batch size???
     Flow[Outliers]
-    .conflate( immutable.Seq( _ ) ) { _ :+ _ }
-    .mapConcat( identity )
-    .via( Limiter.limitGlobal(limiter, 2.minutes) )
-    .mapAsync( 1 ) { os =>
+//    .via( Limiter.limitGlobal(limiter, 2.minutes) )
+    .mapAsync( Runtime.getRuntime.availableProcessors() ) { os =>
       val published = publisher ? Publish( os )
       published.mapTo[Published] map { _.outliers }
     }
@@ -82,8 +81,8 @@ object GraphitePublisher extends LazyLogging {
     def separation: FiniteDuration = 10.seconds
     def destinationAddress: InetSocketAddress
     def createSocket( address: InetSocketAddress ): Socket
-    def batchSize: Int = 100
-    def batchInterval: FiniteDuration = 1.second
+    def batchSize: Int
+    def minimumBatchInterval: FiniteDuration = 200.milliseconds
     def publishingTopic( p: OutlierPlan, t: Topic ): Topic = s"${p.name}.${t}"
     def publishAlgorithmControlBoundaries( p: OutlierPlan, algorithm: Symbol ): Boolean = {
       val publishKey = algorithm.name + ".publish-controls"
@@ -117,10 +116,19 @@ class GraphitePublisher extends DenseOutlierPublisher {
   lazy val circuitOpenMeter: Meter = metrics.meter( "circuit", "open" )
   lazy val circuitPendingMeter: Meter = metrics.meter( "circuit", "pending" )
   lazy val circuitRequestsMeter: Meter = metrics.meter( "circuit", "requests" )
-  lazy val publishedMeter: Meter = metrics.meter( "published" )
-  lazy val publishTimer: Timer = metrics.timer( "publishing" )
+  lazy val bytesPublishedMeter: Meter = metrics.meter( "bytes-published" )
+  lazy val publishingTimer: Timer = metrics.timer( "publishing" )
   var gaugeStatus: BreakerStatus = BreakerClosed
 
+  val publishLogger: Logger = Logger( LoggerFactory getLogger "Publish" )
+
+  val publishDispatcher = context.system.dispatchers.lookup( "publish-dispatcher" )
+
+
+  def batchInterval: FiniteDuration = {
+    val calculated = FiniteDuration( ( publishingTimer.mean + 3 * publishingTimer.stdDev ).toLong, MILLISECONDS )
+    if ( minimumBatchInterval < calculated ) calculated else minimumBatchInterval
+  }
 
   def initializeMetrics(): Unit = {
     metrics.gauge( "waiting" ) { waitQueue.size }
@@ -132,11 +140,15 @@ class GraphitePublisher extends DenseOutlierPublisher {
       context.system.scheduler,
       maxFailures = 5,
       callTimeout = 10.seconds,
-      resetTimeout = 1.minute
+      resetTimeout = 2.minutes
     )( executor = context.system.dispatcher )
     .onOpen {
       gaugeStatus = BreakerOpen
-      log warning  "graphite connection is down, and circuit breaker will remain open for 1 minute before trying again"
+      val reopened = open()
+      log.warning(
+        "graphite connection is down, reconnection {} and circuit breaker will remain open for 1 minute before trying again",
+        if ( reopened.isSuccess ) "succeeded" else "failed"
+      )
     }
     .onHalfOpen {
       gaugeStatus = BreakerPending
@@ -156,7 +168,12 @@ class GraphitePublisher extends DenseOutlierPublisher {
 
   def resetNextScheduled(): Option[Cancellable] = {
     cancelNextSchedule()
-    _nextScheduled = Some( context.system.scheduler.scheduleOnce(outer.batchInterval, self, SendBatch) )
+
+    if ( log.isInfoEnabled && batchInterval > outer.minimumBatchInterval ) {
+      log.info( "GraphitePublisher: batch interval = {}", batchInterval.toCoarsest )
+    }
+
+    _nextScheduled = Some( context.system.scheduler.scheduleOnce(batchInterval, self, SendBatch) )
     _nextScheduled
   }
 
@@ -303,11 +320,20 @@ class GraphitePublisher extends DenseOutlierPublisher {
       val (toBePublished, remainingQueue) = waitQueue splitAt outer.batchSize
       waitQueue = remainingQueue
 
-      log.debug( "flush: batch=[{}]", toBePublished.mkString(",") )
+      publishLogger.info(
+        "Flush: toBePublished:[{}]\tremainingQueue:[{}]\tbatchSize:[{}]",
+        toBePublished.size.toString,
+        remainingQueue.size.toString,
+        outer.batchSize.toString
+      )
+
+      toBePublished foreach { tbp => publishLogger.info( "{}: timestamp:[{}] value:[{}]", tbp._1, tbp._2, tbp._3.toString) }
+
+      //      log.debug( "flush: batch=[{}]", toBePublished.mkString(",") )
       val report = serialize( toBePublished:_* )
       breaker withSyncCircuitBreaker {
         circuitRequestsMeter.mark()
-        publishTimer time { sendToGraphite( report ) }
+        sendToGraphite( report )
       }
       flush()
     }
@@ -327,7 +353,15 @@ class GraphitePublisher extends DenseOutlierPublisher {
     val (toBePublished, remainingQueue) = waitQueue splitAt batchSize
     waitQueue = remainingQueue
 
+    publishLogger.info(
+      "BatchAndSend: toBePublished:[{}]\tremainingQueue:[{}]\tbatchSize:[{}]",
+      toBePublished.size.toString,
+      remainingQueue.size.toString,
+      outer.batchSize.toString
+    )
+
     if ( toBePublished.nonEmpty ) {
+
       val report = pickler.pickleFlattenedTimeSeries( toBePublished:_* )
       breaker withCircuitBreaker {
         Future {
@@ -335,18 +369,22 @@ class GraphitePublisher extends DenseOutlierPublisher {
           sendToGraphite( report )
           resetNextScheduled()
           self ! SendBatch
+        }( publishDispatcher ) map { _ =>
+          toBePublished foreach { tbp => publishLogger.info( "{}: timestamp:[{}] value:[{}]", tbp._1, tbp._2, tbp._3.toString) }
         }
       }
     }
   }
 
   def sendToGraphite( pickle: ByteString ): Unit = {
-    publishedMeter mark pickle.size
+    bytesPublishedMeter mark pickle.size
 
-    socket foreach { s =>
-      val out = s.getOutputStream
-      out write pickle.toArray
-      out.flush()
+    publishingTimer time {
+      socket foreach { s =>
+        val out = s.getOutputStream
+        out write pickle.toArray
+        out.flush()
+      }
     }
   }
 }

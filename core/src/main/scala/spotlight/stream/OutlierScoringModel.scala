@@ -84,7 +84,7 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
           detector = detector,
           maxAllowedWait = config.detectionBudget,
           plans = config.plans,
-          parallelism = Runtime.getRuntime.availableProcessors() * 8
+          parallelism = Runtime.getRuntime.availableProcessors() * 32
         )(
           system.dispatcher
         )

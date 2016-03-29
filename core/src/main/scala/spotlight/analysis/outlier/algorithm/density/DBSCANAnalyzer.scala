@@ -12,7 +12,6 @@ import spotlight.analysis.outlier.{ DetectOutliersInSeries, DetectUsing }
 import spotlight.model.outlier.Outliers
 
 
-
 /**
  * Created by rolfsd on 9/29/15.
  */
@@ -28,8 +27,14 @@ trait DBSCANAnalyzer extends AlgorithmActor {
 
   override val detect: Receive = LoggingReceive {
     case s @ DetectUsing( _, aggregator, payload: DetectOutliersInSeries, history, algorithmConfig ) => {
+      val start = System.currentTimeMillis()
+
       ( algorithmContext >=> cluster >=> findOutliers ).run( s ) match {
-        case \/-( r ) => aggregator ! r
+        case \/-( r ) => {
+          algorithmTimer.update( System.currentTimeMillis() - start, scala.concurrent.duration.MILLISECONDS )
+          aggregator ! r
+        }
+
         case -\/( ex ) => {
           log.error(
             ex,
@@ -50,14 +55,16 @@ trait DBSCANAnalyzer extends AlgorithmActor {
     Kleisli[TryV, Config, Int] { c => \/ fromTryCatchNonFatal { c getInt algorithm.name+".minDensityConnectedPoints" } }
   }
 
-  def historyStandardDeviation: Op[AlgorithmContext, Double] = kleisli[TryV, AlgorithmContext, Double] { context => context.history.standardDeviation( 1 ).right }
+  def historyStandardDeviation: Op[AlgorithmContext, Double] = kleisli[TryV, AlgorithmContext, Double] { context =>
+    context.history.standardDeviation( 1 ).right
+  }
 
   val eps: Op[AlgorithmContext, Double] = {
     val epsContext = for {
       context <- ask[TryV, AlgorithmContext]
       config <- messageConfig
       historyStdDev <- historyStandardDeviation
-      tol <- kleisli[TryV, AlgorithmContext, Option[Double]] {_.tolerance }
+      tol <- kleisli[TryV, AlgorithmContext, Option[Double]] { _.tolerance }
     } yield ( context, config, historyStdDev, tol )
 
     epsContext flatMapK { case (ctx, config, hsd, tol) =>
@@ -67,7 +74,7 @@ trait DBSCANAnalyzer extends AlgorithmActor {
 
       val calculatedEps = for {
         stddev <- if ( hsd.isNaN ) None else Some( hsd )
-        t <- tol
+        t = tol getOrElse 1.0
       } yield { t * stddev }
 
       trainingLogger.debug(
@@ -97,10 +104,16 @@ trait DBSCANAnalyzer extends AlgorithmActor {
       log.debug( "cluster [{}]: eps = [{}]", ctx.message.topic, e )
       log.debug( "cluster: minDensityConnectedPoints = [{}]", minDensityPts )
       log.debug( "cluster: distanceMeasure = [{}]", distance )
-      log.debug( "cluster: data = [{}]", data.mkString(",") )
+      log.debug( "cluster: data[{}] = [{}]", data.size, data.mkString(",") )
 
       import scala.collection.JavaConverters._
-      ( ctx, new DBSCANClusterer[DoublePoint]( e, minDensityPts, distance ).cluster( data.asJava ).asScala.toSeq )
+      val clusters = new DBSCANClusterer[DoublePoint]( e, minDensityPts, distance ).cluster( data.asJava ).asScala.toSeq
+      if ( log.isDebugEnabled ) {
+        val sizeClusters = clusters.map { c => (c.getPoints.size, c.getPoints.asScala.mkString("[", ", ", "]") ) }
+        log.debug( "cluster: clusters = [{}]", sizeClusters.mkString( "\n + [", ", ", "]\n" ) )
+      }
+
+      ( ctx, clusters )
     }
   }
 

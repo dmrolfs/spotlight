@@ -186,7 +186,7 @@ object Configuration {
     )
   }
 
-  val defaultOutlierReducer: ReduceOutliers = ReduceOutliers.seriesIntersection
+  val defaultOutlierReducer: ReduceOutliers = ReduceOutliers.byCorroborationPercentage( 50 )
 
 
   final case class SimpleConfiguration private[stream](

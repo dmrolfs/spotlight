@@ -96,7 +96,7 @@ class LeastSquaresAnalyzer( override val router: ActorRef ) extends SkylineAnaly
             val control = ControlBoundary.fromExpectedAndDistance(
               timestamp = ts.toLong,
               expected = t,
-              distance = tol * errorsStddev
+              distance = math.abs( tol * errorsStddev )
             )
             val isOutlier = ( math.abs(t) > errorsStddev * tol ) && ( math.round( errorsStddev ) != 0D ) && ( math.round( t ) != 0 )
             ( isOutlier, control )

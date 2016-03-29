@@ -108,11 +108,9 @@ object SeasonalExponentialMovingAverageAnalyzer {
       override val bins: Int,
       moments: Vector[Moment]
     ) extends SeasonalModel {
-      private val trace = Trace[SimpleSeasonalModel]
-
       override val binLength: joda.Duration = waveLength / bins
 
-      def binLengths( ts: joda.DateTime ): Double = trace.block( s"binLengths( $ts )" ) {
+      def binLengths( ts: joda.DateTime ): Double = {
         val diff = {
           if ( reference < ts ) new joda.Interval( reference, ts ).toDurationMillis
           else new joda.Interval( ts, reference ).toDuration.negated.getMillis
@@ -120,7 +118,7 @@ object SeasonalExponentialMovingAverageAnalyzer {
         diff.toDouble / binLength.millis.toDouble
       }
 
-      def binFor( ts: joda.DateTime ): Int = trace.block( s"binFor( $ts )" ) {
+      def binFor( ts: joda.DateTime ): Int = {
         val bin = math.floor( binLengths(ts) % bins ).toInt
         if ( bin < 0 ) bins + bin else bin
       }
@@ -129,12 +127,9 @@ object SeasonalExponentialMovingAverageAnalyzer {
         copy( moments = moments.updated( binFor(ts), m ) )
       }
 
-      override def seasonStartFor( ts: joda.DateTime ): joda.DateTime = trace.block( s"seasonStartFor( $ts )" ) {
+      override def seasonStartFor( ts: joda.DateTime ): joda.DateTime = {
         val diff = new joda.Interval( reference, ts ).toDuration
         val waveLengths = math.floor( diff.millis.toDouble / waveLength.millis.toDouble ).toInt
-        trace( s"diff = $diff" )
-        trace( s"waveLength = $waveLength" )
-        trace( s"waveLengths = $waveLengths" )
         logger.debug( "seasonStartFor( {} ) => [{}]", Seq[AnyRef](ts, (reference+(waveLength*waveLengths))):_* )
         reference + ( waveLength * waveLengths )
       }
@@ -143,9 +138,6 @@ object SeasonalExponentialMovingAverageAnalyzer {
       override def binStartFor( ts: joda.DateTime ): joda.DateTime = {
         val diff = new joda.Interval( reference, ts ).toDuration
         val binLengths = math.floor( diff.millis.toDouble / binLength.millis.toDouble ).toInt
-        trace( s"diff = $diff" )
-        trace( s"binLength = $binLength" )
-        trace( s"binLengths = $binLengths" )
         logger.debug( "seasonStartFor( {} ) => [{}]", Seq[AnyRef](ts, (reference+(binLength*binLengths))):_* )
         reference + ( binLength * binLengths )
       }
@@ -238,7 +230,7 @@ class SeasonalExponentialMovingAverageAnalyzer(
             val control = ControlBoundary.fromExpectedAndDistance(
               timestamp = ts.toLong,
               expected = stats.ewma,
-              distance = tol * stats.ewmsd
+              distance = math.abs( tol * stats.ewmsd )
             )
             ( control isOutlier v, control )
             //            math.abs( v - stats.ewma ) > ( tol * stats.ewmsd )

@@ -1,10 +1,11 @@
 package spotlight.analysis.outlier
 
 import java.io.Serializable
+
 import org.apache.commons.math3.linear.RealMatrix
 import org.apache.commons.math3.ml.clustering.DoublePoint
 import org.apache.commons.math3.stat.descriptive.MultivariateSummaryStatistics
-import spotlight.model.timeseries.DataPoint
+import spotlight.model.timeseries.{DataPoint, Point}
 
 
 /**

@@ -7,7 +7,7 @@ import akka.actor.{Actor, ActorLogging, Cancellable, Props}
 import akka.event.LoggingReceive
 import com.typesafe.scalalogging.Logger
 import org.slf4j.LoggerFactory
-import nl.grons.metrics.scala.{Meter, MetricName}
+import nl.grons.metrics.scala.{Meter, MetricName, Timer}
 import peds.akka.metrics.InstrumentedActor
 import peds.commons.log.Trace
 import spotlight.analysis.outlier.OutlierQuorumAggregator.ConfigurationProvider
@@ -52,6 +52,9 @@ extends Actor with InstrumentedActor with ActorLogging { outer: ConfigurationPro
   lazy val warningsMeter: Meter = metrics meter "quorum.warnings"
   lazy val timeoutsMeter: Meter = metrics meter "quorum.timeout"
 
+  lazy val quorumTimer: Timer = metrics.timer( "quorum", plan.name )
+  val startMillis: Long = System.currentTimeMillis()
+
   implicit val ec = context.system.dispatcher
 
   var pendingWhistle: Option[Cancellable] = None
@@ -77,7 +80,7 @@ extends Actor with InstrumentedActor with ActorLogging { outer: ConfigurationPro
     case m: Outliers => {
       val source = sender()
       _fulfilled ++= m.algorithms map { _ -> m }
-      process( _fulfilled )
+      if ( _fulfilled.size == plan.algorithms.size ) publishAndStop( _fulfilled )
     }
 
     case unknown: UnrecognizedPayload => {
@@ -106,28 +109,34 @@ extends Actor with InstrumentedActor with ActorLogging { outer: ConfigurationPro
 
     case timeout: AnalysisTimedOut => {
       timeoutsMeter.mark()
-      context.parent ! timeout
-      context.stop( self )
+      if ( plan isQuorum _fulfilled ) {
+        publishAndStop( _fulfilled )
+      } else {
+        context.parent ! timeout
+        context stop self
+      }
     }
   }
 
-  def process( fulfilled: OutlierAlgorithmResults )( implicit ec: ExecutionContext ): Unit = {
-    if ( plan isQuorum fulfilled ) {
-      conclusionsMeter.mark()
-      plan.reduce( fulfilled, source, plan ) match {
-        case \/-( o ) => {
-          context.parent ! o
-          logTally( o, fulfilled )
-        }
 
-        case -\/( exs ) => exs.foreach{ ex => log.error( "failed to create Outliers for plan [{}] due to: {}", plan, ex ) }
+  def publishAndStop( fulfilled: OutlierAlgorithmResults ): Unit = {
+    quorumTimer.update( System.currentTimeMillis() - startMillis, scala.concurrent.duration.MILLISECONDS )
+    conclusionsMeter.mark()
+
+    plan.reduce( fulfilled, source, plan ) match {
+      case \/-( o ) => {
+        context.parent ! o
+        logTally( o, fulfilled )
       }
 
-      context stop self
+      case -\/( exs ) => exs.foreach{ ex => log.error( "failed to create Outliers for plan [{}] due to: {}", plan, ex ) }
     }
+
+    context stop self
   }
 
   val outlierLogger: Logger = Logger( LoggerFactory getLogger "Outliers" )
+
   def logTally( result: Outliers, fulfilled: OutlierAlgorithmResults ): Unit = {
     val tally = fulfilled map { case (a, o) => (a, o.anomalySize) }
     outlierLogger.debug(

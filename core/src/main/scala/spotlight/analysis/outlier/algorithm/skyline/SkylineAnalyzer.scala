@@ -3,11 +3,14 @@ package spotlight.analysis.outlier.algorithm.skyline
 import scala.annotation.tailrec
 import scala.reflect.ClassTag
 import akka.event.LoggingReceive
-import scalaz._, Scalaz._
+
+import scalaz._
+import Scalaz._
 import scalaz.Kleisli.kleisli
 import shapeless.syntax.typeable._
-import org.joda.{ time => joda }
+import org.joda.{time => joda}
 import com.typesafe.config.Config
+import nl.grons.metrics.scala.Timer
 import org.apache.commons.math3.ml.clustering.DoublePoint
 import org.apache.commons.math3.ml.distance.DistanceMeasure
 import peds.commons.Valid
@@ -88,9 +91,11 @@ trait SkylineAnalyzer[C <: SkylineAnalyzer.SkylineContext] extends AlgorithmActo
     case msg @ DetectUsing( algo, aggregator, payload: DetectOutliersInSeries, history, algorithmConfig ) => {
       val toOutliers = kleisli[TryV, (Outliers, AlgorithmContext), Outliers] { case (o, _) => o.right }
 
+      val start = System.currentTimeMillis()
       ( algorithmContext >=> findOutliers >=> toOutliers ).run( msg ) match {
         case \/-( r ) => {
           log.debug( "sending detect result to aggregator[{}]: [{}]", aggregator.path, r )
+          algorithmTimer.update( System.currentTimeMillis() - start, scala.concurrent.duration.MILLISECONDS )
           aggregator ! r
         }
         case -\/( ex ) => {

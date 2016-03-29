@@ -41,7 +41,7 @@ class DetectionAlgorithmRouter extends Actor with InstrumentedActor with ActorLo
   override def unhandled( message: Any ): Unit = {
     message match {
       case m: DetectUsing => log.error( s"cannot route unregistered algorithm [${m.algorithm}]" )
-      case m => super.unhandled( m )
+      case m => log.error( s"ROUTER UNAWARE OF message: [{}]\nrouting table:{}", m, routingTable.toSeq.mkString("\n",",","\n") ) // super.unhandled( m )
     }
   }
 }

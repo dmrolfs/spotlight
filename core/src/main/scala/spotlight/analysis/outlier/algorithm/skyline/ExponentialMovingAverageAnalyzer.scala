@@ -80,7 +80,7 @@ class ExponentialMovingAverageAnalyzer(
             val control = ControlBoundary.fromExpectedAndDistance(
               timestamp = ts.toLong,
               expected = stats.ewma,
-              distance = tol * stats.ewmsd
+              distance = math.abs( tol * stats.ewmsd )
             )
 
             ( control.isOutlier(v), control )

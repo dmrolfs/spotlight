@@ -165,7 +165,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       }
     }
 
-    "detect no outliers points in series" in { f: Fixture =>
+    "detect no outliers points in series" taggedAs (WIP) in { f: Fixture =>
       import f._
       val analyzer = TestActorRef[SeriesDensityAnalyzer]( SeriesDensityAnalyzer.props(router.ref) )
 
@@ -195,25 +195,28 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
 
       val algProps = ConfigFactory.parseString(
         s"""
-           |${algoS.name}.seedEps: 5.0
-           |${algoS.name}.minDensityConnectedPoints: 3
+           |${algoS.name} {
+           |  tolerance: 3
+           |  seedEps: 5.0
+           |  minDensityConnectedPoints: 3
+           |}
         """.stripMargin
       )
 
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
       analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries( series, plan ), HistoricalStatistics(2, false), algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "detect" ) {
-        //todo stream envelope
-        //        case Envelope(SeriesOutliers(alg, source, outliers), hdr) => {
-        //          alg must equal( 'dbscan )
-        //          source mustBe series
-        //          outliers.size mustBe 6
-        //        }
-        case m @ NoOutliers(alg, source, plan, control) => {
+        case SeriesOutliers(alg, source, plan, outliers, controls) => {
           alg mustBe Set( algoS )
           source mustBe series
-          m.hasAnomalies mustBe false
+          outliers.size mustBe 2
+          outliers mustBe myPoints.drop( myPoints.size - 2 )
         }
+//        case m @ NoOutliers(alg, source, plan, control) => {
+//          alg mustBe Set( algoS )
+//          source mustBe series
+//          m.hasAnomalies mustBe false
+//        }
       }
     }
 
@@ -247,7 +250,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
     }
 
 
-    "history is updated with each detect request" taggedAs (WIP) in { f: Fixture =>
+    "history is updated with each detect request" in { f: Fixture =>
       import f._
 
       def detectUsing( message: OutlierDetectionMessage, history: HistoricalStatistics ): DetectUsing = {

@@ -7,9 +7,11 @@ import scalaz._
 import Scalaz._
 import scalaz.Kleisli.kleisli
 import com.typesafe.config.Config
+import com.typesafe.scalalogging.LazyLogging
+import nl.grons.metrics.scala.Timer
 import org.apache.commons.math3.linear.MatrixUtils
 import org.apache.commons.math3.ml.distance.{DistanceMeasure, EuclideanDistance}
-import org.apache.commons.math3.ml.clustering.{Cluster, DoublePoint}
+import org.apache.commons.math3.ml.clustering.DoublePoint
 import peds.akka.metrics.InstrumentedActor
 import peds.commons.math.MahalanobisDistance
 import spotlight.model.outlier.OutlierPlan
@@ -23,6 +25,7 @@ trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
   def algorithm: Symbol
   def router: ActorRef
 
+  lazy val algorithmTimer: Timer = metrics.timer( "algorithm", algorithm.name )
 
   override def preStart(): Unit = {
     context watch router
@@ -91,7 +94,7 @@ object AlgorithmActor {
     def addControlBoundary( control: ControlBoundary ): That
   }
 
-  object AlgorithmContext {
+  object AlgorithmContext extends LazyLogging {
     def apply( message: DetectUsing, data: Seq[DoublePoint] ): AlgorithmContext = {
       SimpleAlgorithmContext( message, message.source, data )
     }
@@ -113,11 +116,13 @@ object AlgorithmActor {
       override def distanceMeasure: TryV[DistanceMeasure] = {
         def makeMahalanobisDistance: TryV[DistanceMeasure] = {
           val mahal = if ( message.history.N > 0 ) {
+            logger.debug( "DISTANCE_MEASURE message.history.covariance = {}", message.history.covariance)
             MahalanobisDistance.fromCovariance( message.history.covariance )
           } else {
+            logger.debug( "DISTANCE_MEASURE point data = {}", data.mkString("[",",","]"))
             MahalanobisDistance.fromPoints( MatrixUtils.createRealMatrix( data.toArray map { _.getPoint } ) )
           }
-
+          logger.debug( "DISTANCE_MEASURE mahal = {}  sample distance={}", mahal, mahal.map{ _.compute(Array(3D, 18.4), Array(2D, 19.2))})
           mahal.disjunction.leftMap{ _.head }
         }
 

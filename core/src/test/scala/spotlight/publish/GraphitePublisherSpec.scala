@@ -112,6 +112,7 @@ with MockitoSugar {
           import scala.concurrent.duration._
           override def separation: FiniteDuration = 1.second
           override def initializeMetrics(): Unit = { }
+          override def batchSize: Int = 100
           override def destinationAddress: InetSocketAddress = outer.address
           override def createSocket( address: InetSocketAddress ): Socket = {
             openCount.incrementAndGet()
@@ -224,6 +225,7 @@ with MockitoSugar {
             import scala.concurrent.duration._
             override def separation: FiniteDuration = 1.second
             override def initializeMetrics(): Unit = { }
+            override def batchSize: Int = 100
             override def destinationAddress: InetSocketAddress = f.address
             override def createSocket( address: InetSocketAddress ): Socket = {
               openCount.incrementAndGet()
@@ -296,6 +298,7 @@ with MockitoSugar {
             import scala.concurrent.duration._
             override def separation: FiniteDuration = 1.second
             override def initializeMetrics(): Unit = { }
+            override def batchSize: Int = 100
             override def destinationAddress: InetSocketAddress = f.address
             override def createSocket( address: InetSocketAddress ): Socket = {
               openCount.incrementAndGet()

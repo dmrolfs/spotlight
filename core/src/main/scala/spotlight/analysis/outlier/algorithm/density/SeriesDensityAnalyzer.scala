@@ -1,9 +1,11 @@
 package spotlight.analysis.outlier.algorithm.density
 
 import scala.reflect.ClassTag
-import akka.actor.{ ActorRef, Props }
-import scalaz._, Scalaz._
-import scalaz.Kleisli.{ ask, kleisli }
+import akka.actor.{ActorRef, Props}
+
+import scalaz._
+import Scalaz._
+import scalaz.Kleisli.{ask, kleisli}
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.LazyLogging
 import org.apache.commons.math3.ml.clustering.DoublePoint
@@ -11,10 +13,11 @@ import org.apache.commons.math3.ml.distance.DistanceMeasure
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import peds.commons.Valid
 import peds.commons.log.Trace
+import peds.commons.math.MahalanobisDistance
 import spotlight.analysis.outlier.algorithm.AlgorithmActor._
 import spotlight.analysis.outlier.algorithm.density.DBSCANAnalyzer.Clusters
-import spotlight.analysis.outlier.{ DetectUsing, HistoricalStatistics, HistoryKey }
-import spotlight.model.outlier.{ NoOutliers, OutlierPlan, Outliers, SeriesOutliers }
+import spotlight.analysis.outlier.{DetectUsing, HistoricalStatistics, HistoryKey}
+import spotlight.model.outlier.{NoOutliers, OutlierPlan, Outliers, SeriesOutliers}
 import spotlight.model.timeseries._
 
 
@@ -73,7 +76,17 @@ object SeriesDensityAnalyzer extends LazyLogging {
       basis.foldLeft( past ) { case (h, (cur, prev)) =>
         val ts = cur.getPoint.head
         val dist = distance.compute( prev.getPoint, cur.getPoint )
-        h.addValue( dist )
+
+        //todo cleanup
+        import shapeless.syntax.typeable._
+        distance.cast[MahalanobisDistance] foreach { mahal => logger.debug( "distance: N:[{}] covariance:{}", mahal.dimension.toString, mahal.covariance.toString ) }
+        logger.debug(
+          "dist prev:[{}] current:[{}] calculated distance: {}",
+          s"(${prev.getPoint.apply(0).toLong}, ${prev.getPoint.apply(1)})",
+          s"(${cur.getPoint.apply(0).toLong}, ${cur.getPoint.apply(1)})",
+          dist.toString
+        )
+        if ( !dist.isNaN ) h.addValue( dist )
         h
       }
     }

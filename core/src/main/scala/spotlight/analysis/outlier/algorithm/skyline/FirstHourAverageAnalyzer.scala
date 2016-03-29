@@ -128,7 +128,7 @@ class FirstHourAverageAnalyzer( override val router: ActorRef ) extends SkylineA
           val control = ControlBoundary.fromExpectedAndDistance(
             timestamp = ts.toLong,
             expected = ctx.firstHour.getMean,
-            distance = tol * ctx.firstHour.getStandardDeviation
+            distance = math.abs( tol * ctx.firstHour.getStandardDeviation )
           )
           log.debug( "first hour mean[{}] and stdev[{}]", ctx.firstHour.getMean, ctx.firstHour.getStandardDeviation )
 //          math.abs( v - mean ) > ( tol * stddev)

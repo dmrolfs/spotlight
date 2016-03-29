@@ -51,7 +51,7 @@ object OutlierDetectionWorkflow {
     def configuration: Config
 
     def makePublishRateLimiter()(implicit context: ActorContext ): ActorRef = {
-      context.actorOf( Limiter.props(1000, 100.milliseconds, 100), "limiter" )
+      context.actorOf( Limiter.props(20000, 100.milliseconds, 5000), "limiter" )
     }
 
     def makePublisher( publisherProps: Props )( implicit context: ActorContext ): ActorRef = {
@@ -64,9 +64,9 @@ object OutlierDetectionWorkflow {
           new GraphitePublisher with GraphitePublisher.PublishProvider {
             override lazy val metricBaseName = MetricName( classOf[GraphitePublisher] )
             override def destinationAddress: InetSocketAddress = address
-            override def batchInterval: FiniteDuration = 500.millis
-            override def batchSize: Int = 100
-            override def createSocket(address: InetSocketAddress): Socket = {
+            override def batchInterval: FiniteDuration = 100.milliseconds
+            override def batchSize: Int = 5000
+            override def createSocket( address: InetSocketAddress ): Socket = {
               new Socket( destinationAddress.getAddress, destinationAddress.getPort )
             }
             override def publishingTopic( p: OutlierPlan, t: Topic ): Topic = OutlierMetricPrefix + super.publishingTopic( p, t )

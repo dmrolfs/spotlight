@@ -95,7 +95,7 @@ extends SkylineAnalyzer[MedianAbsoluteDeviationAnalyzer.Context] {
           val control = ControlBoundary.fromExpectedAndDistance(
             timestamp = ts.toLong,
             expected = ctx.movingStatistics.getPercentile( 50 ),
-            distance = tol * ctx.deviationStatistics.getPercentile( 50 )
+            distance = math.abs( tol * ctx.deviationStatistics.getPercentile( 50 ) )
           )
           ( control isOutlier v, control )
 //          val d = deviation( v, ctx )

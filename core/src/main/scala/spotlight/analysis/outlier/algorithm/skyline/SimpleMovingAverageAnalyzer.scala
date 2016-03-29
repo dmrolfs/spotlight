@@ -82,7 +82,10 @@ class SimpleMovingAverageAnalyzer( override val router: ActorRef ) extends Skyli
           val (ts, v) = p
           val mean = ctx.movingStatistics.getMean
           val stddev = ctx.movingStatistics.getStandardDeviation
-          log.debug( "Stddev from simple moving Average: mean[{}]\tstdev[{}]\ttolerance[{}]", mean, stddev, tol )
+          log.debug(
+            "Stddev from simple moving Average N[{}]: mean[{}]\tstdev[{}]\ttolerance[{}]",
+            ctx.movingStatistics.getN, mean, stddev, tol
+          )
           val control = ControlBoundary.fromExpectedAndDistance(
             timestamp = ts.toLong,
             expected = mean,

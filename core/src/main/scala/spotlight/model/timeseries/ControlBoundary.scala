@@ -16,7 +16,7 @@ object ControlBoundary {
 
     val checked = for {
       e <- checkedExpected
-      d <- if ( distance.isNaN ) None else Some( distance )
+      d <- if ( distance.isNaN ) None else Some( math.abs(distance) )
     } yield ( e - d, e + d )
 
     ControlBoundary(

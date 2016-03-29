@@ -210,14 +210,14 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
         StreamMonitor.set(
           'framing,
           'intakeBuffer,
-          'timeseries,
+//          'timeseries,
           OutlierScoringModel.WatchPoints.ScoringPlanned,
           OutlierScoringModel.WatchPoints.ScoringBatch,
           OutlierScoringModel.WatchPoints.ScoringAnalysisBuffer,
           OutlierScoringModel.WatchPoints.ScoringDetect,
-          'publish,
-          'tcpOut,
-          'train
+          'publish
+//          'tcpOut,
+//          'train
         )
 
                                                  broadcast ~> passArchivable ~> train ~> termTraining
@@ -264,9 +264,9 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
     implicit val ec = system.dispatcher
 
     Flow[Outliers]
-    .conflate( immutable.Seq( _ ) ) { _ :+ _ }
-    .mapConcat( identity )
-    .via( GraphitePublisher.publish( limiter, publisher, 2, 90.seconds ) )
+//    .conflate( immutable.Seq( _ ) ) { _ :+ _ }
+//    .mapConcat( identity )
+    .via( GraphitePublisher.publish( limiter, publisher, Runtime.getRuntime.availableProcessors(), 90.seconds ) )
   }
 
   def startPlanWatcher( config: Configuration, listeners: Set[ActorRef] )( implicit system: ActorSystem ): Unit = {
