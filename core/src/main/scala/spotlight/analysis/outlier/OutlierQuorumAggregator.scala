@@ -52,7 +52,7 @@ extends Actor with InstrumentedActor with ActorLogging { outer: ConfigurationPro
   lazy val warningsMeter: Meter = metrics meter "quorum.warnings"
   lazy val timeoutsMeter: Meter = metrics meter "quorum.timeout"
 
-  lazy val quorumTimer: Timer = metrics.timer( "quorum", plan.name )
+  lazy val quorumTimer: Timer = metrics.timer( "quorum.plan", plan.name )
   val startMillis: Long = System.currentTimeMillis()
 
   implicit val ec = context.system.dispatcher

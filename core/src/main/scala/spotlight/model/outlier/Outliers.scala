@@ -50,7 +50,7 @@ abstract class Outliers extends Equals {
   }
 
   override def toString: String = {
-    s"""${getClass.safeSimpleName}outliers:[${anomalySize}].plan:[${plan.name}].topic:[${topic}].source:[${source.size}].""" +
+    s"""${getClass.safeSimpleName}:outliers:[${anomalySize}].plan:[${plan.name}].topic:[${topic}].source:[${source.size}].""" +
     s"""interval:[${source.interval getOrElse "No Interval"}]"""
   }
 }
