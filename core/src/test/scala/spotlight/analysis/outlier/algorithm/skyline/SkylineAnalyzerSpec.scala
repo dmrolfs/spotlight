@@ -156,55 +156,6 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
       }
     }
 
-    "find outliers via Grubbs Test" in { f: Fixture =>
-      import f._
-      // helpful online grubbs calculator: http://graphpad.com/quickcalcs/Grubbs1.cfm
-
-      val full: Seq[DataPoint] = makeDataPoints(
-        values = IndexedSeq.fill( 10 )( 1.0 ).to[scala.collection.immutable.IndexedSeq],
-        timeWiggle = (0.98, 1.02),
-        valueWiggle = (0.98, 1.02)
-      )
-
-      val series = spike( full )()
-
-      val algoS = GrubbsAnalyzer.Algorithm
-      val algProps = ConfigFactory.parseString( s"""${algoS.name}.tolerance: 2""" )
-
-      val analyzer = TestActorRef[GrubbsAnalyzer]( GrubbsAnalyzer.props(router.ref) )
-      analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
-      val history1 = historyWith( None, series )
-      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series, plan), history1, algProps ) )
-      aggregator.expectMsgPF( 2.seconds.dilated, "grubbs" ) {
-        case m @ SeriesOutliers(alg, source, plan, outliers, control) => {
-          alg mustBe Set( algoS )
-          source mustBe series
-          m.hasAnomalies mustBe true
-          outliers.size mustBe 1
-          outliers mustBe Seq( series.points.last )
-        }
-      }
-
-
-      val full2: Seq[DataPoint] = makeDataPoints(
-        values = IndexedSeq.fill( 10 )( 1.0 ).to[scala.collection.immutable.IndexedSeq],
-        timeWiggle = (0.98, 1.02),
-        valueWiggle = (0.98, 1.02)
-      )
-
-      val series2 = spike( full )( 0 )
-      val history2 = historyWith( Option(history1.recordLastDataPoints(series.points)), series2 )
-
-      analyzer.receive( DetectUsing(algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
-      aggregator.expectMsgPF( 2.seconds.dilated, "grubbs again" ) {
-        case m @ NoOutliers(alg, source, plan, control) => {
-          alg mustBe Set( algoS )
-          source mustBe series2
-          m.hasAnomalies mustBe false
-        }
-      }
-    }
-
     "find outliers based on absolute median deviation" taggedAs (NEXT) in { f: Fixture =>
       import f._
       val analyzer = TestActorRef[MedianAbsoluteDeviationAnalyzer]( MedianAbsoluteDeviationAnalyzer.props(router.ref) )

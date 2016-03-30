@@ -5,8 +5,7 @@ import akka.actor.{ActorRef, Props}
 
 import scalaz._
 import Scalaz._
-import scalaz.Kleisli.kleisli
-import org.joda.{ time => joda }
+import scalaz.Kleisli.{ ask, kleisli }
 import org.apache.commons.math3.distribution.TDistribution
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import peds.commons.Valid
@@ -55,27 +54,37 @@ class GrubbsAnalyzer( override val router: ActorRef ) extends SkylineAnalyzer[Sk
       context <- toSkylineContext
       taverages <- tailAverage
       threshold <- dataThreshold( taverages )
+      tolerance <- tolerance <=< ask[TryV, AlgorithmContext]
     } yield {
+      val tol = tolerance getOrElse 3D
+
       val data = taverages.map{ case (_, v) => v }.toArray
       val stats = new DescriptiveStatistics( data )
       val stddev = stats.getStandardDeviation
       val mean = stats.getMean
-      val zScores = taverages map { case (ts, v) => ( ts, math.abs(v - mean) / stddev ) }
-      log.debug( "Skyline[Grubbs]: mean:[{}] stddev:[{}] zScores:[{}]", mean, stddev, zScores.mkString(",") )
+      // zscore calculation considered in control expected and distance formula
+//      val zScores = taverages map { case (ts, v) => ( ts, math.abs(v - mean) / stddev ) }
+//      log.debug( "Skyline[Grubbs]: mean:[{}] stddev:[{}] zScores:[{}]", mean, stddev, zScores.mkString(",") )
 
       val thresholdSquared = math.pow( threshold, 2 )
       log.debug( "Skyline[Grubbs]: threshold^2:[{}]", thresholdSquared )
       val grubbsScore = {
         ((data.size - 1) / math.sqrt(data.size)) * math.sqrt( thresholdSquared / (data.size - 2 + thresholdSquared) )
       }
-      log.debug( "Skyline[Grubbs]: Grubbs Score:[{}]", grubbsScore )
+      log.debug( "Skyline[Grubbs]: Grubbs Score:[{}] tolerance:[{}]", grubbsScore, tol )
 
       collectOutlierPoints(
-        points = zScores,
+        points = taverages,
         context = context,
         evaluateOutlier = (p: Point2D, ctx: Context) => {
-          log.debug( "{} > {}", (p._1.toLong, p._2), grubbsScore )
-          ( p._2 > grubbsScore, ControlBoundary( timestamp = new joda.DateTime(p._1.toLong), ceiling = Some(grubbsScore) ) )
+          val (ts, v) = p
+          val control = ControlBoundary.fromExpectedAndDistance(
+            timestamp = ts.toLong,
+            expected = mean,
+            distance = tol * grubbsScore * stddev
+          )
+
+          ( control isOutlier v, control )
         },
         update = (ctx: Context, pt: Point2D) => { ctx }
       )
