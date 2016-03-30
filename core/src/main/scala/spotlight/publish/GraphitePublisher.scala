@@ -82,7 +82,8 @@ object GraphitePublisher extends LazyLogging {
     def destinationAddress: InetSocketAddress
     def createSocket( address: InetSocketAddress ): Socket
     def batchSize: Int
-    def minimumBatchInterval: FiniteDuration = 200.milliseconds
+    def minimumBatchInterval: FiniteDuration = 250.milliseconds
+    def maximumBatchInterval: FiniteDuration = 1.second
     def publishingTopic( p: OutlierPlan, t: Topic ): Topic = s"${p.name}.${t}"
     def publishAlgorithmControlBoundaries( p: OutlierPlan, algorithm: Symbol ): Boolean = {
       val publishKey = algorithm.name + ".publish-controls"
@@ -125,9 +126,11 @@ class GraphitePublisher extends DenseOutlierPublisher {
   val publishDispatcher = context.system.dispatchers.lookup( "publish-dispatcher" )
 
 
-  def batchInterval: FiniteDuration = {
+  final def batchInterval: FiniteDuration = {
     val calculated = FiniteDuration( ( publishingTimer.mean + 3 * publishingTimer.stdDev ).toLong, MILLISECONDS )
-    if ( minimumBatchInterval < calculated ) calculated else minimumBatchInterval
+    if ( calculated < minimumBatchInterval ) minimumBatchInterval
+    else if ( maximumBatchInterval < calculated ) maximumBatchInterval
+    else calculated
   }
 
   def initializeMetrics(): Unit = {
@@ -136,18 +139,27 @@ class GraphitePublisher extends DenseOutlierPublisher {
   }
 
   val breaker: CircuitBreaker = {
+    val reset = 2.minutes
+
     new CircuitBreaker(
       context.system.scheduler,
       maxFailures = 5,
       callTimeout = 10.seconds,
-      resetTimeout = 2.minutes
+      resetTimeout = reset
     )( executor = context.system.dispatcher )
     .onOpen {
       gaugeStatus = BreakerOpen
+      val oldConnected = isConnected
+      val socketClose = Try { socket foreach { _.close() } }
+      socket = None
       val reopened = open()
+
       log.warning(
-        "graphite connection is down, reconnection {} and circuit breaker will remain open for 1 minute before trying again",
-        if ( reopened.isSuccess ) "succeeded" else "failed"
+        "graphite connection is down, closed[{}], reconnection [{}] " +
+          "and circuit breaker will remain open for [{}] before trying again",
+        socketClose,
+        if ( reopened.isSuccess && isConnected ) "succeeded" else "failed",
+        reset.toCoarsest
       )
     }
     .onHalfOpen {
@@ -169,7 +181,8 @@ class GraphitePublisher extends DenseOutlierPublisher {
   def resetNextScheduled(): Option[Cancellable] = {
     cancelNextSchedule()
 
-    if ( log.isInfoEnabled && batchInterval > outer.minimumBatchInterval ) {
+    //todo this wont log -- what do i care to show?
+    if ( log.isInfoEnabled && batchInterval > outer.maximumBatchInterval ) {
       log.info( "GraphitePublisher: batch interval = {}", batchInterval.toCoarsest )
     }
 
@@ -354,10 +367,10 @@ class GraphitePublisher extends DenseOutlierPublisher {
     waitQueue = remainingQueue
 
     publishLogger.info(
-      "BatchAndSend: toBePublished:[{}]\tremainingQueue:[{}]\tbatchSize:[{}]",
+      "BatchAndSend: toBePublished:[{} / {}]\tremainingQueue:[{}]",
       toBePublished.size.toString,
-      remainingQueue.size.toString,
-      outer.batchSize.toString
+      outer.batchSize.toString,
+      remainingQueue.size.toString
     )
 
     if ( toBePublished.nonEmpty ) {

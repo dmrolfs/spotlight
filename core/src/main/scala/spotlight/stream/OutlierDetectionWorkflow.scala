@@ -64,8 +64,7 @@ object OutlierDetectionWorkflow {
           new GraphitePublisher with GraphitePublisher.PublishProvider {
             override lazy val metricBaseName = MetricName( classOf[GraphitePublisher] )
             override def destinationAddress: InetSocketAddress = address
-            override def batchInterval: FiniteDuration = 100.milliseconds
-            override def batchSize: Int = 5000
+            override def batchSize: Int = 1000
             override def createSocket( address: InetSocketAddress ): Socket = {
               new Socket( destinationAddress.getAddress, destinationAddress.getPort )
             }
