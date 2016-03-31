@@ -25,18 +25,18 @@ class DetectionAlgorithmRouter extends Actor with InstrumentedActor with ActorLo
 
   override val supervisorStrategy: SupervisorStrategy = SupervisorStrategy.defaultStrategy
 
-  val registration: Receive = LoggingReceive {
+  val registration: Receive = {
     case RegisterDetectionAlgorithm( algorithm, handler ) => {
       routingTable += ( algorithm -> handler )
       sender() ! AlgorithmRegistered( algorithm )
     }
   }
 
-  val routing: Receive = LoggingReceive {
+  val routing: Receive = {
     case m: DetectUsing if routingTable contains m.algorithm => routingTable( m.algorithm ) forward m
   }
 
-  override val receive: Receive = around( registration orElse routing )
+  override val receive: Receive = LoggingReceive{ around( registration orElse routing ) }
 
   override def unhandled( message: Any ): Unit = {
     message match {

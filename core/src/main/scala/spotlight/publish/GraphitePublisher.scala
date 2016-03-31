@@ -1,7 +1,6 @@
 package spotlight.publish
 
 import java.net.{InetSocketAddress, Socket}
-
 import scala.annotation.tailrec
 import scala.collection.immutable
 import scala.concurrent.duration._
@@ -11,13 +10,12 @@ import akka.actor._
 import akka.event.LoggingReceive
 import akka.pattern.{CircuitBreaker, CircuitBreakerOpenException, ask}
 import akka.stream.scaladsl.Flow
-import akka.stream.{ActorAttributes, OverflowStrategy, Supervision}
+import akka.stream.{ActorAttributes, Supervision}
 import akka.util.{ByteString, Timeout}
 import org.joda.{time => joda}
 import com.typesafe.scalalogging.{LazyLogging, Logger}
 import org.slf4j.LoggerFactory
 import nl.grons.metrics.scala.{Meter, Timer}
-import peds.akka.stream.Limiter
 import peds.commons.log.Trace
 import spotlight.model.timeseries.Topic
 import spotlight.model.outlier.{OutlierPlan, Outliers}
@@ -57,7 +55,7 @@ object GraphitePublisher extends LazyLogging {
 //todo DMR WORK HERE: GROUP up to graphite batch size???
     Flow[Outliers]
 //    .via( Limiter.limitGlobal(limiter, 2.minutes) )
-    .mapAsync( Runtime.getRuntime.availableProcessors() ) { os =>
+    .mapAsync( parallelism ) { os =>
       val published = publisher ? Publish( os )
       published.mapTo[Published] map { _.outliers }
     }
@@ -82,8 +80,8 @@ object GraphitePublisher extends LazyLogging {
     def destinationAddress: InetSocketAddress
     def createSocket( address: InetSocketAddress ): Socket
     def batchSize: Int
-    def minimumBatchInterval: FiniteDuration = 250.milliseconds
-    def maximumBatchInterval: FiniteDuration = 1.second
+    def minimumBatchInterval: FiniteDuration = 500.milliseconds
+    def maximumBatchInterval: FiniteDuration = 5.seconds
     def publishingTopic( p: OutlierPlan, t: Topic ): Topic = s"${p.name}.${t}"
     def publishAlgorithmControlBoundaries( p: OutlierPlan, algorithm: Symbol ): Boolean = {
       val publishKey = algorithm.name + ".publish-controls"
@@ -116,6 +114,7 @@ class GraphitePublisher extends DenseOutlierPublisher {
 
   lazy val circuitOpenMeter: Meter = metrics.meter( "circuit", "open" )
   lazy val circuitPendingMeter: Meter = metrics.meter( "circuit", "pending" )
+  lazy val circuitClosedMeter: Meter = metrics.meter( "circuit", "closed" )
   lazy val circuitRequestsMeter: Meter = metrics.meter( "circuit", "requests" )
   lazy val bytesPublishedMeter: Meter = metrics.meter( "bytes-published" )
   lazy val publishingTimer: Timer = metrics.timer( "publishing" )
@@ -148,6 +147,7 @@ class GraphitePublisher extends DenseOutlierPublisher {
       resetTimeout = reset
     )( executor = context.system.dispatcher )
     .onOpen {
+      circuitOpenMeter.mark()
       gaugeStatus = BreakerOpen
       val oldConnected = isConnected
       val socketClose = Try { socket foreach { _.close() } }
@@ -163,10 +163,12 @@ class GraphitePublisher extends DenseOutlierPublisher {
       )
     }
     .onHalfOpen {
+      circuitPendingMeter.mark()
       gaugeStatus = BreakerPending
       log info "attempting to publish to graphite and close circuit breaker"
     }
     .onClose {
+      circuitClosedMeter.mark()
       gaugeStatus = BreakerClosed
       log info "graphite connection established and circuit breaker is closed"
     }
