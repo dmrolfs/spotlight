@@ -1,10 +1,9 @@
 package spotlight.analysis.outlier
 
-import scala.util.Success
-import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.FiniteDuration
 import akka.actor.{Actor, ActorLogging, Cancellable, Props}
 import akka.event.LoggingReceive
+import scalaz.{-\/, \/-}
 import com.typesafe.scalalogging.Logger
 import org.slf4j.LoggerFactory
 import nl.grons.metrics.scala.{Meter, MetricName, Timer}
@@ -12,9 +11,8 @@ import peds.akka.metrics.InstrumentedActor
 import peds.commons.log.Trace
 import spotlight.analysis.outlier.OutlierQuorumAggregator.ConfigurationProvider
 import spotlight.model.outlier._
-import spotlight.model.timeseries.{ControlBoundary, TimeSeriesBase, Topic}
+import spotlight.model.timeseries.{TimeSeriesBase, Topic}
 
-import scalaz.{-\/, \/-}
 
 
 object OutlierQuorumAggregator {
@@ -53,7 +51,7 @@ extends Actor with InstrumentedActor with ActorLogging { outer: ConfigurationPro
   lazy val timeoutsMeter: Meter = metrics meter "quorum.timeout"
 
   lazy val quorumTimer: Timer = metrics.timer( "quorum.plan", plan.name )
-  val startMillis: Long = System.currentTimeMillis()
+  val originNanos: Long = System.nanoTime()
 
   implicit val ec = context.system.dispatcher
 
@@ -74,9 +72,9 @@ extends Actor with InstrumentedActor with ActorLogging { outer: ConfigurationPro
 
   var _fulfilled: OutlierAlgorithmResults = Map()
 
-  override def receive: Receive = around( quorum() )
+  override def receive: Receive = LoggingReceive{ around( quorum() ) }
 
-  def quorum( retries: Int = warningsBeforeTimeout ): Receive = LoggingReceive {
+  def quorum( retries: Int = warningsBeforeTimeout ): Receive = {
     case m: Outliers => {
       val source = sender()
       _fulfilled ++= m.algorithms map { _ -> m }
@@ -120,7 +118,7 @@ extends Actor with InstrumentedActor with ActorLogging { outer: ConfigurationPro
 
 
   def publishAndStop( fulfilled: OutlierAlgorithmResults ): Unit = {
-    quorumTimer.update( System.currentTimeMillis() - startMillis, scala.concurrent.duration.MILLISECONDS )
+    quorumTimer.update( System.nanoTime() - originNanos, scala.concurrent.duration.NANOSECONDS )
     conclusionsMeter.mark()
 
     plan.reduce( fulfilled, source, plan ) match {
