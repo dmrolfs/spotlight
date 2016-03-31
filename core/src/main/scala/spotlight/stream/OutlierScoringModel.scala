@@ -13,7 +13,6 @@ import org.slf4j.LoggerFactory
 import peds.akka.metrics.Instrumented
 import peds.akka.stream.StreamMonitor
 import peds.commons.collection.BloomFilter
-import peds.commons.V
 import spotlight.analysis.outlier.OutlierDetection
 import spotlight.model.outlier._
 import spotlight.model.timeseries.TimeSeriesBase.Merging
@@ -43,7 +42,7 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
   }
 
   def scoringGraph(
-    detector: ActorRef,
+    routerRef: ActorRef,
     config: Configuration
   )(
     implicit system: ActorSystem,
@@ -79,14 +78,17 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
         .watchFlow( WatchPoints.ScoringGrouping )
       )
 
+      val maxInDetectionFactor = {
+        val path = "spotlight.workflow.detect.max-in-flight"
+        if ( config hasPath path ) config.getDouble( path ) else 1.0
+      }
+
       val detectOutlier = b.add(
-        OutlierDetection.detectOutlier(
-          detector = detector,
+        OutlierDetection.detectionFlow(
+          routerRef = routerRef,
+          maxInDetectionFactor = maxInDetectionFactor,
           maxAllowedWait = config.detectionBudget,
-          plans = config.plans,
-          parallelism = Runtime.getRuntime.availableProcessors() * 32
-        )(
-          system.dispatcher
+          plans = config.plans
         )
         .watchFlow( WatchPoints.ScoringDetect )
       )
@@ -125,7 +127,6 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
 
   def filterPlanned( plans: Seq[OutlierPlan] )( implicit system: ActorSystem ): Flow[TimeSeries, TimeSeries, Unit] = {
     Flow[TimeSeries]
-//    .transform( () => logMetric )
     .filter { ts => !isOutlierReport(ts) && isPlanned( ts, plans ) }
   }
 

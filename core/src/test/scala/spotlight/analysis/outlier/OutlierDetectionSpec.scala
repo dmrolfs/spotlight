@@ -29,6 +29,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
 
     trait TestConfigurationProvider extends OutlierDetection.ConfigurationProvider {
       override def router: ActorRef = fixture.router.ref
+      override def maxInFlightCpuFactor: Double = 1
     }
 
     val plans: Seq[OutlierPlan] = Seq(

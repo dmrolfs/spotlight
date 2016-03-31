@@ -30,7 +30,7 @@ import spotlight.model.timeseries.{ TimeSeries, TimeSeriesBase }
 import spotlight.protocol.GraphiteSerializationProtocol
 import spotlight.publish.GraphitePublisher
 import spotlight.stream.{ Configuration, OutlierScoringModel, OutlierDetectionWorkflow }
-import spotlight.stream.OutlierDetectionWorkflow.{ GetPublisher, GetPublishRateLimiter, GetOutlierDetector }
+import spotlight.stream.OutlierDetectionWorkflow.{ GetPublisher, GetPublishRateLimiter, GetDetectionRouter }
 import spotlight.train.{ AvroFileTrainingRepositoryInterpreter, LogStatisticsTrainingRepositoryInterpreter, TrainOutlierAnalysis }
 
 
@@ -51,7 +51,7 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
   case class BootstrapContext(
     config: Configuration,
     reloader: () => V[Configuration],
-    detector: ActorRef,
+    router: ActorRef,
     limiter: ActorRef,
     publisher: ActorRef
   )
@@ -102,19 +102,19 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
     implicit val timeout = Timeout( 30.seconds )
     val actors = for {
       _ <- workflow ? WaitForStart
-      ChildStarted( d ) <- ( workflow ? GetOutlierDetector ).mapTo[ChildStarted]
+      ChildStarted( r ) <- ( workflow ? GetDetectionRouter ).mapTo[ChildStarted]
       ChildStarted( l ) <- ( workflow ? GetPublishRateLimiter ).mapTo[ChildStarted]
       ChildStarted( p ) <- ( workflow ? GetPublisher ).mapTo[ChildStarted]
-    } yield ( d, l, p )
+    } yield ( r, l, p )
 
     val bootstrapTimeout = akka.pattern.after( 1.second, system.scheduler ) {
       Future.failed( new TimeoutException( "failed to bootstrap detection workflow core actors" ) )
     }
 
     Future.firstCompletedOf( actors :: bootstrapTimeout :: Nil ) map {
-      case (detector, limiter, publisher) => {
-        startPlanWatcher( config, Set(detector) )
-        BootstrapContext( config, reloader, detector, limiter, publisher )
+      case (router, limiter, publisher) => {
+//        startPlanWatcher( config, Set(detector) )
+        BootstrapContext( config, reloader, router, limiter, publisher )
       }
     }
   }
@@ -174,7 +174,7 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
         )
 
         val timeSeries = b.add( conf.protocol.unmarshalTimeSeriesData.watchSourced( 'timeseries ) )
-        val scoring = b.add( OutlierScoringModel.scoringGraph( context.detector, conf ) )
+        val scoring = b.add( OutlierScoringModel.scoringGraph( context.router, conf ) )
         val logUnrecognized = b.add(
           Flow[TimeSeries].transform( () =>
             OutlierScoringModel.logMetric( Logger( LoggerFactory getLogger "Unrecognized" ), conf.plans )
@@ -264,8 +264,6 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
     implicit val ec = system.dispatcher
 
     Flow[Outliers]
-//    .conflate( immutable.Seq( _ ) ) { _ :+ _ }
-//    .mapConcat( identity )
     .via( GraphitePublisher.publish( limiter, publisher, Runtime.getRuntime.availableProcessors(), 90.seconds ) )
   }
 

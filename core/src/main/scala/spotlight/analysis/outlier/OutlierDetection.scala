@@ -3,21 +3,24 @@ package spotlight.analysis.outlier
 import scala.collection.immutable
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
-import scala.util.Success
-import akka.actor.{ Actor, ActorRef, ActorLogging, Props }
+import akka.actor.{Actor, ActorLogging, ActorRef, ActorSystem, Props}
 import akka.event.LoggingReceive
 import akka.pattern.AskTimeoutException
-import akka.stream.{ ActorAttributes, Supervision }
-import akka.stream.scaladsl.Flow
-import scalaz.{ Success => SuccessZ }
+import akka.stream.actor._
+import akka.stream.{FlowShape, Materializer, Supervision}
+import akka.stream.scaladsl._
+import com.codahale.metrics.{Metric, MetricFilter}
+
+import scalaz.\/-
 import org.slf4j.LoggerFactory
-import com.typesafe.scalalogging.{ Logger, StrictLogging }
-import nl.grons.metrics.scala.Meter
-import peds.akka.metrics.{ Instrumented, InstrumentedActor }
+import com.typesafe.scalalogging.{Logger, StrictLogging}
+import nl.grons.metrics.scala.{Meter, MetricName, Timer}
+import peds.akka.metrics.{Instrumented, InstrumentedActor}
+import peds.akka.stream.StreamMonitor
 import peds.commons.identifier.ShortUUID
 import peds.commons.log.Trace
 import spotlight.model.timeseries._
-import spotlight.model.outlier.{ Outliers, OutlierPlan }
+import spotlight.model.outlier.{OutlierPlan, Outliers}
 
 
 object OutlierDetection extends StrictLogging with Instrumented {
@@ -35,37 +38,54 @@ object OutlierDetection extends StrictLogging with Instrumented {
     case _ => Supervision.Stop
   }
 
-  def detectOutlier(
-    detector: ActorRef,
+  def detectionFlow(
+    routerRef: ActorRef,
+    maxInDetectionFactor: Double,
     maxAllowedWait: FiniteDuration,
-    plans: immutable.Seq[OutlierPlan],
-    parallelism: Int
+    plans: Seq[OutlierPlan]
   )(
-    implicit ec: ExecutionContext
+    implicit system: ActorSystem,
+    materializer: Materializer
   ): Flow[TimeSeriesBase, Outliers, Unit] = {
-    import akka.pattern.ask
-    import akka.util.Timeout
-    implicit val triggerTimeout = Timeout( maxAllowedWait )
+    val graph = GraphDSL.create() { implicit b =>
+      import GraphDSL.Implicits._
+      import StreamMonitor._
 
-  //todo: refactor this to a FanOutShape with recognized and unrecognized outs.
-    Flow[TimeSeriesBase]
-    .map { ts: TimeSeriesBase =>
-      plans
-      .collect { case p if p appliesTo ts => OutlierDetectionMessage( ts, p ) }
-      .collect { case SuccessZ( m ) => m }
-    }
-    .mapConcat[OutlierDetectionMessage] { identity }
-    .mapAsyncUnordered( parallelism ) { request: OutlierDetectionMessage =>
-      val result = detector ? request
-      result
-      .mapTo[DetectionProtocol]
-      .andThen {
-        case Success( UnrecognizedTopic( topic ) ) => logger info s"detector did not recognize topic [${topic}]"
+      val requests = b.add(
+        Flow[TimeSeriesBase]
+        .map { ts: TimeSeriesBase =>
+          plans.to[immutable.Seq]
+          .collect { case p if p appliesTo ts => OutlierDetectionMessage( ts, plan = p ).disjunction }
+          .collect { case \/-( m ) => m }
+        }
+        .mapConcat[OutlierDetectionMessage] { identity }
+      )
+
+      val (publisherRef, publisher) = {
+        Source.actorPublisher[Outliers]( DetectionPublisher.props ).toMat( Sink.asPublisher(false) )( Keep.both ).run()
       }
-    }.withAttributes( ActorAttributes.supervisionStrategy(decider) )
-    .collect {
-      case DetectionResult( result ) => result
+
+      val detectionPublisher = b.add( Source fromPublisher publisher )
+
+      val dummy = b.add( Flow[Outliers].map { identity } )
+
+      val detectorProps = OutlierDetection.props(
+        new OutlierDetection with ConfigurationProvider {
+          override val router: ActorRef = routerRef
+          override def streamConductor: Option[ActorRef] = Some( publisherRef )
+          override def maxInFlightCpuFactor: Double = maxInDetectionFactor
+        }
+      )
+
+      val detection = b.add( Sink actorSubscriber detectorProps )
+
+      requests ~> detection
+                  detectionPublisher ~> dummy
+
+      FlowShape( requests.in, dummy.out )
     }
+
+    Flow fromGraph graph
   }
 
 
@@ -83,11 +103,20 @@ object OutlierDetection extends StrictLogging with Instrumented {
 
   trait ConfigurationProvider {
     def router: ActorRef
+    def streamConductor: Option[ActorRef] = None
+    def maxInFlightCpuFactor: Double
   }
+
+
+  case class DetectionJob( destination: ActorRef, startNanos: Long = System.nanoTime() )
 }
 
 
-class OutlierDetection extends Actor with InstrumentedActor with ActorLogging {
+class OutlierDetection
+extends Actor
+with ActorSubscriber
+with InstrumentedActor
+with ActorLogging {
   outer: OutlierDetection.ConfigurationProvider =>
 
   import OutlierDetection._
@@ -99,21 +128,69 @@ class OutlierDetection extends Actor with InstrumentedActor with ActorLogging {
     log.info( "{} dispatcher: [{}]", self.path, context.dispatcher )
   }
 
+  override lazy val metricBaseName: MetricName = MetricName( classOf[OutlierDetection] )
+  var detectionTimer: Timer = metrics timer "detect"
+
   def initializeMetrics(): Unit = {
+    stripLingeringMetrics()
     metrics.gauge( "outstanding" ) { outstanding.size }
   }
 
-  type AggregatorSubscribers = Map[ActorRef, ActorRef]
-  var outstanding: AggregatorSubscribers = Map.empty[ActorRef, ActorRef]
+  def stripLingeringMetrics(): Unit = {
+    metrics.registry.removeMatching(
+      new MetricFilter {
+        override def matches( name: String, metric: Metric ): Boolean = {
+          name.contains( classOf[OutlierDetection].getName ) && name.contains( "outstanding" )
+        }
+      }
+    )
+  }
 
-  override def receive: Receive = around( detection )
+  type AggregatorSubscribers = Map[ActorRef, DetectionJob]
+  var outstanding: AggregatorSubscribers = Map.empty[ActorRef, DetectionJob]
 
-  val detection: Receive = LoggingReceive {
+
+  override protected def requestStrategy: RequestStrategy = {
+    val availableProcessors = Runtime.getRuntime.availableProcessors()
+    val maxInFlight = math.floor( outer.maxInFlightCpuFactor * availableProcessors ).toInt
+    log.info(
+      "OutlierDetector: setting request strategy max in flight=[{}] based on CPU[{}] and configured factor[{}]",
+      maxInFlight.toString,
+      availableProcessors,
+      outer.maxInFlightCpuFactor
+    )
+
+    new MaxInFlightRequestStrategy( max = maxInFlight ) {
+      override def inFlightInternally: Int = outstanding.size
+    }
+  }
+
+  override def receive: Receive = LoggingReceive {
+    around( outer.streamConductor map { _ => detection orElse subscriber } getOrElse detection )
+  }
+
+  val subscriber: Receive = {
+    case next @ ActorSubscriberMessage.OnNext( m: OutlierDetectionMessage ) if outer.streamConductor.isDefined => {
+      log.debug( "OutlierDetection request: [{}:{}]", m.topic, m.plan )
+      val aggregator = dispatch( m, m.plan )( context.dispatcher )
+      outstanding += aggregator -> DetectionJob( destination = outer.streamConductor.get )
+    }
+
+    case ActorSubscriberMessage.OnComplete if outer.streamConductor.isDefined => {
+      outer.streamConductor.get ! ActorSubscriberMessage.OnComplete
+    }
+//
+//    case m: OnError => ???
+  }
+
+  val detection: Receive = {
     case result: Outliers if outstanding.contains( sender() ) => {
       log.debug( "OutlierDetection results: [{}:{}]", result.topic, result.plan )
       val aggregator = sender()
-      outstanding( aggregator ) ! DetectionResult( result )
+      val job = outstanding( aggregator )
+      job.destination ! DetectionResult( result )
       outstanding -= aggregator
+      detectionTimer.update( System.nanoTime() - job.startNanos, scala.concurrent.duration.NANOSECONDS )
       updateScore( result )
     }
 
@@ -121,12 +198,11 @@ class OutlierDetection extends Actor with InstrumentedActor with ActorLogging {
       log.debug( "OutlierDetection request: [{}:{}]", m.topic, m.plan )
       val requester = sender()
       val aggregator = dispatch( m, m.plan )( context.dispatcher )
-      outstanding += ( aggregator -> requester )
+      outstanding += aggregator -> DetectionJob( destination = requester )
     }
 
     case to @ OutlierQuorumAggregator.AnalysisTimedOut( topic, plan ) => {
       log.error( "quorum was not reached in time: [{}]", to )
-      outstanding( sender() ) ! DetectionTimedOut( topic, plan )
       outstanding -= sender()
     }
   }

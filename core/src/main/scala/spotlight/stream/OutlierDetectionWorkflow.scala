@@ -1,7 +1,6 @@
 package spotlight.stream
 
 import java.net.{InetSocketAddress, Socket}
-
 import scala.concurrent.duration._
 import akka.actor.SupervisorStrategy._
 import akka.actor._
@@ -15,7 +14,7 @@ import peds.akka.supervision.{IsolatedLifeCycleSupervisor, OneForOneStrategyFact
 import spotlight.analysis.outlier.algorithm.density.{CohortDensityAnalyzer, SeriesCentroidDensityAnalyzer}
 import spotlight.analysis.outlier.algorithm.skyline._
 import spotlight.analysis.outlier.algorithm.density.SeriesDensityAnalyzer
-import spotlight.analysis.outlier.{DetectionAlgorithmRouter, OutlierDetection}
+import spotlight.analysis.outlier.DetectionAlgorithmRouter
 import spotlight.model.outlier.OutlierPlan
 import spotlight.model.timeseries.Topic
 import spotlight.publish.{GraphitePublisher, LogPublisher}
@@ -34,7 +33,7 @@ object OutlierDetectionWorkflow {
   val OutlierMetricPrefix = "spotlight.outlier."
 
 
-  case object GetOutlierDetector
+  case object GetDetectionRouter
   case object GetPublishRateLimiter
   case object GetPublisher
 
@@ -100,20 +99,6 @@ object OutlierDetectionWorkflow {
         n -> context.actorOf( p.withDispatcher("outlier-algorithm-dispatcher"), n.name )
       }
     }
-
-    def makeOutlierDetector( routerRef: ActorRef )( implicit context: ActorContext ): ActorRef = {
-      context.actorOf(
-        OutlierDetection.props {
-          new OutlierDetection with OutlierDetection.ConfigurationProvider {
-            override def router: ActorRef = routerRef
-            override lazy val metricBaseName = MetricName( classOf[OutlierDetection] )
-//            override def makePlans: OutlierDetection.ConfigurationProvider.Creator = outer.makePlans
-//            override def refreshInterval: FiniteDuration = 15.minutes
-          }
-        }.withDispatcher( "outlier-detection-dispatcher" ),
-        "outlierDetector"
-      )
-    }
   }
 }
 
@@ -125,7 +110,7 @@ class OutlierDetectionWorkflow(
 
   import spotlight.stream.OutlierDetectionWorkflow._
 
-  var detectorRef: ActorRef = _
+  var routerRef: ActorRef = _
   var publishRateLimiterRef: ActorRef = _
   var publisherRef: ActorRef = _
 
@@ -136,9 +121,8 @@ class OutlierDetectionWorkflow(
   override def childStarter(): Unit = {
     publishRateLimiterRef = makePublishRateLimiter( )
     publisherRef = makePublisher( publisherProps )
-    val router = makePlanRouter()
-    makeAlgorithmWorkers( router )
-    detectorRef = makeOutlierDetector( router )
+    routerRef = makePlanRouter()
+    makeAlgorithmWorkers( routerRef )
     context become around( active )
   }
 
@@ -159,7 +143,7 @@ class OutlierDetectionWorkflow(
 
   val active: Receive = LoggingReceive {
     super.receive orElse {
-      case GetOutlierDetector => sender( ) ! ChildStarted( detectorRef )
+      case GetDetectionRouter => sender() ! ChildStarted( routerRef )
       case GetPublishRateLimiter => sender( ) ! ChildStarted( publishRateLimiterRef )
       case GetPublisher => sender() ! ChildStarted( publisherRef )
     }

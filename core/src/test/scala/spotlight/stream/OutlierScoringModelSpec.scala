@@ -14,6 +14,7 @@ import akka.stream.scaladsl._
 import akka.util.ByteString
 import akka.testkit._
 import akka.actor.ActorRef
+import akka.stream.testkit.TestSubscriber.OnNext
 
 import scalaz.Scalaz._
 import com.typesafe.config.ConfigFactory
@@ -27,7 +28,7 @@ import spotlight.analysis.outlier.algorithm.density.SeriesDensityAnalyzer
 import spotlight.protocol.PythonPickleProtocol
 import spotlight.testkit.ParallelAkkaSpec
 import spotlight.analysis.outlier.{DetectionAlgorithmRouter, OutlierDetection}
-import spotlight.model.outlier.{IsQuorum, OutlierPlan, SeriesOutliers}
+import spotlight.model.outlier.{IsQuorum, OutlierPlan, Outliers, SeriesOutliers}
 import spotlight.model.timeseries.{DataPoint, TimeSeries}
 
 
@@ -59,12 +60,12 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
       timeout = 500.millis,
       isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = 1, triggerPoint = 1 ),
       reduce = Configuration.defaultOutlierReducer,
-                                    planSpecification = ConfigFactory.parseString(
+      planSpecification = ConfigFactory.parseString(
         s"""
           |algorithm-config.${algo.name}.seedEps: 5.0
           |algorithm-config.${algo.name}.minDensityConnectedPoints: 3
         """.stripMargin
-                                                                                 )
+      )
     )
 
     val plans = Seq( plan )
@@ -103,7 +104,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
       val flowUnderTest = protocol.unmarshalTimeSeriesData
       //      val flowUnderTest = Flow[ByteString].mapConcat( PythonPickleProtocol.toDataPoints )
       val future = Source( List(pickledWithDefaultTopic(dp)) ).via( flowUnderTest ).runWith( Sink.head )
-      val result = Await.result( future, 100.millis.dilated )
+      val result = Await.result( future, 200.millis.dilated )
       result mustBe expected
     }
 
@@ -207,6 +208,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
       val detector = system.actorOf(
         OutlierDetection.props {
           new OutlierDetection with TestConfigurationProvider {
+            override def maxInFlightCpuFactor: Double = 1
             override def router: ActorRef = routerRef
           }
         },
@@ -232,33 +234,71 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
 //      val expected = TimeSeries( "foo", (dp1 ++ dp3).sortBy( _.timestamp ) )
 
       val graphiteFlow = OutlierScoringModel.batchSeries( parallelism = 4, windowSize = 20.millis )
-      val detectFlow = OutlierDetection.detectOutlier(
-        detector,
+      val detectFlow = OutlierDetection.detectionFlow(
+        routerRef = routerRef,
+        maxInDetectionFactor = 1,
         maxAllowedWait = 2.seconds,
-        plans = immutable.Seq(defaultPlan),
-        parallelism = 4
+        plans = Seq( defaultPlan )
       )
 
       val flowUnderTest = graphiteFlow via detectFlow
 
+      val (pub, sub) = {
+        TestSource.probe[TimeSeries]
+        .via( flowUnderTest )
+        .toMat( TestSink.probe[Outliers] )( Keep.both )
+        .run()
+      }
+
+      val ps = pub.expectSubscription()
+      val ss = sub.expectSubscription()
+
+      ss.request( 1 )
+
       val topics = List( "foo", "bar", "foo" )
       val data: List[TimeSeries] = topics.zip(List(dp1)).map{ case (t,p) => TimeSeries(t, p) }
 
-      val future = Source( data )
-                   .via( flowUnderTest )
-                   .runWith( Sink.head )
-      val result = Await.result( future, 2.seconds.dilated )
-      trace( s"result class   [${result.hashCode}] = ${result.getClass}")
-      trace( s"expected class [${expected.hashCode}] = ${expected.getClass}")
-      result.algorithms mustBe expected.algorithms
-      result mustBe a [SeriesOutliers]
-      result.asInstanceOf[SeriesOutliers].outliers mustBe expected.outliers
-      result.anomalySize mustBe expected.anomalySize
-      result.hasAnomalies mustBe expected.hasAnomalies
-      result.size mustBe expected.size
-      result.source mustBe expected.source
-      result.topic mustBe expected.topic
-      result mustBe expected
+      data foreach { ps.sendNext }
+      val actual = sub.expectNext()
+      actual.algorithms mustBe expected.algorithms
+      actual mustBe a [SeriesOutliers]
+      actual.asInstanceOf[SeriesOutliers].outliers mustBe expected.outliers
+      actual.anomalySize mustBe expected.anomalySize
+      actual.hasAnomalies mustBe expected.hasAnomalies
+      actual.size mustBe expected.size
+      actual.source mustBe expected.source
+      actual.topic mustBe expected.topic
+      actual mustBe expected
+////////////////////////////////////////////////////
+//      pub.sendNext( data(0) )
+//
+//      Source( data )
+//      .via( flowUnderTest )
+//      .runWith( TestSink.probe[Outliers] )
+//      .request( 1 )
+//      .expectEventPF[Outliers] {
+//        case OnNext( actual ) => {
+//          val foo: Int = actual
+//        }
+//      }
+//      .expectNext( )
+
+//      val future: Int = Source( data )
+//                   .via( flowUnderTest )
+//                   .runWith( sinkProbe )
+//      logger.debug( "STREAM future = {}", future )
+//      val result = Await.result( future, 2.seconds.dilated )
+//      trace( s"result class   [${result.hashCode}] = ${result.getClass}")
+//      trace( s"expected class [${expected.hashCode}] = ${expected.getClass}")
+//      result.algorithms mustBe expected.algorithms
+//      result mustBe a [SeriesOutliers]
+//      result.asInstanceOf[SeriesOutliers].outliers mustBe expected.outliers
+//      result.anomalySize mustBe expected.anomalySize
+//      result.hasAnomalies mustBe expected.hasAnomalies
+//      result.size mustBe expected.size
+//      result.source mustBe expected.source
+//      result.topic mustBe expected.topic
+//      result mustBe expected
     }
 
     "grouped Example" in { f: Fixture =>
