@@ -95,7 +95,7 @@ class LeastSquaresAnalyzer( override val router: ActorRef ) extends SkylineAnaly
             log.debug( "least squares 3 non-zero avg error: {} != {} = {}", math.round( t ), 0D, ( math.round( t ) != 0D ) )
             val control = ControlBoundary.fromExpectedAndDistance(
               timestamp = ts.toLong,
-              expected = t,
+              expected = v + t,
               distance = math.abs( tol * errorsStddev )
             )
             val isOutlier = ( math.abs(t) > errorsStddev * tol ) && ( math.round( errorsStddev ) != 0D ) && ( math.round( t ) != 0 )
