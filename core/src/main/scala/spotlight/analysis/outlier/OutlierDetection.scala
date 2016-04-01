@@ -149,18 +149,20 @@ with ActorLogging {
   type AggregatorSubscribers = Map[ActorRef, DetectionJob]
   var outstanding: AggregatorSubscribers = Map.empty[ActorRef, DetectionJob]
 
-
-  override protected def requestStrategy: RequestStrategy = {
+  lazy val maxInFlight: Int = {
     val availableProcessors = Runtime.getRuntime.availableProcessors()
-    val maxInFlight = math.floor( outer.maxInFlightCpuFactor * availableProcessors ).toInt
+    val result = math.floor( outer.maxInFlightCpuFactor * availableProcessors ).toInt
     log.info(
       "OutlierDetector: setting request strategy max in flight=[{}] based on CPU[{}] and configured factor[{}]",
-      maxInFlight.toString,
+      result.toString,
       availableProcessors,
       outer.maxInFlightCpuFactor
     )
+    result
+  }
 
-    new MaxInFlightRequestStrategy( max = maxInFlight ) {
+  override protected def requestStrategy: RequestStrategy = {
+    new MaxInFlightRequestStrategy( max = outer.maxInFlight ) {
       override def inFlightInternally: Int = outstanding.size
     }
   }

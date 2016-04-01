@@ -79,7 +79,7 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
       )
 
       val maxInDetectionFactor = {
-        val path = "spotlight.workflow.detect.max-in-flight"
+        val path = "spotlight.workflow.detect.max-in-flight-cpu-factor"
         if ( config hasPath path ) config.getDouble( path ) else 1.0
       }
 
