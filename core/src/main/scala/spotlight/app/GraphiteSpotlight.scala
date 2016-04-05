@@ -3,35 +3,36 @@ package spotlight.app
 import java.net.InetSocketAddress
 import java.util.concurrent.TimeoutException
 
-import scala.concurrent.{ ExecutionContext, Future }
+import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
-import scala.util.{ Failure, Success }
+import scala.util.{Failure, Success}
 import scala.util.matching.Regex
-import akka.actor.{ ActorRef, ActorSystem }
+import akka.actor.{ActorRef, ActorSystem}
 import akka.stream.scaladsl._
 import akka.stream._
-import akka.util.{ ByteString, Timeout }
+import akka.util.{ByteString, Timeout}
 
-import scalaz.{ Sink => _, _ }, Scalaz._
+import scalaz.{Sink => _, _}
+import Scalaz._
 import org.slf4j.LoggerFactory
-import com.typesafe.scalalogging.{ Logger, StrictLogging }
+import com.typesafe.scalalogging.{Logger, StrictLogging}
 import com.typesafe.config.Config
 import kamon.Kamon
-import nl.grons.metrics.scala.{ MetricName, Meter }
-
-import peds.akka.supervision.IsolatedLifeCycleSupervisor.{ WaitForStart, ChildStarted }
+import nl.grons.metrics.scala.{Meter, MetricName}
+import peds.akka.supervision.IsolatedLifeCycleSupervisor.{ChildStarted, WaitForStart}
 import peds.commons.log.Trace
 import peds.akka.supervision.OneForOneStrategyFactory
-import peds.akka.metrics.{ Reporter, Instrumented }
+import peds.akka.metrics.{Instrumented, Reporter}
 import peds.commons.V
 import peds.akka.stream.StreamMonitor
+import spotlight.analysis.outlier.ProcessorAdapter
 import spotlight.model.outlier._
-import spotlight.model.timeseries.{ TimeSeries, TimeSeriesBase }
+import spotlight.model.timeseries.{TimeSeries, TimeSeriesBase}
 import spotlight.protocol.GraphiteSerializationProtocol
 import spotlight.publish.GraphitePublisher
-import spotlight.stream.{ Configuration, OutlierScoringModel, OutlierDetectionWorkflow }
-import spotlight.stream.OutlierDetectionWorkflow.{ GetPublisher, GetPublishRateLimiter, GetDetectionRouter }
-import spotlight.train.{ AvroFileTrainingRepositoryInterpreter, LogStatisticsTrainingRepositoryInterpreter, TrainOutlierAnalysis }
+import spotlight.stream.{Configuration, OutlierDetectionBootstrap, OutlierScoringModel}
+import spotlight.stream.OutlierDetectionBootstrap.{GetOutlierDetector, GetPublishRateLimiter, GetPublisher}
+import spotlight.train.{AvroFileTrainingRepositoryInterpreter, LogStatisticsTrainingRepositoryInterpreter, TrainOutlierAnalysis}
 
 
 /**
@@ -51,7 +52,7 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
   case class BootstrapContext(
     config: Configuration,
     reloader: () => V[Configuration],
-    router: ActorRef,
+    detector: ActorRef,
     limiter: ActorRef,
     publisher: ActorRef
   )
@@ -95,26 +96,26 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
     implicit val ec = system.dispatcher
 
     val reloader = Configuration.reloader( args )()()
-    val workflow = startWorkflow( config, reloader )
+    val workflow = startDetection( config, reloader )
 
     import akka.pattern.ask
 
     implicit val timeout = Timeout( 30.seconds )
     val actors = for {
       _ <- workflow ? WaitForStart
-      ChildStarted( r ) <- ( workflow ? GetDetectionRouter ).mapTo[ChildStarted]
+      ChildStarted( d ) <- ( workflow ? GetOutlierDetector ).mapTo[ChildStarted]
       ChildStarted( l ) <- ( workflow ? GetPublishRateLimiter ).mapTo[ChildStarted]
       ChildStarted( p ) <- ( workflow ? GetPublisher ).mapTo[ChildStarted]
-    } yield ( r, l, p )
+    } yield ( d, l, p )
 
     val bootstrapTimeout = akka.pattern.after( 1.second, system.scheduler ) {
       Future.failed( new TimeoutException( "failed to bootstrap detection workflow core actors" ) )
     }
 
     Future.firstCompletedOf( actors :: bootstrapTimeout :: Nil ) map {
-      case (router, limiter, publisher) => {
+      case (detector, limiter, publisher) => {
 //        startPlanWatcher( config, Set(detector) )
-        BootstrapContext( config, reloader, router, limiter, publisher )
+        BootstrapContext( config, reloader, detector, limiter, publisher )
       }
     }
   }
@@ -174,7 +175,7 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
         )
 
         val timeSeries = b.add( conf.protocol.unmarshalTimeSeriesData.watchSourced( 'timeseries ) )
-        val scoring = b.add( OutlierScoringModel.scoringGraph( context.router, conf ) )
+        val scoring = b.add( OutlierScoringModel.scoringGraph( context.detector, conf ) )
         val logUnrecognized = b.add(
           Flow[TimeSeries].transform( () =>
             OutlierScoringModel.logMetric( Logger( LoggerFactory getLogger "Unrecognized" ), conf.plans )
@@ -210,14 +211,11 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
         StreamMonitor.set(
           'framing,
           'intakeBuffer,
-//          'timeseries,
           OutlierScoringModel.WatchPoints.ScoringPlanned,
           OutlierScoringModel.WatchPoints.ScoringBatch,
           OutlierScoringModel.WatchPoints.ScoringAnalysisBuffer,
-          OutlierScoringModel.WatchPoints.ScoringDetect,
+          ProcessorAdapter.WatchPoints.Processor,
           'publish
-//          'tcpOut,
-//          'train
         )
 
                                                  broadcast ~> passArchivable ~> train ~> termTraining
@@ -311,10 +309,10 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
     }
   }
 
-  def startWorkflow( config: Configuration, reloader: () => V[Configuration] )( implicit system: ActorSystem ): ActorRef = {
+  def startDetection(config: Configuration, reloader: () => V[Configuration] )(implicit system: ActorSystem ): ActorRef = {
     system.actorOf(
-      OutlierDetectionWorkflow.props(
-        new OutlierDetectionWorkflow() with OneForOneStrategyFactory with OutlierDetectionWorkflow.ConfigurationProvider {
+      OutlierDetectionBootstrap.props(
+        new OutlierDetectionBootstrap( ) with OneForOneStrategyFactory with OutlierDetectionBootstrap.ConfigurationProvider {
           override def sourceAddress: InetSocketAddress = config.sourceAddress
           override def maxFrameLength: Int = config.maxFrameLength
           override def protocol: GraphiteSerializationProtocol = config.protocol
@@ -323,7 +321,7 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
           override def configuration: Config = config
         }
       ),
-      "workflow-supervisor"
+      "detection-supervisor"
     )
   }
 

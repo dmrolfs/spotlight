@@ -1,23 +1,24 @@
 package spotlight.stream
 
 import java.util.concurrent.atomic.AtomicInteger
+
 import scala.concurrent.duration._
-import akka.stream.FanOutShape.{ Name, Init }
+import akka.stream.FanOutShape.{Init, Name}
 import akka.actor._
 import akka.stream.scaladsl._
 import akka.stream._
-import akka.stream.stage.{ SyncDirective, Context, PushStage }
-
-import com.typesafe.scalalogging.{ StrictLogging, Logger }
+import akka.stream.stage.{Context, PushStage, SyncDirective}
+import com.typesafe.scalalogging.{Logger, StrictLogging}
 import org.slf4j.LoggerFactory
 import peds.akka.metrics.Instrumented
 import peds.akka.stream.StreamMonitor
 import peds.commons.collection.BloomFilter
 import spotlight.analysis.outlier.OutlierDetection
+import spotlight.analysis.outlier.OutlierDetection.DetectionResult
 import spotlight.model.outlier._
 import spotlight.model.timeseries.TimeSeriesBase.Merging
 import spotlight.model.timeseries._
-import spotlight.stream.OutlierDetectionWorkflow._
+import spotlight.stream.OutlierDetectionBootstrap._
 
 
 /**
@@ -42,7 +43,7 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
   }
 
   def scoringGraph(
-    routerRef: ActorRef,
+    detectorRef: ActorRef,
     config: Configuration
   )(
     implicit system: ActorSystem,
@@ -85,7 +86,7 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
 
       val detectOutlier = b.add(
         OutlierDetection.detectionFlow(
-          routerRef = routerRef,
+          detector = detectorRef,
           maxInDetectionFactor = maxInDetectionFactor,
           maxAllowedWait = config.detectionBudget,
           plans = config.plans

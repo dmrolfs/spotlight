@@ -1,10 +1,12 @@
 package spotlight.analysis.outlier
 
-import akka.actor.{ ActorRef }
+import akka.actor.{ActorRef, Props}
 import org.apache.http.HttpEntityEnclosingRequest
-import scalaz.Scalaz.{ when => _, _ }
+
+import scalaz.Scalaz.{when => _, _}
 import com.typesafe.config.ConfigFactory
 import spotlight.model.timeseries._
+
 import scala.concurrent.duration._
 import akka.testkit._
 import org.mockito.Mockito._
@@ -12,7 +14,7 @@ import org.scalatest.mock.MockitoSugar
 import org.mockito.Matchers._
 import org.mockito.invocation.InvocationOnMock
 import org.mockito.stubbing.Answer
-import spotlight.model.outlier.{ ReduceOutliers, IsQuorum, OutlierPlan }
+import spotlight.model.outlier.{IsQuorum, OutlierPlan, ReduceOutliers}
 import spotlight.testkit.ParallelAkkaSpec
 
 
@@ -29,8 +31,16 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
 
     trait TestConfigurationProvider extends OutlierDetection.ConfigurationProvider {
       override def router: ActorRef = fixture.router.ref
-      override def maxInFlightCpuFactor: Double = 1
     }
+
+    val detect = TestActorRef[OutlierDetection with OutlierDetection.ConfigurationProvider](
+      Props(
+        new OutlierDetection with TestConfigurationProvider {
+          override def preStart(): Unit = { }
+        }
+      )
+    )
+
 
     val plans: Seq[OutlierPlan] = Seq(
       OutlierPlan.forTopics(
@@ -75,14 +85,6 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
         reduce = reduceA
       )
 
-      val detect = TestActorRef[OutlierDetection with OutlierDetection.ConfigurationProvider](
-        OutlierDetection.props {
-          new OutlierDetection with TestConfigurationProvider {
-            override def preStart(): Unit = { }
-          }
-        }
-      )
-
       detect.underlyingActor.router mustBe f.router.ref
 
       val msg = OutlierDetectionMessage( TimeSeries( topic = "dummy", points = Seq.empty[DataPoint] ), defaultPlan ).toOption.get
@@ -122,14 +124,6 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
         planSpecification = ConfigFactory.empty
       )
 
-      val detect = TestActorRef[OutlierDetection](
-        OutlierDetection.props {
-          new OutlierDetection with TestConfigurationProvider {
-            override def preStart(): Unit = { }
-          }
-        }
-      )
-
       val msg = OutlierDetectionMessage( TimeSeries( topic = metric, points = Seq.empty[DataPoint] ), defaultPlan ).toOption.get
 
       detect receive msg
@@ -164,14 +158,6 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
         timeout = 2.seconds,
         isQuorum = isQuorumA,
         reduce = reduceA
-      )
-
-      val detect = TestActorRef[OutlierDetection](
-        OutlierDetection.props {
-          new OutlierDetection with TestConfigurationProvider {
-            override def preStart(): Unit = { }
-          }
-        }
       )
 
       val msgForDefault = OutlierDetectionMessage(
@@ -283,14 +269,6 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
         reduce = reduceA,
         algorithms = Set( 'foo, 'bar ),
                                              planSpecification = ConfigFactory.empty
-      )
-
-      val detect = TestActorRef[OutlierDetection](
-        OutlierDetection.props {
-          new OutlierDetection with TestConfigurationProvider {
-            override def preStart(): Unit = { }
-          }
-        }
       )
 
       val expectedA = HistoricalStatistics.fromActivePoints( DataPoint.toDoublePoints(pointsA).toArray, false )
