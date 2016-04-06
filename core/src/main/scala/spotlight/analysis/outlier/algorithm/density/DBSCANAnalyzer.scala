@@ -55,6 +55,10 @@ trait DBSCANAnalyzer extends AlgorithmActor {
     Kleisli[TryV, Config, Int] { c => \/ fromTryCatchNonFatal { c getInt algorithm.name+".minDensityConnectedPoints" } }
   }
 
+  def historyMean: Op[AlgorithmContext, Double] = kleisli[TryV, AlgorithmContext, Double] { context =>
+    context.history.mean( 1 ).right
+  }
+
   def historyStandardDeviation: Op[AlgorithmContext, Double] = kleisli[TryV, AlgorithmContext, Double] { context =>
     context.history.standardDeviation( 1 ).right
   }
@@ -63,19 +67,23 @@ trait DBSCANAnalyzer extends AlgorithmActor {
     val epsContext = for {
       context <- ask[TryV, AlgorithmContext]
       config <- messageConfig
+      historyMean <- historyMean
       historyStdDev <- historyStandardDeviation
       tol <- kleisli[TryV, AlgorithmContext, Option[Double]] { _.tolerance }
-    } yield ( context, config, historyStdDev, tol )
+    } yield ( context, config, historyMean, historyStdDev, tol )
 
-    epsContext flatMapK { case (ctx, config, hsd, tol) =>
+    epsContext flatMapK { case (ctx, config, hsm, hsd, tol) =>
       log.debug( "eps config = {}", config )
-      log.debug( "eps tolerance = {}", tol )
-      log.debug( "eps historical std dev = {}", hsd )
+      log.debug( "eps historical mean=[{}] stddev=[{}] tolerance=[{}]", hsm, hsd, tol )
 
       val calculatedEps = for {
-        stddev <- if ( hsd.isNaN ) None else Some( hsd )
+        distanceMean <- if ( hsm.isNaN ) None else Some( hsm )
+        distanceStddev <- if ( hsd.isNaN ) None else Some( hsd )
         t = tol getOrElse 1.0
-      } yield { t * stddev }
+      } yield {
+        log.debug( "dist-mean=[{}] dist-stddev=[{}] tolerance=[{}] calc-eps=[{}]", distanceMean, distanceStddev, t, (distanceMean + t * distanceStddev) )
+        distanceMean + t * distanceStddev
+      }
 
       trainingLogger.debug(
         "[{}][{}] eps calculated = {}",

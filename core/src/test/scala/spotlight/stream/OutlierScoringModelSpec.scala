@@ -192,7 +192,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
           .map { a =>
             s"""
                |algorithm-config.${a.name} {
-               |  tolerance: 2
+               |  tolerance: 1.043822701 // eps:0.75
                |  seedEps: 0.75
                |  minDensityConnectedPoints: 3
                |  distance: Mahalanobis // Euclidean
