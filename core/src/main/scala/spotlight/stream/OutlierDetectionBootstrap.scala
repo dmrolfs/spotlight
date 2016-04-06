@@ -1,6 +1,7 @@
 package spotlight.stream
 
 import java.net.{InetSocketAddress, Socket}
+
 import scala.concurrent.duration._
 import akka.actor.SupervisorStrategy._
 import akka.actor._
@@ -14,7 +15,7 @@ import peds.akka.supervision.{IsolatedLifeCycleSupervisor, OneForOneStrategyFact
 import spotlight.analysis.outlier.algorithm.density.{CohortDensityAnalyzer, SeriesCentroidDensityAnalyzer}
 import spotlight.analysis.outlier.algorithm.skyline._
 import spotlight.analysis.outlier.algorithm.density.SeriesDensityAnalyzer
-import spotlight.analysis.outlier.DetectionAlgorithmRouter
+import spotlight.analysis.outlier.{DetectionAlgorithmRouter, OutlierDetection}
 import spotlight.model.outlier.OutlierPlan
 import spotlight.model.timeseries.Topic
 import spotlight.publish.{GraphitePublisher, LogPublisher}
@@ -24,8 +25,8 @@ import spotlight.protocol.GraphiteSerializationProtocol
 /**
   * Created by rolfsd on 1/6/16.
   */
-object OutlierDetectionWorkflow {
-  def props( makeWorkflow: => OutlierDetectionWorkflow with OneForOneStrategyFactory with ConfigurationProvider ): Props = {
+object OutlierDetectionBootstrap {
+  def props( makeWorkflow: => OutlierDetectionBootstrap with OneForOneStrategyFactory with ConfigurationProvider ): Props = {
     Props( makeWorkflow )
   }
 
@@ -33,7 +34,7 @@ object OutlierDetectionWorkflow {
   val OutlierMetricPrefix = "spotlight.outlier."
 
 
-  case object GetDetectionRouter
+  case object GetOutlierDetector
   case object GetPublishRateLimiter
   case object GetPublisher
 
@@ -99,30 +100,38 @@ object OutlierDetectionWorkflow {
         n -> context.actorOf( p.withDispatcher("outlier-algorithm-dispatcher"), n.name )
       }
     }
+
+    def makeOutlierDetector( routerRef: ActorRef )( implicit context: ActorContext ): ActorRef = {
+      context.actorOf(
+        OutlierDetection.props( routerRef = routerRef ).withDispatcher( "outlier-detection-dispatcher" ),
+        "outlierDetector"
+      )
+    }
   }
 }
 
-class OutlierDetectionWorkflow(
+class OutlierDetectionBootstrap(
   maxNrRetries: Int = -1,
   withinTimeRange: Duration = Duration.Inf
 ) extends IsolatedLifeCycleSupervisor with InstrumentedActor with ActorLogging {
-  outer: SupervisionStrategyFactory with OutlierDetectionWorkflow.ConfigurationProvider =>
+  outer: SupervisionStrategyFactory with OutlierDetectionBootstrap.ConfigurationProvider =>
 
-  import spotlight.stream.OutlierDetectionWorkflow._
+  import spotlight.stream.OutlierDetectionBootstrap._
 
-  var routerRef: ActorRef = _
+  var detectorRef: ActorRef = _
   var publishRateLimiterRef: ActorRef = _
   var publisherRef: ActorRef = _
 
 
-  override lazy val metricBaseName: MetricName = MetricName( classOf[OutlierDetectionWorkflow] )
+  override lazy val metricBaseName: MetricName = MetricName( classOf[OutlierDetectionBootstrap] )
   val failuresMeter: Meter = metrics.meter( "actor.failures" )
 
   override def childStarter(): Unit = {
     publishRateLimiterRef = makePublishRateLimiter( )
     publisherRef = makePublisher( publisherProps )
-    routerRef = makePlanRouter()
+    val routerRef = makePlanRouter()
     makeAlgorithmWorkers( routerRef )
+    detectorRef = makeOutlierDetector( routerRef )
     context become around( active )
   }
 
@@ -143,7 +152,7 @@ class OutlierDetectionWorkflow(
 
   val active: Receive = LoggingReceive {
     super.receive orElse {
-      case GetDetectionRouter => sender() ! ChildStarted( routerRef )
+      case GetOutlierDetector => sender( ) ! ChildStarted( detectorRef )
       case GetPublishRateLimiter => sender( ) ! ChildStarted( publishRateLimiterRef )
       case GetPublisher => sender() ! ChildStarted( publisherRef )
     }

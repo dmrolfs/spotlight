@@ -20,6 +20,8 @@ import spotlight.analysis.outlier.{DetectUsing, HistoricalStatistics, HistoryKey
 import spotlight.model.outlier.{NoOutliers, OutlierPlan, Outliers, SeriesOutliers}
 import spotlight.model.timeseries._
 
+import scala.annotation.tailrec
+
 
 
 /**
@@ -127,6 +129,13 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends DBSCANAnaly
     super.algorithmContext >=> toDensity
   }
 
+  override def historyMean: Op[AlgorithmContext, Double] = kleisli[TryV, AlgorithmContext, Double] { context =>
+    context match {
+      case contextClassTag( c ) => c.distanceHistory.getMean.right
+      case c => c.history.mean( 1 ).right
+    }
+  }
+
   override def historyStandardDeviation: Op[AlgorithmContext, Double] = {
     kleisli[TryV, AlgorithmContext, Double] { context =>
       context match {
@@ -165,8 +174,10 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends DBSCANAnaly
       contextAndClusters <- ask[TryV, (AlgorithmContext, Clusters)]
       (ctx, _) = contextAndClusters
       os <- outliers
+      ctrls <- controls
     } yield {
       val tsTag = ClassTag[TimeSeries]( classOf[TimeSeries] )
+      val controlBoundaries = Map( algorithm -> ctrls )
       log.debug( "tsTag = {}", tsTag )
       ctx.source match {
         case tsTag( src ) if os.nonEmpty => {
@@ -174,12 +185,92 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends DBSCANAnaly
             algorithms = Set(algorithm),
             source = src,
             outliers = os.toIndexedSeq,
-            plan = ctx.message.plan
+            plan = ctx.message.plan,
+            algorithmControlBoundaries = controlBoundaries
           )
         }
 
-        case src => NoOutliers( algorithms = Set(algorithm), source = src, plan = ctx.message.plan )
+        case src => {
+          NoOutliers(
+            algorithms = Set(algorithm),
+            source = src,
+            plan = ctx.message.plan,
+            algorithmControlBoundaries = controlBoundaries
+          )
+        }
       }
     }
+  }
+
+  def controls: Op[(AlgorithmContext, Clusters), Seq[ControlBoundary]] = {
+//    val contextCC = kleisli[TryV, (AlgorithmContext, Clusters), Context] { case (ac, _) => ac.right }
+    val context = kleisli[TryV, (AlgorithmContext, Clusters), Context] { case (ac, _) => toConcreteContext( ac )}
+    val distanceHistory = context map { _.distanceHistory }
+    val distanceMeasure = kleisli[TryV, (AlgorithmContext, Clusters), DistanceMeasure] { case (a, _) => a.distanceMeasure }
+    val toleranceCC = kleisli[TryV, (AlgorithmContext, Clusters), Option[Double]] { case (ac, _) => ac.tolerance }
+
+    for {
+      ctx <- context
+      e <- eps <=< kleisli[TryV, (AlgorithmContext, Clusters), AlgorithmContext] { case (ac, _) => ac.right }
+      dh <- distanceHistory
+      distance <- distanceMeasure
+      tolerance <- toleranceCC
+    } yield {
+      val createControls = {
+        val PublishControlsPath = s"${algorithm.name}.publish-controls"
+        if ( ctx.messageConfig hasPath PublishControlsPath ) {
+          ctx.messageConfig getBoolean PublishControlsPath
+        } else {
+          false
+        }
+      }
+
+      if ( !createControls ) Seq.empty[ControlBoundary]
+      else {
+        val tol = tolerance getOrElse 3D
+        val points = DataPoint toDoublePoints ctx.source.points
+        val last = ctx.history.lastPoints.lastOption map { new DoublePoint( _ ) }
+        log.debug( "last = [{}]", last )
+        val pairs = last map { l => points.zip( l +: points ) } getOrElse { (points drop 1).zip( points ) }
+        log.debug( "pairs=[{}]", pairs.mkString(",") )
+        pairs map { case (p2, p1) =>
+          val Array(ts2, v2) = p2.getPoint
+
+          def extrapolate( label: String, target: Double ) = (v: Double) => {
+            math.abs( distance.compute(p1.getPoint, Array(ts2, v)) ) - math.abs( target )
+          }
+
+          val expectedDistance = dh.getMean
+          val farthestDistance = math.abs( dh.getMean + tol * dh.getStandardDeviation )
+          log.debug( "expectedDistance=[{}]  farthest=[{}]", expectedDistance, farthestDistance )
+          val expected = valueSeek( precision = 0.001, maximumSteps = 20, start = v2 )( extrapolate("expected", expectedDistance) )
+          val farthest = valueSeek( precision = 0.001, maximumSteps = 20, start = expected )( extrapolate("farthest", farthestDistance) )
+          val result = ControlBoundary.fromExpectedAndDistance( timestamp = ts2.toLong, expected = expected, distance = farthest - expected )
+
+          log.debug(
+            "floor=[{}]  ceiling=[{}]",
+            extrapolate( "floor", farthestDistance )( result.floor.get ),
+            extrapolate( "ceiling", farthestDistance )( result.ceiling.get )
+          )
+
+          log.debug( "pt1~>p2={}~>{} cb:{} h={}", p1, p2, result, (farthest - expected) )
+          result
+        }
+      }
+    }
+  }
+
+  def valueSeek( precision: Double, maximumSteps: Int, start: Double )( fn: Double => Double ): Double = {
+    @tailrec def loop( current: Double, last: Double, step: Int = 0 ): Double = {
+      if ( maximumSteps <= step ) current
+      else if ( math.abs(current - last) <= precision ) current
+      else {
+        val next = current - fn(current) * (current - last) / ( fn(current) - fn(last) )
+        log.debug( "valueSeek next=[{}]", next )
+        loop( next, current, step + 1 )
+      }
+    }
+
+    loop( fn(start), fn(start + 1) )
   }
 }

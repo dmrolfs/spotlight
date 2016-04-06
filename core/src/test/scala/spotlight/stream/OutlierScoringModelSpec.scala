@@ -192,7 +192,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
           .map { a =>
             s"""
                |algorithm-config.${a.name} {
-               |  tolerance: 2
+               |  tolerance: 1.043822701 // eps:0.75
                |  seedEps: 0.75
                |  minDensityConnectedPoints: 3
                |  distance: Mahalanobis // Euclidean
@@ -205,15 +205,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
 
       val routerRef = system.actorOf( DetectionAlgorithmRouter.props, "router" )
       val dbscan = system.actorOf( SeriesDensityAnalyzer.props( routerRef ), "dbscan" )
-      val detector = system.actorOf(
-        OutlierDetection.props {
-          new OutlierDetection with TestConfigurationProvider {
-            override def maxInFlightCpuFactor: Double = 1
-            override def router: ActorRef = routerRef
-          }
-        },
-        "detectOutliers"
-      )
+      val detector = system.actorOf( OutlierDetection.props( routerRef = routerRef ), "detectOutliers" )
 
       val now = new joda.DateTime( 2016, 3, 25, 10, 38, 40, 81 ) // new joda.DateTime( joda.DateTime.now.getMillis / 1000L * 1000L )
       logger.debug( "USE NOW = {}", now )
@@ -235,7 +227,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
 
       val graphiteFlow = OutlierScoringModel.batchSeries( parallelism = 4, windowSize = 20.millis )
       val detectFlow = OutlierDetection.detectionFlow(
-        routerRef = routerRef,
+        detector = detector,
         maxInDetectionFactor = 1,
         maxAllowedWait = 2.seconds,
         plans = Seq( defaultPlan )

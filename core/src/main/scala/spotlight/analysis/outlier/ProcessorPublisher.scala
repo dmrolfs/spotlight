@@ -2,21 +2,20 @@ package spotlight.analysis.outlier
 
 import scala.annotation.tailrec
 import scala.concurrent.duration._
+import scala.reflect.ClassTag
 import akka.actor._
 import akka.actor.SupervisorStrategy.{Escalate, Restart, Stop}
 import akka.event.LoggingReceive
 import akka.stream.actor.{ActorPublisher, ActorPublisherMessage, ActorSubscriberMessage}
 import nl.grons.metrics.scala.{Meter, MetricName}
 import peds.akka.metrics.InstrumentedActor
-import spotlight.analysis.outlier.OutlierDetection.DetectionResult
-import spotlight.model.outlier.Outliers
 
 
 /**
   * Created by rolfsd on 3/30/16.
   */
-object DetectionPublisher {
-  def props: Props = Props( new DetectionPublisher with StreamConfigurationProvider )
+object ProcessorPublisher {
+  def props[O: ClassTag]: Props = Props( new ProcessorPublisher[O] with StreamConfigurationProvider )
 
 
   trait StreamConfigurationProvider {
@@ -25,18 +24,21 @@ object DetectionPublisher {
   }
 }
 
-class DetectionPublisher
+class ProcessorPublisher[O: ClassTag]
 extends Actor
-with ActorPublisher[Outliers]
+with ActorPublisher[O]
 with InstrumentedActor
-with ActorLogging { outer: DetectionPublisher.StreamConfigurationProvider =>
+with ActorLogging { outer: ProcessorPublisher.StreamConfigurationProvider =>
+  val oTag = implicitly[ClassTag[O]]
+  log.debug( "Publisher oTag = {}", oTag )
+  var buffer: Vector[O] = Vector.empty[O]
 
-  var buffer: Vector[Outliers] = Vector.empty[Outliers]
 
-  override lazy val metricBaseName: MetricName = MetricName( classOf[DetectionPublisher] )
+  override lazy val metricBaseName: MetricName = MetricName( classOf[ProcessorPublisher[O]] )
   val conductorFailuresMeter: Meter = metrics.meter( "conductor.failures" )
 
-  override def receive: Receive = LoggingReceive { around( publish ) }
+//  override def receive: Receive = LoggingReceive { around( publish ) }
+  override def receive: Receive = LoggingReceive { publish }
 
 
   override val subscriptionTimeout: Duration = {
@@ -45,19 +47,20 @@ with ActorLogging { outer: DetectionPublisher.StreamConfigurationProvider =>
   }
 
   val publish: Receive = {
-    case DetectionResult( outliers ) => {
+    case oTag( message ) if isActive => {
+      log.debug( "Publisher received message: [{}][{}]", oTag.runtimeClass.getName, message )
       if ( buffer.isEmpty && totalDemand > 0 ) {
         log.debug(
-          "DetectionPublisher: there is demand [{}:{}] so short-circuiting buffer[{}] to onNext outliers: [{}]",
+          "ProcessorPublisher: there is demand [{}:{}] so short-circuiting buffer[{}] to onNext message: [{}]",
           totalDemand,
           isActive,
           buffer.size,
-          outliers
+          message
         )
-        onNext( outliers )
+        onNext( message )
       } else {
-        buffer :+= outliers
-        log.debug( "DetectionPublisher: buffered [new-size={}] result: [{}]", buffer.size, outliers )
+        buffer :+= message
+        log.debug( "ProcessorPublisher: buffered [new-size={}] result: [{}]", buffer.size, message )
         deliverBuffer()
       }
     }
@@ -67,8 +70,10 @@ with ActorLogging { outer: DetectionPublisher.StreamConfigurationProvider =>
       onComplete()
     }
 
+    case ActorSubscriberMessage.OnError( cause ) => onError( cause )
+
     case _: ActorPublisherMessage.Request => {
-      log.debug( "DetectionPublisher: downstream request received: totalDemand=[{}]", totalDemand )
+      log.debug( "ProcessorPublisher: downstream request received: totalDemand=[{}]", totalDemand )
       deliverBuffer()
     }
 
@@ -76,18 +81,20 @@ with ActorLogging { outer: DetectionPublisher.StreamConfigurationProvider =>
       log.info( "cancelling detection analysis - leaving buffered:[{}]", buffer.size )
       context stop self
     }
+
+//    case m => unhandled( m )
   }
 
 
   @tailrec final def deliverBuffer(): Unit = {
     if ( isActive && totalDemand > 0 ) {
       if ( totalDemand <= Int.MaxValue ) {
-        log.debug( "DetectionPublisher: delivering {} of {} demand", totalDemand.toInt, totalDemand.toInt )
+        log.debug( "ProcessorPublisher: delivering {} of {} demand", totalDemand.toInt, totalDemand.toInt )
         val (use, keep) = buffer splitAt totalDemand.toInt
         use foreach onNext
         buffer = keep
       } else {
-        log.debug( "DetectionPublisher: delivering {} of {} demand", Int.MaxValue, totalDemand.toInt )
+        log.debug( "ProcessorPublisher: delivering {} of {} demand", Int.MaxValue, totalDemand.toInt )
         val (use, keep) = buffer splitAt Int.MaxValue
         use foreach onNext
         buffer = keep

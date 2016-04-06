@@ -111,7 +111,7 @@ class SeriesCentroidDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSug
 
       val algProps = ConfigFactory.parseString(
         s"""
-           |${algoS.name}.tolerance: 0.65321171
+           |${algoS.name}.tolerance: -1.063505513 // eps:5.0
            |${algoS.name}.seedEps: 0.0
            |${algoS.name}.minDensityConnectedPoints: 3
            |${algoS.name}.distance: Euclidean

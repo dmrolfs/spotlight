@@ -29,7 +29,7 @@ object OutlierDetectionWorkflowSpec {
 }
 
 class OutlierDetectionWorkflowSpec extends ParallelAkkaSpec with MockitoSugar with ScalaFutures {
-  import OutlierDetectionWorkflow._
+  import OutlierDetectionBootstrap._
 
   override val trace = Trace[OutlierDetectionWorkflowSpec]
 
@@ -46,8 +46,8 @@ class OutlierDetectionWorkflowSpec extends ParallelAkkaSpec with MockitoSugar wi
     val dbscan = TestProbe()
     val detector = TestProbe()
 
-    val workflow = TestActorRef[OutlierDetectionWorkflow](
-      new OutlierDetectionWorkflow with OneForOneStrategyFactory with ConfigurationProvider {
+    val workflow = TestActorRef[OutlierDetectionBootstrap](
+      new OutlierDetectionBootstrap with OneForOneStrategyFactory with ConfigurationProvider {
         def sourceAddress: InetSocketAddress = new InetSocketAddress( "example.com", 2004 )
         def maxFrameLength: Int = 1000
         def protocol: GraphiteSerializationProtocol = fixture.protocol
@@ -60,12 +60,12 @@ class OutlierDetectionWorkflowSpec extends ParallelAkkaSpec with MockitoSugar wi
         override def makePublishRateLimiter()(implicit context: ActorContext): ActorRef = rateLimiter.ref
         override def makePublisher(publisherProps: Props)(implicit context: ActorContext): ActorRef = publisher.ref
         override def makePlanRouter()(implicit context: ActorContext): ActorRef = planRouter.ref
-//        override def makeOutlierDetector(rateLimiter: ActorRef)(implicit context: ActorContext): ActorRef = detector.ref
+        override def makeOutlierDetector(rateLimiter: ActorRef)(implicit context: ActorContext): ActorRef = detector.ref
         override def makeAlgorithmWorkers(router: ActorRef)(implicit context: ActorContext): Map[Symbol, ActorRef] = {
           Map( 'dbscan -> dbscan.ref )
         }
       }
-    )
+                                                          )
 
     val sender = TestProbe()
 
@@ -77,26 +77,18 @@ class OutlierDetectionWorkflowSpec extends ParallelAkkaSpec with MockitoSugar wi
 
   val DONE = Tag( "done" )
 
-  "OutlierDetectionWorkflow" should {
+  "OutlierDetectionBootstrap" should {
     "start" in  { f: Fixture =>
       import f._
       workflow.receive( WaitForStart, sender.ref )
       sender.expectMsg( 400.millis.dilated,  "start", Started )
     }
 
-//    "create outlier detector" in { f: Fixture =>
-//      import f._
-//      workflow.receive( GetOutlierDetector, sender.ref )
-//      sender.expectMsgPF( 400.millis.dilated, "detector" ) {
-//        case ChildStarted( actual ) => actual mustBe detector.ref
-//      }
-//    }
-
-    "create router" in { f: Fixture =>
+    "create outlier detector" in { f: Fixture =>
       import f._
-      workflow.receive( GetDetectionRouter, sender.ref )
-      sender.expectMsgPF( 400.millis.dilated, "router" ) {
-        case ChildStarted( actual ) => actual mustBe planRouter.ref
+      workflow.receive( GetOutlierDetector, sender.ref )
+      sender.expectMsgPF( 400.millis.dilated, "detector" ) {
+        case ChildStarted( actual ) => actual mustBe detector.ref
       }
     }
 
@@ -122,15 +114,14 @@ class OutlierDetectionWorkflowSpec extends ParallelAkkaSpec with MockitoSugar wi
       implicit val to = Timeout( 1.second.dilated )
       val actual = for {
         _ <- workflow ? WaitForStart
-//        ChildStarted( d ) <- ( workflow ? GetOutlierDetector ).mapTo[ChildStarted]
-        ChildStarted( r ) <- ( workflow ? GetDetectionRouter ).mapTo[ChildStarted]
+        ChildStarted( d ) <- ( workflow ? GetOutlierDetector ).mapTo[ChildStarted]
         ChildStarted( l ) <- ( workflow ? GetPublishRateLimiter ).mapTo[ChildStarted]
         ChildStarted( p ) <- ( workflow ? GetPublisher ).mapTo[ChildStarted]
-      } yield (r, l, p)
+      } yield (d, l, p)
 
       whenReady( actual) { a =>
-        val (r, l, p) = a
-        r mustBe planRouter.ref
+        val (d, l, p) = a
+        d mustBe detector.ref
         l mustBe rateLimiter.ref
         p mustBe publisher.ref
       }
