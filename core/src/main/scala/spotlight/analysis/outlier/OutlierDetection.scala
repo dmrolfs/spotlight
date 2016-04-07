@@ -3,7 +3,7 @@ package spotlight.analysis.outlier
 import scala.collection.immutable
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
-import akka.actor.{Actor, ActorLogging, ActorRef, ActorSystem, Props}
+import akka.actor.{Actor, ActorLogging, ActorPath, ActorRef, ActorSystem, Props}
 import akka.event.LoggingReceive
 import akka.pattern.AskTimeoutException
 import akka.stream.actor._
@@ -188,7 +188,15 @@ with ActorLogging {
 
   def dispatch( m: OutlierDetectionMessage, p: OutlierPlan )( implicit ec: ExecutionContext ): ActorRef = {
     log.debug( "OutlierDetection disptaching: [{}][{}:{}]", m.topic, m.plan, m.plan.id )
-    val aggregatorName = s"quorum-${p.name}-${fullExtractId(m) getOrElse "!NULL-ID!"}-${ShortUUID()}"
+    val aggregatorName = {
+      val name = s"quorum-${p.name}-${fullExtractId(m) getOrElse "!NULL-ID!"}-${ShortUUID()}"
+      if ( ActorPath isValidPathElement name ) name
+      else {
+        val blunted = name.replaceAll( "[;/?:@&=+$,]", "_" )
+        log.warning( "OutlierDetection attempting to dispatch to invalid aggregator name: [{}] blunting to [{}]", name, blunted )
+        blunted
+      }
+    }
     val aggregator = context.actorOf( OutlierQuorumAggregator.props( p, m.source ), aggregatorName )
     val history = updateHistory( m.source, p )
 

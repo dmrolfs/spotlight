@@ -47,7 +47,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
 
   val NEXT = Tag( "next" )
 
-  "SkylineAnalyzer" should {
+  "CommonAnalyzer" should {
     "find outliers deviating from first hour" in { f: Fixture =>
       import f._
       val analyzer = TestActorRef[FirstHourAverageAnalyzer]( FirstHourAverageAnalyzer.props(router.ref) )

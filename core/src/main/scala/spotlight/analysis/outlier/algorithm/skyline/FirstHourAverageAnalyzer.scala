@@ -13,7 +13,8 @@ import org.apache.commons.math3.stat.descriptive.SummaryStatistics
 import peds.commons.Valid
 import peds.commons.util._
 import spotlight.analysis.outlier.algorithm.AlgorithmActor.{AlgorithmContext, Op, TryV}
-import spotlight.analysis.outlier.algorithm.skyline.SkylineAnalyzer.SkylineContext
+import spotlight.analysis.outlier.algorithm.CommonAnalyzer
+import CommonAnalyzer.WrappingContext
 import spotlight.model.outlier.Outliers
 import spotlight.model.timeseries.{ControlBoundary, Point2D, TimeSeriesBase}
 
@@ -35,8 +36,8 @@ object FirstHourAverageAnalyzer {
   final case class Context private[skyline](
     override val underlying: AlgorithmContext,
     firstHour: SummaryStatistics
-  ) extends SkylineContext with LazyLogging {
-    override def withUnderlying( ctx: AlgorithmContext ): Valid[SkylineContext] = copy( underlying = ctx ).successNel
+  ) extends WrappingContext with LazyLogging {
+    override def withUnderlying( ctx: AlgorithmContext ): Valid[WrappingContext] = copy( underlying = ctx ).successNel
 
     override type That = Context
     override def withSource( newSource: TimeSeriesBase ): That = {
@@ -71,18 +72,18 @@ object FirstHourAverageAnalyzer {
   }
 }
 
-class FirstHourAverageAnalyzer( override val router: ActorRef ) extends SkylineAnalyzer[FirstHourAverageAnalyzer.Context] {
+class FirstHourAverageAnalyzer( override val router: ActorRef ) extends CommonAnalyzer[FirstHourAverageAnalyzer.Context] {
   import FirstHourAverageAnalyzer._
 
   override implicit val contextClassTag: ClassTag[Context] = ClassTag( classOf[Context] )
 
   override def algorithm: Symbol = FirstHourAverageAnalyzer.Algorithm
 
-  override def makeSkylineContext( c: AlgorithmContext ): Valid[SkylineContext] = {
+  override def makeSkylineContext( c: AlgorithmContext ): Valid[WrappingContext] = {
     makeFirstHourStatistics( c ) map { firstHour => Context( underlying = c, firstHour = firstHour ) }
   }
 
-  override def preStartContext( context: AlgorithmContext, priorContext: SkylineContext ): TryV[SkylineContext] = {
+  override def preStartContext( context: AlgorithmContext, priorContext: WrappingContext ): TryV[WrappingContext] = {
     for {
       sctx <- super.preStartContext( context, priorContext )
       fhctx <- toConcreteContext( sctx )
@@ -114,7 +115,7 @@ class FirstHourAverageAnalyzer( override val router: ActorRef ) extends SkylineA
     */
   override val findOutliers: Op[AlgorithmContext, (Outliers, AlgorithmContext)] = {
     val outliers = for {
-      context <- toSkylineContext <=< ask[TryV, AlgorithmContext]
+      context <- toConcreteContextK <=< ask[TryV, AlgorithmContext]
       tolerance <- tolerance <=< ask[TryV, AlgorithmContext]
       taverages <- tailAverage <=< ask[TryV, AlgorithmContext]
     } yield {

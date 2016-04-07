@@ -8,7 +8,8 @@ import Scalaz._
 import scalaz.Kleisli.ask
 import peds.commons.Valid
 import spotlight.analysis.outlier.algorithm.AlgorithmActor.{AlgorithmContext, Op, TryV}
-import spotlight.analysis.outlier.algorithm.skyline.SkylineAnalyzer.SkylineContext
+import spotlight.analysis.outlier.algorithm.CommonAnalyzer
+import CommonAnalyzer.WrappingContext
 import spotlight.model.outlier.Outliers
 import spotlight.model.timeseries.{ControlBoundary, Point2D}
 
@@ -23,16 +24,16 @@ object MeanSubtractionCumulationAnalyzer {
 }
 
 class MeanSubtractionCumulationAnalyzer( override val router: ActorRef )
-extends SkylineAnalyzer[SkylineAnalyzer.SimpleSkylineContext] {
-  import SkylineAnalyzer.SimpleSkylineContext
+extends CommonAnalyzer[CommonAnalyzer.SimpleWrappingContext] {
+  import CommonAnalyzer.SimpleWrappingContext
 
-  type Context = SimpleSkylineContext
+  type Context = SimpleWrappingContext
 
   override implicit val contextClassTag: ClassTag[Context] = ClassTag( classOf[Context] )
 
   override def algorithm: Symbol = MeanSubtractionCumulationAnalyzer.Algorithm
 
-  override def makeSkylineContext( c: AlgorithmContext ): Valid[SkylineContext] = SimpleSkylineContext( underlying = c).successNel
+  override def makeSkylineContext( c: AlgorithmContext ): Valid[WrappingContext] = SimpleWrappingContext( underlying = c ).successNel
 
 
   /**
@@ -40,7 +41,7 @@ extends SkylineAnalyzer[SkylineAnalyzer.SimpleSkylineContext] {
     */
   override val findOutliers: Op[AlgorithmContext, (Outliers, AlgorithmContext)] = {
     val outliers = for {
-      context <- toSkylineContext <=< ask[TryV, AlgorithmContext]
+      context <- toConcreteContextK <=< ask[TryV, AlgorithmContext]
       tolerance <- tolerance <=< ask[TryV, AlgorithmContext]
     } yield {
       val tol = tolerance getOrElse 3D

@@ -11,6 +11,7 @@ import nl.grons.metrics.scala.{Meter, MetricName}
 import peds.akka.supervision.IsolatedLifeCycleSupervisor.ChildStarted
 import peds.akka.metrics.InstrumentedActor
 import peds.akka.stream.Limiter
+import peds.commons.util._
 import peds.akka.supervision.{IsolatedLifeCycleSupervisor, OneForOneStrategyFactory, SupervisionStrategyFactory}
 import spotlight.analysis.outlier.algorithm.density.{CohortDensityAnalyzer, SeriesCentroidDensityAnalyzer}
 import spotlight.analysis.outlier.algorithm.skyline._
@@ -140,8 +141,9 @@ class OutlierDetectionBootstrap(
 
     case _: ActorKilledException => Stop
 
-    case _: Exception => {
-      failuresMeter.mark( )
+    case ex: Exception => {
+      log.warning( "{} restarting on caught exception from child: [{}]", getClass.safeSimpleName, ex )
+      failuresMeter.mark()
       Restart
     }
 

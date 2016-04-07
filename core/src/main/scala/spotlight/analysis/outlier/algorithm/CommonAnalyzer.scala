@@ -1,24 +1,20 @@
-package spotlight.analysis.outlier.algorithm.skyline
+package spotlight.analysis.outlier.algorithm
 
 import scala.annotation.tailrec
 import scala.reflect.ClassTag
 import akka.event.LoggingReceive
-
-import scalaz._
-import Scalaz._
 import scalaz.Kleisli.kleisli
+import scalaz.Scalaz._
+import scalaz._
 import shapeless.syntax.typeable._
-import org.joda.{time => joda}
 import com.typesafe.config.Config
-import nl.grons.metrics.scala.Timer
 import org.apache.commons.math3.ml.clustering.DoublePoint
 import org.apache.commons.math3.ml.distance.DistanceMeasure
+import org.joda.{time => joda}
 import peds.commons.Valid
 import peds.commons.util._
 import spotlight.analysis.outlier._
-import spotlight.analysis.outlier.algorithm.AlgorithmActor
 import spotlight.analysis.outlier.algorithm.AlgorithmActor._
-import spotlight.analysis.outlier.algorithm.skyline.SkylineAnalyzer.SkylineContextError
 import spotlight.model.outlier.{NoOutliers, OutlierPlan, Outliers}
 import spotlight.model.timeseries._
 
@@ -26,10 +22,10 @@ import spotlight.model.timeseries._
 /**
   * Created by rolfsd on 2/12/16.
   */
-object SkylineAnalyzer {
-  trait SkylineContext extends AlgorithmContext {
+object CommonAnalyzer {
+  trait WrappingContext extends AlgorithmContext {
     def underlying: AlgorithmContext
-    def withUnderlying( ctx: AlgorithmContext ): Valid[SkylineContext]
+    def withUnderlying( ctx: AlgorithmContext ): Valid[WrappingContext]
 
     override def message: DetectUsing = underlying.message
     override def data: Seq[DoublePoint] = underlying.data
@@ -46,10 +42,10 @@ object SkylineAnalyzer {
   }
 
 
-  final case class SimpleSkylineContext private[skyline]( override val underlying: AlgorithmContext ) extends SkylineContext {
-    override def withUnderlying( ctx: AlgorithmContext ): Valid[SkylineContext] = copy( underlying = ctx ).successNel
+  final case class SimpleWrappingContext private[algorithm]( override val underlying: AlgorithmContext ) extends WrappingContext {
+    override def withUnderlying( ctx: AlgorithmContext ): Valid[WrappingContext] = copy( underlying = ctx ).successNel
 
-    override type That = SimpleSkylineContext
+    override type That = SimpleWrappingContext
     override def withSource( newSource: TimeSeriesBase ): That = {
       val updated = underlying withSource newSource
       copy( underlying = updated )
@@ -66,19 +62,19 @@ object SkylineAnalyzer {
   val ApproximateDayWindow: Int = 6 * 60 * 24
 
 
-  final case class SkylineContextError private[skyline]( context: AlgorithmActor.AlgorithmContext )
+  final case class CommonContextError private[algorithm](context: AlgorithmActor.AlgorithmContext )
   extends IllegalStateException( s"Context was not extended for Skyline algorithms: [${context}]" )
 }
 
 
-trait SkylineAnalyzer[C <: SkylineAnalyzer.SkylineContext] extends AlgorithmActor {
-  import SkylineAnalyzer.SkylineContext
+trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor {
+  import CommonAnalyzer.WrappingContext
 
   implicit val contextClassTag: ClassTag[C]
   def toConcreteContext( actx: AlgorithmContext ): TryV[C] = {
     actx match {
       case contextClassTag( ctx ) => ctx.right
-      case ctx => SkylineContextError( ctx ).left
+      case ctx => CommonAnalyzer.CommonContextError( ctx ).left
     }
   }
 
@@ -121,11 +117,11 @@ trait SkylineAnalyzer[C <: SkylineAnalyzer.SkylineContext] extends AlgorithmActo
   def findOutliers: Op[AlgorithmContext, (Outliers, AlgorithmContext)]
 
   //todo dmr place into Agent for use & concurrency *across* actor instances?
-  var _scopedContexts: Map[HistoryKey, SkylineContext] = Map.empty[HistoryKey, SkylineContext]
+  var _scopedContexts: Map[HistoryKey, WrappingContext] = Map.empty[HistoryKey, WrappingContext]
 
-  def setScopedContext( c: SkylineContext ): Unit = { _scopedContexts += c.historyKey -> c }
-  def makeSkylineContext( c: AlgorithmContext ): Valid[SkylineContext]
-  def preStartContext( context: AlgorithmContext, priorContext: SkylineContext ): TryV[SkylineContext] = {
+  def setScopedContext( c: WrappingContext ): Unit = {_scopedContexts += c.historyKey -> c }
+  def makeSkylineContext( c: AlgorithmContext ): Valid[WrappingContext]
+  def preStartContext( context: AlgorithmContext, priorContext: WrappingContext ): TryV[WrappingContext] = {
     log.debug( "preStartContext: [{}]", context )
     priorContext.withUnderlying( context ).disjunction.leftMap{ _.head }
   }
@@ -145,7 +141,7 @@ trait SkylineAnalyzer[C <: SkylineAnalyzer.SkylineContext] extends AlgorithmActo
     super.algorithmContext >=> toSkyline
   }
 
-  def toSkylineContext: Op[AlgorithmContext, C] = kleisli { toConcreteContext }
+  def toConcreteContextK: Op[AlgorithmContext, C] = kleisli {toConcreteContext }
 
   val tailAverage: Op[AlgorithmContext, Seq[Point2D]] = Kleisli[TryV, AlgorithmContext, Seq[Point2D]] { context =>
     val TailLength = 3
@@ -185,7 +181,7 @@ trait SkylineAnalyzer[C <: SkylineAnalyzer.SkylineContext] extends AlgorithmActo
     update: UpdateContext[CTX]
   ): (Seq[DataPoint], AlgorithmContext) = {
     @tailrec def loop( pts: List[Point2D], ctx: CTX, acc: Seq[DataPoint] ): (Seq[DataPoint], AlgorithmContext) = {
-      ctx.cast[SkylineContext] foreach { setScopedContext }
+      ctx.cast[WrappingContext] foreach {setScopedContext }
 
       pts match {
         case Nil => ( acc, ctx )
