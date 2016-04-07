@@ -115,13 +115,18 @@ trait DBSCANAnalyzer extends AlgorithmActor {
       log.debug( "cluster: data[{}] = [{}]", data.size, data.mkString(",") )
 
       import scala.collection.JavaConverters._
-      val clusters = new DBSCANClusterer[DoublePoint]( e, minDensityPts, distance ).cluster( data.asJava ).asScala.toSeq
-      if ( log.isDebugEnabled ) {
-        val sizeClusters = clusters.map { c => (c.getPoints.size, c.getPoints.asScala.mkString("[", ", ", "]") ) }
-        log.debug( "cluster: clusters = [{}]", sizeClusters.mkString( "\n + [", ", ", "]\n" ) )
+      val clustersD = \/ fromTryCatchNonFatal {
+        new DBSCANClusterer[DoublePoint]( e, minDensityPts, distance ).cluster( data.asJava ).asScala.toSeq
       }
 
-      ( ctx, clusters )
+      if ( log.isDebugEnabled ) {
+        val sizeClusters = clustersD.map { clusters =>
+          clusters map { c => (c.getPoints.size, c.getPoints.asScala.mkString( "[", ", ", "]" )) }
+        }
+        log.debug( "cluster: clusters = [{}]", sizeClusters.map{ _.mkString( "\n + [", ", ", "]\n" ) } )
+      }
+
+      ( ctx, clustersD valueOr { _ => Seq.empty[Cluster[DoublePoint]] } )
     }
   }
 

@@ -249,8 +249,8 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends DBSCANAnaly
 
           log.debug(
             "floor=[{}]  ceiling=[{}]",
-            extrapolate( "floor", farthestDistance )( result.floor.get ),
-            extrapolate( "ceiling", farthestDistance )( result.ceiling.get )
+            result.floor map { f => extrapolate( "floor", farthestDistance )( f ) },
+            result.ceiling map { c => extrapolate( "ceiling", farthestDistance )( c ) }
           )
 
           log.debug( "pt1~>p2={}~>{} cb:{} h={}", p1, p2, result, (farthest - expected) )
