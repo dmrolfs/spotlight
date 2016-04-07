@@ -112,8 +112,8 @@ class SkylineSeasonalEWMASpec extends SkylineBaseSpec {
       import SeasonalExponentialMovingAverageAnalyzer.SeasonalModel
       // would be nice to use now() but joda smartly handles DST which makes calculating expected bin slightly more than involved
       // than I prefer to handle at this time
-      val startOfToday = joda.LocalDate.now.toDateTimeAtStartOfDay
       val today = new joda.LocalDate( 2016, 8, 30 )
+      val startOfToday = today.toDateTimeAtStartOfDay
       val yesterday = today minus joda.Days.ONE
       val weekBeforeToday = today minus joda.Weeks.ONE
       val model = {
@@ -128,6 +128,41 @@ class SkylineSeasonalEWMASpec extends SkylineBaseSpec {
       model.binFor( yesterday.toDateTime( new joda.LocalTime(23, 59, 59, 999) ) ) mustBe 23
       model.binFor( yesterday.toDateTime( new joda.LocalTime(13, 37, 59, 999) ) ) mustBe 13
       model.binFor( weekBeforeToday.toDateTime( new joda.LocalTime(7, 0, 0, 1) ) ) mustBe 7
+    }
+
+    "track bin averages for seasons" taggedAs (WIP) in { f: Fixture =>
+      import f._
+      import SeasonalExponentialMovingAverageAnalyzer.SeasonalModel
+
+      val startOfToday = joda.LocalDate.now.toDateTimeAtStartOfDay
+      val seed = {
+        SeasonalModel( reference = startOfToday, waveLength = joda.Weeks.ONE.toStandardDuration, bins = 7 )
+        .toOption
+        .get
+      }
+
+      val points = {
+        ( 0 until 7*24*60*60 )
+        .map { i =>
+          val ts = startOfToday.plusSeconds( i )
+          val v = ts.getDayOfMonth
+          ( ts, v )
+        }
+      }
+
+      val seasonalModel = {
+        points
+        .foldLeft( seed ){ case (sm, (ts, v)) =>
+          val m = sm momentAt ts
+          sm.withMomentAtDateTime( m :+ v, ts )
+        }
+        .asInstanceOf[SeasonalModel.SimpleSeasonalModel]
+      }
+
+      seasonalModel.moments.zipWithIndex foreach { case (m, i) =>
+        m.statistics.get.ewma mustBe ( (startOfToday.getDayOfMonth + i).toDouble +- 0.00001 )
+        m.statistics.get.ewmsd mustBe ( 0.0 +- 0.00001 )
+      }
     }
 
     "find outliers deviating stddev from seasonal exponential moving average" in { f: Fixture =>

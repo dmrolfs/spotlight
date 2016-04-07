@@ -34,7 +34,7 @@ object ExponentialMovingAverageAnalyzer {
 
     override def addControlBoundary( control: ControlBoundary ): That = copy(underlying = underlying.addControlBoundary(control))
 
-    override def toString: String = s"""${getClass.safeSimpleName}(moment:[${moment}])"""
+    override def toString: String = s"""${getClass.safeSimpleName}(momentAt:[${moment}])"""
   }
 }
 
@@ -90,7 +90,7 @@ class ExponentialMovingAverageAnalyzer(
         },
         update = (ctx: Context, pt: Point2D) => {
           val (ts, v) = pt
-          log.debug( "stddevFromMovingAverage: adding point ({}, {}) to historical moment: [{}]", ts.toLong, v, context.moment.statistics )
+          log.debug( "stddevFromMovingAverage: adding point ({}, {}) to historical momentAt: [{}]", ts.toLong, v, context.moment.statistics )
           ctx.copy( moment = ctx.moment :+ v )
         }
       )

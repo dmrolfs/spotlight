@@ -47,7 +47,7 @@ object SeasonalExponentialMovingAverageAnalyzer {
     def waveLength: joda.Duration
     def binLength: joda.Duration
     def bins: Int
-    def moment( ts: joda.DateTime ): Moment
+    def momentAt(ts: joda.DateTime ): Moment
 
     def withMomentAtDateTime( m: Moment, dt: joda.DateTime ): SeasonalModel
   }
@@ -142,7 +142,7 @@ object SeasonalExponentialMovingAverageAnalyzer {
         reference + ( binLength * binLengths )
       }
 
-      override def moment( ts: joda.DateTime ): Moment = moments( binFor(ts) )
+      override def momentAt( ts: joda.DateTime ): Moment = moments( binFor( ts ) )
     }
   }
 
@@ -225,7 +225,7 @@ class SeasonalExponentialMovingAverageAnalyzer(
         context = context,
         evaluateOutlier = (p: Point2D, ctx: Context) => {
           val (ts, v) = p
-          ctx.seasonalModel.moment( new joda.DateTime(ts.toLong) ).statistics map { stats =>
+          ctx.seasonalModel.momentAt( new joda.DateTime( ts.toLong ) ).statistics map { stats =>
             log.debug( "pt:[{}] - bin:[{}] - from seasonal exponential moving average: (mean, stddev):[{}]\ttolerance:[{}]", (ts.toLong, v), ctx.seasonalModel.asInstanceOf[SeasonalModel.SimpleSeasonalModel].binFor(new joda.DateTime(ts.toLong)), (stats.ewma, stats.ewmsd), tol )
             val control = ControlBoundary.fromExpectedAndDistance(
               timestamp = ts.toLong,
@@ -242,8 +242,8 @@ class SeasonalExponentialMovingAverageAnalyzer(
           val ts = new joda.DateTime( pt._1.toLong )
           val v = pt._2
           val model = ctx.seasonalModel
-          val m = model.moment( ts )
-          log.debug( "FromSeasonalMovingAverage: adding point ({}, {}) to historical moment: [{}]", ts.getMillis, v, m.statistics )
+          val m = model.momentAt( ts )
+          log.debug( "FromSeasonalMovingAverage: adding point ({}, {}) to historical momentAt: [{}]", ts.getMillis, v, m.statistics )
           ctx.copy( seasonalModel = model.withMomentAtDateTime( m :+ v, ts ) )
         }
       )
