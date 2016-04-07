@@ -10,7 +10,8 @@ import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import peds.commons.Valid
 import peds.commons.util._
 import spotlight.analysis.outlier.algorithm.AlgorithmActor.{AlgorithmContext, Op, TryV}
-import spotlight.analysis.outlier.algorithm.skyline.SkylineAnalyzer.SkylineContext
+import spotlight.analysis.outlier.algorithm.CommonAnalyzer
+import CommonAnalyzer.WrappingContext
 import spotlight.model.outlier.Outliers
 import spotlight.model.timeseries.{ControlBoundary, Point2D, TimeSeriesBase}
 
@@ -27,8 +28,8 @@ object SimpleMovingAverageAnalyzer {
   final case class Context private[skyline](
     override val underlying: AlgorithmContext,
     movingStatistics: DescriptiveStatistics
-  ) extends SkylineContext {
-    override def withUnderlying( ctx: AlgorithmContext ): Valid[SkylineContext] = copy( underlying = ctx ).successNel
+  ) extends WrappingContext {
+    override def withUnderlying( ctx: AlgorithmContext ): Valid[WrappingContext] = copy( underlying = ctx ).successNel
 
     override type That = Context
     override def withSource( newSource: TimeSeriesBase ): That = {
@@ -44,15 +45,15 @@ object SimpleMovingAverageAnalyzer {
   }
 }
 
-class SimpleMovingAverageAnalyzer( override val router: ActorRef ) extends SkylineAnalyzer[SimpleMovingAverageAnalyzer.Context] {
+class SimpleMovingAverageAnalyzer( override val router: ActorRef ) extends CommonAnalyzer[SimpleMovingAverageAnalyzer.Context] {
   import SimpleMovingAverageAnalyzer._
-  import SkylineAnalyzer.ApproximateDayWindow
+  import CommonAnalyzer.ApproximateDayWindow
 
   override implicit val contextClassTag: ClassTag[Context] = ClassTag( classOf[Context] )
 
   override def algorithm: Symbol = SimpleMovingAverageAnalyzer.Algorithm
 
-  override def makeSkylineContext( c: AlgorithmContext ): Valid[SkylineContext] = {
+  override def makeSkylineContext( c: AlgorithmContext ): Valid[WrappingContext] = {
     makeStatistics( c ) map { movingStats => Context( underlying = c, movingStatistics = movingStats ) }
   }
 
@@ -69,7 +70,7 @@ class SimpleMovingAverageAnalyzer( override val router: ActorRef ) extends Skyli
     */
   override val findOutliers: Op[AlgorithmContext, (Outliers, AlgorithmContext)] = {
     val outliers = for {
-      context <- toSkylineContext <=< ask[TryV, AlgorithmContext]
+      context <- toConcreteContextK <=< ask[TryV, AlgorithmContext]
       tolerance <- tolerance <=< ask[TryV, AlgorithmContext]
       taverages <- tailAverage <=< ask[TryV, AlgorithmContext]
     } yield {

@@ -3,13 +3,15 @@ package spotlight.analysis.outlier.algorithm.skyline
 import scala.reflect.ClassTag
 import akka.actor.{ActorRef, Props}
 
-import scalaz._, Scalaz._
+import scalaz._
+import Scalaz._
 import scalaz.Kleisli.ask
 import peds.commons.Valid
 import peds.commons.util._
 import spotlight.analysis.outlier.Moment
 import spotlight.analysis.outlier.algorithm.AlgorithmActor.{AlgorithmContext, Op, TryV}
-import spotlight.analysis.outlier.algorithm.skyline.SkylineAnalyzer.SkylineContext
+import spotlight.analysis.outlier.algorithm.CommonAnalyzer
+import CommonAnalyzer.WrappingContext
 import spotlight.model.outlier.Outliers
 import spotlight.model.timeseries.{ControlBoundary, Point2D, TimeSeriesBase}
 
@@ -23,8 +25,8 @@ object ExponentialMovingAverageAnalyzer {
   def props( router: ActorRef ): Props = Props { new ExponentialMovingAverageAnalyzer( router ) }
 
 
-  final case class Context private[skyline]( override val underlying: AlgorithmContext, moment: Moment ) extends SkylineContext {
-    override def withUnderlying( ctx: AlgorithmContext ): Valid[SkylineContext] = copy( underlying = ctx ).successNel
+  final case class Context private[skyline]( override val underlying: AlgorithmContext, moment: Moment ) extends WrappingContext {
+    override def withUnderlying( ctx: AlgorithmContext ): Valid[WrappingContext] = copy( underlying = ctx ).successNel
 
     override type That = Context
     override def withSource( newSource: TimeSeriesBase ): That = {
@@ -40,14 +42,14 @@ object ExponentialMovingAverageAnalyzer {
 
 class ExponentialMovingAverageAnalyzer(
   override val router: ActorRef
-) extends SkylineAnalyzer[ExponentialMovingAverageAnalyzer.Context] {
+) extends CommonAnalyzer[ExponentialMovingAverageAnalyzer.Context] {
   import ExponentialMovingAverageAnalyzer._
 
   override implicit val contextClassTag: ClassTag[Context] = ClassTag( classOf[Context] )
 
   override def algorithm: Symbol = ExponentialMovingAverageAnalyzer.Algorithm
 
-  override def makeSkylineContext( c: AlgorithmContext ): Valid[SkylineContext] = {
+  override def makeSkylineContext( c: AlgorithmContext ): Valid[WrappingContext] = {
     makeStatistics( c ) map { moment => Context( underlying = c, moment = moment ) }
   }
 
@@ -64,7 +66,7 @@ class ExponentialMovingAverageAnalyzer(
     */
   override val findOutliers: Op[AlgorithmContext, (Outliers, AlgorithmContext)] = {
     val outliers = for {
-      context <- toSkylineContext <=< ask[TryV, AlgorithmContext]
+      context <- toConcreteContextK <=< ask[TryV, AlgorithmContext]
       tolerance <- tolerance <=< ask[TryV, AlgorithmContext]
     } yield {
       val tol = tolerance getOrElse 3D

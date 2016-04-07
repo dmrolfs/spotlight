@@ -5,12 +5,13 @@ import akka.actor.{ActorRef, Props}
 
 import scalaz._
 import Scalaz._
-import scalaz.Kleisli.{ ask, kleisli }
+import scalaz.Kleisli.{ask, kleisli}
 import org.apache.commons.math3.distribution.TDistribution
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import peds.commons.Valid
 import spotlight.analysis.outlier.algorithm.AlgorithmActor.{AlgorithmContext, Op, TryV}
-import spotlight.analysis.outlier.algorithm.skyline.SkylineAnalyzer.SkylineContext
+import spotlight.analysis.outlier.algorithm.CommonAnalyzer
+import CommonAnalyzer.WrappingContext
 import spotlight.model.outlier.Outliers
 import spotlight.model.timeseries.{ControlBoundary, Point2D}
 
@@ -24,16 +25,16 @@ object GrubbsAnalyzer {
   def props( router: ActorRef ): Props = Props { new GrubbsAnalyzer( router ) }
 }
 
-class GrubbsAnalyzer( override val router: ActorRef ) extends SkylineAnalyzer[SkylineAnalyzer.SimpleSkylineContext] {
-  import SkylineAnalyzer.SimpleSkylineContext
+class GrubbsAnalyzer( override val router: ActorRef ) extends CommonAnalyzer[CommonAnalyzer.SimpleWrappingContext] {
+  import CommonAnalyzer.SimpleWrappingContext
 
-  type Context = SimpleSkylineContext
+  type Context = SimpleWrappingContext
 
   override implicit val contextClassTag: ClassTag[Context] = ClassTag( classOf[Context] )
 
   override def algorithm: Symbol = GrubbsAnalyzer.Algorithm
 
-  override def makeSkylineContext( c: AlgorithmContext ): Valid[SkylineContext] = ( SimpleSkylineContext( c ) ).successNel
+  override def makeSkylineContext( c: AlgorithmContext ): Valid[WrappingContext] = ( SimpleWrappingContext( c ) ).successNel
 
 
   /**
@@ -51,7 +52,7 @@ class GrubbsAnalyzer( override val router: ActorRef ) extends SkylineAnalyzer[Sk
     // background: http://www.itl.nist.gov/div898/handbook/eda/section3/eda35h1.htm
     // background: http://graphpad.com/support/faqid/1598/
     val outliers = for {
-      context <- toSkylineContext
+      context <- toConcreteContextK
       taverages <- tailAverage
       threshold <- dataThreshold( taverages )
       tolerance <- tolerance <=< ask[TryV, AlgorithmContext]

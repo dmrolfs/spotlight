@@ -14,7 +14,8 @@ import org.apache.commons.math3.exception.{InsufficientDataException, MathIntern
 import peds.commons.Valid
 import peds.commons.util._
 import spotlight.analysis.outlier.algorithm.AlgorithmActor.{AlgorithmContext, Op, TryV}
-import spotlight.analysis.outlier.algorithm.skyline.SkylineAnalyzer.SkylineContext
+import spotlight.analysis.outlier.algorithm.CommonAnalyzer
+import CommonAnalyzer.WrappingContext
 import spotlight.analysis.outlier.algorithm.skyline.adf.AugmentedDickeyFuller
 import spotlight.model.outlier.Outliers
 import spotlight.model.timeseries.{ControlBoundary, DataPoint, TimeSeriesBase}
@@ -33,8 +34,8 @@ object KolmogorovSmirnovAnalyzer {
     override val underlying: AlgorithmContext,
     referenceOffset: joda.Duration,
     referenceHistory: Queue[DataPoint]
-  ) extends SkylineContext {
-    override def withUnderlying( ctx: AlgorithmContext ): Valid[SkylineContext] = {
+  ) extends WrappingContext {
+    override def withUnderlying( ctx: AlgorithmContext ): Valid[WrappingContext] = {
       val boundary = ctx.source.start map { _ - referenceOffset }
       val updatedHistory = boundary map { b => referenceHistory.dropWhile{ _.timestamp < b } } getOrElse { referenceHistory }
       copy( underlying = ctx, referenceHistory = updatedHistory ).successNel
@@ -67,14 +68,14 @@ object KolmogorovSmirnovAnalyzer {
   }
 }
 
-class KolmogorovSmirnovAnalyzer( override val router: ActorRef ) extends SkylineAnalyzer[KolmogorovSmirnovAnalyzer.Context] {
+class KolmogorovSmirnovAnalyzer( override val router: ActorRef ) extends CommonAnalyzer[KolmogorovSmirnovAnalyzer.Context] {
   import KolmogorovSmirnovAnalyzer.Context
 
   override implicit val contextClassTag: ClassTag[Context] = ClassTag( classOf[Context] )
 
   override def algorithm: Symbol = KolmogorovSmirnovAnalyzer.Algorithm
 
-  override def makeSkylineContext( c: AlgorithmContext ): Valid[SkylineContext] = {
+  override def makeSkylineContext( c: AlgorithmContext ): Valid[WrappingContext] = {
     referenceOffset( c ) map { offset =>
       log.debug( "makeSkylingContext: [{}]", c )
       Context( underlying = c, referenceOffset = offset, referenceHistory = c.source.points.to[Queue] )
@@ -115,7 +116,7 @@ class KolmogorovSmirnovAnalyzer( override val router: ActorRef ) extends Skyline
     val outliers = for {
       context <- ask[TryV, AlgorithmContext]
       tolerance <- tolerance <=< ask[TryV, AlgorithmContext]
-      unlike <- isDistributionUnlikeReference( tolerance getOrElse 3D ) <=< toSkylineContext <=< ask[TryV, AlgorithmContext]
+      unlike <- isDistributionUnlikeReference( tolerance getOrElse 3D ) <=< toConcreteContextK <=< ask[TryV, AlgorithmContext]
     } yield {
       if ( unlike ) ( context.source.points, context ) else ( Seq.empty[DataPoint], context )
     }

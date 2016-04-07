@@ -10,7 +10,8 @@ import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import peds.commons.Valid
 import peds.commons.util._
 import spotlight.analysis.outlier.algorithm.AlgorithmActor.{AlgorithmContext, Op, TryV}
-import spotlight.analysis.outlier.algorithm.skyline.SkylineAnalyzer.SkylineContext
+import spotlight.analysis.outlier.algorithm.CommonAnalyzer
+import CommonAnalyzer.WrappingContext
 import spotlight.model.outlier.Outliers
 import spotlight.model.timeseries.{ControlBoundary, Point2D, TimeSeriesBase}
 
@@ -27,8 +28,8 @@ object MedianAbsoluteDeviationAnalyzer {
     override val underlying: AlgorithmContext,
     movingStatistics: DescriptiveStatistics,
     deviationStatistics: DescriptiveStatistics
-  ) extends SkylineContext {
-    override def withUnderlying( ctx: AlgorithmContext ): Valid[SkylineContext] = copy( underlying = ctx ).successNel
+  ) extends WrappingContext {
+    override def withUnderlying( ctx: AlgorithmContext ): Valid[WrappingContext] = copy( underlying = ctx ).successNel
 
     override type That = Context
     override def withSource( newSource: TimeSeriesBase ): That = {
@@ -46,9 +47,9 @@ object MedianAbsoluteDeviationAnalyzer {
 }
 
 class MedianAbsoluteDeviationAnalyzer( override val router: ActorRef )
-extends SkylineAnalyzer[MedianAbsoluteDeviationAnalyzer.Context] {
+extends CommonAnalyzer[MedianAbsoluteDeviationAnalyzer.Context] {
   import MedianAbsoluteDeviationAnalyzer._
-  import SkylineAnalyzer.ApproximateDayWindow
+  import CommonAnalyzer.ApproximateDayWindow
 
   type Context = MedianAbsoluteDeviationAnalyzer.Context
 
@@ -56,7 +57,7 @@ extends SkylineAnalyzer[MedianAbsoluteDeviationAnalyzer.Context] {
 
   override def algorithm: Symbol = MedianAbsoluteDeviationAnalyzer.Algorithm
 
-  override def makeSkylineContext( c: AlgorithmContext ): Valid[SkylineContext] = {
+  override def makeSkylineContext( c: AlgorithmContext ): Valid[WrappingContext] = {
     ( makeMovingStatistics(c) |@| makeDeviationStatistics(c) ) { (m, d) =>
       Context( underlying = c, movingStatistics = m, deviationStatistics = d )
     }
@@ -76,7 +77,7 @@ extends SkylineAnalyzer[MedianAbsoluteDeviationAnalyzer.Context] {
     */
   override val findOutliers: Op[AlgorithmContext, (Outliers, AlgorithmContext)] = {
     val outliers = for {
-      context <- toSkylineContext <=< ask[TryV, AlgorithmContext]
+      context <- toConcreteContextK <=< ask[TryV, AlgorithmContext]
       tolerance <- tolerance <=< ask[TryV, AlgorithmContext]
     } yield {
       val tol = tolerance getOrElse 3D  // skyline source uses 6.0 - admittedly arbitrary?

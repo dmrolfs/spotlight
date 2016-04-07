@@ -11,7 +11,8 @@ import org.apache.commons.math3.stat.regression.MillerUpdatingRegression
 import peds.commons.Valid
 import peds.commons.util._
 import spotlight.analysis.outlier.algorithm.AlgorithmActor.{AlgorithmContext, Op, TryV}
-import spotlight.analysis.outlier.algorithm.skyline.SkylineAnalyzer.SkylineContext
+import spotlight.analysis.outlier.algorithm.CommonAnalyzer
+import CommonAnalyzer.WrappingContext
 import spotlight.model.outlier.Outliers
 import spotlight.model.timeseries.{ControlBoundary, Point2D, TimeSeriesBase}
 
@@ -28,8 +29,8 @@ object LeastSquaresAnalyzer {
   final case class Context private[skyline](
     override val underlying: AlgorithmContext,
     regression: MillerUpdatingRegression
-  ) extends SkylineContext {
-    override def withUnderlying( ctx: AlgorithmContext ): Valid[SkylineContext] = copy( underlying = ctx ).successNel
+  ) extends WrappingContext {
+    override def withUnderlying( ctx: AlgorithmContext ): Valid[WrappingContext] = copy( underlying = ctx ).successNel
 
     override type That = Context
     override def withSource( newSource: TimeSeriesBase ): That = {
@@ -43,14 +44,14 @@ object LeastSquaresAnalyzer {
   }
 }
 
-class LeastSquaresAnalyzer( override val router: ActorRef ) extends SkylineAnalyzer[LeastSquaresAnalyzer.Context] {
+class LeastSquaresAnalyzer( override val router: ActorRef ) extends CommonAnalyzer[LeastSquaresAnalyzer.Context] {
   import LeastSquaresAnalyzer.Context
 
   override implicit val contextClassTag: ClassTag[Context] = ClassTag( classOf[Context] )
 
   override def algorithm: Symbol = LeastSquaresAnalyzer.Algorithm
 
-  override def makeSkylineContext( c: AlgorithmContext ): Valid[SkylineContext] = {
+  override def makeSkylineContext( c: AlgorithmContext ): Valid[WrappingContext] = {
     makeRegression( c ) map { rm => Context( underlying = c, regression = rm ) }
   }
 
@@ -68,7 +69,7 @@ class LeastSquaresAnalyzer( override val router: ActorRef ) extends SkylineAnaly
 
     override val findOutliers: Op[AlgorithmContext, (Outliers, AlgorithmContext)] = {
     val outliers = for {
-      context <- toSkylineContext <=< ask[TryV, AlgorithmContext]
+      context <- toConcreteContextK <=< ask[TryV, AlgorithmContext]
       tolerance <- tolerance <=< ask[TryV, AlgorithmContext]
     } yield {
       val tol = tolerance getOrElse 3D
@@ -154,7 +155,7 @@ class LeastSquaresAnalyzer( override val router: ActorRef ) extends SkylineAnaly
 
 //override val findOutliers: Op[AlgorithmContext, (Outliers, AlgorithmContext)] = {
 //  val outliers = for {
-//  context <- toSkylineContext <=< ask[TryV, AlgorithmContext]
+//  context <- toConcreteContextK <=< ask[TryV, AlgorithmContext]
 //  tolerance <- tolerance <=< ask[TryV, AlgorithmContext]
 //} yield {
 //  val tol = tolerance getOrElse 3D

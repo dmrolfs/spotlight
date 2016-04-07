@@ -8,7 +8,8 @@ import Scalaz._
 import scalaz.Kleisli.ask
 import peds.commons.Valid
 import spotlight.analysis.outlier.algorithm.AlgorithmActor.{AlgorithmContext, Op, TryV}
-import spotlight.analysis.outlier.algorithm.skyline.SkylineAnalyzer.SkylineContext
+import spotlight.analysis.outlier.algorithm.CommonAnalyzer
+import CommonAnalyzer.WrappingContext
 import spotlight.model.outlier.Outliers
 import spotlight.model.timeseries.{ControlBoundary, Point2D}
 
@@ -37,17 +38,17 @@ object HistogramBinsAnalyzer {
 
 }
 
-class HistogramBinsAnalyzer( override val router: ActorRef ) extends SkylineAnalyzer[SkylineAnalyzer.SimpleSkylineContext] {
+class HistogramBinsAnalyzer( override val router: ActorRef ) extends CommonAnalyzer[CommonAnalyzer.SimpleWrappingContext] {
   import HistogramBinsAnalyzer.{ Histogram, Bin }
 
-  type Context = SkylineAnalyzer.SimpleSkylineContext
+  type Context = CommonAnalyzer.SimpleWrappingContext
 
   override implicit val contextClassTag: ClassTag[Context] = ClassTag( classOf[Context] )
 
   override def algorithm: Symbol = HistogramBinsAnalyzer.Algorithm
 
-  override def makeSkylineContext( c: AlgorithmContext ): Valid[SkylineContext] = {
-    SkylineAnalyzer.SimpleSkylineContext( underlying = c ).successNel
+  override def makeSkylineContext( c: AlgorithmContext ): Valid[WrappingContext] = {
+    CommonAnalyzer.SimpleWrappingContext( underlying = c ).successNel
   }
 
 
@@ -57,7 +58,7 @@ class HistogramBinsAnalyzer( override val router: ActorRef ) extends SkylineAnal
     */
     override val findOutliers: Op[AlgorithmContext, (Outliers, AlgorithmContext)] = {
     val outliers = for {
-      context <- toSkylineContext <=< ask[TryV, AlgorithmContext]
+      context <- toConcreteContextK <=< ask[TryV, AlgorithmContext]
       taverages <- tailAverage <=< ask[TryV, AlgorithmContext]
       tolerance <- tolerance <=< ask[TryV, AlgorithmContext]
     } yield {
