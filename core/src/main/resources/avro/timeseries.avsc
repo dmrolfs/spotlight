@@ -1,5 +1,5 @@
 {
-  "namespace": "spotlight.train",
+  "namespace": "spotlight.protocol",
   "name": "TimeSeries",
   "type": "record",
   "fields": [

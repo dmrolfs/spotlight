@@ -15,7 +15,7 @@ import org.scalatest.mock.MockitoSugar
 import peds.commons.V
 import shapeless._
 import spotlight.analysis.outlier._
-import spotlight.analysis.outlier.algorithm.AlgorithmActor
+import spotlight.analysis.outlier.algorithm.{AlgorithmActor, CommonAnalyzer}
 import spotlight.model.outlier._
 import spotlight.model.timeseries._
 import spotlight.testkit.ParallelAkkaSpec
@@ -52,6 +52,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
     val algoC = CohortDensityAnalyzer.Algorithm
     val plan = mock[OutlierPlan]
     when( plan.appliesTo ).thenReturn( Fixture.appliesToAll )
+    when( plan.algorithms ) thenReturn Set( algoS )
 
     val router = TestProbe()
     val aggregator = TestProbe()
@@ -65,15 +66,16 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
     }
 
     def makeDensityExpectedHistory(points: Seq[DataPoint], start: Option[DescriptiveStatistics], last: Option[DataPoint] ): DescriptiveStatistics = {
-      val initial = start getOrElse { new DescriptiveStatistics }
+//      val initial = start getOrElse { Moment.withAlpha( "expected", 0.05 ).toOption.get }
+      val initial = start getOrElse { new DescriptiveStatistics( CommonAnalyzer.ApproximateDayWindow ) }
 //      val last = initialH.lastPoints.lastOption map { new DoublePoint( _ ) }
       val dps = DataPoint toDoublePoints points
       val basis = last map { l => dps.zip( DataPoint.toDoublePoint(l) +: dps ) } getOrElse { (dps drop 1).zip( dps ) }
       basis.foldLeft( initial ) { case (s, (c, p)) =>
         val ts = c.getPoint.head
-        val d = new EuclideanDistance().compute( p.getPoint, c.getPoint )
-        s addValue d
+        s.addValue( new EuclideanDistance().compute( p.getPoint, c.getPoint ) )
         s
+//        s :+ new EuclideanDistance().compute( p.getPoint, c.getPoint )
       }
     }
   }
@@ -94,6 +96,14 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
   }
 
   def assertDescriptiveStats(actual: DescriptiveStatistics, expected: DescriptiveStatistics ): Unit = {
+//    actual.statistics.isDefined mustBe expected.statistics.isDefined
+//    for {
+//      a <- actual.statistics
+//      e <- expected.statistics
+//    } {
+//      a.ewma mustBe e.ewma
+//      a.ewmsd mustBe e.ewmsd
+//    }
     actual.getN mustBe expected.getN
     actual.getMax mustBe expected.getMax
     actual.getMean mustBe expected.getMean
@@ -165,7 +175,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       }
     }
 
-    "detect no outliers points in series" taggedAs (WIP) in { f: Fixture =>
+    "detect no outliers points in series" in { f: Fixture =>
       import f._
       val analyzer = TestActorRef[SeriesDensityAnalyzer]( SeriesDensityAnalyzer.props(router.ref) )
 
@@ -244,7 +254,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
     }
 
 
-    "history is updated with each detect request" in { f: Fixture =>
+    "history is updated with each detect request" taggedAs (WIP) in { f: Fixture =>
       import f._
 
       def detectUsing( message: OutlierDetectionMessage, history: HistoricalStatistics ): DetectUsing = {
@@ -270,10 +280,12 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       )
 
       val densityExpectedA = makeDensityExpectedHistory( pointsA, None, None )
-      densityExpectedA.getN mustBe ( pointsA.size - 1)
+//      densityExpectedA.getN mustBe ( pointsA.size - 1)
+
+      val operationToTest = analyzer.underlyingActor.algorithmContext >=> analyzer.underlyingActor.updateDistanceMoment
 
       assertDescriptiveStats(
-        analyzer.underlyingActor.algorithmContext.run(msgA).toOption.get.asInstanceOf[SeriesDensityAnalyzer.Context].distanceHistory,
+        operationToTest.run(msgA).toOption.get.asInstanceOf[SeriesDensityAnalyzer.Context].distanceStatistics,
         densityExpectedA
       )
 
@@ -295,14 +307,14 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
 
       trace( s"pointsA.size = ${pointsA.size}" )
       trace( s"pointsB.size = ${pointsB.size}" )
-      trace( s"expectedA.n = ${densityExpectedA.getN}" )
-      trace( s"expectedAB.N = ${densityExpectedAB.getN}" )
-      densityExpectedAB.getN mustBe ( pointsA.size - 1 + pointsB.size )
+//      trace( s"expectedA.n = ${densityExpectedA.getN}" )
+//      trace( s"expectedAB.N = ${densityExpectedAB.getN}" )
+//      densityExpectedAB.getN mustBe ( pointsA.size - 1 + pointsB.size )
       trace( s"historyAB.n = ${detectHistoryAB.N}" )
       trace( s"expectedAB = $densityExpectedAB" )
       trace( s"historyAB = ${detectHistoryAB}" )
       assertDescriptiveStats(
-        analyzer.underlyingActor.algorithmContext.run(msgAB).toOption.get.asInstanceOf[SeriesDensityAnalyzer.Context].distanceHistory,
+        operationToTest.run(msgAB).toOption.get.asInstanceOf[SeriesDensityAnalyzer.Context].distanceStatistics,
         densityExpectedAB
       )
 
@@ -315,7 +327,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       aggregator.expectMsgPF( 2.seconds.dilated, "default-foo-A" ) {
         case m: SeriesOutliers => {
           assertDescriptiveStats(
-            analyzerB.underlyingActor._scopedContexts( HistoryKey(plan, metric) ).distanceHistory,
+            analyzerB.underlyingActor._scopedContexts( HistoryKey(plan, metric) ).asInstanceOf[SeriesDensityAnalyzer.Context].distanceStatistics,
             densityExpectedB_A
           )
           m.topic mustBe metric
@@ -330,7 +342,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       aggregator.expectMsgPF( 2.seconds.dilated, "default-foo-AB" ){
         case m: NoOutliers => {
           assertDescriptiveStats(
-            analyzerB.underlyingActor._scopedContexts( HistoryKey(plan, metric) ).distanceHistory,
+            analyzerB.underlyingActor._scopedContexts( HistoryKey(plan, metric) ).asInstanceOf[SeriesDensityAnalyzer.Context].distanceStatistics,
             densityExpectedB_AB
           )
           m.topic mustBe metric
