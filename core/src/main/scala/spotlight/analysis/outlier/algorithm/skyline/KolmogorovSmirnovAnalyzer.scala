@@ -75,7 +75,7 @@ class KolmogorovSmirnovAnalyzer( override val router: ActorRef ) extends CommonA
 
   override def algorithm: Symbol = KolmogorovSmirnovAnalyzer.Algorithm
 
-  override def makeSkylineContext( c: AlgorithmContext ): Valid[WrappingContext] = {
+  override def wrapContext(c: AlgorithmContext ): Valid[WrappingContext] = {
     referenceOffset( c ) map { offset =>
       log.debug( "makeSkylingContext: [{}]", c )
       Context( underlying = c, referenceOffset = offset, referenceHistory = c.source.points.to[Queue] )

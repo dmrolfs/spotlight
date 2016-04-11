@@ -47,7 +47,7 @@ class HistogramBinsAnalyzer( override val router: ActorRef ) extends CommonAnaly
 
   override def algorithm: Symbol = HistogramBinsAnalyzer.Algorithm
 
-  override def makeSkylineContext( c: AlgorithmContext ): Valid[WrappingContext] = {
+  override def wrapContext(c: AlgorithmContext ): Valid[WrappingContext] = {
     CommonAnalyzer.SimpleWrappingContext( underlying = c ).successNel
   }
 

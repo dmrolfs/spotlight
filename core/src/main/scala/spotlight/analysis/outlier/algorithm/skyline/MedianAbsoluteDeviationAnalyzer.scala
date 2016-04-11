@@ -57,7 +57,7 @@ extends CommonAnalyzer[MedianAbsoluteDeviationAnalyzer.Context] {
 
   override def algorithm: Symbol = MedianAbsoluteDeviationAnalyzer.Algorithm
 
-  override def makeSkylineContext( c: AlgorithmContext ): Valid[WrappingContext] = {
+  override def wrapContext(c: AlgorithmContext ): Valid[WrappingContext] = {
     ( makeMovingStatistics(c) |@| makeDeviationStatistics(c) ) { (m, d) =>
       Context( underlying = c, movingStatistics = m, deviationStatistics = d )
     }

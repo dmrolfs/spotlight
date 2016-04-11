@@ -177,7 +177,7 @@ class SeasonalExponentialMovingAverageAnalyzer(
 
   override def algorithm: Symbol = SeasonalExponentialMovingAverageAnalyzer.Algorithm
 
-  override def makeSkylineContext( c: AlgorithmContext ): Valid[WrappingContext] = {
+  override def wrapContext(c: AlgorithmContext ): Valid[WrappingContext] = {
     makeSeasonalModel( c ) map { model => Context( underlying = c, seasonalModel = model ) }
   }
 

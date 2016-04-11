@@ -53,7 +53,7 @@ class SimpleMovingAverageAnalyzer( override val router: ActorRef ) extends Commo
 
   override def algorithm: Symbol = SimpleMovingAverageAnalyzer.Algorithm
 
-  override def makeSkylineContext( c: AlgorithmContext ): Valid[WrappingContext] = {
+  override def wrapContext(c: AlgorithmContext ): Valid[WrappingContext] = {
     makeStatistics( c ) map { movingStats => Context( underlying = c, movingStatistics = movingStats ) }
   }
 

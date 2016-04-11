@@ -49,7 +49,7 @@ class ExponentialMovingAverageAnalyzer(
 
   override def algorithm: Symbol = ExponentialMovingAverageAnalyzer.Algorithm
 
-  override def makeSkylineContext( c: AlgorithmContext ): Valid[WrappingContext] = {
+  override def wrapContext(c: AlgorithmContext ): Valid[WrappingContext] = {
     makeStatistics( c ) map { moment => Context( underlying = c, moment = moment ) }
   }
 

@@ -120,28 +120,28 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
   var _scopedContexts: Map[HistoryKey, WrappingContext] = Map.empty[HistoryKey, WrappingContext]
 
   def setScopedContext( c: WrappingContext ): Unit = {_scopedContexts += c.historyKey -> c }
-  def makeSkylineContext( c: AlgorithmContext ): Valid[WrappingContext]
+  def wrapContext(c: AlgorithmContext ): Valid[WrappingContext]
   def preStartContext( context: AlgorithmContext, priorContext: WrappingContext ): TryV[WrappingContext] = {
     log.debug( "preStartContext: [{}]", context )
     priorContext.withUnderlying( context ).disjunction.leftMap{ _.head }
   }
 
   override val algorithmContext: Op[DetectUsing, AlgorithmContext] = {
-    val toSkyline = kleisli[TryV, AlgorithmContext, AlgorithmContext] { c =>
+    val wrap = kleisli[TryV, AlgorithmContext, AlgorithmContext] { c =>
       _scopedContexts
       .get( c.historyKey )
       .map { priorContext => preStartContext( c, priorContext ) }
       .getOrElse {
-        val context = makeSkylineContext( c )
+        val context = wrapContext( c )
         context foreach { setScopedContext }
         context.disjunction.leftMap{ _.head }
       }
     }
 
-    super.algorithmContext >=> toSkyline
+    super.algorithmContext >=> wrap
   }
 
-  def toConcreteContextK: Op[AlgorithmContext, C] = kleisli {toConcreteContext }
+  def toConcreteContextK: Op[AlgorithmContext, C] = kleisli { toConcreteContext }
 
   val tailAverage: Op[AlgorithmContext, Seq[Point2D]] = Kleisli[TryV, AlgorithmContext, Seq[Point2D]] { context =>
     val TailLength = 3

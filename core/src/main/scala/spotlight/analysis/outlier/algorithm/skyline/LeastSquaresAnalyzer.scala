@@ -51,7 +51,7 @@ class LeastSquaresAnalyzer( override val router: ActorRef ) extends CommonAnalyz
 
   override def algorithm: Symbol = LeastSquaresAnalyzer.Algorithm
 
-  override def makeSkylineContext( c: AlgorithmContext ): Valid[WrappingContext] = {
+  override def wrapContext(c: AlgorithmContext ): Valid[WrappingContext] = {
     makeRegression( c ) map { rm => Context( underlying = c, regression = rm ) }
   }
 

@@ -33,7 +33,7 @@ extends CommonAnalyzer[CommonAnalyzer.SimpleWrappingContext] {
 
   override def algorithm: Symbol = MeanSubtractionCumulationAnalyzer.Algorithm
 
-  override def makeSkylineContext( c: AlgorithmContext ): Valid[WrappingContext] = SimpleWrappingContext( underlying = c ).successNel
+  override def wrapContext(c: AlgorithmContext ): Valid[WrappingContext] = SimpleWrappingContext( underlying = c ).successNel
 
 
   /**

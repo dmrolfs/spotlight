@@ -34,7 +34,7 @@ class GrubbsAnalyzer( override val router: ActorRef ) extends CommonAnalyzer[Com
 
   override def algorithm: Symbol = GrubbsAnalyzer.Algorithm
 
-  override def makeSkylineContext( c: AlgorithmContext ): Valid[WrappingContext] = ( SimpleWrappingContext( c ) ).successNel
+  override def wrapContext(c: AlgorithmContext ): Valid[WrappingContext] = ( SimpleWrappingContext( c ) ).successNel
 
 
   /**
