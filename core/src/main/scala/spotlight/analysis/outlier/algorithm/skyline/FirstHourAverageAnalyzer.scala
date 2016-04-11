@@ -50,6 +50,7 @@ object FirstHourAverageAnalyzer {
     }
 
     def withPoints( points: Seq[DoublePoint] ): Context = {
+      logger.error( "FirstHour.Context.withPoints" )
       val firstHourPoints = {
         points
         .map { _.getPoint }
@@ -79,15 +80,8 @@ class FirstHourAverageAnalyzer( override val router: ActorRef ) extends CommonAn
 
   override def algorithm: Symbol = FirstHourAverageAnalyzer.Algorithm
 
-  override def makeSkylineContext( c: AlgorithmContext ): Valid[WrappingContext] = {
+  override def wrapContext(c: AlgorithmContext ): Valid[WrappingContext] = {
     makeFirstHourStatistics( c ) map { firstHour => Context( underlying = c, firstHour = firstHour ) }
-  }
-
-  override def preStartContext( context: AlgorithmContext, priorContext: WrappingContext ): TryV[WrappingContext] = {
-    for {
-      sctx <- super.preStartContext( context, priorContext )
-      fhctx <- toConcreteContext( sctx )
-    } yield fhctx withPoints fhctx.data
   }
 
   def makeFirstHourStatistics(
@@ -131,8 +125,7 @@ class FirstHourAverageAnalyzer( override val router: ActorRef ) extends CommonAn
             expected = ctx.firstHour.getMean,
             distance = math.abs( tol * ctx.firstHour.getStandardDeviation )
           )
-          log.debug( "first hour mean[{}] and stdev[{}]", ctx.firstHour.getMean, ctx.firstHour.getStandardDeviation )
-//          math.abs( v - mean ) > ( tol * stddev)
+          log.debug( "first hour mean[{}] stdev[{}] tolerance[{}]", ctx.firstHour.getMean, ctx.firstHour.getStandardDeviation, tol )
           ( control.isOutlier(v), control )
         },
         update = (ctx: Context, pt: Point2D) => ctx

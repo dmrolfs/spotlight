@@ -1,22 +1,17 @@
 package spotlight.analysis.outlier.algorithm.skyline
 
+import scala.collection.immutable
+import scala.concurrent.duration._
 import akka.testkit._
 import com.github.nscala_time.time.JodaImplicits._
 import com.typesafe.config.ConfigFactory
-import com.typesafe.scalalogging.LazyLogging
-import spotlight.analysis.outlier.{DetectOutliersInSeries, DetectUsing, DetectionAlgorithmRouter, HistoricalStatistics}
+import spotlight.analysis.outlier.{DetectOutliersInSeries, DetectUsing, DetectionAlgorithmRouter}
 import spotlight.model.outlier._
-import spotlight.model.timeseries.{DataPoint, TimeSeries, TimeSeriesBase}
-import spotlight.testkit.ParallelAkkaSpec
-import org.apache.commons.math3.random.RandomDataGenerator
+import spotlight.model.timeseries.DataPoint
 import org.joda.{time => joda}
 import org.mockito.Mockito._
 import org.scalatest.Tag
 import org.scalatest.mock.MockitoSugar
-
-import scala.collection.immutable
-import scala.concurrent.duration._
-import scala.concurrent.{ExecutionContext, Future}
 
 
 /**
@@ -48,114 +43,6 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
   val NEXT = Tag( "next" )
 
   "CommonAnalyzer" should {
-    "find outliers deviating from first hour" in { f: Fixture =>
-      import f._
-      val analyzer = TestActorRef[FirstHourAverageAnalyzer]( FirstHourAverageAnalyzer.props(router.ref) )
-      val firstHour = FirstHourAverageAnalyzer.Context.FirstHour
-      trace( s"firstHour = $firstHour" )
-      val full = makeDataPoints(
-        values = points.map{ case DataPoint(_, v) => v },
-        start = firstHour.start,
-        period = 2.minutes,
-        timeWiggle = (0.97, 1.03),
-        valueWiggle = (0.99, 1.01)
-      )
-
-      val series = spike( full )()
-      trace( s"test series = $series" )
-      val algoS = FirstHourAverageAnalyzer.Algorithm
-      val algProps = ConfigFactory.parseString( s"""${algoS.name}.tolerance: 4""" )
-
-      analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
-      val history1 = historyWith( None, series )
-      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series, plan), history1, algProps ) )
-      aggregator.expectMsgPF( 2.seconds.dilated, "first hour" ) {
-        case m @ SeriesOutliers(alg, source, plan, outliers, control) => {
-          alg mustBe Set( algoS )
-          source mustBe series
-          m.hasAnomalies mustBe true
-          outliers.size mustBe 1
-          outliers mustBe Seq( series.points.last )
-        }
-      }
-
-      val start2 = series.points.last.timestamp + 1.minute
-      val full2 = makeDataPoints(
-        values = points.map{ case DataPoint(_, v) => v },
-        start = start2,
-        period = 2.minutes,
-        timeWiggle = (0.97, 1.03),
-        valueWiggle = (0.99, 1.01)
-      )
-
-      val series2 = spike( full2 )( 0 )
-      val history2 = historyWith( Option(history1.recordLastDataPoints(series.points)), series2 )
-
-      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
-      aggregator.expectMsgPF( 2.seconds.dilated, "first hour again" ) {
-        case m @ SeriesOutliers(alg, source, plan, outliers, control) => {
-          alg mustBe Set( algoS )
-          source mustBe series2
-          m.hasAnomalies mustBe true
-          outliers.size mustBe 3
-          outliers mustBe series2.points.take(3)
-        }
-      }
-    }
-
-    "find outliers over 2 first hour messages" in { f: Fixture =>
-      import f._
-      val analyzer = TestActorRef[FirstHourAverageAnalyzer]( FirstHourAverageAnalyzer.props(router.ref) )
-      val firstHour = FirstHourAverageAnalyzer.Context.FirstHour
-      trace( s"firstHour = $firstHour" )
-      val full = makeDataPoints(
-        values = points.map{ case DataPoint(_, v) => v },
-        start = firstHour.start,
-        period = 1.minute,
-        timeWiggle = (0.97, 1.03),
-        valueWiggle = (0.99, 1.01)
-      )
-
-      val series = spike( full )()
-      trace( s"test series = $series" )
-      val algoS = FirstHourAverageAnalyzer.Algorithm
-      val algProps = ConfigFactory.parseString( s"""${algoS.name}.tolerance: 2""" )
-
-      analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered(algoS) )
-      val history1 = historyWith( None, series )
-      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series, plan), history1, algProps ) )
-      aggregator.expectMsgPF( 2.seconds.dilated, "first hour" ) {
-        case m @ NoOutliers(alg, source, plan, control) => {
-          alg mustBe Set( algoS )
-          source mustBe series
-          m.hasAnomalies mustBe false
-        }
-      }
-
-      val start2 = series.points.last.timestamp + 1.minute
-      val full2 = makeDataPoints(
-        values = points.map{ case DataPoint(_, v) => v },
-        start = start2,
-        period = 1.minute,
-        timeWiggle = (0.97, 1.03),
-        valueWiggle = (0.99, 1.01)
-      )
-
-      val series2 = spike( full2 )( 0 )
-      val history2 = historyWith( Option(history1.recordLastDataPoints(series.points)), series2 )
-
-      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
-      aggregator.expectMsgPF( 2.seconds.dilated, "first hour again" ) {
-        case m @ SeriesOutliers(alg, source, plan, outliers, control) => {
-          alg mustBe Set( algoS )
-          source mustBe series2
-          m.hasAnomalies mustBe true
-          outliers.size mustBe 2
-          outliers mustBe series2.points.take(2)
-        }
-      }
-    }
-
     "find outliers based on absolute median deviation" taggedAs (NEXT) in { f: Fixture =>
       import f._
       val analyzer = TestActorRef[MedianAbsoluteDeviationAnalyzer]( MedianAbsoluteDeviationAnalyzer.props(router.ref) )
