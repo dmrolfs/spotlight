@@ -50,10 +50,13 @@ object FirstHourAverageAnalyzer {
     }
 
     def withPoints( points: Seq[DoublePoint] ): Context = {
-      logger.error( "FirstHour.Context.withPoints" )
       val firstHourPoints = {
         points
         .map { _.getPoint }
+//        .map { p =>
+//          logger.info( "FirstHour.withPoint [{}] in first-hour:[{}] = {}", (new joda.DateTime(p(0).toLong), p(1)), Context.FirstHour, Context.FirstHour.contains(p(0).toLong).toString )
+//          p
+//        }
         .collect { case Array( ts, v ) if Context.FirstHour contains ts.toLong => v }
       }
 
@@ -89,18 +92,13 @@ class FirstHourAverageAnalyzer( override val router: ActorRef ) extends CommonAn
     initialStatistics: Option[SummaryStatistics] = None
   ): Valid[SummaryStatistics] = {
     val firstHourStats = initialStatistics getOrElse { new SummaryStatistics }
-
-    context.data
-    .map { _.getPoint }
-    .filter { case Array(ts, v) => Context.FirstHour contains ts.toLong }
-    .foreach { case Array(ts, v) =>
-      log.debug( "adding points to first hour: [({}, {})]", ts.toLong, v )
-      firstHourStats addValue v
-    }
-
     firstHourStats.successNel
   }
 
+  val contextWithFirstHourStats: Op[AlgorithmContext, Context] = toConcreteContextK map { c =>
+    log.debug( "first-hour:[{}] context source points: [{}]", Context.FirstHour, c.source.points.mkString(",") )
+    c withPoints c.source.points
+  }
 
   /**
     * Calcuate the simple average over one hour, FULL_DURATION seconds ago.
@@ -109,26 +107,27 @@ class FirstHourAverageAnalyzer( override val router: ActorRef ) extends CommonAn
     */
   override val findOutliers: Op[AlgorithmContext, (Outliers, AlgorithmContext)] = {
     val outliers = for {
-      context <- toConcreteContextK <=< ask[TryV, AlgorithmContext]
-      tolerance <- tolerance <=< ask[TryV, AlgorithmContext]
-      taverages <- tailAverage <=< ask[TryV, AlgorithmContext]
+      ctx <- contextWithFirstHourStats
+      tolerance <- tolerance
+      taverages <- tailAverage
     } yield {
       val tol = tolerance getOrElse 3D
 
       collectOutlierPoints(
         points = taverages,
-        context = context,
-        evaluateOutlier = (p: Point2D, ctx: Context) => {
+        context = ctx,
+        evaluateOutlier = (p: Point2D, c: Context) => {
           val (ts, v) = p
           val control = ControlBoundary.fromExpectedAndDistance(
             timestamp = ts.toLong,
-            expected = ctx.firstHour.getMean,
-            distance = math.abs( tol * ctx.firstHour.getStandardDeviation )
+            expected = c.firstHour.getMean,
+            distance = math.abs( tol * c.firstHour.getStandardDeviation )
           )
-          log.debug( "first hour mean[{}] stdev[{}] tolerance[{}]", ctx.firstHour.getMean, ctx.firstHour.getStandardDeviation, tol )
+          log.debug( "first hour[{}] mean[{}] stdev[{}] tolerance[{}]", c.firstHour.getN, c.firstHour.getMean, c.firstHour.getStandardDeviation, tol )
+          log.debug( "first hour[{}] [{}] is-outlier:{} control = [{}]", algorithm.name, v, control.isOutlier(v), control )
           ( control.isOutlier(v), control )
         },
-        update = (ctx: Context, pt: Point2D) => ctx
+        update = (c: Context, pt: Point2D) => c
       )
     }
 

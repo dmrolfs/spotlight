@@ -166,7 +166,6 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
       val isOutlier = makeOutlierTest( clusters )
       val outlyingTestPoints = ctx.data.filter { pt => isOutlier( pt ) }.map {_.getPoint.head.toLong}.toSet
       val outliers = ctx.source.points filter { dp => outlyingTestPoints contains dp.timestamp.getMillis }
-      log.info( "filterOutliers: ctx distance-stats={}", ctx.asInstanceOf[Context].distanceStatistics )
       (outliers, ctx)
     }
   }
@@ -181,7 +180,6 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
       ctxWithControls = cs.foldLeft( ctx ){ _ addControlBoundary _ }
       result <- makeOutliers(anomalies, ctxWithControls) <=< toContext
     } yield {
-      log.info( "toOutliers: ctx distance-stats={}", ctx.asInstanceOf[Context].distanceStatistics )
       ( result, ctxWithControls )
     }
   }
@@ -194,7 +192,6 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
       tol <- tolerance
     } yield {
       val distanceStatistics = ctx.distanceStatistics
-      log.info( "controls: ctx distance-stats={}", ctx.asInstanceOf[Context].distanceStatistics )
 
       if ( !shouldCreateControls(ctx) ) Seq.empty[ControlBoundary]
       else {

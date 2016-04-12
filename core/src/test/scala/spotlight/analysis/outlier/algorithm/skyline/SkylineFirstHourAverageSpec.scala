@@ -95,7 +95,7 @@ class SkylineFirstHourAverageSpec extends SkylineBaseSpec {
 
 
   "FirstHourAverageAnalyzer" should {
-    "find outliers deviating from first hour" taggedAs (WIP) in { f: Fixture =>
+    "find outliers deviating from first hour" in { f: Fixture =>
       import f._
       val analyzer = TestActorRef[FirstHourAverageAnalyzer]( FirstHourAverageAnalyzer.props(router.ref) )
       val firstHour = FirstHourAverageAnalyzer.Context.FirstHour
@@ -205,7 +205,7 @@ class SkylineFirstHourAverageSpec extends SkylineBaseSpec {
 
     "find outliers beyond first hour" in { f: Fixture => pending }
 
-    "provide full control boundaries" in { f: Fixture =>
+    "provide full control boundaries" taggedAs (WIP) in { f: Fixture =>
       import f._
       val analyzer = TestActorRef[FirstHourAverageAnalyzer]( FirstHourAverageAnalyzer.props( router.ref ) )
       val firstHour = FirstHourAverageAnalyzer.Context.FirstHour
@@ -254,6 +254,8 @@ class SkylineFirstHourAverageSpec extends SkylineBaseSpec {
              tolerance = 3,
              lastPoints = series.points
           )
+          logger.error( "actual controls = [{}]", actual(algoS).mkString("\n", ", \n", "\n") )
+          logger.error( "expected controls = [{}]", expected.mkString("\n", ", \n", "\n") )
           actual( algoS ).zip( expected ).zipWithIndex foreach { case ((a, e), i) => compareControls( i, a, e ) }
 
 //          control( algoS ).zip( expectedControls ) foreach { case (a, e) =>

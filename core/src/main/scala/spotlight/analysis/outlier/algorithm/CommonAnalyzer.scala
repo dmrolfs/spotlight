@@ -181,7 +181,7 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
     update: UpdateContext[CTX]
   ): (Seq[DataPoint], AlgorithmContext) = {
     @tailrec def loop( pts: List[Point2D], ctx: CTX, acc: Seq[DataPoint] ): (Seq[DataPoint], AlgorithmContext) = {
-      ctx.cast[WrappingContext] foreach {setScopedContext }
+      ctx.cast[WrappingContext] foreach { setScopedContext }
 
       pts match {
         case Nil => ( acc, ctx )
