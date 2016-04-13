@@ -186,18 +186,25 @@ with ActorLogging {
 
   val fullExtractId: OutlierPlan.ExtractTopic = OutlierDetection.extractOutlierDetectionTopic orElse { case _ => None }
 
+  def aggregatorNameForMessage( m: OutlierDetectionMessage, p: OutlierPlan ): String = {
+    val extractedId = fullExtractId( m ) getOrElse {
+      log.warning( "OutlierDetection failed to extract ID from message:[{}] and plan:[{}]", m, p )
+      "__UNKNOWN_ID__"
+    }
+
+    val name = s"""quorum-${p.name}-${extractedId}-${ShortUUID()}"""
+
+    if ( ActorPath isValidPathElement name ) name
+    else {
+      val blunted = name.replaceAll( "[;/?:@&=+$,]", "_" )
+      log.warning( "OutlierDetection attempting to dispatch to invalid aggregator name: [{}] blunting to [{}]", name, blunted )
+      blunted
+    }
+  }
+
   def dispatch( m: OutlierDetectionMessage, p: OutlierPlan )( implicit ec: ExecutionContext ): ActorRef = {
     log.debug( "OutlierDetection disptaching: [{}][{}:{}]", m.topic, m.plan, m.plan.id )
-    val aggregatorName = {
-      val name = s"quorum-${p.name}-${fullExtractId(m) getOrElse "!NULL-ID!"}-${ShortUUID()}"
-      if ( ActorPath isValidPathElement name ) name
-      else {
-        val blunted = name.replaceAll( "[;/?:@&=+$,]", "_" )
-        log.warning( "OutlierDetection attempting to dispatch to invalid aggregator name: [{}] blunting to [{}]", name, blunted )
-        blunted
-      }
-    }
-    val aggregator = context.actorOf( OutlierQuorumAggregator.props( p, m.source ), aggregatorName )
+    val aggregator = context.actorOf( OutlierQuorumAggregator.props(p, m.source), aggregatorNameForMessage(m, p) )
     val history = updateHistory( m.source, p )
 
     p.algorithms foreach { a =>
