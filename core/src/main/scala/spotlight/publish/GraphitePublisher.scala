@@ -154,13 +154,23 @@ class GraphitePublisher extends DenseOutlierPublisher {
       socket = None
       val reopened = open()
 
-      log.warning(
-        "graphite connection is down, closed[{}], reconnection [{}] " +
-          "and circuit breaker will remain open for [{}] before trying again",
-        socketClose,
-        if ( reopened.isSuccess && isConnected ) "succeeded" else "failed",
-        reset.toCoarsest
-      )
+      if ( reopened.isSuccess && isConnected ) {
+        log.info(
+          "graphite connection is down, closed[{}], reconnection [{}] " +
+            "and circuit breaker will remain open for [{}] before trying again",
+          socketClose,
+          "succeeded",
+          reset.toCoarsest
+        )
+      } else {
+        log.error(
+          "graphite connection is down, closed[{}], reconnection [{}] " +
+            "and circuit breaker will remain open for [{}] before trying again",
+          socketClose,
+          "failed",
+          reset.toCoarsest
+        )
+      }
     }
     .onHalfOpen {
       circuitPendingMeter.mark()
