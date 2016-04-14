@@ -1,7 +1,7 @@
 package spotlight.analysis.outlier
 
 import scala.reflect.ClassTag
-import akka.actor.{ActorContext, ActorLogging, ActorRef, ActorSystem, Props}
+import akka.actor.{ActorContext, ActorLogging, ActorRef, ActorSystem, Props, Terminated}
 import akka.event.LoggingReceive
 import akka.stream.{FlowShape, Materializer}
 import akka.stream.actor.{ActorSubscriber, ActorSubscriberMessage, MaxInFlightRequestStrategy, RequestStrategy}
@@ -9,6 +9,7 @@ import akka.stream.scaladsl._
 import nl.grons.metrics.scala.{Meter, MetricName}
 import peds.akka.metrics.InstrumentedActor
 import peds.akka.stream.StreamMonitor
+import spotlight.analysis.outlier.ProcessorAdapter.DeadWorkerError
 
 
 /**
@@ -68,6 +69,10 @@ object ProcessorAdapter {
 
 
   case class DetectionJob( destination: ActorRef, startNanos: Long = System.nanoTime() )
+
+
+  final case class DeadWorkerError private[outlier]( deadWorker: ActorRef )
+  extends IllegalStateException( s"Flow Processor notified of worker death: [${deadWorker}]" )
 }
 
 class ProcessorAdapter extends ActorSubscriber with InstrumentedActor with ActorLogging {
@@ -91,12 +96,21 @@ class ProcessorAdapter extends ActorSubscriber with InstrumentedActor with Actor
     case next @ ActorSubscriberMessage.OnNext( message ) if outer.workerFor.isDefinedAt( message ) => {
       submissionMeter.mark()
       outstanding += 1
-      outer.workerFor( message ) ! message
+      val worker = outer workerFor message
+      context watch worker
+      worker ! message
     }
 
     case ActorSubscriberMessage.OnComplete => outer.destinationPublisher ! ActorSubscriberMessage.OnComplete
 
     case onError: ActorSubscriberMessage.OnError => outer.destinationPublisher ! onError
+
+    case Terminated( deadWorker ) => {
+      log.error( "Flow Processor notified of worker death: [{}]", deadWorker )
+
+      //todo is this response appropriate for spotlight and generally?
+      outer.destinationPublisher ! ActorSubscriberMessage.OnError( DeadWorkerError(deadWorker) )
+    }
   }
 
   val publish: Receive = {
