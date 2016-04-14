@@ -1,14 +1,16 @@
 package spotlight.analysis.outlier.algorithm.density
 
 import scala.reflect.ClassTag
-import scalaz._, Scalaz._
-import akka.actor.{ ActorRef, Props }
+import scalaz._
+import Scalaz._
+import akka.actor.{ActorRef, Props}
 import org.apache.commons.math3.ml.clustering.DoublePoint
+import peds.commons.{KOp, TryV}
 import spotlight.analysis.outlier.algorithm.AlgorithmActor
 import spotlight.analysis.outlier.algorithm.density.DBSCANAnalyzer.Clusters
-import spotlight.analysis.outlier.{ DetectUsing, HistoricalStatistics }
-import spotlight.model.outlier.{ NoOutliers, Outliers, SeriesOutliers }
-import spotlight.model.timeseries.{ DataPoint, TimeSeries }
+import spotlight.analysis.outlier.{DetectUsing, HistoricalStatistics}
+import spotlight.model.outlier.{NoOutliers, Outliers, SeriesOutliers}
+import spotlight.model.timeseries.{DataPoint, TimeSeries}
 
 
 
@@ -25,7 +27,7 @@ class SeriesCentroidDensityAnalyzer( override val router: ActorRef ) extends DBS
 
   override def algorithm: Symbol = SeriesCentroidDensityAnalyzer.Algorithm
 
-  override val algorithmContext: Op[DetectUsing, AlgorithmContext] = {
+  override val algorithmContext: KOp[DetectUsing, AlgorithmContext] = {
     def centroidDistances( points: Seq[DoublePoint], history: HistoricalStatistics ): Seq[DoublePoint] = {
       val h = if ( history.N > 0 ) history else {HistoricalStatistics.fromActivePoints( points.toArray, false ) }
       val mean = h.mean( 1 )
@@ -45,7 +47,7 @@ class SeriesCentroidDensityAnalyzer( override val router: ActorRef ) extends DBS
     }
   }
 
-  override def findOutliers: Op[(AlgorithmContext, Clusters), Outliers] = {
+  override def findOutliers: KOp[(AlgorithmContext, Clusters), Outliers] = {
     Kleisli[TryV, (AlgorithmContext, Clusters), Outliers] { case (context, clusters) =>
       val isOutlier = makeOutlierTest( clusters )
       val centroidOutliers: Set[Long] = {

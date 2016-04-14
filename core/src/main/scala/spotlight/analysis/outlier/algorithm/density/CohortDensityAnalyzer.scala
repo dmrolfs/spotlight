@@ -2,9 +2,12 @@ package spotlight.analysis.outlier.algorithm.density
 
 import akka.actor.{ActorRef, Props}
 import akka.event.LoggingReceive
-import scalaz._, Scalaz._
+
+import scalaz._
+import Scalaz._
 import org.apache.commons.math3.ml.clustering.{Cluster, DoublePoint}
 import org.apache.commons.math3.stat.{descriptive => stat}
+import peds.commons.KOp
 import spotlight.analysis.outlier.algorithm.AlgorithmActor
 import spotlight.analysis.outlier.{DetectOutliersInCohort, DetectUsing}
 import spotlight.model.outlier.{CohortOutliers, NoOutliers, Outliers}
@@ -85,5 +88,5 @@ class CohortDensityAnalyzer( override val router: ActorRef ) extends DBSCANAnaly
   }
 
   //todo figure out how to unify into a single density algorithm
-  override def findOutliers: Op[(AlgorithmContext, Seq[Cluster[DoublePoint]]), Outliers] = ???
+  override def findOutliers: KOp[(AlgorithmContext, Seq[Cluster[DoublePoint]]), Outliers] = ???
 }

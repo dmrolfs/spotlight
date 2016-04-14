@@ -6,8 +6,8 @@ import akka.actor.{ActorRef, Props}
 import scalaz._
 import Scalaz._
 import scalaz.Kleisli.ask
-import peds.commons.Valid
-import spotlight.analysis.outlier.algorithm.AlgorithmActor.{AlgorithmContext, Op, TryV}
+import peds.commons.{KOp, TryV, Valid}
+import spotlight.analysis.outlier.algorithm.AlgorithmActor.AlgorithmContext
 import spotlight.analysis.outlier.algorithm.CommonAnalyzer
 import CommonAnalyzer.WrappingContext
 import spotlight.model.outlier.Outliers
@@ -56,7 +56,7 @@ class HistogramBinsAnalyzer( override val router: ActorRef ) extends CommonAnaly
     * A timeseries is anomalous if the average of the last three datapoints
     * on a projected least squares model is greater than three sigma.
     */
-    override val findOutliers: Op[AlgorithmContext, (Outliers, AlgorithmContext)] = {
+    override val findOutliers: KOp[AlgorithmContext, (Outliers, AlgorithmContext)] = {
     val outliers = for {
       context <- toConcreteContextK <=< ask[TryV, AlgorithmContext]
       taverages <- tailAverage <=< ask[TryV, AlgorithmContext]

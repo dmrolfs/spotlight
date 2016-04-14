@@ -8,8 +8,8 @@ import Scalaz._
 import scalaz.Kleisli.{ask, kleisli}
 import org.apache.commons.math3.distribution.TDistribution
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
-import peds.commons.Valid
-import spotlight.analysis.outlier.algorithm.AlgorithmActor.{AlgorithmContext, Op, TryV}
+import peds.commons.{KOp, TryV, Valid}
+import spotlight.analysis.outlier.algorithm.AlgorithmActor.AlgorithmContext
 import spotlight.analysis.outlier.algorithm.CommonAnalyzer
 import CommonAnalyzer.WrappingContext
 import spotlight.model.outlier.Outliers
@@ -40,7 +40,7 @@ class GrubbsAnalyzer( override val router: ActorRef ) extends CommonAnalyzer[Com
   /**
     * A timeseries is anomalous if the Z score is greater than the Grubb's score.
     */
-  override val findOutliers: Op[AlgorithmContext, (Outliers, AlgorithmContext)] = {
+  override val findOutliers: KOp[AlgorithmContext, (Outliers, AlgorithmContext)] = {
     def dataThreshold( data: Seq[Point2D] ) = kleisli[TryV, AlgorithmContext, Double] { context =>
       val Alpha = 0.05  //todo drive from context's algoConfig
       val degreesOfFreedom = math.max( data.size - 2, 1 ) //todo: not a great idea but for now avoiding error if size <= 2

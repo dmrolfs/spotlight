@@ -13,6 +13,7 @@ import org.apache.commons.math3.linear.MatrixUtils
 import org.apache.commons.math3.ml.distance.{DistanceMeasure, EuclideanDistance}
 import org.apache.commons.math3.ml.clustering.DoublePoint
 import peds.akka.metrics.InstrumentedActor
+import peds.commons.{TryV, KOp}
 import peds.commons.math.MahalanobisDistance
 import spotlight.model.outlier.OutlierPlan
 import spotlight.model.timeseries.{ControlBoundary, DataPoint, TimeSeriesBase, Topic}
@@ -60,21 +61,17 @@ trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
 
   // -- algorithm functional elements --
 
-  def algorithmContext: Op[DetectUsing, AlgorithmContext] = {
+  def algorithmContext: KOp[DetectUsing, AlgorithmContext] = {
     Kleisli[TryV, DetectUsing, AlgorithmContext] { m => AlgorithmContext( m, DataPoint.toDoublePoints( m.source.points ) ).right }
   }
 
-  val tolerance: Op[AlgorithmContext, Option[Double]] = Kleisli[TryV, AlgorithmContext, Option[Double]] { _.tolerance }
+  val tolerance: KOp[AlgorithmContext, Option[Double]] = Kleisli[TryV, AlgorithmContext, Option[Double]] { _.tolerance }
 
-  val messageConfig: Op[AlgorithmContext, Config] = kleisli[TryV, AlgorithmContext, Config] { _.messageConfig.right }
+  val messageConfig: KOp[AlgorithmContext, Config] = kleisli[TryV, AlgorithmContext, Config] { _.messageConfig.right }
 
 }
 
 object AlgorithmActor {
-  type TryV[T] = Throwable\/T
-  type Op[I, O] = Kleisli[TryV, I, O]
-
-
   trait AlgorithmContext {
     def message: DetectUsing
     def data: Seq[DoublePoint]

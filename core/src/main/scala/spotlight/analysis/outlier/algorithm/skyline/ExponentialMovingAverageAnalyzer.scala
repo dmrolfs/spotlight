@@ -6,10 +6,10 @@ import akka.actor.{ActorRef, Props}
 import scalaz._
 import Scalaz._
 import scalaz.Kleisli.ask
-import peds.commons.Valid
+import peds.commons.{KOp, TryV, Valid}
 import peds.commons.util._
 import spotlight.analysis.outlier.Moment
-import spotlight.analysis.outlier.algorithm.AlgorithmActor.{AlgorithmContext, Op, TryV}
+import spotlight.analysis.outlier.algorithm.AlgorithmActor.AlgorithmContext
 import spotlight.analysis.outlier.algorithm.CommonAnalyzer
 import CommonAnalyzer.WrappingContext
 import spotlight.model.outlier.Outliers
@@ -64,7 +64,7 @@ class ExponentialMovingAverageAnalyzer(
     * deviations of the exponential moving average. This is better for finding anomalies
     * with respect to the short term trends.
     */
-  override val findOutliers: Op[AlgorithmContext, (Outliers, AlgorithmContext)] = {
+  override val findOutliers: KOp[AlgorithmContext, (Outliers, AlgorithmContext)] = {
     val outliers = for {
       context <- toConcreteContextK <=< ask[TryV, AlgorithmContext]
       tolerance <- tolerance <=< ask[TryV, AlgorithmContext]

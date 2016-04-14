@@ -9,11 +9,11 @@ import scalaz.Kleisli.ask
 import org.joda.{time => joda}
 import com.github.nscala_time.time.Imports._
 import com.typesafe.scalalogging.LazyLogging
-import peds.commons.Valid
+import peds.commons.{KOp, TryV, Valid}
 import peds.commons.log.Trace
 import peds.commons.util._
 import spotlight.analysis.outlier.Moment
-import spotlight.analysis.outlier.algorithm.AlgorithmActor.{AlgorithmContext, Op, TryV}
+import spotlight.analysis.outlier.algorithm.AlgorithmActor.AlgorithmContext
 import spotlight.analysis.outlier.algorithm.CommonAnalyzer
 import CommonAnalyzer.WrappingContext
 import spotlight.model.outlier.Outliers
@@ -213,7 +213,7 @@ class SeasonalExponentialMovingAverageAnalyzer(
     * seasonal bin is greater than tolerance * standard deviations of the bin's exponential
     * moving average. This is better for finding anomalies with respect to seasonal periods.
     */
-  override val findOutliers: Op[AlgorithmContext, (Outliers, AlgorithmContext)] = {
+  override val findOutliers: KOp[AlgorithmContext, (Outliers, AlgorithmContext)] = {
     val outliers = for {
       context <- toConcreteContextK <=< ask[TryV, AlgorithmContext]
       tolerance <- tolerance <=< ask[TryV, AlgorithmContext]

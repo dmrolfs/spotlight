@@ -7,14 +7,14 @@ import akka.actor.{ActorRef, Props}
 import scalaz._
 import Scalaz._
 import scalaz.Kleisli.{ask, kleisli}
-import peds.commons.Valid
+import peds.commons.{KOp, TryV, Valid}
 import peds.commons.util._
 import org.apache.commons.math3.ml.clustering.{Cluster, DBSCANClusterer, DoublePoint}
 import org.apache.commons.math3.ml.distance.DistanceMeasure
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import spotlight.model.outlier.Outliers
 import spotlight.model.timeseries.{ControlBoundary, DataPoint, TimeSeriesBase}
-import spotlight.analysis.outlier.algorithm.AlgorithmActor.{AlgorithmContext, Op, TryV}
+import spotlight.analysis.outlier.algorithm.AlgorithmActor.AlgorithmContext
 import spotlight.analysis.outlier.algorithm.CommonAnalyzer
 import spotlight.analysis.outlier.algorithm.CommonAnalyzer.WrappingContext
 
@@ -77,9 +77,9 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
   }
 
 
-  val distanceMeasure: Op[AlgorithmContext, DistanceMeasure] = kleisli { _.distanceMeasure }
+  val distanceMeasure: KOp[AlgorithmContext, DistanceMeasure] = kleisli { _.distanceMeasure }
 
-  val updateDistanceMoment: Op[AlgorithmContext, AlgorithmContext] = {
+  val updateDistanceMoment: KOp[AlgorithmContext, AlgorithmContext] = {
     for {
       ctx <- toConcreteContextK
       distance <- distanceMeasure
@@ -94,7 +94,7 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
   }
 
   type Clusters = Seq[Cluster[DoublePoint]]
-  val cluster: Op[AlgorithmContext, (Clusters, AlgorithmContext)] = {
+  val cluster: KOp[AlgorithmContext, (Clusters, AlgorithmContext)] = {
     for {
       ctx <- toConcreteContextK
       e <- eps <=< toConcreteContextK
@@ -120,7 +120,7 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
     }
   }
 
-  val eps: Op[Context, Double] = {
+  val eps: KOp[Context, Double] = {
     kleisli[TryV, Context, Double] { ctx =>
       val config = ctx.messageConfig
       val distanceStatistcs = ctx.distanceStatistics
@@ -158,7 +158,7 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
     }
   }
 
-  val filterOutliers: Op[(Clusters, AlgorithmContext), (Seq[DataPoint], AlgorithmContext)] = {
+  val filterOutliers: KOp[(Clusters, AlgorithmContext), (Seq[DataPoint], AlgorithmContext)] = {
     for {
       clustersAndContext <- ask[ TryV, (Clusters, AlgorithmContext) ]
       (clusters, ctx) = clustersAndContext
@@ -170,7 +170,7 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
     }
   }
 
-  val toOutliers: Op[(Seq[DataPoint], AlgorithmContext), (Outliers, AlgorithmContext)] = {
+  val toOutliers: KOp[(Seq[DataPoint], AlgorithmContext), (Outliers, AlgorithmContext)] = {
     val toContext = kleisli[TryV, (Seq[DataPoint], AlgorithmContext), AlgorithmContext] { case (_, ctx) => ctx.right }
 
     for {
@@ -184,7 +184,7 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
     }
   }
 
-  val controls: Op[AlgorithmContext, Seq[ControlBoundary]] = {
+  val controls: KOp[AlgorithmContext, Seq[ControlBoundary]] = {
     for {
       ctx <- toConcreteContextK
       e <- eps <=< toConcreteContextK
@@ -260,7 +260,7 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
 
   /**
     */
-  override val findOutliers: Op[AlgorithmContext, (Outliers, AlgorithmContext)] = {
+  override val findOutliers: KOp[AlgorithmContext, (Outliers, AlgorithmContext)] = {
     updateDistanceMoment >=> cluster >=> filterOutliers >=> toOutliers
   }
 

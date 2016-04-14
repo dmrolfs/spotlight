@@ -10,9 +10,9 @@ import org.joda.{time => joda}
 import com.typesafe.scalalogging.LazyLogging
 import org.apache.commons.math3.ml.clustering.DoublePoint
 import org.apache.commons.math3.stat.descriptive.SummaryStatistics
-import peds.commons.Valid
+import peds.commons.{KOp, Valid}
 import peds.commons.util._
-import spotlight.analysis.outlier.algorithm.AlgorithmActor.{AlgorithmContext, Op, TryV}
+import spotlight.analysis.outlier.algorithm.AlgorithmActor.AlgorithmContext
 import spotlight.analysis.outlier.algorithm.CommonAnalyzer
 import CommonAnalyzer.WrappingContext
 import spotlight.model.outlier.Outliers
@@ -95,7 +95,7 @@ class FirstHourAverageAnalyzer( override val router: ActorRef ) extends CommonAn
     firstHourStats.successNel
   }
 
-  val contextWithFirstHourStats: Op[AlgorithmContext, Context] = toConcreteContextK map { c =>
+  val contextWithFirstHourStats: KOp[AlgorithmContext, Context] = toConcreteContextK map { c =>
     log.debug( "first-hour:[{}] context source points: [{}]", Context.FirstHour, c.source.points.mkString(",") )
     c withPoints c.source.points
   }
@@ -105,7 +105,7 @@ class FirstHourAverageAnalyzer( override val router: ActorRef ) extends CommonAn
     * A timeseries is anomalous if the average of the last three datapoints
     * are outside of three standard deviations of this value.
     */
-  override val findOutliers: Op[AlgorithmContext, (Outliers, AlgorithmContext)] = {
+  override val findOutliers: KOp[AlgorithmContext, (Outliers, AlgorithmContext)] = {
     val outliers = for {
       ctx <- contextWithFirstHourStats
       tolerance <- tolerance

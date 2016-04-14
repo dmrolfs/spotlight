@@ -8,9 +8,9 @@ import Scalaz._
 import scalaz.Kleisli.ask
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import org.apache.commons.math3.stat.regression.MillerUpdatingRegression
-import peds.commons.Valid
+import peds.commons.{KOp, TryV, Valid}
 import peds.commons.util._
-import spotlight.analysis.outlier.algorithm.AlgorithmActor.{AlgorithmContext, Op, TryV}
+import spotlight.analysis.outlier.algorithm.AlgorithmActor.AlgorithmContext
 import spotlight.analysis.outlier.algorithm.CommonAnalyzer
 import CommonAnalyzer.WrappingContext
 import spotlight.model.outlier.Outliers
@@ -67,7 +67,7 @@ class LeastSquaresAnalyzer( override val router: ActorRef ) extends CommonAnalyz
     * on a projected least squares model is greater than three sigma.
     */
 
-    override val findOutliers: Op[AlgorithmContext, (Outliers, AlgorithmContext)] = {
+    override val findOutliers: KOp[AlgorithmContext, (Outliers, AlgorithmContext)] = {
     val outliers = for {
       context <- toConcreteContextK <=< ask[TryV, AlgorithmContext]
       tolerance <- tolerance <=< ask[TryV, AlgorithmContext]

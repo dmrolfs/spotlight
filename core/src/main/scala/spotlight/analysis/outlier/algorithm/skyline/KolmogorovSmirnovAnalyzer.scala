@@ -11,9 +11,9 @@ import org.joda.{time => joda}
 import com.github.nscala_time.time.Imports._
 import org.apache.commons.math3.stat.inference.TestUtils
 import org.apache.commons.math3.exception.{InsufficientDataException, MathInternalError}
-import peds.commons.Valid
+import peds.commons.{KOp, TryV, Valid}
 import peds.commons.util._
-import spotlight.analysis.outlier.algorithm.AlgorithmActor.{AlgorithmContext, Op, TryV}
+import spotlight.analysis.outlier.algorithm.AlgorithmActor.AlgorithmContext
 import spotlight.analysis.outlier.algorithm.CommonAnalyzer
 import CommonAnalyzer.WrappingContext
 import spotlight.analysis.outlier.algorithm.skyline.adf.AugmentedDickeyFuller
@@ -99,8 +99,8 @@ class KolmogorovSmirnovAnalyzer( override val router: ActorRef ) extends CommonA
   * A timeseries is anomalous if the average of the last three datapoints
   * on a projected least squares model is greater than three sigma.
   */
-  override val findOutliers: Op[AlgorithmContext, (Outliers, AlgorithmContext)] = {
-    def isDistributionUnlikeReference( tol: Double ): Op[Context, Boolean] = {
+  override val findOutliers: KOp[AlgorithmContext, (Outliers, AlgorithmContext)] = {
+    def isDistributionUnlikeReference( tol: Double ): KOp[Context, Boolean] = {
       kleisli[TryV, Context, Boolean] { implicit context =>
         val reference = context.referenceSeries.map{ _.value }.toArray
         log.debug( "reference-history[{}] = [{}]", context.referenceHistory.size, context.referenceHistory.mkString(",") )

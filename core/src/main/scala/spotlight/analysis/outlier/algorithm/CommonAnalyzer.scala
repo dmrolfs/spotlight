@@ -3,6 +3,7 @@ package spotlight.analysis.outlier.algorithm
 import scala.annotation.tailrec
 import scala.reflect.ClassTag
 import akka.event.LoggingReceive
+
 import scalaz.Kleisli.kleisli
 import scalaz.Scalaz._
 import scalaz._
@@ -11,7 +12,7 @@ import com.typesafe.config.Config
 import org.apache.commons.math3.ml.clustering.DoublePoint
 import org.apache.commons.math3.ml.distance.DistanceMeasure
 import org.joda.{time => joda}
-import peds.commons.Valid
+import peds.commons.{KOp, TryV, Valid}
 import peds.commons.util._
 import spotlight.analysis.outlier._
 import spotlight.analysis.outlier.algorithm.AlgorithmActor._
@@ -114,7 +115,7 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
     }
   }
 
-  def findOutliers: Op[AlgorithmContext, (Outliers, AlgorithmContext)]
+  def findOutliers: KOp[AlgorithmContext, (Outliers, AlgorithmContext)]
 
   //todo dmr place into Agent for use & concurrency *across* actor instances?
   var _scopedContexts: Map[HistoryKey, WrappingContext] = Map.empty[HistoryKey, WrappingContext]
@@ -126,7 +127,7 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
     priorContext.withUnderlying( context ).disjunction.leftMap{ _.head }
   }
 
-  override val algorithmContext: Op[DetectUsing, AlgorithmContext] = {
+  override val algorithmContext: KOp[DetectUsing, AlgorithmContext] = {
     val wrap = kleisli[TryV, AlgorithmContext, AlgorithmContext] { c =>
       _scopedContexts
       .get( c.historyKey )
@@ -141,9 +142,9 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
     super.algorithmContext >=> wrap
   }
 
-  def toConcreteContextK: Op[AlgorithmContext, C] = kleisli { toConcreteContext }
+  def toConcreteContextK: KOp[AlgorithmContext, C] = kleisli { toConcreteContext }
 
-  val tailAverage: Op[AlgorithmContext, Seq[Point2D]] = Kleisli[TryV, AlgorithmContext, Seq[Point2D]] { context =>
+  val tailAverage: KOp[AlgorithmContext, Seq[Point2D]] = Kleisli[TryV, AlgorithmContext, Seq[Point2D]] { context =>
     val TailLength = 3
 
     val data = context.data.map{ _.getPoint.apply( 1 ) }
@@ -221,8 +222,8 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
 
   def makeOutliersK(
     algorithm: Symbol,
-    outliers: Op[AlgorithmContext, (Seq[DataPoint], AlgorithmContext)]
-  ): Op[AlgorithmContext, (Outliers, AlgorithmContext)] = {
+    outliers: KOp[AlgorithmContext, (Seq[DataPoint], AlgorithmContext)]
+  ): KOp[AlgorithmContext, (Outliers, AlgorithmContext)] = {
     for {
       outliersContext <- outliers
       (outlierPoints, resultingContext) = outliersContext
@@ -230,7 +231,7 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
     } yield (result, resultingContext)
   }
 
-  def makeOutliers( outliers: Seq[DataPoint], resultingContext: AlgorithmContext ): Op[AlgorithmContext, Outliers] = {
+  def makeOutliers( outliers: Seq[DataPoint], resultingContext: AlgorithmContext ): KOp[AlgorithmContext, Outliers] = {
     kleisli[TryV, AlgorithmContext, Outliers] { originalContext =>
       Outliers.forSeries(
         algorithms = Set( algorithm ),

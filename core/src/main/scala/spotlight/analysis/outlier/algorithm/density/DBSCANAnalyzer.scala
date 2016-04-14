@@ -1,14 +1,17 @@
 package spotlight.analysis.outlier.algorithm.density
 
 import akka.event.LoggingReceive
-import scalaz._, Scalaz._
-import scalaz.Kleisli.{ ask, kleisli }
+
+import scalaz._
+import Scalaz._
+import scalaz.Kleisli.{ask, kleisli}
 import com.typesafe.config.Config
-import org.apache.commons.math3.ml.clustering.{ Cluster, DBSCANClusterer, DoublePoint }
+import org.apache.commons.math3.ml.clustering.{Cluster, DBSCANClusterer, DoublePoint}
 import org.apache.commons.math3.ml.distance.DistanceMeasure
 import org.slf4j.LoggerFactory
+import peds.commons.{KOp, TryV}
 import spotlight.analysis.outlier.algorithm.AlgorithmActor
-import spotlight.analysis.outlier.{ DetectOutliersInSeries, DetectUsing }
+import spotlight.analysis.outlier.{DetectOutliersInSeries, DetectUsing}
 import spotlight.model.outlier.Outliers
 
 
@@ -48,22 +51,22 @@ trait DBSCANAnalyzer extends AlgorithmActor {
     }
   }
 
-  def findOutliers: Op[(AlgorithmContext, Seq[Cluster[DoublePoint]]), Outliers]
+  def findOutliers: KOp[(AlgorithmContext, Seq[Cluster[DoublePoint]]), Outliers]
 
 
-  val minDensityConnectedPoints: Op[Config, Int] = {
+  val minDensityConnectedPoints: KOp[Config, Int] = {
     Kleisli[TryV, Config, Int] { c => \/ fromTryCatchNonFatal { c getInt algorithm.name+".minDensityConnectedPoints" } }
   }
 
-  def historyMean: Op[AlgorithmContext, Double] = kleisli[TryV, AlgorithmContext, Double] { context =>
+  def historyMean: KOp[AlgorithmContext, Double] = kleisli[TryV, AlgorithmContext, Double] { context =>
     context.history.mean( 1 ).right
   }
 
-  def historyStandardDeviation: Op[AlgorithmContext, Double] = kleisli[TryV, AlgorithmContext, Double] { context =>
+  def historyStandardDeviation: KOp[AlgorithmContext, Double] = kleisli[TryV, AlgorithmContext, Double] { context =>
     context.history.standardDeviation( 1 ).right
   }
 
-  val eps: Op[AlgorithmContext, Double] = {
+  val eps: KOp[AlgorithmContext, Double] = {
     val epsContext = for {
       context <- ask[TryV, AlgorithmContext]
       config <- messageConfig
@@ -101,7 +104,7 @@ trait DBSCANAnalyzer extends AlgorithmActor {
     }
   }
 
-  val cluster: Op[AlgorithmContext, (AlgorithmContext, Seq[Cluster[DoublePoint]])] = {
+  val cluster: KOp[AlgorithmContext, (AlgorithmContext, Seq[Cluster[DoublePoint]])] = {
     for {
       ctx <- ask[TryV, AlgorithmContext]
       data = ctx.data
