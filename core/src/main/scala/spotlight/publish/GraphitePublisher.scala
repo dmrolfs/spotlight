@@ -396,7 +396,7 @@ class GraphitePublisher extends DenseOutlierPublisher {
           self ! SendBatch
         }( publishDispatcher ) map { _ =>
           toBePublished foreach { tbp => publishLogger.info( "{}: timestamp:[{}] value:[{}]", tbp._1, tbp._2, tbp._3.toString) }
-        }
+        } //todo send self message with report to republish upon failure?
       }
     }
   }
