@@ -233,7 +233,7 @@ class SkylineSeasonalEWMASpec extends SkylineBaseSpec {
 
 //    "publish outliers result to" in { f: Fixture =>
 //      import f._
-//      val analyzer = TestActorRef[ExponentialMovingAverageAnalyzer]( ExponentialMovingAverageAnalyzer.props(router.ref) )
+//      val analyzer = TestActorRef[ExponentialMovingAverageAnalyzer]( ExponentialMovingAverageAnalyzer.elasticProps(router.ref) )
 //      val full = makeDataPoints(
 //                                 values = immutable.IndexedSeq.fill( 5 )( 1.0 ),
 //                                 timeWiggle = (0.97, 1.03),

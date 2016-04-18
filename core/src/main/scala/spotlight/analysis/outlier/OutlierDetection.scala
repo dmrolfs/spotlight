@@ -61,7 +61,7 @@ object OutlierDetection extends StrictLogging with Instrumented {
     }
     .mapConcat[OutlierDetectionMessage] { identity }
     .via {
-      ProcessorAdapter.processorFlow[OutlierDetectionMessage, DetectionResult]( maxInDetectionFactor ) {
+      ProcessorAdapter.elasticProcessorFlow[OutlierDetectionMessage, DetectionResult]( maxInDetectionFactor ) {
         case m => detector
       }
     }
