@@ -1,22 +1,23 @@
 package spotlight.publish
 
 import java.net.{InetSocketAddress, Socket}
+
 import scala.annotation.tailrec
 import scala.collection.immutable
 import scala.concurrent.duration._
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.Future
 import scala.util.{Failure, Success, Try}
 import akka.actor._
 import akka.event.LoggingReceive
-import akka.pattern.{CircuitBreaker, CircuitBreakerOpenException, ask}
-import akka.stream.scaladsl.Flow
-import akka.stream.{ActorAttributes, Supervision}
-import akka.util.{ByteString, Timeout}
+import akka.pattern.CircuitBreaker
+import akka.stream.actor.{ActorSubscriberMessage, MaxInFlightRequestStrategy, RequestStrategy}
+import akka.util.ByteString
+import shapeless.syntax.typeable._
+import com.codahale.metrics.{Metric, MetricFilter}
 import org.joda.{time => joda}
 import com.typesafe.scalalogging.{LazyLogging, Logger}
 import org.slf4j.LoggerFactory
 import nl.grons.metrics.scala.{Meter, Timer}
-import peds.commons.log.Trace
 import spotlight.model.timeseries.Topic
 import spotlight.model.outlier.{OutlierPlan, Outliers}
 import spotlight.protocol.PythonPickleProtocol
@@ -26,41 +27,7 @@ import spotlight.protocol.PythonPickleProtocol
   * Created by rolfsd on 12/29/15.
   */
 object GraphitePublisher extends LazyLogging {
-  import OutlierPublisher._
-
   def props( makePublisher: => GraphitePublisher with PublishProvider ): Props = Props( makePublisher )
-
-
-  def publish(
-    limiter: ActorRef,
-    publisher: ActorRef,
-    parallelism: Int,
-    timeout: FiniteDuration
-  )(
-    implicit ec: ExecutionContext
-  ): Flow[Outliers, Outliers, Unit] = {
-    val decider: Supervision.Decider = {
-      case ex: CircuitBreakerOpenException => {
-        logger.warn( "GraphitePublisher: Graphite circuit breaker opened: [{}]", ex.getMessage )
-        Supervision.Resume
-      }
-
-      case ex => {
-        logger.warn( "GraphitePublisher: restarting after error: [{}]", ex.getMessage )
-        Supervision.Restart
-      }
-    }
-
-    implicit val to = Timeout( timeout )
-//todo DMR WORK HERE: GROUP up to graphite batch size???
-    Flow[Outliers]
-//    .via( Limiter.limitGlobal(limiter, 2.minutes) )
-    .mapAsync( parallelism ) { os =>
-      val published = publisher ? Publish( os )
-      published.mapTo[Published] map { _.outliers }
-    }
-    .withAttributes( ActorAttributes.supervisionStrategy(decider) )
-  }
 
 
   sealed trait GraphitePublisherProtocol
@@ -75,7 +42,8 @@ object GraphitePublisher extends LazyLogging {
   case object Flushed extends GraphitePublisherProtocol
 
 
-  trait PublishProvider {
+  trait PublishProvider  {
+    def maxOutstanding: Int
     def separation: FiniteDuration = 10.seconds
     def destinationAddress: InetSocketAddress
     def createSocket( address: InetSocketAddress ): Socket
@@ -97,14 +65,14 @@ object GraphitePublisher extends LazyLogging {
 }
 
 
-class GraphitePublisher extends DenseOutlierPublisher {
-  outer: GraphitePublisher.PublishProvider =>
-
+class GraphitePublisher extends DenseOutlierPublisher { outer: GraphitePublisher.PublishProvider =>
   import GraphitePublisher._
   import OutlierPublisher._
   import context.dispatcher
 
-  val trace = Trace[GraphitePublisher]
+  override protected def requestStrategy: RequestStrategy = new MaxInFlightRequestStrategy( outer.maxOutstanding ) {
+    override def inFlightInternally: Int = waitQueue.size
+  }
 
   val pickler: PythonPickleProtocol = new PythonPickleProtocol
   var socket: Option[Socket] = None //todo: if socket fails supervisor should restart actor
@@ -133,8 +101,20 @@ class GraphitePublisher extends DenseOutlierPublisher {
   }
 
   def initializeMetrics(): Unit = {
+    stripLingeringMetrics()
     metrics.gauge( "waiting" ) { waitQueue.size }
     metrics.gauge( "circuit", "breaker" ) { gaugeStatus.toString }
+  }
+
+  def stripLingeringMetrics(): Unit = {
+    metrics.registry.removeMatching(
+      new MetricFilter {
+        override def matches( name: String, metric: Metric ): Boolean = {
+          name.contains( classOf[GraphitePublisher].getName ) &&
+            ( name.contains( "waiting" ) || name.contains( "circuit.breaker" ) )
+        }
+      }
+    )
   }
 
   val breaker: CircuitBreaker = {
@@ -206,6 +186,7 @@ class GraphitePublisher extends DenseOutlierPublisher {
   override def preStart(): Unit = {
     initializeMetrics()
     log.debug( "{} dispatcher: [{}]", self.path, context.dispatcher )
+    log.info( "GraphitePublisher started with maxOutstanding:[{}]", outer.maxOutstanding )
     self ! Open
   }
 
@@ -217,13 +198,13 @@ class GraphitePublisher extends DenseOutlierPublisher {
   }
 
 
-  override def receive: Receive = around( closed )
+  override def receive: Receive = LoggingReceive{ around( closed ) }
 
-  val closed: Receive = LoggingReceive {
+  val closed: Receive = {
     case Open => {
       open()
       sender() ! Opened
-      context become around( opened )
+      context become LoggingReceive { around( opened ) }
     }
 
     case Close => {
@@ -232,26 +213,54 @@ class GraphitePublisher extends DenseOutlierPublisher {
     }
   }
 
-  val opened: Receive = LoggingReceive {
+  val opened: Receive = {
+    case ActorSubscriberMessage.OnNext( outliers ) => {
+      outliers.cast[Outliers] match {
+        case Some( os ) => {
+          log.debug( "GraphitePublisher received OnNext. publishing outliers" )
+          publish( os )
+        }
+
+        case None => log.warning( "GraphitePublisher received UNKNOWN OnNext with:[{}]", outliers )
+      }
+    }
+
+    case ActorSubscriberMessage.OnComplete => {
+      log debug "GraphitePublisher closing on completed stream"
+      close()
+    }
+
+    case ActorSubscriberMessage.OnError( ex ) => {
+      log.info( "GraphitePublisher closing on errored stream: [{}]", ex.getMessage )
+      close()
+    }
+
     case Publish( outliers ) => {
+      log.debug( "GraphitePublisher received Publish([{}])", outliers )
       publish( outliers )
       sender() ! Published( outliers ) //todo send when all corresponding marks are sent to graphite
     }
 
     case Open => {
+      log.debug( "GraphitePublisher received Open" )
       open()
       sender() ! Opened
     }
 
     case Close => {
+      log.debug( "GraphitePublisher received Close" )
       close()
       sender() ! Closed
-      context become around( closed )
+      context stop self
     }
 
-    case Flush => flush()
+    case Flush => {
+      log.debug( "GraphitePublisher received Flush" )
+      flush()
+    }
 
     case SendBatch => {
+      log.debug( "GraphitePublisher received SendBatch: next schedule in [{}]", batchInterval.toCoarsest )
       if ( waitQueue.nonEmpty ) batchAndSend()
       resetNextScheduled()
     }
@@ -386,7 +395,6 @@ class GraphitePublisher extends DenseOutlierPublisher {
     )
 
     if ( toBePublished.nonEmpty ) {
-
       val report = pickler.pickleFlattenedTimeSeries( toBePublished:_* )
       breaker withCircuitBreaker {
         Future {
@@ -399,6 +407,8 @@ class GraphitePublisher extends DenseOutlierPublisher {
         } //todo send self message with report to republish upon failure?
       }
     }
+
+    if ( waitQueue.nonEmpty ) resetNextScheduled()
   }
 
   def sendToGraphite( pickle: ByteString ): Unit = {

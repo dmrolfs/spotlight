@@ -2,10 +2,11 @@ package spotlight.publish
 
 import scala.annotation.tailrec
 import scala.concurrent.duration.FiniteDuration
-import akka.actor.{ Actor, ActorLogging }
-import org.joda.{ time => joda }
+import akka.actor.ActorLogging
+import akka.stream.actor.{ActorSubscriber, MaxInFlightRequestStrategy, RequestStrategy}
+import org.joda.{time => joda}
 import peds.akka.metrics.InstrumentedActor
-import spotlight.model.outlier.{ NoOutliers, Outliers, SeriesOutliers }
+import spotlight.model.outlier.{NoOutliers, Outliers, SeriesOutliers}
 import spotlight.model.timeseries._
 
 
@@ -18,9 +19,11 @@ object OutlierPublisher {
   case class Published( outliers: Outliers ) extends Protocol
 
   type TopicPoint = ( Topic, joda.DateTime, Double )
+
 }
 
-trait OutlierPublisher extends Actor with InstrumentedActor with ActorLogging {
+trait OutlierPublisher extends ActorSubscriber with InstrumentedActor with ActorLogging {
+
   import OutlierPublisher.TopicPoint
 
   def publish( o: Outliers ): Unit
@@ -52,10 +55,15 @@ trait DenseOutlierPublisher extends OutlierPublisher {
         import com.github.nscala_time.time.Imports._
 
         @tailrec def fillInterval( timePoint: joda.DateTime, range: joda.Interval, acc: Seq[DataPoint] ): Seq[DataPoint] = {
-          if ( !range.contains(timePoint) ) acc
+          log.debug( "fillInterval( timePoint:[{}], range:[{}], acc:[{}] )", timePoint, range, acc )
+          if ( !range.contains(timePoint) ) {
+            log.debug( "fillInterval result: [{}]", acc )
+            acc
+          }
           else fillInterval( timePoint + fillSeparation.toMillis, range, acc :+ DataPoint(timePoint, 0D) )
         }
 
+        log.debug( "fillInterval loop: fillSeparation=[{}]", fillSeparation )
         expected.source.interval map { i => Some( fillInterval(i.start, i, Seq.empty[DataPoint]) ) } getOrElse { None }
       }
 

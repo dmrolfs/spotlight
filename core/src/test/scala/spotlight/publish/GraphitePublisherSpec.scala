@@ -106,22 +106,23 @@ with MockitoSugar {
 
     when( socketFactory.createSocket( any(classOf[InetAddress]), anyInt ) ).thenReturn( socket )
 
-    val graphite = TestActorRef[GraphitePublisher](
-      Props(
-        new GraphitePublisher with GraphitePublisher.PublishProvider {
-          import scala.concurrent.duration._
-          override def separation: FiniteDuration = 1.second
-          override def initializeMetrics(): Unit = { }
-          override def batchSize: Int = 100
-          override def destinationAddress: InetSocketAddress = outer.address
-          override def createSocket( address: InetSocketAddress ): Socket = {
-            openCount.incrementAndGet()
-            outer.socket
-          }
-          override def publishingTopic( p: OutlierPlan, t: Topic ): Topic = t
+    val publisherProps = Props(
+      new GraphitePublisher with GraphitePublisher.PublishProvider {
+        import scala.concurrent.duration._
+
+        override lazy val maxOutstanding: Int = 1000000
+        override lazy val separation: FiniteDuration = 1.second
+        override def initializeMetrics(): Unit = { }
+        override lazy val batchSize: Int = 100
+        override lazy val destinationAddress: InetSocketAddress = outer.address
+        override def createSocket( address: InetSocketAddress ): Socket = {
+          openCount.incrementAndGet()
+          outer.socket
         }
-      )
+        override def publishingTopic( p: OutlierPlan, t: Topic ): Topic = t
+      }
     )
+    val graphite = TestActorRef[GraphitePublisher]( publisherProps )
 
     val dp1 = DataPoint( new joda.DateTime(100000L), 17D )
     val dp1b = DataPoint( new joda.DateTime(103000L), 19D )
@@ -189,7 +190,7 @@ with MockitoSugar {
       }
     }
 
-    "write one-point batch" in { f: Fixture =>
+    "write one-point batch" taggedAs (WIP) in { f: Fixture =>
       import f._
       val outliers = NoOutliers(
         algorithms = Set('dbscan),
@@ -223,9 +224,11 @@ with MockitoSugar {
         Props(
           new GraphitePublisher with GraphitePublisher.PublishProvider {
             import scala.concurrent.duration._
-            override def separation: FiniteDuration = 1.second
+
+            override val maxOutstanding: Int = 1000000
+            override val separation: FiniteDuration = 1.second
             override def initializeMetrics(): Unit = { }
-            override def batchSize: Int = 100
+            override val batchSize: Int = 100
             override def destinationAddress: InetSocketAddress = f.address
             override def createSocket( address: InetSocketAddress ): Socket = {
               openCount.incrementAndGet()
@@ -296,9 +299,11 @@ with MockitoSugar {
         Props(
           new GraphitePublisher with GraphitePublisher.PublishProvider {
             import scala.concurrent.duration._
-            override def separation: FiniteDuration = 1.second
+
+            override val maxOutstanding: Int = 1000000
+            override val separation: FiniteDuration = 1.second
             override def initializeMetrics(): Unit = { }
-            override def batchSize: Int = 100
+            override val batchSize: Int = 100
             override def destinationAddress: InetSocketAddress = f.address
             override def createSocket( address: InetSocketAddress ): Socket = {
               openCount.incrementAndGet()

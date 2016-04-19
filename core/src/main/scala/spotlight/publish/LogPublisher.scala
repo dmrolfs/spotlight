@@ -2,6 +2,7 @@ package spotlight.publish
 
 import akka.actor.Props
 import akka.event.LoggingReceive
+import akka.stream.actor.{RequestStrategy, WatermarkRequestStrategy}
 import com.typesafe.scalalogging.Logger
 import spotlight.model.outlier.Outliers
 import org.slf4j.LoggerFactory
@@ -16,6 +17,8 @@ object LogPublisher {
 
 class LogPublisher extends OutlierPublisher {
   import OutlierPublisher._
+
+  override protected def requestStrategy: RequestStrategy = new WatermarkRequestStrategy( 4 )
 
   val outlierLogger = Logger( LoggerFactory getLogger "Outliers" )
 
