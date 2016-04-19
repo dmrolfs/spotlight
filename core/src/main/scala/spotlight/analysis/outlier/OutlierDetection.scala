@@ -6,17 +6,15 @@ import scala.concurrent.duration._
 import akka.actor.{Actor, ActorLogging, ActorPath, ActorRef, ActorSystem, Props}
 import akka.event.LoggingReceive
 import akka.pattern.AskTimeoutException
-import akka.stream.actor._
-import akka.stream.{FlowShape, Materializer, Supervision}
+import akka.stream.{Materializer, Supervision}
 import akka.stream.scaladsl._
 import com.codahale.metrics.{Metric, MetricFilter}
-
 import scalaz.\/-
 import org.slf4j.LoggerFactory
 import com.typesafe.scalalogging.{Logger, StrictLogging}
 import nl.grons.metrics.scala.{Meter, MetricName, Timer}
 import peds.akka.metrics.{Instrumented, InstrumentedActor}
-import peds.akka.stream.StreamMonitor
+import peds.akka.stream.ProcessorAdapter
 import peds.commons.identifier.ShortUUID
 import peds.commons.log.Trace
 import spotlight.model.timeseries._
