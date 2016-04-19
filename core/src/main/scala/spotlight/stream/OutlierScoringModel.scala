@@ -73,12 +73,8 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
 
       val scoringBuffer = b.add(
         Flow[TimeSeries]
-        .via(
-          Flow[TimeSeries]
-          .buffer( config.workflowBufferSize, OverflowStrategy.backpressure )
-          .watchFlow( WatchPoints.ScoringAnalysisBuffer )
-        )
-        .watchFlow( WatchPoints.ScoringGrouping )
+        .buffer( config.workflowBufferSize, OverflowStrategy.backpressure )
+        .watchFlow( WatchPoints.ScoringAnalysisBuffer )
       )
 
       val maxInDetectionFactor = {
