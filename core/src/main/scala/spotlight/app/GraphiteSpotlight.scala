@@ -24,8 +24,7 @@ import peds.commons.log.Trace
 import peds.akka.supervision.OneForOneStrategyFactory
 import peds.akka.metrics.{Instrumented, Reporter}
 import peds.commons.V
-import peds.akka.stream.StreamMonitor
-import spotlight.analysis.outlier.ProcessorAdapter
+import peds.akka.stream.{ProcessorAdapter, StreamMonitor}
 import spotlight.model.outlier._
 import spotlight.model.timeseries.{TimeSeries, TimeSeriesBase, Topic}
 import spotlight.protocol.GraphiteSerializationProtocol
