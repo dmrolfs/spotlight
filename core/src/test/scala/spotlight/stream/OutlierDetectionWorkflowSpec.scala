@@ -57,8 +57,8 @@ class OutlierDetectionWorkflowSpec extends ParallelAkkaSpec with MockitoSugar wi
         def configuration: Config = fixture.config
 
 
-        override def makePublishRateLimiter()(implicit context: ActorContext): ActorRef = rateLimiter.ref
-        override def makePublisher(publisherProps: Props)(implicit context: ActorContext): ActorRef = publisher.ref
+//        override def makePublishRateLimiter()(implicit context: ActorContext): ActorRef = rateLimiter.ref
+//        override def makePublisher(publisherProps: Props)(implicit context: ActorContext): ActorRef = publisher.ref
         override def makePlanRouter()(implicit context: ActorContext): ActorRef = planRouter.ref
         override def makeOutlierDetector(rateLimiter: ActorRef)(implicit context: ActorContext): ActorRef = detector.ref
         override def makeAlgorithmWorkers(router: ActorRef)(implicit context: ActorContext): Map[Symbol, ActorRef] = {
@@ -92,21 +92,21 @@ class OutlierDetectionWorkflowSpec extends ParallelAkkaSpec with MockitoSugar wi
       }
     }
 
-    "create publish rate limiter" in { f: Fixture =>
-      import f._
-      workflow.receive( GetPublishRateLimiter, sender.ref )
-      sender.expectMsgPF( 400.millis.dilated, "limiter" ) {
-        case ChildStarted( actual ) => actual mustBe rateLimiter.ref
-      }
-    }
+//    "create publish rate limiter" in { f: Fixture =>
+//      import f._
+//      workflow.receive( GetPublishRateLimiter, sender.ref )
+//      sender.expectMsgPF( 400.millis.dilated, "limiter" ) {
+//        case ChildStarted( actual ) => actual mustBe rateLimiter.ref
+//      }
+//    }
 
-    "create publisher" in { f: Fixture =>
-      import f._
-      workflow.receive( GetPublisher, sender.ref )
-      sender.expectMsgPF( 400.millis.dilated, "publisher" ) {
-        case ChildStarted( actual ) => actual mustBe publisher.ref
-      }
-    }
+//    "create publisher" in { f: Fixture =>
+//      import f._
+//      workflow.receive( GetPublisher, sender.ref )
+//      sender.expectMsgPF( 400.millis.dilated, "publisher" ) {
+//        case ChildStarted( actual ) => actual mustBe publisher.ref
+//      }
+//    }
 
     "get child actors" in { f: Fixture =>
       import f._
@@ -115,15 +115,15 @@ class OutlierDetectionWorkflowSpec extends ParallelAkkaSpec with MockitoSugar wi
       val actual = for {
         _ <- workflow ? WaitForStart
         ChildStarted( d ) <- ( workflow ? GetOutlierDetector ).mapTo[ChildStarted]
-        ChildStarted( l ) <- ( workflow ? GetPublishRateLimiter ).mapTo[ChildStarted]
-        ChildStarted( p ) <- ( workflow ? GetPublisher ).mapTo[ChildStarted]
-      } yield (d, l, p)
+//        ChildStarted( l ) <- ( workflow ? GetPublishRateLimiter ).mapTo[ChildStarted]
+//        ChildStarted( p ) <- ( workflow ? GetPublisher ).mapTo[ChildStarted]
+      } yield d
 
-      whenReady( actual) { a =>
-        val (d, l, p) = a
+      whenReady( actual ) { a =>
+        val d = a
         d mustBe detector.ref
-        l mustBe rateLimiter.ref
-        p mustBe publisher.ref
+//        l mustBe rateLimiter.ref
+//        p mustBe publisher.ref
       }
     }
   }

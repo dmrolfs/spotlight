@@ -25,6 +25,8 @@ import spotlight.stream.OutlierDetectionBootstrap._
  * Created by rolfsd on 10/21/15.
  */
 object OutlierScoringModel extends Instrumented with StrictLogging {
+  val OutlierMetricPrefix = "spotlight.outlier."
+
   object ScoringShape {
     def apply[In, Out, Off]( init: Init[In] ): ScoringShape[In, Out, Off] = new ScoringShape( init )
   }

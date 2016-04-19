@@ -32,12 +32,12 @@ object OutlierDetectionBootstrap {
   }
 
 
-  val OutlierMetricPrefix = "spotlight.outlier."
+//  val OutlierMetricPrefix = "spotlight.outlier."
 
 
   case object GetOutlierDetector
-  case object GetPublishRateLimiter
-  case object GetPublisher
+//  case object GetPublishRateLimiter
+//  case object GetPublisher
 
 
   type MakeProps = ActorRef => Props
@@ -47,35 +47,35 @@ object OutlierDetectionBootstrap {
     def maxFrameLength: Int
     def protocol: GraphiteSerializationProtocol
     def windowDuration: FiniteDuration
-    def graphiteAddress: Option[InetSocketAddress]
+//    def graphiteAddress: Option[InetSocketAddress]
 //    def makePlans: OutlierPlan.Creator
     def configuration: Config
 
-    def makePublishRateLimiter()(implicit context: ActorContext ): ActorRef = {
-      context.actorOf( Limiter.props(20000, 100.milliseconds, 5000), "limiter" )
-    }
+//    def makePublishRateLimiter()(implicit context: ActorContext ): ActorRef = {
+//      context.actorOf( Limiter.props(20000, 100.milliseconds, 5000), "limiter" )
+//    }
 
-    def makePublisher( publisherProps: Props )( implicit context: ActorContext ): ActorRef = {
-      context.actorOf( publisherProps.withDispatcher("publish-dispatcher"), "publisher" )
-    }
+//    def makePublisher( publisherProps: Props )( implicit context: ActorContext ): ActorRef = {
+//      context.actorOf( publisherProps.withDispatcher("publish-dispatcher"), "publisher" )
+//    }
 
-    def publisherProps: Props = {
-      graphiteAddress map { address =>
-        GraphitePublisher.props {
-          new GraphitePublisher with GraphitePublisher.PublishProvider {
-            override lazy val metricBaseName = MetricName( classOf[GraphitePublisher] )
-            override def destinationAddress: InetSocketAddress = address
-            override def batchSize: Int = 1000
-            override def createSocket( address: InetSocketAddress ): Socket = {
-              new Socket( destinationAddress.getAddress, destinationAddress.getPort )
-            }
-            override def publishingTopic( p: OutlierPlan, t: Topic ): Topic = OutlierMetricPrefix + super.publishingTopic( p, t )
-          }
-        }
-      } getOrElse {
-        LogPublisher.props
-      }
-    }
+//    def publisherProps: Props = {
+//      graphiteAddress map { address =>
+//        GraphitePublisher.props {
+//          new GraphitePublisher with GraphitePublisher.PublishProvider {
+//            override lazy val metricBaseName = MetricName( classOf[GraphitePublisher] )
+//            override def destinationAddress: InetSocketAddress = address
+//            override def batchSize: Int = 1000
+//            override def createSocket( address: InetSocketAddress ): Socket = {
+//              new Socket( destinationAddress.getAddress, destinationAddress.getPort )
+//            }
+//            override def publishingTopic( p: OutlierPlan, t: Topic ): Topic = OutlierMetricPrefix + super.publishingTopic( p, t )
+//          }
+//        }
+//      } getOrElse {
+//        LogPublisher.props
+//      }
+//    }
 
 
     def makePlanRouter()( implicit context: ActorContext ): ActorRef = {
@@ -120,20 +120,20 @@ class OutlierDetectionBootstrap(
   import spotlight.stream.OutlierDetectionBootstrap._
 
   var detectorRef: ActorRef = _
-  var publishRateLimiterRef: ActorRef = _
-  var publisherRef: ActorRef = _
+//  var publishRateLimiterRef: ActorRef = _
+//  var publisherRef: ActorRef = _
 
 
   override lazy val metricBaseName: MetricName = MetricName( classOf[OutlierDetectionBootstrap] )
   val failuresMeter: Meter = metrics.meter( "actor.failures" )
 
   override def childStarter(): Unit = {
-    publishRateLimiterRef = makePublishRateLimiter( )
-    publisherRef = makePublisher( publisherProps )
+//    publishRateLimiterRef = makePublishRateLimiter( )
+//    publisherRef = makePublisher( publisherProps )
     val routerRef = makePlanRouter()
     makeAlgorithmWorkers( routerRef )
     detectorRef = makeOutlierDetector( routerRef )
-    context become around( active )
+    context become LoggingReceive{ around( active ) }
   }
 
   override val supervisorStrategy: SupervisorStrategy = makeStrategy( maxNrRetries, withinTimeRange ) {
@@ -161,8 +161,8 @@ class OutlierDetectionBootstrap(
   val active: Receive = LoggingReceive {
     super.receive orElse {
       case GetOutlierDetector => sender( ) ! ChildStarted( detectorRef )
-      case GetPublishRateLimiter => sender( ) ! ChildStarted( publishRateLimiterRef )
-      case GetPublisher => sender() ! ChildStarted( publisherRef )
+//      case GetPublishRateLimiter => sender( ) ! ChildStarted( publishRateLimiterRef )
+//      case GetPublisher => sender() ! ChildStarted( publisherRef )
     }
   }
 }
