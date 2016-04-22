@@ -54,9 +54,15 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
 
     val algo = SeriesDensityAnalyzer.Algorithm
 
+    val grouping: Option[OutlierPlan.Grouping] = {
+      val window = None
+      window map { w => OutlierPlan.Grouping( limit = 10000, w ) }
+    }
+
     val plan = OutlierPlan.default(
       name = "DEFAULT_PLAN",
       algorithms = Set( algo ),
+      grouping = grouping,
       timeout = 500.millis,
       isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = 1, triggerPoint = 1 ),
       reduce = Configuration.defaultOutlierReducer,
@@ -181,9 +187,15 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
       import com.github.nscala_time.time.OrderingImplicits._
 
       val algos = Set( algo )
+      val grouping: Option[OutlierPlan.Grouping] = {
+        val window = None
+        window map { w => OutlierPlan.Grouping( limit = 10000, w ) }
+      }
+
       val defaultPlan = OutlierPlan.default(
         name = "DEFAULT_PLAN",
         algorithms = algos,
+        grouping = grouping,
         timeout = 5000.millis,
         isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = algos.size, triggerPoint = 1 ),
         reduce = Configuration.defaultOutlierReducer,

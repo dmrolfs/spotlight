@@ -51,7 +51,6 @@ object Moment extends LazyLogging {
       val newMin = math.min( movingMin, value )
       val newEWMA = (alpha * value) + (1 - alpha) * ewma
       val newEWMSD = math.sqrt( alpha * math.pow(ewmsd, 2) + (1 - alpha) * math.pow(value - ewma, 2) )
-      logger.debug( s"Moment adding [${value}] => max:[${newMax}] min:[${newMin}] ewma:[${newEWMA}] ewmsd:[${newEWMSD}]" )
       this.copy( n = n+1, movingMax = newMax, movingMin = newMin, ewma = newEWMA, ewmsd = newEWMSD )
     }
 

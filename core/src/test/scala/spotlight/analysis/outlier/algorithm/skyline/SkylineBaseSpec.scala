@@ -34,7 +34,12 @@ abstract class SkylineBaseSpec extends ParallelAkkaSpec with MockitoSugar with L
       }
 
       import scala.concurrent.duration._
-      OutlierPlan.default( "", 1.second, isQuorun, reduce, Set.empty[Symbol] ).appliesTo
+      val grouping: Option[OutlierPlan.Grouping] = {
+        val window = None
+        window map { w => OutlierPlan.Grouping( limit = 10000, w ) }
+      }
+
+      OutlierPlan.default( "", 1.second, isQuorun, reduce, Set.empty[Symbol], grouping ).appliesTo
     }
   }
 

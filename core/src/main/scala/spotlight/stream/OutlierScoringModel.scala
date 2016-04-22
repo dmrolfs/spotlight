@@ -13,7 +13,7 @@ import org.slf4j.LoggerFactory
 import peds.akka.metrics.Instrumented
 import peds.akka.stream.StreamMonitor
 import peds.commons.collection.BloomFilter
-import spotlight.analysis.outlier.OutlierDetection
+import spotlight.analysis.outlier.{OutlierDetection, OutlierPlanDetectionRouter}
 import spotlight.analysis.outlier.OutlierDetection.DetectionResult
 import spotlight.model.outlier._
 import spotlight.model.timeseries.TimeSeriesBase.Merging
@@ -45,7 +45,7 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
   }
 
   def scoringGraph(
-    detectorRef: ActorRef,
+    planRouterRef: ActorRef,
     config: Configuration
   )(
     implicit system: ActorSystem,
@@ -69,34 +69,28 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
         Flow[TimeSeries].filter{ !isPlanned( _, config.plans ) }.via( watchUnrecognized )
       )
 
-      val batch = b.add( batchSeries( config.windowDuration ).watchConsumed( WatchPoints.ScoringBatch ) )
-
-      val scoringBuffer = b.add(
-        Flow[TimeSeries]
-        .buffer( config.workflowBufferSize, OverflowStrategy.backpressure )
-        .watchFlow( WatchPoints.ScoringAnalysisBuffer )
-      )
-
-      val maxInDetectionFactor = {
+      val maxInDetectionCpuFactor = {
         val path = "spotlight.workflow.detect.max-in-flight-cpu-factor"
         if ( config hasPath path ) config.getDouble( path ) else 1.0
       }
 
-      val detectOutlier = b.add(
-        OutlierDetection.detectionFlow(
-          detector = detectorRef,
-          maxInDetectionFactor = maxInDetectionFactor,
-          maxAllowedWait = config.detectionBudget,
-          plans = config.plans
+      val plansDetectOutliers = b.add(
+        OutlierPlanDetectionRouter.elasticPlanDetectionRouterFlow(
+          planDetectorRouterRef = planRouterRef,
+          maxInDetectionCpuFactor = maxInDetectionCpuFactor,
+          plans = () => { config.plans.toSet }
         )
         .watchFlow( WatchPoints.ScoringDetect )
       )
 
-      logMetrics ~> blockPriors ~> broadcast ~> passPlanned ~> batch ~> scoringBuffer ~> detectOutlier
+      logMetrics ~> blockPriors ~> broadcast ~> passPlanned ~> plansDetectOutliers
                                    broadcast ~> passUnrecognized
 
       ScoringShape(
-        FanOutShape.Ports( inlet = logMetrics.in, outlets = scala.collection.immutable.Seq(detectOutlier.out, passUnrecognized.out) )
+        FanOutShape.Ports(
+          inlet = logMetrics.in,
+          outlets = scala.collection.immutable.Seq( plansDetectOutliers.out, passUnrecognized.out )
+        )
       )
     }
   }

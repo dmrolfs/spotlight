@@ -27,6 +27,7 @@ trait Configuration extends Config {
   def windowDuration: FiniteDuration
   def graphiteAddress: Option[InetSocketAddress]
   def detectionBudget: FiniteDuration
+  def maxInDetectionCpuFactor: Double
   def plans: immutable.Seq[OutlierPlan]
   def planOrigin: ConfigOrigin
   def tcpInboundBufferSize: Int
@@ -201,6 +202,11 @@ object Configuration {
       FiniteDuration( getDuration(Directory.DETECTION_BUDGET, MILLISECONDS), MILLISECONDS )
     }
 
+    override def maxInDetectionCpuFactor: Double = {
+      val path = "spotlight.workflow.detect.max-in-flight-cpu-factor"
+      if ( hasPath( path ) ) getDouble( path ) else 1.0
+    }
+
     override def plans: immutable.Seq[OutlierPlan] = makePlans( getConfig( Configuration.Directory.PLAN_PATH ) )
     override def planOrigin: ConfigOrigin = getConfig( Configuration.Directory.PLAN_PATH ).origin()
     override def workflowBufferSize: Int = getInt( Directory.WORKFLOW_BUFFER_SIZE )
@@ -228,6 +234,19 @@ object Configuration {
           val TOPICS = "topics"
           val REGEX = "regex"
 
+          val grouping: Option[OutlierPlan.Grouping] = {
+            val GROUP_LIMIT = "group.limit"
+            val GROUP_WITHIN = "group.within"
+            val limit = if ( spec hasPath GROUP_LIMIT ) spec getInt GROUP_LIMIT else 10000
+            val window = if ( spec hasPath GROUP_WITHIN ) {
+              Some( FiniteDuration( spec.getDuration( GROUP_WITHIN ).getNano, NANOSECONDS ) )
+            } else {
+              None
+            }
+
+            window map { w => OutlierPlan.Grouping( limit, w ) }
+          }
+
           //todo: add configuration for at-least and majority
           val ( timeout, algorithms ) = pullCommonPlanFacets( spec )
 
@@ -239,6 +258,7 @@ object Configuration {
                 isQuorum = makeIsQuorum( spec, algorithms.size ),
                 reduce = defaultOutlierReducer,
                 algorithms = algorithms,
+                grouping = grouping,
                 planSpecification = spec
               )
             )
@@ -253,6 +273,7 @@ object Configuration {
                 isQuorum = makeIsQuorum( spec, algorithms.size ),
                 reduce = defaultOutlierReducer,
                 algorithms = algorithms,
+                grouping = grouping,
                 planSpecification = spec,
                 extractTopic = OutlierDetection.extractOutlierDetectionTopic,
                 topics = spec.getStringList(TOPICS).asScala.map{ Topic(_) }.toSet
@@ -266,6 +287,7 @@ object Configuration {
                 isQuorum = makeIsQuorum( spec, algorithms.size ),
                 reduce = defaultOutlierReducer,
                 algorithms = algorithms,
+                grouping = grouping,
                 planSpecification = spec,
                 extractTopic = OutlierDetection.extractOutlierDetectionTopic,
                 regex = new Regex( spec.getString(REGEX) )

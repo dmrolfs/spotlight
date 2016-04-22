@@ -203,7 +203,6 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
 
           val updatedContext = update( ctx.addControlBoundary(control).asInstanceOf[CTX], pt ) //todo: not a fan of this cast.
 
-          log.debug( "LOOP ControlBoundaries: [{}]", updatedContext.controlBoundaries.mkString(","))
           log.debug(
             "LOOP-{}[{}]: control:[{}] acc:[{}]",
             if ( isOutlier ) "HIT" else "MISS",

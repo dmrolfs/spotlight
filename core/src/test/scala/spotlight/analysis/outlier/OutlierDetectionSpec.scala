@@ -41,6 +41,10 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
       )
     )
 
+    val grouping: Option[OutlierPlan.Grouping] = {
+      val window = None
+      window map { w => OutlierPlan.Grouping( limit = 10000, w ) }
+    }
 
     val plans: Seq[OutlierPlan] = Seq(
       OutlierPlan.forTopics(
@@ -49,6 +53,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
         isQuorum = isQuorumA,
         reduce = reduceA,
         algorithms = Set( 'foo, 'bar ),
+        grouping = grouping,
         planSpecification = ConfigFactory.empty,
         extractTopic = OutlierDetection.extractOutlierDetectionTopic,
         topics = Set( Topic("metric") )
@@ -77,10 +82,16 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
     "apply default plan if no other plan is assigned" in { f: Fixture =>
       import f._
 
+      val grouping: Option[OutlierPlan.Grouping] = {
+        val window = None
+        window map { w => OutlierPlan.Grouping( limit = 10000, w ) }
+      }
+
       val defaultPlan = OutlierPlan.default(
         name = "DEFAULT_PLAN",
         timeout = 2.seconds,
         algorithms = Set( 'foo, 'bar ),
+        grouping = grouping,
         isQuorum = isQuorumA,
         reduce = reduceA
       )
@@ -115,12 +126,18 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
     "apply plan if assigned" in { f: Fixture =>
       import f._
 
+      val grouping: Option[OutlierPlan.Grouping] = {
+        val window = None
+        window map { w => OutlierPlan.Grouping( limit = 10000, w ) }
+      }
+
       val defaultPlan = OutlierPlan.default(
         name = "dummy",
         timeout = 2.seconds,
         isQuorum = isQuorumA,
         reduce = reduceA,
         algorithms = Set( 'foo, 'bar ),
+        grouping = grouping,
         planSpecification = ConfigFactory.empty
       )
 
@@ -152,9 +169,15 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
     "apply default plan if nameExtractor does not apply and no other plan is assigned" in { f: Fixture =>
       import f._
 
+      val grouping: Option[OutlierPlan.Grouping] = {
+        val window = None
+        window map { w => OutlierPlan.Grouping( limit = 10000, w ) }
+      }
+
       val defaultPlan = OutlierPlan.default(
         name = "DEFAULT_PLAN",
         algorithms = Set( 'zed ),
+        grouping = grouping,
         timeout = 2.seconds,
         isQuorum = isQuorumA,
         reduce = reduceA
@@ -262,13 +285,19 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
         DataPoint( new joda.DateTime(467), 11 )
       )
 
+      val grouping: Option[OutlierPlan.Grouping] = {
+        val window = None
+        window map { w => OutlierPlan.Grouping( limit = 10000, w ) }
+      }
+
       val defaultPlan = OutlierPlan.default(
         name = "dummy",
         timeout = 2.seconds,
         isQuorum = isQuorumA,
         reduce = reduceA,
         algorithms = Set( 'foo, 'bar ),
-                                             planSpecification = ConfigFactory.empty
+        grouping = grouping,
+        planSpecification = ConfigFactory.empty
       )
 
       val expectedA = HistoricalStatistics.fromActivePoints( DataPoint.toDoublePoints(pointsA).toArray, false )
