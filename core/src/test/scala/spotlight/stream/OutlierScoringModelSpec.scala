@@ -27,7 +27,7 @@ import peds.commons.log.Trace
 import spotlight.analysis.outlier.algorithm.density.SeriesDensityAnalyzer
 import spotlight.protocol.PythonPickleProtocol
 import spotlight.testkit.ParallelAkkaSpec
-import spotlight.analysis.outlier.{DetectionAlgorithmRouter, OutlierDetection}
+import spotlight.analysis.outlier.{DetectionAlgorithmRouter, OutlierDetection, OutlierPlanDetectionRouter}
 import spotlight.model.outlier.{IsQuorum, OutlierPlan, Outliers, SeriesOutliers}
 import spotlight.model.timeseries.{DataPoint, TimeSeries}
 
@@ -218,7 +218,15 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
       val routerRef = system.actorOf( DetectionAlgorithmRouter.props, "router" )
       val dbscan = system.actorOf( SeriesDensityAnalyzer.props( routerRef ), "dbscan" )
       val detector = system.actorOf( OutlierDetection.props( routerRef = routerRef ), "detectOutliers" )
-
+      val planRouter = system.actorOf(
+        OutlierPlanDetectionRouter.props(
+          _detectorRef = detector,
+          _detectionBudget = 2.minutes,
+          _bufferSize = 1000,
+          _maxInDetectionCpuFactor = 1
+        ),
+        "planRouter"
+      )
       val now = new joda.DateTime( 2016, 3, 25, 10, 38, 40, 81 ) // new joda.DateTime( joda.DateTime.now.getMillis / 1000L * 1000L )
       logger.debug( "USE NOW = {}", now )
 
@@ -238,14 +246,12 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
 //      val expected = TimeSeries( "foo", (dp1 ++ dp3).sortBy( _.timestamp ) )
 
       val graphiteFlow = OutlierScoringModel.batchSeries( parallelism = 4, windowSize = 20.millis )
-      val detectFlow = OutlierDetection.detectionFlow(
-        detector = detector,
-        maxInDetectionFactor = 1,
-        maxAllowedWait = 2.seconds,
-        plans = Seq( defaultPlan )
+      val detectFlow = OutlierPlanDetectionRouter.elasticPlanDetectionRouterFlow(
+        planDetectorRouterRef = planRouter,
+        maxInDetectionCpuFactor = 1
       )
 
-      val flowUnderTest = graphiteFlow via detectFlow
+      val flowUnderTest = graphiteFlow.map{ ts => (ts, defaultPlan) } via detectFlow
 
       val (pub, sub) = {
         TestSource.probe[TimeSeries]

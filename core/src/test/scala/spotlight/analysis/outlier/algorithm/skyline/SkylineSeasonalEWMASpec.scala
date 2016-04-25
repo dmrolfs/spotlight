@@ -159,6 +159,7 @@ class SkylineSeasonalEWMASpec extends SkylineBaseSpec {
         .asInstanceOf[SeasonalModel.SimpleSeasonalModel]
       }
 
+      //todo 1.0 was not 31.0 plus or minus 1.0E-5 (SkylineSeasonalEWMASpec.scala:163) run on Mon 4/25
       seasonalModel.moments.zipWithIndex foreach { case (m, i) =>
         m.statistics.get.ewma mustBe ( (startOfToday.getDayOfMonth + i).toDouble +- 0.00001 )
         m.statistics.get.ewmsd mustBe ( 0.0 +- 0.00001 )

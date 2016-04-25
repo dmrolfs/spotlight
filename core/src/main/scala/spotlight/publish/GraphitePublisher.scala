@@ -1,7 +1,6 @@
 package spotlight.publish
 
 import java.net.{InetSocketAddress, Socket}
-
 import scala.annotation.tailrec
 import scala.collection.immutable
 import scala.concurrent.duration._
@@ -93,11 +92,17 @@ class GraphitePublisher extends DenseOutlierPublisher { outer: GraphitePublisher
   val publishDispatcher = context.system.dispatchers.lookup( "publish-dispatcher" )
 
 
+  var lastQueueClearingNanos: Long = System.nanoTime()
+  def markClearing(): Unit = lastQueueClearingNanos = System.nanoTime()
+  def sinceLastClearing(): FiniteDuration = FiniteDuration( System.nanoTime() - lastQueueClearingNanos, NANOSECONDS )
+
   final def batchInterval: FiniteDuration = {
-    val calculated = FiniteDuration( ( publishingTimer.mean + 3 * publishingTimer.stdDev ).toLong, MILLISECONDS )
-    if ( calculated < minimumBatchInterval ) minimumBatchInterval
-    else if ( maximumBatchInterval < calculated ) maximumBatchInterval
-    else calculated
+    val calculated = FiniteDuration( ( publishingTimer.mean + 10 * publishingTimer.stdDev ).toLong, NANOSECONDS )
+    calculated match {
+      case c if c < minimumBatchInterval => minimumBatchInterval
+      case c if maximumBatchInterval < c => maximumBatchInterval
+      case c => c
+    }
   }
 
   def initializeMetrics(): Unit = {
@@ -261,7 +266,7 @@ class GraphitePublisher extends DenseOutlierPublisher { outer: GraphitePublisher
 
     case SendBatch => {
       log.debug( "GraphitePublisher received SendBatch: next schedule in [{}]", batchInterval.toCoarsest )
-      if ( waitQueue.nonEmpty ) batchAndSend()
+      if ( sinceLastClearing() > batchInterval || waitQueue.size >= outer.batchSize ) batchAndSend()
       resetNextScheduled()
     }
   }
@@ -270,6 +275,7 @@ class GraphitePublisher extends DenseOutlierPublisher { outer: GraphitePublisher
     val points = markPoints( o )
     waitQueue = points.foldLeft( waitQueue ){ _ enqueue _ }
     log.debug( "publish[{}]: added [{} / {}] to wait queue - now at [{}]", o.topic, o.anomalySize, o.size, waitQueue.size )
+    if ( waitQueue.size > outer.maxOutstanding ) batchAndSend()
   }
 
   object ControlLabeling {
@@ -387,14 +393,14 @@ class GraphitePublisher extends DenseOutlierPublisher { outer: GraphitePublisher
     val (toBePublished, remainingQueue) = waitQueue splitAt batchSize
     waitQueue = remainingQueue
 
-    publishLogger.info(
-      "BatchAndSend: toBePublished:[{} / {}]\tremainingQueue:[{}]",
-      toBePublished.size.toString,
-      outer.batchSize.toString,
-      remainingQueue.size.toString
-    )
-
     if ( toBePublished.nonEmpty ) {
+      publishLogger.info(
+        "BatchAndSend: toBePublished:[{} / {}]\tremainingQueue:[{}]",
+        toBePublished.size.toString,
+        outer.batchSize.toString,
+        remainingQueue.size.toString
+      )
+
       val report = pickler.pickleFlattenedTimeSeries( toBePublished:_* )
       breaker withCircuitBreaker {
         Future {
@@ -408,7 +414,12 @@ class GraphitePublisher extends DenseOutlierPublisher { outer: GraphitePublisher
       }
     }
 
-    if ( waitQueue.nonEmpty ) resetNextScheduled()
+    if ( waitQueue.isEmpty ) {
+      publishLogger.info( "BatchAndSend: cleared no toBePublish. remainingQueue:[{}]", waitQueue.size.toString )
+      markClearing()
+    } else {
+      resetNextScheduled()
+    }
   }
 
   def sendToGraphite( pickle: ByteString ): Unit = {

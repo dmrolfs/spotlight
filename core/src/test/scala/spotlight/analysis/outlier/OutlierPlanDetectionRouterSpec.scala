@@ -123,7 +123,7 @@ class OutlierPlanDetectionRouterSpec extends ParallelAkkaSpec with LazyLogging {
       import f._
       val actual = planRouter.underlyingActor.makePlanStream( plan, subscriber.ref )
       log.info( "actual = [{}]", actual )
-      actual.ingressRef ! OutlierDetectionMessage( TimeSeries("dummy", Seq()), plan ).toOption.get
+      actual.ingressRef ! TimeSeries( "dummy", Seq() )
       detector.expectMsgClass( classOf[DetectOutliersInSeries] )
       subscriber.expectMsgClass( classOf[NoOutliers] )
     }
@@ -132,7 +132,7 @@ class OutlierPlanDetectionRouterSpec extends ParallelAkkaSpec with LazyLogging {
       import f._
       val a1 = planRouter.underlyingActor.streamIngressFor( plan, subscriber.ref )
       log.info( "first actual = [{}]", a1 )
-      val msg = OutlierDetectionMessage( TimeSeries("dummy", Seq()), plan ).toOption.get
+      val msg = TimeSeries( "dummy", Seq() )
       a1 ! msg
       detector.expectMsgClass( classOf[DetectOutliersInSeries] )
       subscriber.expectMsgClass( classOf[NoOutliers] )
@@ -151,23 +151,25 @@ class OutlierPlanDetectionRouterSpec extends ParallelAkkaSpec with LazyLogging {
       val p1 = makePlan( "p1", Some( OutlierPlan.Grouping(10, 300.seconds) ) )
       val p2 = makePlan( "p2", None )
 
-      val m1 = OutlierDetectionMessage( TimeSeries("dummy", Seq()), p1 ).toOption.get
-      val m2 = OutlierDetectionMessage( TimeSeries("dummy", Seq()), p2 ).toOption.get
+//      val m1 = OutlierDetectionMessage( TimeSeries("dummy", Seq()), p1 ).toOption.get
+//      val m2 = OutlierDetectionMessage( TimeSeries("dummy", Seq()), p2 ).toOption.get
+      val m1 = TimeSeries( "dummy", Seq() )
+      val m2 = TimeSeries( "dummy", Seq() )
 
       val a1 = planRouter.underlyingActor.streamIngressFor( p1, subscriber.ref )
       log.info( "first actual ingress = [{}]", a1 )
       log.info( "first actual graph = [{}]", planRouter.underlyingActor.planStreams( OutlierPlanDetectionRouter.Key( p1.id, subscriber.ref ) ) )
       a1 ! m1
-      detector.expectNoMsg( 150.millis.dilated )
-      subscriber.expectNoMsg( 150.millis.dilated )
+      detector.expectNoMsg( 500.millis.dilated )
+      subscriber.expectNoMsg( 500.millis.dilated )
 
       val a2 = planRouter.underlyingActor.streamIngressFor( p2, subscriber.ref )
       log.info( "second actual ingress = [{}]", a2 )
       log.info( "second actual graph = [{}]", planRouter.underlyingActor.planStreams( OutlierPlanDetectionRouter.Key( p2.id, subscriber.ref ) ) )
       a1 must not be a2
       a2 ! m2
-      detector.expectMsgClass( 75.millis.dilated, classOf[DetectOutliersInSeries] )
-      subscriber.expectMsgClass( 75.millis.dilated, classOf[NoOutliers] )
+      detector.expectMsgClass( 200.millis.dilated, classOf[DetectOutliersInSeries] )
+      subscriber.expectMsgClass( 200.millis.dilated, classOf[NoOutliers] )
     }
 
     "router receive uses plan-dependent streams" in { f: Fixture =>
@@ -179,20 +181,20 @@ class OutlierPlanDetectionRouterSpec extends ParallelAkkaSpec with LazyLogging {
       val points = makeDataPoints( values = Seq.fill( 9 )( 1.0 ) )
       val ts = spike( points )( points.size - 1 )
 
-      val m1 = OutlierDetectionMessage( ts, p1 ).toOption.get
-      val m2 = OutlierDetectionMessage( ts, p2 ).toOption.get
+      val m1 = (ts, p1)
+      val m2 = (ts, p2)
 
       planRouter.receive( m1, subscriber.ref )
-      detector.expectNoMsg( 150.millis.dilated )
-      subscriber.expectNoMsg( 150.millis.dilated )
+      detector.expectNoMsg( 500.millis.dilated )
+      subscriber.expectNoMsg( 500.millis.dilated )
 
       planRouter.receive( m2, subscriber.ref )
-      detector.expectMsgClass( 75.millis.dilated, classOf[DetectOutliersInSeries] )
-      subscriber.expectMsgClass( 75.millis.dilated, classOf[NoOutliers] )
+      detector.expectMsgClass( 200.millis.dilated, classOf[DetectOutliersInSeries] )
+      subscriber.expectMsgClass( 200.millis.dilated, classOf[NoOutliers] )
     }
 
 
-    "router actor uses plan-dependent streams" taggedAs (WIP) in { f: Fixture =>
+    "router actor uses plan-dependent streams" in { f: Fixture =>
       import f._
 
       val p1 = makePlan( "p1", Some( OutlierPlan.Grouping(10, 300.seconds) ) )
@@ -201,8 +203,8 @@ class OutlierPlanDetectionRouterSpec extends ParallelAkkaSpec with LazyLogging {
       val points = makeDataPoints( values = Seq.fill( 9 )( 1.0 ) )
       val ts = spike( points )( points.size - 1 )
 
-      val m1 = OutlierDetectionMessage( ts, p1 ).toOption.get
-      val m2 = OutlierDetectionMessage( ts, p2 ).toOption.get
+      val m1 = ( ts, p1 )
+      val m2 = ( ts, p2 )
 
       val routerProps = OutlierPlanDetectionRouter.props(
         _detectorRef = detector.ref,
@@ -214,12 +216,12 @@ class OutlierPlanDetectionRouterSpec extends ParallelAkkaSpec with LazyLogging {
       val router = system.actorOf( routerProps, "test-plan-router" )
 
       router.tell( m1, subscriber.ref )
-      detector.expectNoMsg( 150.millis.dilated )
-      subscriber.expectNoMsg( 150.millis.dilated )
+      detector.expectNoMsg( 500.millis.dilated )
+      subscriber.expectNoMsg( 500.millis.dilated )
 
       router.tell( m2, subscriber.ref )
-      detector.expectMsgClass( 75.millis.dilated, classOf[DetectOutliersInSeries] )
-      subscriber.expectMsgClass( 75.millis.dilated, classOf[NoOutliers] )
+      detector.expectMsgClass( 200.millis.dilated, classOf[DetectOutliersInSeries] )
+      subscriber.expectMsgClass( 200.millis.dilated, classOf[NoOutliers] )
     }
 
     //    "framed flow convert graphite pickle into TimeSeries" in { f: Fixture =>

@@ -50,7 +50,7 @@ trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
   override def unhandled( message: Any ): Unit = {
     message match {
       case m: DetectUsing => {
-        log.info( "algorithm [{}] does not recognize requested payload: [{}]", algorithm, m )
+        log.warning( "algorithm [{}] does not recognize requested payload: [{}]", algorithm, m )
         m.aggregator ! UnrecognizedPayload( algorithm, m )
       }
 
