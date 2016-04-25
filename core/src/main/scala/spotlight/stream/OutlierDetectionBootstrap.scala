@@ -33,7 +33,7 @@ object OutlierDetectionBootstrap {
 
   type MakeProps = ActorRef => Props
 
-  trait ConfigurationProvider { outer =>
+  trait ConfigurationProvider { outer: Actor with ActorLogging =>
     def sourceAddress: InetSocketAddress
     def maxFrameLength: Int
     def protocol: GraphiteSerializationProtocol
@@ -52,10 +52,18 @@ object OutlierDetectionBootstrap {
     )(
       implicit ctx: ActorContext
     ): ActorRef = {
+      log.info(
+        "bootstrap making plan detection router for detector:[{}] budget:[{}] buffer:[{}] cpu factor:[{}]",
+        detector,
+        detectionBudget,
+        bufferSize,
+        maxInDetectionCpuFactor
+      )
+
       ctx.actorOf(
         OutlierPlanDetectionRouter
         .props( detector, detectionBudget, bufferSize, maxInDetectionCpuFactor )
-        .withDispatcher( "outlier-detection-dispatcher" ), //todo maybe it's own dispatcher?
+        .withDispatcher( "plan-router-dispatcher" ),
         "plan-detection-router"
       )
     }

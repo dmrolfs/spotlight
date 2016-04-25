@@ -3,12 +3,18 @@ Description=Spotlight
 After=docker.service
 
 [Service]
+EnvironmentFile=/etc/environment
 TimeoutStartSec=0
 ExecStartPre=-/usr/bin/docker kill spotlight
 ExecStartPre=-/usr/bin/docker rm spotlight
 ExecStartPre=/usr/bin/docker pull dmrolfs/spotlight-core
-ExecStart=/usr/bin/docker run --rm --name spotlight -p 20400:2004 -v /var/log/spotlight:/var/log -v /etc/spotlight:/etc/spotlight dmrolfs/spotlight-core
+ExecStart=/usr/bin/docker run --rm --name spotlight -p 20004:2004 -v /var/log/spotlight:/var/log -v /etc/spotlight:/etc/spotlight dmrolfs/spotlight-core
+ExecStartPost=/bin/sh -c "/usr/bin/etcdctl set /services/carbonrelay/$COREOS_PRIVATE_IPV4 spotlight"
 ExecStop=-/usr/bin/docker stop spotlight
+ExecStopPost=/usr/bin/etcdctl rm /services/carbonrelay/$COREOS_PRIVATE_IPV4
 
 [Install]
 WantedBy=multi-user.target
+
+[X-Fleet]
+X-Conflicts=carbon-relay*

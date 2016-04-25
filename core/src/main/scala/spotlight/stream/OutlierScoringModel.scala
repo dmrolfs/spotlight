@@ -74,16 +74,24 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
         if ( config hasPath path ) config.getDouble( path ) else 1.0
       }
 
+      val planBuffer = b.add(
+        Flow[TimeSeries].buffer(10000, OverflowStrategy.backpressure).watchFlow( Symbol("planConcat.buffer") )
+      )
+
+      val planConcat = b.add(
+        Flow[TimeSeries]
+        .map { ts => config.plans collect { case p if p appliesTo ts => (ts, p) } }
+        .mapConcat { identity }
+      )
+
       val plansDetectOutliers = b.add(
         OutlierPlanDetectionRouter.elasticPlanDetectionRouterFlow(
           planDetectorRouterRef = planRouterRef,
-          maxInDetectionCpuFactor = maxInDetectionCpuFactor,
-          plans = () => { config.plans.toSet }
+          maxInDetectionCpuFactor = maxInDetectionCpuFactor
         )
-        .watchFlow( WatchPoints.ScoringDetect )
       )
 
-      logMetrics ~> blockPriors ~> broadcast ~> passPlanned ~> plansDetectOutliers
+      logMetrics ~> blockPriors ~> broadcast ~> passPlanned ~> planBuffer ~> planConcat ~> plansDetectOutliers
                                    broadcast ~> passUnrecognized
 
       ScoringShape(
@@ -141,7 +149,7 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
     val numTopics = 1
 
     val n = if ( numTopics * windowSize.toMicros.toInt < 0 ) { numTopics * windowSize.toMicros.toInt } else { Int.MaxValue }
-    logger info s"n = [${n}] for windowSize=[${windowSize.toCoarsest}]"
+    logger.debug( "n = [{}] for windowSize=[{}]", n.toString, windowSize.toCoarsest )
     Flow[TimeSeries]
     .groupedWithin( n, d = windowSize ) // max elems = 1 per micro; duration = windowSize
     .map {

@@ -25,7 +25,7 @@ import peds.akka.supervision.OneForOneStrategyFactory
 import peds.akka.metrics.{Instrumented, Reporter}
 import peds.commons.V
 import peds.akka.stream.{ProcessorAdapter, StreamMonitor}
-import spotlight.analysis.outlier.OutlierPlanDetectionRouter
+import spotlight.analysis.outlier.{OutlierDetection, OutlierPlanDetectionRouter}
 import spotlight.model.outlier._
 import spotlight.model.timeseries.{TimeSeries, TimeSeriesBase, Topic}
 import spotlight.protocol.GraphiteSerializationProtocol
@@ -112,6 +112,7 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
 
     Future.firstCompletedOf( actors :: bootstrapTimeout :: Nil ) map {
       case (detector, planRouter) => {
+        logger.info( "bootstrap detector:[{}] planRouter:[{}]", detector, planRouter )
 //        startPlanWatcher( config, Set(detector) )
         BootstrapContext( config, reloader, detector, planRouter )
       }
@@ -173,7 +174,7 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
         )
 
         val timeSeries = b.add( conf.protocol.unmarshalTimeSeriesData )
-        val scoring = b.add( OutlierScoringModel.scoringGraph( context.detector, conf ) )
+        val scoring = b.add( OutlierScoringModel.scoringGraph( planRouterRef = context.planRouter, config = conf ) )
         val logUnrecognized = b.add(
           Flow[TimeSeries].transform( () =>
             OutlierScoringModel.logMetric( Logger( LoggerFactory getLogger "Unrecognized" ), conf.plans )
@@ -181,6 +182,9 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
         )
         val ingressBroadcast = b.add( Broadcast[TimeSeries](outputPorts = 2, eagerCancel = false) )
         val egressBroadcast = b.add( Broadcast[Outliers](outputPorts = 2, eagerCancel = true) )
+        val publishBuffer = b.add(
+          Flow[Outliers].buffer( 10000, OverflowStrategy.backpressure ).watchFlow( Symbol("publish.buffer"))
+        )
         val publish = b.add( publishOutliers( context.config.graphiteAddress ) )
         val tcpOut = b.add( Flow[Outliers].map{ _ => ByteString() } )
 
@@ -207,19 +211,20 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
         val termTraining = b.add( Sink.ignore )
         val termUnrecognized = b.add( Sink.ignore )
 
+//framing,intakeBuffer,scoring.planned,plan.router
         StreamMonitor.set(
           'framing,
           'intakeBuffer,
-          OutlierScoringModel.WatchPoints.ScoringPlanned,
+          Symbol("planConcat.buffer"),
+          Symbol( OutlierPlanDetectionRouter.WatchPoints.PlanRouter.name + ".buffer" ),
           OutlierPlanDetectionRouter.WatchPoints.PlanRouter,
-          ProcessorAdapter.WatchPoints.Processor,
-          'publish
+          Symbol( "publish.buffer" )
         )
 
                                                  ingressBroadcast ~> passArchivable ~> train ~> termTraining
         framing ~> intakeBuffer ~> timeSeries ~> ingressBroadcast ~> scoring.in
                                                                      scoring.out0 ~> egressBroadcast ~> tcpOut
-                                                                                     egressBroadcast ~> publish
+                                                                                     egressBroadcast ~> publishBuffer ~> publish
                                                                      scoring.out1 ~> logUnrecognized ~> termUnrecognized
 
         FlowShape( framing.in, tcpOut.out )
