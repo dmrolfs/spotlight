@@ -225,11 +225,11 @@ with ActorLogging {
     }
     _score += key -> s
     outlierLogger.debug(
-      "\t\toutlier-rate[{}]:[{}] = [{}%] in [{}] points",
+      "\t\toutlier-rate[{}]:[{}] = [{}%] [{} (count, points)]",
       os.plan.name,
       os.topic,
       (s._1.toDouble / s._2.toDouble).toString,
-      s._2.toString
+      (s._1.toString, s._2.toString)
     )
   }
 }
