@@ -52,7 +52,17 @@ object GraphitePublisher extends LazyLogging {
     def publishingTopic( p: OutlierPlan, t: Topic ): Topic = s"${p.name}.${t}"
     def publishAlgorithmControlBoundaries( p: OutlierPlan, algorithm: Symbol ): Boolean = {
       val publishKey = algorithm.name + ".publish-controls"
-      if ( p.algorithmConfig hasPath publishKey ) p.algorithmConfig getBoolean publishKey else false
+      if ( p.algorithmConfig hasPath publishKey ) p.algorithmConfig getBoolean publishKey
+      else {
+        //todo dmr remove after determining prob with control publishing
+        logger.warn(
+          "Plan[{}] algorithm[{}] will not publishing controls; algo-config:[{}]",
+          p.name,
+          algorithm.name,
+          p.algorithmConfig
+        )
+        false
+      }
     }
   }
 
