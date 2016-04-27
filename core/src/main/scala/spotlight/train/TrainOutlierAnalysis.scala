@@ -1,12 +1,15 @@
 package spotlight.train
 
+import akka.NotUsed
+
 import scala.concurrent.duration.FiniteDuration
-import scala.concurrent.{ Promise, Future }
+import scala.concurrent.{Future, Promise}
 import akka.actor.ActorSystem
 import akka.stream.scaladsl.Flow
-import scalaz.{ -\/, \/- }
+
+import scalaz.{-\/, \/-}
 import scalaz.concurrent.Task
-import spotlight.model.timeseries.{ TimeSeries, TimeSeriesBase, TimeSeriesCohort }
+import spotlight.model.timeseries.{TimeSeries, TimeSeriesBase, TimeSeriesCohort}
 import spotlight.model.timeseries.TimeSeriesBase.Merging
 
 
@@ -30,7 +33,7 @@ object TrainOutlierAnalysis {
   )(
     implicit system: ActorSystem,
     merging: Merging[T]
-  ): Flow[T, T, Unit] = {
+  ): Flow[T, T, NotUsed] = {
     Flow[T]
     .groupedWithin( maxPoints, batchingWindow )  // batch points before archiving
     .map {

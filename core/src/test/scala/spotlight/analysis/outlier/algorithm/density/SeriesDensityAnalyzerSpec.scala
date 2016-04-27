@@ -42,7 +42,12 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
         ): V[Outliers] = Validation.failureNel[Throwable, Outliers]( new IllegalStateException("should not use" ) ).disjunction
       }
 
-      OutlierPlan.default( "", 1.second, isQuorun, reduce, Set.empty[Symbol] ).appliesTo
+      val grouping: Option[OutlierPlan.Grouping] = {
+        val window = None
+        window map { w => OutlierPlan.Grouping( limit = 10000, w ) }
+      }
+
+      OutlierPlan.default( "", 1.second, isQuorun, reduce, Set.empty[Symbol], grouping ).appliesTo
     }
   }
 

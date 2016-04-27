@@ -17,6 +17,7 @@ sealed trait OutlierPlan extends Equals {
   def name: String
   def appliesTo: OutlierPlan.AppliesTo
   def algorithms: Set[Symbol]
+  def grouping: Option[OutlierPlan.Grouping]
   def timeout: FiniteDuration
   def isQuorum: IsQuorum
   def reduce: ReduceOutliers
@@ -51,6 +52,7 @@ object OutlierPlan {
 
   type Creator = () => V[Seq[OutlierPlan]]
 
+  final case class Grouping( limit: Int, window: FiniteDuration )
 
   def apply(
     name: String,
@@ -58,6 +60,7 @@ object OutlierPlan {
     isQuorum: IsQuorum,
     reduce: ReduceOutliers,
     algorithms: Set[Symbol],
+    grouping: Option[OutlierPlan.Grouping],
     planSpecification: Config
   )(
     appliesTo: (Any) => Boolean
@@ -67,6 +70,7 @@ object OutlierPlan {
       name = name,
       appliesTo = AppliesTo.function( appliesTo ),
       algorithms = algorithms ++ getAlgorithms( planSpecification ),
+      grouping = grouping,
       timeout = timeout,
       isQuorum = isQuorum,
       reduce = reduce,
@@ -82,6 +86,7 @@ object OutlierPlan {
     isQuorum: IsQuorum,
     reduce: ReduceOutliers,
     algorithms: Set[Symbol],
+    grouping: Option[OutlierPlan.Grouping],
     planSpecification: Config
   )(
     appliesTo: PartialFunction[Any, Boolean]
@@ -91,6 +96,7 @@ object OutlierPlan {
       name = name,
       appliesTo = AppliesTo.partialFunction( appliesTo ),
       algorithms = algorithms ++ getAlgorithms( planSpecification ),
+      grouping = grouping,
       timeout = timeout,
       isQuorum = isQuorum,
       reduce = reduce,
@@ -106,6 +112,7 @@ object OutlierPlan {
     isQuorum: IsQuorum,
     reduce: ReduceOutliers,
     algorithms: Set[Symbol],
+    grouping: Option[OutlierPlan.Grouping],
     planSpecification: Config,
     extractTopic: ExtractTopic,
     topics: Set[Topic]
@@ -115,6 +122,7 @@ object OutlierPlan {
       name = name,
       appliesTo = AppliesTo.topics( topics, extractTopic ),
       algorithms = algorithms ++ getAlgorithms( planSpecification ),
+      grouping = grouping,
       timeout = timeout,
       isQuorum = isQuorum,
       reduce = reduce,
@@ -130,6 +138,7 @@ object OutlierPlan {
     isQuorum: IsQuorum,
     reduce: ReduceOutliers,
     algorithms: Set[Symbol],
+    grouping: Option[OutlierPlan.Grouping],
     planSpecification: Config,
     extractTopic: ExtractTopic,
     topics: String*
@@ -139,6 +148,7 @@ object OutlierPlan {
       name = name,
       appliesTo = AppliesTo.topics( topics.map{ Topic(_) }.toSet, extractTopic ),
       algorithms = algorithms ++ getAlgorithms( planSpecification ),
+      grouping = grouping,
       timeout = timeout,
       isQuorum = isQuorum,
       reduce = reduce,
@@ -154,6 +164,7 @@ object OutlierPlan {
     isQuorum: IsQuorum,
     reduce: ReduceOutliers,
     algorithms: Set[Symbol],
+    grouping: Option[OutlierPlan.Grouping],
     planSpecification: Config,
     extractTopic: ExtractTopic,
     regex: Regex
@@ -163,6 +174,7 @@ object OutlierPlan {
       name = name,
       appliesTo = AppliesTo.regex( regex, extractTopic ),
       algorithms = algorithms ++ getAlgorithms( planSpecification ),
+      grouping = grouping,
       timeout = timeout,
       isQuorum = isQuorum,
       reduce = reduce,
@@ -178,6 +190,7 @@ object OutlierPlan {
     isQuorum: IsQuorum,
     reduce: ReduceOutliers,
     algorithms: Set[Symbol],
+    grouping: Option[OutlierPlan.Grouping],
     planSpecification: Config = ConfigFactory.empty
   ): OutlierPlan = {
     SimpleOutlierPlan(
@@ -185,6 +198,7 @@ object OutlierPlan {
       name = name,
       appliesTo = AppliesTo.all,
       algorithms = algorithms ++ getAlgorithms( planSpecification ),
+      grouping = grouping,
       timeout = timeout,
       isQuorum = isQuorum,
       reduce = reduce,
@@ -218,6 +232,7 @@ object OutlierPlan {
     override val name: String,
     override val appliesTo: OutlierPlan.AppliesTo,
     override val algorithms: Set[Symbol],
+    override val grouping: Option[OutlierPlan.Grouping],
     override val timeout: FiniteDuration,
     override val isQuorum: IsQuorum,
     override val reduce: ReduceOutliers,
@@ -232,7 +247,7 @@ object OutlierPlan {
     override val toString: String = {
       getClass.safeSimpleName + s"[${id}](" +
         s"""name:[$name], ${appliesTo.toString} timeout:[${timeout.toCoarsest}], """ +
-        s"""algorithms:[${algorithms.mkString(",")}], algorithm-config:[${algorithmConfig.root}]""" +
+        s"""algorithms:[${algorithms.mkString(",")}], grouping:[${grouping}], algorithm-config:[${algorithmConfig.root}]""" +
         ")"
     }
   }

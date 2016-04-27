@@ -1,9 +1,8 @@
 package spotlight.stream
 
-import java.net.{ InetAddress, InetSocketAddress }
-import java.{ lang, time, util }
+import java.net.{InetAddress, InetSocketAddress}
+import java.time.Duration
 import scala.concurrent.duration._
-import scala.concurrent.{ ExecutionContext, Future }
 import scala.util.matching.Regex
 import scala.collection.immutable
 import scalaz.Scalaz._
@@ -12,9 +11,9 @@ import com.typesafe.config._
 import com.typesafe.scalalogging.LazyLogging
 import spotlight.analysis.outlier.OutlierDetection
 import spotlight.model.outlier._
-import spotlight.model.timeseries.{ TimeSeriesBase, Topic }
-import spotlight.protocol.{ GraphiteSerializationProtocol, MessagePackProtocol, PythonPickleProtocol }
-import peds.commons.{ V, Valid }
+import spotlight.model.timeseries.Topic
+import spotlight.protocol.{GraphiteSerializationProtocol, MessagePackProtocol, PythonPickleProtocol}
+import peds.commons.{V, Valid}
 
 
 /**
@@ -27,6 +26,7 @@ trait Configuration extends Config {
   def windowDuration: FiniteDuration
   def graphiteAddress: Option[InetSocketAddress]
   def detectionBudget: FiniteDuration
+  def maxInDetectionCpuFactor: Double
   def plans: immutable.Seq[OutlierPlan]
   def planOrigin: ConfigOrigin
   def tcpInboundBufferSize: Int
@@ -201,7 +201,12 @@ object Configuration {
       FiniteDuration( getDuration(Directory.DETECTION_BUDGET, MILLISECONDS), MILLISECONDS )
     }
 
-    override def plans: immutable.Seq[OutlierPlan] = makePlans( getConfig( Configuration.Directory.PLAN_PATH ) )
+    override def maxInDetectionCpuFactor: Double = {
+      val path = "spotlight.workflow.detect.max-in-flight-cpu-factor"
+      if ( hasPath( path ) ) getDouble( path ) else 1.0
+    }
+
+    override val plans: immutable.Seq[OutlierPlan] = makePlans( getConfig( Configuration.Directory.PLAN_PATH ) ) //todo support plan reloading
     override def planOrigin: ConfigOrigin = getConfig( Configuration.Directory.PLAN_PATH ).origin()
     override def workflowBufferSize: Int = getInt( Directory.WORKFLOW_BUFFER_SIZE )
     override def tcpInboundBufferSize: Int = getInt( Directory.TCP_INBOUND_BUFFER_SIZE )
@@ -228,10 +233,25 @@ object Configuration {
           val TOPICS = "topics"
           val REGEX = "regex"
 
+          val grouping: Option[OutlierPlan.Grouping] = {
+            val GROUP_LIMIT = "group.limit"
+            val GROUP_WITHIN = "group.within"
+            val limit = if ( spec hasPath GROUP_LIMIT ) spec getInt GROUP_LIMIT else 10000
+            logger.info( "CONFIGURATION spec: [{}]", spec )
+            val window = if ( spec hasPath GROUP_WITHIN ) {
+              Some( FiniteDuration( spec.getDuration( GROUP_WITHIN ).toNanos, NANOSECONDS ) )
+            } else {
+              None
+            }
+
+            window map { w => OutlierPlan.Grouping( limit, w ) }
+          }
+
           //todo: add configuration for at-least and majority
           val ( timeout, algorithms ) = pullCommonPlanFacets( spec )
 
           if ( spec.hasPath(IS_DEFAULT) && spec.getBoolean(IS_DEFAULT) ) {
+            logger info s"topic[$name] default plan origin: ${spec.origin} line:${spec.origin.lineNumber}"
             Some(
               OutlierPlan.default(
                 name = name,
@@ -239,12 +259,13 @@ object Configuration {
                 isQuorum = makeIsQuorum( spec, algorithms.size ),
                 reduce = defaultOutlierReducer,
                 algorithms = algorithms,
+                grouping = grouping,
                 planSpecification = spec
               )
             )
           } else if ( spec hasPath TOPICS ) {
             import scala.collection.JavaConverters._
-            logger info s"topic[$name] plan origin: ${spec.origin} line:${spec.origin.lineNumber}"
+            logger info s"topic[$name] topic plan origin: ${spec.origin} line:${spec.origin.lineNumber}"
 
             Some(
               OutlierPlan.forTopics(
@@ -253,12 +274,14 @@ object Configuration {
                 isQuorum = makeIsQuorum( spec, algorithms.size ),
                 reduce = defaultOutlierReducer,
                 algorithms = algorithms,
+                grouping = grouping,
                 planSpecification = spec,
                 extractTopic = OutlierDetection.extractOutlierDetectionTopic,
                 topics = spec.getStringList(TOPICS).asScala.map{ Topic(_) }.toSet
               )
             )
           } else if ( spec hasPath REGEX ) {
+            logger info s"topic[$name] regex plan origin: ${spec.origin} line:${spec.origin.lineNumber}"
             Some(
               OutlierPlan.forRegex(
                 name = name,
@@ -266,6 +289,7 @@ object Configuration {
                 isQuorum = makeIsQuorum( spec, algorithms.size ),
                 reduce = defaultOutlierReducer,
                 algorithms = algorithms,
+                grouping = grouping,
                 planSpecification = spec,
                 extractTopic = OutlierDetection.extractOutlierDetectionTopic,
                 regex = new Regex( spec.getString(REGEX) )
@@ -299,11 +323,11 @@ object Configuration {
 
 
     override def getAnyRefList(s: String) = underlying.getAnyRefList(s)
-    override def getIntList(s: String): util.List[Integer] = underlying.getIntList(s)
+    override def getIntList(s: String): java.util.List[Integer] = underlying.getIntList(s)
     override def getValue(s: String): ConfigValue = underlying.getValue(s)
     override def root(): ConfigObject = underlying.root()
     override def getAnyRef(s: String): AnyRef = underlying.getAnyRef(s)
-    override def getConfigList(s: String): util.List[_ <: Config] = underlying.getConfigList(s)
+    override def getConfigList(s: String): java.util.List[_ <: Config] = underlying.getConfigList(s)
     override def getIsNull(s: String): Boolean = underlying.getIsNull(s)
     override def withFallback(configMergeable: ConfigMergeable): Config = underlying.withFallback(configMergeable)
     override def checkValid(config: Config, strings: String*): Unit = underlying.checkValid(config, strings:_*)
@@ -313,52 +337,52 @@ object Configuration {
     }
     override def getList(s: String): ConfigList = underlying.getList(s)
     override def getDouble(s: String): Double = underlying.getDouble(s)
-    override def getLongList(s: String): util.List[lang.Long] = underlying.getLongList(s)
-    override def getObjectList(s: String): util.List[_ <: ConfigObject] = underlying.getObjectList(s)
+    override def getLongList(s: String): java.util.List[java.lang.Long] = underlying.getLongList(s)
+    override def getObjectList(s: String): java.util.List[_ <: ConfigObject] = underlying.getObjectList(s)
     override def withOnlyPath(s: String): Config = underlying.withOnlyPath(s)
     override def entrySet(): java.util.Set[java.util.Map.Entry[String, ConfigValue]] = underlying.entrySet()
     override def getDoubleList(s: String): java.util.List[java.lang.Double] = underlying.getDoubleList(s)
     override def hasPathOrNull(s: String): Boolean = underlying.hasPathOrNull(s)
     override def hasPath(s: String): Boolean = underlying.hasPath(s)
     override def getLong(s: String): Long = underlying.getLong(s)
-    override def getMemorySizeList(s: String): util.List[ConfigMemorySize] = underlying.getMemorySizeList(s)
-    override def getBooleanList(s: String): util.List[lang.Boolean] = underlying.getBooleanList(s)
-    override def getBytesList(s: String): util.List[lang.Long] = underlying.getBytesList(s)
+    override def getMemorySizeList(s: String): java.util.List[ConfigMemorySize] = underlying.getMemorySizeList(s)
+    override def getBooleanList(s: String): java.util.List[java.lang.Boolean] = underlying.getBooleanList(s)
+    override def getBytesList(s: String): java.util.List[java.lang.Long] = underlying.getBytesList(s)
     override def getBoolean(s: String): Boolean = underlying.getBoolean(s)
     override def getConfig(s: String): Config = underlying.getConfig(s)
     override def getObject(s: String): ConfigObject = underlying.getObject(s)
-    override def getStringList(s: String): util.List[String] = underlying.getStringList(s)
-    override def getNumberList(s: String): util.List[Number] = underlying.getNumberList(s)
+    override def getStringList(s: String): java.util.List[String] = underlying.getStringList(s)
+    override def getNumberList(s: String): java.util.List[Number] = underlying.getNumberList(s)
     override def atPath(s: String): Config = underlying.atPath(s)
     override def isResolved: Boolean = underlying.isResolved
     override def isEmpty: Boolean = underlying.isEmpty
     override def atKey(s: String): Config = underlying.atKey(s)
     override def getDuration(s: String, timeUnit: TimeUnit): Long = underlying.getDuration(s, timeUnit)
-    override def getDuration(s: String): time.Duration = underlying.getDuration(s)
+    override def getDuration( path: String ): Duration = underlying getDuration path
     override def withValue(s: String, configValue: ConfigValue): Config = underlying.withValue(s, configValue)
     override def getInt(s: String): Int = underlying.getInt(s)
     override def resolve(): Config = underlying.resolve()
     override def resolve(configResolveOptions: ConfigResolveOptions): Config = underlying.resolve(configResolveOptions)
     override def getNumber(s: String): Number = underlying.getNumber(s)
-    override def getDurationList(s: String, timeUnit: TimeUnit): util.List[lang.Long] = underlying.getDurationList(s, timeUnit)
-    override def getDurationList(s: String): util.List[time.Duration] = underlying.getDurationList(s)
+    override def getDurationList(s: String, timeUnit: TimeUnit): java.util.List[java.lang.Long] = underlying.getDurationList(s, timeUnit)
+    override def getDurationList(s: String): java.util.List[Duration] = underlying getDurationList s
     override def origin(): ConfigOrigin = underlying.origin()
     override def withoutPath(s: String): Config = underlying.withoutPath(s)
     override def getMemorySize(s: String): ConfigMemorySize = underlying.getMemorySize(s)
-    override def getBytes(s: String): lang.Long = underlying.getBytes(s)
+    override def getBytes(s: String): java.lang.Long = underlying.getBytes(s)
     override def getString(s: String): String = underlying.getString(s)
 
     @deprecated( "replaced by {@link #getDurationList(String, TimeUnit)}", "1.1" )
-    override def getNanoseconds(s: String): lang.Long = underlying.getNanoseconds(s)
+    override def getNanoseconds(s: String): java.lang.Long = underlying.getNanoseconds(s)
 
     @deprecated( "replaced by {@link #getDurationList(String, TimeUnit)}", "1.1" )
-    override def getNanosecondsList(s: String): util.List[lang.Long] = underlying.getNanosecondsList(s)
+    override def getNanosecondsList(s: String): java.util.List[java.lang.Long] = underlying.getNanosecondsList(s)
 
     @deprecated( "replaced by {@link #getDurationList(String, TimeUnit)}", "1.1" )
-    override def getMilliseconds(s: String): lang.Long = underlying.getMilliseconds(s)
+    override def getMilliseconds(s: String): java.lang.Long = underlying.getMilliseconds(s)
 
     @deprecated( "replaced by {@link #getDurationList(String, TimeUnit)}", "1.1" )
-    override def getMillisecondsList(s: String): util.List[lang.Long] = underlying.getMillisecondsList(s)
+    override def getMillisecondsList(s: String): java.util.List[java.lang.Long] = underlying.getMillisecondsList(s)
   }
 
   case class UsageConfigurationError private[stream]( usage: String ) extends IllegalArgumentException( usage )

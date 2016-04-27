@@ -1,6 +1,7 @@
 package spotlight.protocol
 
-import akka.stream.{ ActorAttributes, Supervision }
+import akka.NotUsed
+import akka.stream.{ActorAttributes, Supervision}
 import akka.stream.scaladsl.Flow
 import akka.util.ByteString
 import com.typesafe.scalalogging.LazyLogging
@@ -31,10 +32,10 @@ object GraphiteSerializationProtocol extends LazyLogging {
 }
 
 trait GraphiteSerializationProtocol {
-  def framingFlow( maximumFrameLength: Int ): Flow[ByteString, ByteString, Unit]
+  def framingFlow( maximumFrameLength: Int ): Flow[ByteString, ByteString, NotUsed]
   def toDataPoints( bytes: ByteString ): List[TimeSeries]
 
-  def unmarshalTimeSeriesData: Flow[ByteString, TimeSeries, Unit] = {
+  def unmarshalTimeSeriesData: Flow[ByteString, TimeSeries, NotUsed] = {
     Flow[ByteString]
     .mapConcat { toDataPoints }
     .withAttributes( ActorAttributes.supervisionStrategy(GraphiteSerializationProtocol.decider) )

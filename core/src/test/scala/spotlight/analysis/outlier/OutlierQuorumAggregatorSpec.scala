@@ -22,8 +22,18 @@ class OutlierQuorumAggregatorSpec extends ParallelAkkaSpec with MockitoSugar {
   override val trace = Trace[OutlierQuorumAggregatorSpec]
 
   class Fixture extends AkkaFixture { fixture =>
+    val defaultPlan = plan( 3.seconds )
     val none = mock[NoOutliers]
+    when( none.plan ) thenReturn defaultPlan
+    when( none.topic ) thenReturn Topic( "metric.none" )
+    when( none.algorithms ) thenReturn defaultPlan.algorithms.take(1)
+    when( none.algorithmControlBoundaries ) thenReturn Map.empty[Symbol, Seq[ControlBoundary]]
+
     val some = mock[SeriesOutliers]
+    when( some.plan ) thenReturn defaultPlan
+    when( some.topic ) thenReturn Topic( "metric.some" )
+    when( some.algorithms ) thenReturn defaultPlan.algorithms.take(1)
+    when( some.algorithmControlBoundaries ) thenReturn Map.empty[Symbol, Seq[ControlBoundary]]
 
     val demoReduce = new ReduceOutliers {
       override def apply( results: OutlierAlgorithmResults, source: TimeSeriesBase, plan: OutlierPlan ): V[ Outliers ] = {
@@ -34,15 +44,22 @@ class OutlierQuorumAggregatorSpec extends ParallelAkkaSpec with MockitoSugar {
       }
     }
 
-    def plan( to: FiniteDuration ) = OutlierPlan.default(
-      name = "default",
-      timeout = to,
-      isQuorum = IsQuorum.AtLeastQuorumSpecification( 1, 1 ),
-      reduce = demoReduce,
-      algorithms = Set( 'foobar ),
-      planSpecification = ConfigFactory.empty
-    )
+    val grouping: Option[OutlierPlan.Grouping] = {
+      val window = None
+      window map { w => OutlierPlan.Grouping( limit = 10000, w ) }
+    }
 
+    def plan( to: FiniteDuration ): OutlierPlan = {
+      OutlierPlan.default(
+        name = "default",
+        timeout = to,
+        isQuorum = IsQuorum.AtLeastQuorumSpecification( 1, 1 ),
+        reduce = demoReduce,
+        algorithms = Set( 'foobar ),
+        grouping = grouping,
+        planSpecification = ConfigFactory.empty
+      )
+    }
   }
 
   override def makeAkkaFixture(): Fixture = new Fixture
@@ -77,7 +94,7 @@ class OutlierQuorumAggregatorSpec extends ParallelAkkaSpec with MockitoSugar {
       }
     }
 
-    "send results upon satisfying quorum" in { f: Fixture =>
+    "send results upon satisfying quorum" taggedAs (WIP) in { f: Fixture =>
       import f._
       val p = plan( 2.seconds )
 
@@ -88,13 +105,21 @@ class OutlierQuorumAggregatorSpec extends ParallelAkkaSpec with MockitoSugar {
         "aggregator"
       )
 
-      val outliers = mock[Outliers]
-      when( outliers.topic ) thenReturn Topic( "metric.name" )
-      when( outliers.algorithms ) thenReturn p.algorithms.take(1)
-      when( outliers.algorithmControlBoundaries ) thenReturn Map.empty[Symbol, Seq[ControlBoundary]]
+//      val outliers = NoOutliers( algorithms = p.algorithms, source = TimeSeries("metric.name"), plan = p )
+        val outliers = mock[Outliers]
+        when( outliers.plan ) thenReturn p
+        when( outliers.topic ) thenReturn Topic( "metric.specific" )
+        when( outliers.algorithms ) thenReturn p.algorithms.take(1)
+        when( outliers.algorithmControlBoundaries ) thenReturn Map.empty[Symbol, Seq[ControlBoundary]]
+
+      log.info( "outliers = [{}]", outliers )
+      log.info( "outliers.plan = [{}]", outliers.plan )
+      log.info( "outliers.plan.name = [{}]", outliers.plan.name )
+      log.info( "outliers.topic = [{}]", outliers.topic )
+      log.info( "outliers.anomalySize = [{}]", outliers.anomalySize )
 
       aggregator.receive( outliers )
-      destination.expectMsg( none )
+      destination.expectMsgClass( classOf[NoOutliers] )
     }
   }
 }

@@ -7,7 +7,7 @@ import scala.collection.immutable
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 import scala.util.Failure
-import akka.pattern
+import akka.{NotUsed, pattern}
 import akka.stream.OverflowStrategy
 import akka.stream.testkit.scaladsl.{TestSink, TestSource}
 import akka.stream.scaladsl._
@@ -27,7 +27,7 @@ import peds.commons.log.Trace
 import spotlight.analysis.outlier.algorithm.density.SeriesDensityAnalyzer
 import spotlight.protocol.PythonPickleProtocol
 import spotlight.testkit.ParallelAkkaSpec
-import spotlight.analysis.outlier.{DetectionAlgorithmRouter, OutlierDetection}
+import spotlight.analysis.outlier.{DetectionAlgorithmRouter, OutlierDetection, OutlierPlanDetectionRouter}
 import spotlight.model.outlier.{IsQuorum, OutlierPlan, Outliers, SeriesOutliers}
 import spotlight.model.timeseries.{DataPoint, TimeSeries}
 
@@ -39,10 +39,10 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
   import OutlierScoringModelSpec._
 
   class Fixture extends AkkaFixture { fixture =>
-    def status[T]( label: String ): Flow[T, T, Unit] = Flow[T].map { e => logger info s"\n$label:${e.toString}"; e }
+    def status[T]( label: String ): Flow[T, T, NotUsed] = Flow[T].map { e => logger info s"\n$label:${e.toString}"; e }
 
     val protocol = new PythonPickleProtocol
-    val stringFlow: Flow[ByteString, ByteString, Unit] = Flow[ByteString].via( protocol.framingFlow() )
+    val stringFlow: Flow[ByteString, ByteString, NotUsed] = Flow[ByteString].via( protocol.framingFlow() )
 
     trait TestConfigurationProvider extends OutlierDetection.ConfigurationProvider {
 //      override def makePlans: Creator = () => { fixture.plans.right }
@@ -54,9 +54,15 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
 
     val algo = SeriesDensityAnalyzer.Algorithm
 
+    val grouping: Option[OutlierPlan.Grouping] = {
+      val window = None
+      window map { w => OutlierPlan.Grouping( limit = 10000, w ) }
+    }
+
     val plan = OutlierPlan.default(
       name = "DEFAULT_PLAN",
       algorithms = Set( algo ),
+      grouping = grouping,
       timeout = 500.millis,
       isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = 1, triggerPoint = 1 ),
       reduce = Configuration.defaultOutlierReducer,
@@ -160,7 +166,10 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
       )
 
 
-      val flowUnderTest: Flow[TimeSeries, TimeSeries, Unit] = OutlierScoringModel.batchSeries( windowSize = 1.second, parallelism = 4 )
+      val flowUnderTest: Flow[TimeSeries, TimeSeries, NotUsed] = {
+        OutlierScoringModel.batchSeriesByWindow( windowSize = 1.second, parallelism = 4 )
+      }
+
       val topics = List( "foo", "bar", "foo" )
       val data: List[TimeSeries] = topics.zip(List(dp1, dp2, dp3)).map{ case (t,p) => TimeSeries(t, p) }
       trace( s"""data=[${data.mkString(",\n")}]""")
@@ -181,9 +190,15 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
       import com.github.nscala_time.time.OrderingImplicits._
 
       val algos = Set( algo )
+      val grouping: Option[OutlierPlan.Grouping] = {
+        val window = None
+        window map { w => OutlierPlan.Grouping( limit = 10000, w ) }
+      }
+
       val defaultPlan = OutlierPlan.default(
         name = "DEFAULT_PLAN",
         algorithms = algos,
+        grouping = grouping,
         timeout = 5000.millis,
         isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = algos.size, triggerPoint = 1 ),
         reduce = Configuration.defaultOutlierReducer,
@@ -206,7 +221,15 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
       val routerRef = system.actorOf( DetectionAlgorithmRouter.props, "router" )
       val dbscan = system.actorOf( SeriesDensityAnalyzer.props( routerRef ), "dbscan" )
       val detector = system.actorOf( OutlierDetection.props( routerRef = routerRef ), "detectOutliers" )
-
+      val planRouter = system.actorOf(
+        OutlierPlanDetectionRouter.props(
+          _detectorRef = detector,
+          _detectionBudget = 2.minutes,
+          _bufferSize = 1000,
+          _maxInDetectionCpuFactor = 1
+        ),
+        "planRouter"
+      )
       val now = new joda.DateTime( 2016, 3, 25, 10, 38, 40, 81 ) // new joda.DateTime( joda.DateTime.now.getMillis / 1000L * 1000L )
       logger.debug( "USE NOW = {}", now )
 
@@ -225,15 +248,18 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
       )
 //      val expected = TimeSeries( "foo", (dp1 ++ dp3).sortBy( _.timestamp ) )
 
-      val graphiteFlow = OutlierScoringModel.batchSeries( parallelism = 4, windowSize = 20.millis )
-      val detectFlow = OutlierDetection.detectionFlow(
-        detector = detector,
-        maxInDetectionFactor = 1,
-        maxAllowedWait = 2.seconds,
-        plans = Seq( defaultPlan )
+      val graphiteFlow = OutlierScoringModel.batchSeriesByPlan( max = 1000 )
+      val detectFlow = OutlierPlanDetectionRouter.elasticPlanDetectionRouterFlow(
+        planDetectorRouterRef = planRouter,
+        maxInDetectionCpuFactor = 1
       )
 
-      val flowUnderTest = graphiteFlow via detectFlow
+      val flowUnderTest = {
+        Flow[TimeSeries]
+        .map{ ts => (ts, defaultPlan) }
+        .via( graphiteFlow )
+        .via( detectFlow )
+      }
 
       val (pub, sub) = {
         TestSource.probe[TimeSeries]
@@ -304,15 +330,15 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
         Fixture.TickA( topic, Seq(next) )
       }
 
-      def conflateFlow[T](): Flow[T, T, Unit] = {
-        Flow[T]
-        .conflate( _ => List.empty[T] ){ (l, u) => u :: l }
-        .mapConcat(identity)
-      }
+//      def conflateFlow[T](): Flow[T, T, Unit] = {
+//        Flow[T]
+//        .conflate( _ => List.empty[T] ){ (l, u) => u :: l }
+//        .mapConcat(identity)
+//      }
 
       val source = Source.tick( 0.second, 50.millis, tickFn ).map { t => t() }
 
-      val flowUnderTest: Flow[Fixture.TickA, Fixture.TickA, Unit] = {
+      val flowUnderTest: Flow[Fixture.TickA, Fixture.TickA, NotUsed] = {
         Flow[Fixture.TickA]
         .groupedWithin( n = 10000, d = 210.millis )
         .map {

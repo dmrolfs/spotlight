@@ -84,11 +84,16 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
       ctx <- toConcreteContextK
       distance <- distanceMeasure
     } yield {
-      val distances = contiguousPairs( ctx ) map { case (cur, prev) => distance.compute( cur.getPoint, prev.getPoint ) }
+      val distances = contiguousPairs( ctx ) map { case (cur, prev) =>
+        val d = distance.compute( cur.getPoint, prev.getPoint )
+        log.debug( "distance:[{}] for contiguous pairs: [{}, {}]", d, prev.getPoint.mkString("(", ",",")"), cur.getPoint.mkString("(",",",")") )
+        d
+      }
       val updatedStats = distances.foldLeft( ctx.distanceStatistics ) { (stats, d) =>
-        stats addValue d
+        if ( !d.isNaN ) stats addValue d
         stats
       }
+      log.debug( "updated distance m:[{}] sd:[{}] stats: [{}]", updatedStats.getMean, updatedStats.getStandardDeviation, updatedStats )
       ctx.copy( distanceStatistics = updatedStats ).asInstanceOf[AlgorithmContext]
     }
   }
@@ -103,6 +108,7 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
         \/ fromTryCatchNonFatal { c.messageConfig getInt algorithm.name + ".minDensityConnectedPoints" }
       }
     } yield {
+      log.debug( "DBSCAN eps = [{}]", e )
       log.debug( "cluster: context dist-stats=[{}]", ctx.distanceStatistics )
       import scala.collection.JavaConverters._
       val clustersD = \/ fromTryCatchNonFatal {
@@ -197,7 +203,7 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
       else {
         val t = tol getOrElse 3.0
         contiguousPairs( ctx ) map { case (p2, p1) => // later point is paired first since primary
-          val Array( ts2, v2) = p2.getPoint
+          val Array( ts2, v2 ) = p2.getPoint
 
           def extrapolate( label: String, target: Double ): Double => Double = (v: Double) => {
             distance.compute( p1.getPoint, Array(ts2, v) ) - target
