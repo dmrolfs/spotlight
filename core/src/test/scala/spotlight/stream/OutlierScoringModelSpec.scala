@@ -7,7 +7,7 @@ import scala.collection.immutable
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 import scala.util.Failure
-import akka.pattern
+import akka.{NotUsed, pattern}
 import akka.stream.OverflowStrategy
 import akka.stream.testkit.scaladsl.{TestSink, TestSource}
 import akka.stream.scaladsl._
@@ -39,10 +39,10 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
   import OutlierScoringModelSpec._
 
   class Fixture extends AkkaFixture { fixture =>
-    def status[T]( label: String ): Flow[T, T, Unit] = Flow[T].map { e => logger info s"\n$label:${e.toString}"; e }
+    def status[T]( label: String ): Flow[T, T, NotUsed] = Flow[T].map { e => logger info s"\n$label:${e.toString}"; e }
 
     val protocol = new PythonPickleProtocol
-    val stringFlow: Flow[ByteString, ByteString, Unit] = Flow[ByteString].via( protocol.framingFlow() )
+    val stringFlow: Flow[ByteString, ByteString, NotUsed] = Flow[ByteString].via( protocol.framingFlow() )
 
     trait TestConfigurationProvider extends OutlierDetection.ConfigurationProvider {
 //      override def makePlans: Creator = () => { fixture.plans.right }
@@ -166,7 +166,10 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
       )
 
 
-      val flowUnderTest: Flow[TimeSeries, TimeSeries, Unit] = OutlierScoringModel.batchSeries( windowSize = 1.second, parallelism = 4 )
+      val flowUnderTest: Flow[TimeSeries, TimeSeries, NotUsed] = {
+        OutlierScoringModel.batchSeriesByWindow( windowSize = 1.second, parallelism = 4 )
+      }
+
       val topics = List( "foo", "bar", "foo" )
       val data: List[TimeSeries] = topics.zip(List(dp1, dp2, dp3)).map{ case (t,p) => TimeSeries(t, p) }
       trace( s"""data=[${data.mkString(",\n")}]""")
@@ -245,13 +248,18 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
       )
 //      val expected = TimeSeries( "foo", (dp1 ++ dp3).sortBy( _.timestamp ) )
 
-      val graphiteFlow = OutlierScoringModel.batchSeries( parallelism = 4, windowSize = 20.millis )
+      val graphiteFlow = OutlierScoringModel.batchSeriesByPlan( max = 1000 )
       val detectFlow = OutlierPlanDetectionRouter.elasticPlanDetectionRouterFlow(
         planDetectorRouterRef = planRouter,
         maxInDetectionCpuFactor = 1
       )
 
-      val flowUnderTest = graphiteFlow.map{ ts => (ts, defaultPlan) } via detectFlow
+      val flowUnderTest = {
+        Flow[TimeSeries]
+        .map{ ts => (ts, defaultPlan) }
+        .via( graphiteFlow )
+        .via( detectFlow )
+      }
 
       val (pub, sub) = {
         TestSource.probe[TimeSeries]
@@ -322,15 +330,15 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
         Fixture.TickA( topic, Seq(next) )
       }
 
-      def conflateFlow[T](): Flow[T, T, Unit] = {
-        Flow[T]
-        .conflate( _ => List.empty[T] ){ (l, u) => u :: l }
-        .mapConcat(identity)
-      }
+//      def conflateFlow[T](): Flow[T, T, Unit] = {
+//        Flow[T]
+//        .conflate( _ => List.empty[T] ){ (l, u) => u :: l }
+//        .mapConcat(identity)
+//      }
 
       val source = Source.tick( 0.second, 50.millis, tickFn ).map { t => t() }
 
-      val flowUnderTest: Flow[Fixture.TickA, Fixture.TickA, Unit] = {
+      val flowUnderTest: Flow[Fixture.TickA, Fixture.TickA, NotUsed] = {
         Flow[Fixture.TickA]
         .groupedWithin( n = 10000, d = 210.millis )
         .map {
