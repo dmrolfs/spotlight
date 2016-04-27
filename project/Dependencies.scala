@@ -14,7 +14,7 @@ object Dependencies {
   }
 
   object demesne {
-    val version = "1.0.2"
+    val version = "1.0.3"
     def module( id: String ) = "com.github.dmrolfs" %% s"demesne-$id" % version
     val core = module( "core" )
     val testkit = module( "testkit" )
@@ -25,6 +25,7 @@ object Dependencies {
     def module( id: String ) = "com.typesafe.akka" %% s"akka-$id" % version
 
     val actor = module( "actor" )
+    val stream = module( "stream" )
     val agent = module( "agent" )
     val cluster = module( "cluster" )
     val clusterSharding = module( "cluster-sharding" )
@@ -33,9 +34,6 @@ object Dependencies {
     val remote = module( "remote" )
     val slf4j = module( "slf4j" )
     val testkit = module( "testkit" )
-//
-//    val streamsVersion = "2.0.3"
-//    val streams = "com.typesafe.akka" % "akka-stream-experimental_2.11" % streamsVersion
     val streamsTestkit = module( "stream-testkit" )
   }
 
@@ -144,6 +142,7 @@ object Dependencies {
 
   val commonDependencies = log.all ++ peds.all ++ time.all ++ Seq(
     akka.actor,
+    akka.stream,
     akka.slf4j,
     facility.uuid,
     facility.config,

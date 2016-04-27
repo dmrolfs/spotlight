@@ -3,6 +3,8 @@ package spotlight.app
 import java.net.{InetSocketAddress, Socket}
 import java.util.concurrent.TimeoutException
 
+import akka.NotUsed
+
 import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
 import scala.util.{Failure, Success}
@@ -147,7 +149,7 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
   )(
     implicit system: ActorSystem,
     materializer: Materializer
-  ): V[Flow[ByteString, ByteString, Unit]] = {
+  ): V[Flow[ByteString, ByteString, NotUsed]] = {
     context.reloader() map { conf =>
       logger.info(
         s"""
@@ -176,9 +178,7 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
         val timeSeries = b.add( conf.protocol.unmarshalTimeSeriesData )
         val scoring = b.add( OutlierScoringModel.scoringGraph( planRouterRef = context.planRouter, config = conf ) )
         val logUnrecognized = b.add(
-          Flow[TimeSeries].transform( () =>
-            OutlierScoringModel.logMetric( Logger( LoggerFactory getLogger "Unrecognized" ), conf.plans )
-          )
+          OutlierScoringModel.logMetric( Logger( LoggerFactory getLogger "Unrecognized" ), conf.plans )
         )
         val ingressBroadcast = b.add( Broadcast[TimeSeries](outputPorts = 2, eagerCancel = false) )
         val egressBroadcast = b.add( Broadcast[Outliers](outputPorts = 2, eagerCancel = true) )
@@ -215,8 +215,8 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
         StreamMonitor.set(
           'framing,
           'intakeBuffer,
-          Symbol("planConcat.buffer"),
-          Symbol( OutlierPlanDetectionRouter.WatchPoints.PlanRouter.name + ".buffer" ),
+          Symbol("plan.buffer"),
+//          Symbol( OutlierPlanDetectionRouter.WatchPoints.PlanRouter.name + ".buffer" ),
           OutlierPlanDetectionRouter.WatchPoints.PlanRouter,
           Symbol( "publish.buffer" )
         )
@@ -234,7 +234,7 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
     }
   }
 
-  def archiveFilter[T <: TimeSeriesBase]( config: Configuration ): Flow[T, T, Unit] = {
+  def archiveFilter[T <: TimeSeriesBase]( config: Configuration ): Flow[T, T, NotUsed] = {
     val archiveWhitelist: Set[Regex] = {
       import scala.collection.JavaConverters._
       if ( config hasPath "spotlight.training.whitelist" ) {

@@ -5,7 +5,10 @@ import Dependencies._
 import spray.revolver.RevolverPlugin._
 
 object BuildSettings {
+  val VERSION = "1.2.0"
+
   val defaultBuildSettings = Defaults.coreDefaultSettings ++ Format.settings ++ Revolver.settings ++ Seq(
+    version := VERSION,
     organization := "cdkglobal",
     crossScalaVersions := Seq( "2.11.8" ),
     scalaVersion <<= crossScalaVersions { (vs: Seq[String]) => vs.head },
@@ -39,6 +42,7 @@ object BuildSettings {
     // AllenAi Public Resolver
     resolvers += "Typesafe Repository" at "http://repo.typesafe.com/typesafe/releases/",
     // resolvers += "AllenAI Releases" at "http://utility.allenai.org:8081/nexus/content/repositories/public-releases",
+    resolvers += "krasserm at bintray" at "http://dl.bintray.com/krasserm/maven",
     resolvers += "omen-bintray" at "http://dl.bintray.com/omen/maven",
     resolvers += "dnvriend at bintray" at "http://dl.bintray.com/dnvriend/maven",
     // Factorie Resolver

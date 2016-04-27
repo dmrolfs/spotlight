@@ -1,15 +1,16 @@
 package spotlight.protocol
 
-import java.io.{ OutputStreamWriter, ByteArrayOutputStream }
+import java.io.{ByteArrayOutputStream, OutputStreamWriter}
 import java.math.BigInteger
 import java.nio.charset.Charset
-import java.nio.{ ByteBuffer, ByteOrder }
-import akka.stream.io.Framing
-import akka.stream.scaladsl.Flow
+import java.nio.{ByteBuffer, ByteOrder}
+
+import akka.NotUsed
+import akka.stream.scaladsl.{Flow, Framing}
 import akka.util.ByteString
 import com.typesafe.scalalogging.LazyLogging
 import net.razorvine.pickle.Pickler
-import org.joda.{ time => joda }
+import org.joda.{time => joda}
 import peds.commons.log.Trace
 import spotlight.model.timeseries._
 
@@ -60,7 +61,7 @@ class PythonPickleProtocol extends GraphiteSerializationProtocol with LazyLoggin
   // If perf is an issue, may consider hand-coding pickler based on dropwizard graphite reporter.
   val pickler = new Pickler( false )
 
-  override def framingFlow( maximumFrameLength: Int = GraphiteMaximumFrameLength ): Flow[ByteString, ByteString, Unit] = {
+  override def framingFlow( maximumFrameLength: Int = GraphiteMaximumFrameLength ): Flow[ByteString, ByteString, NotUsed] = {
     Framing.lengthField(
       fieldLength = SizeFieldLength,
       fieldOffset = 0,

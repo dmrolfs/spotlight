@@ -1,5 +1,7 @@
 package spotlight.analysis.outlier
 
+import akka.NotUsed
+
 import scala.concurrent.duration.FiniteDuration
 import akka.actor.{Actor, ActorLogging, ActorRef, ActorSystem, Props, SupervisorStrategy}
 import akka.event.LoggingReceive
@@ -15,7 +17,6 @@ import spotlight.analysis.outlier.OutlierDetection.DetectionResult
 import spotlight.model.outlier.{OutlierPlan, Outliers}
 import spotlight.model.timeseries.{TimeSeries, TimeSeriesBase}
 import spotlight.model.timeseries.TimeSeriesBase.Merging
-
 
 
 /**
@@ -44,17 +45,12 @@ object OutlierPlanDetectionRouter extends LazyLogging {
   )(
     implicit system: ActorSystem,
     materializer: Materializer
-  ): Flow[(TimeSeries, OutlierPlan), Outliers, Unit] = {
-    import StreamMonitor._
-    Flow[(TimeSeries, OutlierPlan)]
-    .buffer( 10000, OverflowStrategy.backpressure ).watchFlow( Symbol(WatchPoints.PlanRouter.name + ".buffer" ) )
-    .via {
-      ProcessorAdapter.elasticProcessorFlow[(TimeSeries, OutlierPlan), Outliers](
-        maxInDetectionCpuFactor,
-        label = WatchPoints.PlanRouter
-      ) {
-        case m => planDetectorRouterRef
-      }
+  ): Flow[(TimeSeries, OutlierPlan), Outliers, NotUsed] = {
+    ProcessorAdapter.elasticProcessorFlow[(TimeSeries, OutlierPlan), Outliers](
+      maxInDetectionCpuFactor,
+      label = WatchPoints.PlanRouter
+    ) {
+      case m => planDetectorRouterRef
     }
   }
 
@@ -90,7 +86,7 @@ object OutlierPlanDetectionRouter extends LazyLogging {
     }
   }
 
-  final case class PlanStream private[outlier]( ingressRef: ActorRef, graph: RunnableGraph[Unit] )
+  final case class PlanStream private[outlier]( ingressRef: ActorRef, graph: RunnableGraph[NotUsed] )
 
   trait ConfigurationProvider {
     def detector: ActorRef
@@ -205,7 +201,7 @@ class OutlierPlanDetectionRouter extends Actor with InstrumentedActor with Actor
     grouping: OutlierPlan.Grouping
   )(
     implicit tsMerging: Merging[TimeSeries]
-  ): Flow[TimeSeries, TimeSeries, Unit] = {
+  ): Flow[TimeSeries, TimeSeries, NotUsed] = {
     log.debug( "batchSeries grouping = [{}]", grouping )
 
     Flow[TimeSeries]
@@ -221,7 +217,7 @@ class OutlierPlanDetectionRouter extends Actor with InstrumentedActor with Actor
 
   import java.util.concurrent.atomic.AtomicInteger
   val detectionId = new AtomicInteger()
-  def detectionFlow( plan: OutlierPlan )( implicit system: ActorSystem ): Flow[TimeSeriesBase, Outliers, Unit] = {
+  def detectionFlow( plan: OutlierPlan )( implicit system: ActorSystem ): Flow[TimeSeriesBase, Outliers, NotUsed] = {
 
     val label = Symbol( s"${OutlierDetection.WatchPoints.DetectionFlow.name}-${plan.name}-${detectionId.incrementAndGet()}" )
 

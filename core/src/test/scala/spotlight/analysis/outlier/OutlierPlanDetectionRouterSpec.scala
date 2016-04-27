@@ -2,6 +2,8 @@ package spotlight.analysis.outlier
 
 import java.util.concurrent.atomic.AtomicInteger
 
+import akka.NotUsed
+
 import scala.concurrent.duration._
 import akka.actor.{ActorRef, Props}
 import akka.stream.scaladsl._
@@ -29,7 +31,7 @@ class OutlierPlanDetectionRouterSpec extends ParallelAkkaSpec with LazyLogging {
   import OutlierPlanDetectionRouterSpec._
 
   class Fixture extends AkkaFixture { fixture =>
-    def status[T]( label: String ): Flow[T, T, Unit] = Flow[T].map { e => logger info s"\n$label:${e.toString}"; e }
+    def status[T]( label: String ): Flow[T, T, NotUsed] = Flow[T].map { e => logger info s"\n$label:${e.toString}"; e }
 
     val algo = SimpleMovingAverageAnalyzer.Algorithm
 
