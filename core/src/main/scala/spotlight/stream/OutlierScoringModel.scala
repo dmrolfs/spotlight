@@ -1,6 +1,7 @@
 package spotlight.stream
 
 import java.util.concurrent.atomic.AtomicInteger
+
 import scala.concurrent.duration._
 import akka.NotUsed
 import akka.stream.FanOutShape.{Init, Name}
@@ -12,6 +13,7 @@ import com.typesafe.scalalogging.{Logger, StrictLogging}
 import org.slf4j.LoggerFactory
 import peds.akka.metrics.Instrumented
 import peds.akka.stream.StreamMonitor
+import peds.commons.Valid
 import peds.commons.collection.BloomFilter
 import spotlight.analysis.outlier.OutlierPlanDetectionRouter
 import spotlight.model.outlier._
@@ -171,7 +173,8 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
     materializer: Materializer,
     tsMerging: Merging[TimeSeries]
   ): Flow[(TimeSeries, OutlierPlan), (TimeSeries, OutlierPlan), NotUsed] = {
-    val seed: ((TimeSeries, OutlierPlan)) => Map[(Topic, OutlierPlan), TimeSeries] = (tsp: (TimeSeries, OutlierPlan)) => {
+    type PlanSeriesAccumulator = Map[(Topic, OutlierPlan), TimeSeries]
+    val seed: ((TimeSeries, OutlierPlan)) => PlanSeriesAccumulator = (tsp: (TimeSeries, OutlierPlan)) => {
       val (ts, p) = tsp
       val key = (ts.topic, p)
       Map( key -> ts )
@@ -180,10 +183,26 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
     Flow[(TimeSeries, OutlierPlan)]
     .buffer( 1000, OverflowStrategy.backpressure )
     .batch( max, seed ){ case (acc, (ts, p)) =>
+      import scalaz._, Scalaz._
+
       val key = (ts.topic, p)
-      acc + ( key -> ts )
+      val existing  = acc get key
+
+      val newAcc = for {
+        updated <- existing.map{ e => tsMerging.merge(e, ts).disjunction } getOrElse ts.right
+      } yield {
+        acc + ( key -> updated )
+      }
+
+      newAcc match {
+        case \/-( a ) => a
+        case -\/( exs ) => {
+          exs foreach { ex => logger.error( "batching series by plan failed: {}", ex ) }
+          acc
+        }
+      }
     }
-    .mapConcat { _.map { case ((topic, plan), ts) => ( ts, plan ) } }
+    .mapConcat { _.toSeq.to[scala.collection.immutable.Seq].map { case ((topic, plan), ts) => ( ts, plan ) } }
   }
 
 

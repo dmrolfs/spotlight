@@ -29,6 +29,7 @@ import spotlight.protocol.PythonPickleProtocol
 import spotlight.testkit.ParallelAkkaSpec
 import spotlight.analysis.outlier.{DetectionAlgorithmRouter, OutlierDetection, OutlierPlanDetectionRouter}
 import spotlight.model.outlier.{IsQuorum, OutlierPlan, Outliers, SeriesOutliers}
+import spotlight.model.timeseries.TimeSeriesBase.Merging
 import spotlight.model.timeseries.{DataPoint, TimeSeries}
 
 
@@ -73,6 +74,23 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
         """.stripMargin
       )
     )
+
+    def makePlan( name: String, g: Option[OutlierPlan.Grouping] ): OutlierPlan = {
+      OutlierPlan.default(
+        name = name,
+        algorithms = Set( algo ),
+        grouping = g,
+        timeout = 500.millis,
+        isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = 1, triggerPoint = 1 ),
+        reduce = Configuration.defaultOutlierReducer,
+        planSpecification = ConfigFactory.parseString(
+          s"""
+             |algorithm-config.${algo.name}.seedEps: 5.0
+             |algorithm-config.${algo.name}.minDensityConnectedPoints: 3
+          """.stripMargin
+        )
+      )
+    }
 
     val plans = Seq( plan )
   }
@@ -184,7 +202,119 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
     }
 
 
-    "detect Outliers" taggedAs (WIP) in { f: Fixture =>
+    "batch series by plan passthru without merging with demand" taggedAs (WIP) in { f: Fixture =>
+      import f._
+      import OutlierScoringModelSpec._
+
+      val p1 = makePlan( "p1", None )
+      val p2 = makePlan( "p2", None )
+      val myPlans = Set( p1, p2 )
+
+
+      val flowUnderTest = {
+        Flow[TimeSeries]
+        .map { ts =>
+          myPlans collect { case p if p appliesTo ts =>
+            logger.debug( "plan [{}] applies to ts [{}]", p.name, ts.topic )
+            (ts, p)
+          }
+        }
+        .mapConcat { identity }
+        .via( OutlierScoringModel.batchSeriesByPlan(100) )
+        .map { m =>
+          logger.info( "passing message onto plan router: [{}]", m )
+          m
+        }
+        .named( "preFlow" )
+      }
+
+      val pts1 = makeDataPoints( values = Seq.fill( 9 )( 1.0 ) )
+      val ts1 = spike( pts1 )( pts1.size - 1 )
+      val pts2 = makeDataPoints(
+                                 values = Seq.fill( 9 )( 1.0 ),
+                                 start = pts1.last.timestamp.plusSeconds( 1 )
+                               )
+      val ts2 = spike( pts2 )( pts2.size - 1 )
+      val expectedTs = implicitly[Merging[TimeSeries]].merge( ts1, ts2 ).toOption.get
+
+      val data = Seq( ts1, ts2 )
+
+      val (pub, sub) = {
+        TestSource.probe[TimeSeries]
+        .via( flowUnderTest )
+        .toMat( TestSink.probe[(TimeSeries, OutlierPlan)] )( Keep.both )
+        .run()
+      }
+
+      val ps = pub.expectSubscription()
+      val ss = sub.expectSubscription()
+
+      ss.request( 4 ) // request before sendNext creates demand
+
+      data foreach { ps.sendNext }
+
+      sub.expectNext() mustBe (ts1, p1)
+      sub.expectNext() mustBe (ts1, p2)
+      sub.expectNext() mustBe (ts2, p1)
+      sub.expectNext() mustBe (ts2, p2)
+    }
+
+    "batch series by plan with merging if backpressured" taggedAs (WIP) in { f: Fixture =>
+      import f._
+      import OutlierScoringModelSpec._
+
+      val p1 = makePlan( "p1", None )
+      val p2 = makePlan( "p2", None )
+      val myPlans = Set( p1, p2 )
+
+
+      val flowUnderTest = {
+        Flow[TimeSeries]
+        .map { ts =>
+          myPlans collect { case p if p appliesTo ts =>
+            logger.debug( "plan [{}] applies to ts [{}]", p.name, ts.topic )
+            (ts, p)
+          }
+        }
+        .mapConcat { identity }
+        .via( OutlierScoringModel.batchSeriesByPlan(100) )
+        .map { m =>
+          logger.info( "passing message onto plan router: [{}]", m )
+          m
+        }
+        .named( "preFlow" )
+      }
+
+      val pts1 = makeDataPoints( values = Seq.fill( 9 )( 1.0 ) )
+      val ts1 = spike( pts1 )( pts1.size - 1 )
+      val pts2 = makeDataPoints(
+        values = Seq.fill( 9 )( 1.0 ),
+        start = pts1.last.timestamp.plusSeconds( 1 )
+      )
+      val ts2 = spike( pts2 )( pts2.size - 1 )
+      val expectedTs = implicitly[Merging[TimeSeries]].merge( ts1, ts2 ).toOption.get
+
+      val data = Seq( ts1, ts2 )
+
+      val (pub, sub) = {
+        TestSource.probe[TimeSeries]
+        .via( flowUnderTest )
+        .toMat( TestSink.probe[(TimeSeries, OutlierPlan)] )( Keep.both )
+        .run()
+      }
+
+      val ps = pub.expectSubscription()
+      val ss = sub.expectSubscription()
+
+      data foreach { ps.sendNext }
+
+      ss.request( 2 ) // request after sendNext creates backpressure
+
+      sub.expectNext() mustBe (expectedTs, p1)
+      sub.expectNext() mustBe (expectedTs, p2)
+    }
+
+    "detect Outliers" in { f: Fixture =>
       import f._
       import system.dispatcher
       import com.github.nscala_time.time.OrderingImplicits._
@@ -533,6 +663,13 @@ object OutlierScoringModelSpec {
       DataPoint( timestamp = ts, value = v )
     }
   }
+
+  def spike( data: Seq[DataPoint], value: Double = 1000D )( position: Int = data.size - 1 ): TimeSeries = {
+    val (front, last) = data.sortBy{ _.timestamp.getMillis }.splitAt( position )
+    val spiked = ( front :+ last.head.copy( value = value ) ) ++ last.tail
+    TimeSeries( "test-series", spiked )
+  }
+
 
   val points: Seq[Double] = Seq(
     9.46,

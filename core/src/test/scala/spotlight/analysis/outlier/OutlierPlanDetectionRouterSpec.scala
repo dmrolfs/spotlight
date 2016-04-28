@@ -5,8 +5,10 @@ import java.util.concurrent.atomic.AtomicInteger
 import akka.NotUsed
 
 import scala.concurrent.duration._
-import akka.actor.{ActorRef, Props}
+import akka.actor.{ActorRef, ActorSystem, Props}
+import akka.stream.{Materializer, OverflowStrategy}
 import akka.stream.scaladsl._
+import akka.stream.testkit.scaladsl.{TestSink, TestSource}
 import akka.testkit.TestActor.AutoPilot
 import akka.testkit._
 import com.typesafe.config.ConfigFactory
@@ -20,8 +22,11 @@ import spotlight.analysis.outlier.OutlierDetection.DetectionResult
 import spotlight.analysis.outlier.algorithm.skyline.SimpleMovingAverageAnalyzer
 import spotlight.testkit.ParallelAkkaSpec
 import spotlight.model.outlier._
-import spotlight.model.timeseries.{ControlBoundary, DataPoint, TimeSeries}
-import spotlight.stream.Configuration
+import spotlight.model.timeseries.TimeSeriesBase.Merging
+import spotlight.model.timeseries.{ControlBoundary, DataPoint, TimeSeries, Topic}
+import spotlight.stream.{Configuration, OutlierScoringModel}
+
+import scala.concurrent.Await
 
 
 /**
@@ -39,9 +44,9 @@ class OutlierPlanDetectionRouterSpec extends ParallelAkkaSpec with LazyLogging {
     detector.setAutoPilot(
       new AutoPilot {
         override def run( dest: ActorRef, msg: Any ): AutoPilot = {
+          log.info( "DETECTOR AUTOPILOT" )
           msg match {
             case m: OutlierDetectionMessage => {
-              log.info( "Detector AutoPilot received: [{}]", m )
               val results = DetectionResult(
                 Outliers.forSeries(
                   algorithms = Set( algo ),
@@ -52,6 +57,7 @@ class OutlierPlanDetectionRouterSpec extends ParallelAkkaSpec with LazyLogging {
                 ).toOption.get
               )
 
+              log.info( "Detector AutoPilot\n + received: [{}]\n + sending:[{}]\n", m, results )
               dest ! results
               TestActor.KeepRunning
             }
@@ -224,6 +230,122 @@ class OutlierPlanDetectionRouterSpec extends ParallelAkkaSpec with LazyLogging {
       router.tell( m2, subscriber.ref )
       detector.expectMsgClass( 200.millis.dilated, classOf[DetectOutliersInSeries] )
       subscriber.expectMsgClass( 200.millis.dilated, classOf[NoOutliers] )
+    }
+
+    "plan router flow routes to all applicable plans" taggedAs (WIP) in { f: Fixture =>
+      import f._
+
+//      def batchSeriesByPlan(
+//        max: Long
+//      )(
+//        implicit system: ActorSystem,
+//        materializer: Materializer,
+//        tsMerging: Merging[TimeSeries]
+//      ): Flow[(TimeSeries, OutlierPlan), (TimeSeries, OutlierPlan), NotUsed] = {
+//        val seed: ((TimeSeries, OutlierPlan)) => Map[(Topic, OutlierPlan), TimeSeries] = (tsp: (TimeSeries, OutlierPlan)) => {
+//          val (ts, p) = tsp
+//          val key = (ts.topic, p)
+//          Map( key -> ts )
+//        }
+//
+//
+//        Flow[(TimeSeries, OutlierPlan)]
+//        .buffer( (max / 10).toInt, OverflowStrategy.backpressure )
+//        .batch( max, seed ){ case (acc, (ts, p)) =>
+//          import scalaz._, Scalaz._
+//
+//          logger.debug( "+ batching p:ts: [{}] [{}]", p.name, ts)
+//
+//          val key = (ts.topic, p)
+//          val existing  = acc get key
+//
+//          val newAcc = for {
+//            updated <- existing.map{ e => tsMerging.merge(e, ts).disjunction } getOrElse ts.right
+//          } yield {
+//            acc + ( key -> updated )
+//          }
+//
+//          newAcc match {
+//            case \/-( a ) => a
+//            case -\/( exs ) => {
+//              exs foreach { ex => logger.error( "batching series by plan failed: {}", ex ) }
+//              acc
+//            }
+//          }
+//        }
+//        .mapConcat { acc =>
+//          acc.toSeq.to[scala.collection.immutable.Seq].map { case ((topic, plan), ts) =>
+//            logger.debug( "+ mapConcat P:ts: [{}] [{}]", plan.name, ts)
+//            ( ts, plan )
+//          }
+//        }
+//        .named( "batchSeriesByPlan" )
+//      }
+
+      val planRouterRef = system.actorOf(
+        OutlierPlanDetectionRouter.props(
+          _detectorRef = detector.ref,
+          _detectionBudget = 2.seconds,
+          _bufferSize = 100,
+          _maxInDetectionCpuFactor = 1.0
+        ),
+        "plan-router"
+      )
+
+      val planDetectionFlow = OutlierPlanDetectionRouter.elasticPlanDetectionRouterFlow(
+        planDetectorRouterRef = planRouterRef,
+        maxInDetectionCpuFactor = 1.0
+      )
+
+      val p1 = makePlan( "p1", None )
+      val p2 = makePlan( "p2", None )
+      val plans = Set( p1, p2 )
+
+      val preFlow = {
+        Flow[TimeSeries]
+        .map { ts =>
+          plans collect { case p if p appliesTo ts =>
+            logger.debug( "plan [{}] applies to ts [{}]", p.name, ts.topic )
+            (ts, p)
+          }
+        }
+        .mapConcat { identity }
+        .via( OutlierScoringModel.batchSeriesByPlan(100) )
+        .map { m =>
+          logger.info( "passing message onto plan router: [{}]", m )
+          m
+        }
+        .named( "preFlow" )
+      }
+
+      val flowUnderTest = preFlow via planDetectionFlow
+
+      val pts1 = makeDataPoints( values = Seq.fill( 9 )( 1.0 ) )
+      val ts1 = spike( pts1 )( pts1.size - 1 )
+      val data = Seq( ts1 )
+
+      val (pub, sub) = {
+        TestSource.probe[TimeSeries]
+        .via( flowUnderTest )
+        .toMat( TestSink.probe[Outliers] )( Keep.both )
+        .run()
+      }
+
+      val ps = pub.expectSubscription()
+      val ss = sub.expectSubscription()
+
+      data foreach { ps.sendNext }
+
+      ss.request( 2 )
+
+      val a1 = sub.expectNext()
+      plans.contains( a1.plan ) mustBe true
+      a1.source mustBe ts1
+
+      val a2 = sub.expectNext()
+      plans.contains( a2.plan ) mustBe true
+      a1.plan must not be a2.plan
+      a2.source mustBe ts1
     }
 
     //    "framed flow convert graphite pickle into TimeSeries" in { f: Fixture =>
