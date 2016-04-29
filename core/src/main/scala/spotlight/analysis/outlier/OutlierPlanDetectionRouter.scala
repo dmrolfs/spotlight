@@ -30,6 +30,7 @@ object OutlierPlanDetectionRouter extends LazyLogging {
     _maxInDetectionCpuFactor: Double
   ): Props = {
     Props(
+      //todo change to vals where possible?
       new OutlierPlanDetectionRouter with ConfigurationProvider {
         override def detector: ActorRef = _detectorRef
         override def detectionBudget: FiniteDuration = _detectionBudget
@@ -215,10 +216,9 @@ class OutlierPlanDetectionRouter extends Actor with InstrumentedActor with Actor
     .mapConcat { identity }
   }
 
-  import java.util.concurrent.atomic.AtomicInteger
-  val detectionId = new AtomicInteger()
-  def detectionFlow( plan: OutlierPlan )( implicit system: ActorSystem ): Flow[TimeSeriesBase, Outliers, NotUsed] = {
+  val detectionId = new java.util.concurrent.atomic.AtomicInteger()
 
+  def detectionFlow( plan: OutlierPlan )( implicit system: ActorSystem ): Flow[TimeSeriesBase, Outliers, NotUsed] = {
     val label = Symbol( s"${OutlierDetection.WatchPoints.DetectionFlow.name}-${plan.name}-${detectionId.incrementAndGet()}" )
 
     val flow = Flow[TimeSeriesBase]

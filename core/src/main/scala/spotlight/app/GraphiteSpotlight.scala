@@ -1,14 +1,12 @@
 package spotlight.app
 
 import java.net.{InetSocketAddress, Socket}
-import java.util.concurrent.TimeoutException
 
-import akka.NotUsed
-
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.{ExecutionContext, Future, TimeoutException}
 import scala.concurrent.duration._
 import scala.util.{Failure, Success}
 import scala.util.matching.Regex
+import akka.NotUsed
 import akka.actor.{ActorRef, ActorSystem}
 import akka.stream.scaladsl._
 import akka.stream._
@@ -182,8 +180,10 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
         )
         val ingressBroadcast = b.add( Broadcast[TimeSeries](outputPorts = 2, eagerCancel = false) )
         val egressBroadcast = b.add( Broadcast[Outliers](outputPorts = 2, eagerCancel = true) )
+
+        //todo remove after working
         val publishBuffer = b.add(
-          Flow[Outliers].buffer( 10000, OverflowStrategy.backpressure ).watchFlow( Symbol("publish.buffer"))
+          Flow[Outliers].buffer( 1000, OverflowStrategy.backpressure ).watchFlow( Symbol("publish.buffer"))
         )
         val publish = b.add( publishOutliers( context.config.graphiteAddress ) )
         val tcpOut = b.add( Flow[Outliers].map{ _ => ByteString() } )

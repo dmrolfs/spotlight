@@ -26,7 +26,7 @@ import spotlight.model.timeseries.TimeSeriesBase.Merging
 import spotlight.model.timeseries.{ControlBoundary, DataPoint, TimeSeries, Topic}
 import spotlight.stream.{Configuration, OutlierScoringModel}
 
-import scala.concurrent.Await
+import scala.concurrent.{Await, ExecutionContext}
 
 
 /**
@@ -92,7 +92,7 @@ class OutlierPlanDetectionRouterSpec extends ParallelAkkaSpec with LazyLogging {
         }
       ),
       "fixture-plan-router"
-                                                             )
+    )
 
     def makePlan( name: String, g: Option[OutlierPlan.Grouping] ): OutlierPlan = {
       OutlierPlan.default(
@@ -127,7 +127,7 @@ class OutlierPlanDetectionRouterSpec extends ParallelAkkaSpec with LazyLogging {
   val DONE = Tag( "done" )
 
   "OutlierPlanDetectionRouter" should {
-    "make functioning plan stream" in { f: Fixture =>
+    "make functioning plan stream" taggedAs (WIP) in { f: Fixture =>
       import f._
       val actual = planRouter.underlyingActor.makePlanStream( plan, subscriber.ref )
       log.info( "actual = [{}]", actual )
