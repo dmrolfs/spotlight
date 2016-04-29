@@ -1,10 +1,11 @@
 package spotlight.publish
 
 import java.net.{InetSocketAddress, Socket}
+
 import scala.annotation.tailrec
 import scala.collection.immutable
 import scala.concurrent.duration._
-import scala.concurrent.Future
+import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success, Try}
 import akka.actor._
 import akka.event.LoggingReceive
@@ -17,6 +18,7 @@ import org.joda.{time => joda}
 import com.typesafe.scalalogging.{LazyLogging, Logger}
 import org.slf4j.LoggerFactory
 import nl.grons.metrics.scala.{Meter, Timer}
+import peds.commons.collection.BloomFilter
 import spotlight.model.timeseries.Topic
 import spotlight.model.outlier.{OutlierPlan, Outliers}
 import spotlight.protocol.PythonPickleProtocol
@@ -39,6 +41,7 @@ object GraphitePublisher extends LazyLogging {
   case object Opened extends GraphitePublisherProtocol
   case object Closed extends GraphitePublisherProtocol
   case object Flushed extends GraphitePublisherProtocol
+  case class Recover( points: Seq[OutlierPublisher.TopicPoint] ) extends GraphitePublisherProtocol
 
 
   trait PublishProvider  {
@@ -72,7 +75,6 @@ object GraphitePublisher extends LazyLogging {
   case object BreakerPending extends BreakerStatus { override def toString: String = "pending" }
   case object BreakerClosed extends BreakerStatus { override def toString: String = "closed" }
 }
-
 
 class GraphitePublisher extends DenseOutlierPublisher { outer: GraphitePublisher.PublishProvider =>
   import GraphitePublisher._
@@ -135,12 +137,13 @@ class GraphitePublisher extends DenseOutlierPublisher { outer: GraphitePublisher
   val breaker: CircuitBreaker = {
     val reset = 2.minutes
 
-    new CircuitBreaker(
+    //todo currently uses GraphitePublisher's dispatcher for state transitions; maybe used publishDispatcher executor instead?
+    CircuitBreaker(
       context.system.scheduler,
       maxFailures = 5,
       callTimeout = 10.seconds,
       resetTimeout = reset
-    )( executor = context.system.dispatcher )
+    )
     .onOpen {
       circuitOpenMeter.mark()
       gaugeStatus = BreakerOpen
@@ -166,16 +169,20 @@ class GraphitePublisher extends DenseOutlierPublisher { outer: GraphitePublisher
           reset.toCoarsest
         )
       }
+      ()
     }
     .onHalfOpen {
       circuitPendingMeter.mark()
       gaugeStatus = BreakerPending
       log info "attempting to publish to graphite and close circuit breaker"
+      ()
     }
     .onClose {
       circuitClosedMeter.mark()
       gaugeStatus = BreakerClosed
       log info "graphite connection established and circuit breaker is closed"
+      resetNextScheduled()
+      ()
     }
   }
 
@@ -250,6 +257,11 @@ class GraphitePublisher extends DenseOutlierPublisher { outer: GraphitePublisher
       close()
     }
 
+    case Recover( points ) => {
+      log.info( "GraphitePublisher recovered [{}] points delayed by open publish circuit", points.size.toString )
+      waitQueue = points ++: waitQueue
+    }
+
     case Publish( outliers ) => {
       log.debug( "GraphitePublisher received Publish([{}])", outliers )
       publish( outliers )
@@ -276,8 +288,8 @@ class GraphitePublisher extends DenseOutlierPublisher { outer: GraphitePublisher
 
     case SendBatch => {
       log.debug( "GraphitePublisher received SendBatch: next schedule in [{}]", batchInterval.toCoarsest )
-      if ( sinceLastClearing() > batchInterval || waitQueue.size >= outer.batchSize ) batchAndSend()
       resetNextScheduled()
+      if ( sinceLastClearing() > batchInterval || waitQueue.size >= outer.batchSize ) batchAndSend()
     }
   }
 
@@ -370,6 +382,8 @@ class GraphitePublisher extends DenseOutlierPublisher { outer: GraphitePublisher
       val (toBePublished, remainingQueue) = waitQueue splitAt outer.batchSize
       waitQueue = remainingQueue
 
+      reportDuplicates( toBePublished )
+
       publishLogger.info(
         "Flush: toBePublished:[{}]\tremainingQueue:[{}]\tbatchSize:[{}]",
         toBePublished.size.toString,
@@ -392,44 +406,51 @@ class GraphitePublisher extends DenseOutlierPublisher { outer: GraphitePublisher
   def serialize( payload: TopicPoint* ): ByteString = pickler.pickleFlattenedTimeSeries( payload:_* )
 
   def batchAndSend(): Unit = {
-    log.debug(
-      "waitQueue:[{}] batch-size:[{}] toBePublished:[{}] remainingQueue:[{}]",
-      waitQueue.size,
-      outer.batchSize,
-      waitQueue.take(outer.batchSize).size,
-      waitQueue.drop(outer.batchSize).size
-    )
+    if ( gaugeStatus == BreakerClosed ) {
+      val waiting = waitQueue.size
+      val (toBePublished, remainingQueue) = waitQueue splitAt batchSize
+      waitQueue = remainingQueue
 
-    val (toBePublished, remainingQueue) = waitQueue splitAt batchSize
-    waitQueue = remainingQueue
+      if ( toBePublished.nonEmpty ) {
+        publishLogger.info(
+                            "BatchAndSend: from waiting:[{}] toBePublished:[{}]\tremainingQueue:[{}]",
+                            waiting.toString,
+                            s"${toBePublished.size} / ${outer.batchSize}",
+                            remainingQueue.size.toString
+                          )
 
-    if ( toBePublished.nonEmpty ) {
-      publishLogger.info(
-        "BatchAndSend: toBePublished:[{} / {}]\tremainingQueue:[{}]",
-        toBePublished.size.toString,
-        outer.batchSize.toString,
-        remainingQueue.size.toString
-      )
+        reportDuplicates( toBePublished )
 
-      val report = pickler.pickleFlattenedTimeSeries( toBePublished:_* )
-      breaker withCircuitBreaker {
-        Future {
-          circuitRequestsMeter.mark()
-          sendToGraphite( report )
-          resetNextScheduled()
-          self ! SendBatch
-        }( publishDispatcher ) map { _ =>
-          toBePublished foreach { tbp => publishLogger.info( "{}: timestamp:[{}] value:[{}]", tbp._1, tbp._2, tbp._3.toString) }
-        } //todo send self message with report to republish upon failure?
+        val report = pickler.pickleFlattenedTimeSeries( toBePublished:_* )
+
+        breaker withCircuitBreaker {
+          val body = Future {
+            circuitRequestsMeter.mark()
+            sendToGraphite( report )
+            resetNextScheduled()
+            self ! SendBatch
+          }( publishDispatcher ) map { _ =>
+            toBePublished foreach { tbp => publishLogger.info( "{}: timestamp:[{}] value:[{}]", tbp._1, tbp._2, tbp._3.toString) }
+          }
+
+          body onFailure {
+            case ex => {
+              log.warning( "GraphitePublisher recovering [{}] points due to open publish circuit", toBePublished.size.toString )
+              self ! Recover( toBePublished )
+            }
+          }
+
+          body
+        }
+      }
+
+      if ( waitQueue.isEmpty ) {
+        publishLogger.info( "BatchAndSend: cleared no toBePublish. remainingQueue:[{}]", waitQueue.size.toString )
+        markClearing()
       }
     }
 
-    if ( waitQueue.isEmpty ) {
-      publishLogger.info( "BatchAndSend: cleared no toBePublish. remainingQueue:[{}]", waitQueue.size.toString )
-      markClearing()
-    } else {
-      resetNextScheduled()
-    }
+    resetNextScheduled()
   }
 
   def sendToGraphite( pickle: ByteString ): Unit = {
@@ -442,5 +463,19 @@ class GraphitePublisher extends DenseOutlierPublisher { outer: GraphitePublisher
         out.flush()
       }
     }
+  }
+
+
+//  val seenMax: Int = 1000000
+//  var seen: BloomFilter[(Topic, joda.DateTime)] = BloomFilter[(Topic, joda.DateTime)]( maxFalsePosProbability = 0.01, seenMax )
+  def reportDuplicates( toBePublished: Iterable[(Topic, joda.DateTime, Double)] ): Unit = {
+//    toBePublished foreach { tbp =>
+//      if ( seen.size == seenMax ) log.warning( "[GraphitePublisher] SEEN filled" )
+//      if ( seen.size < seenMax ) {
+//        val (t,dt, v) = tbp
+//        if ( seen has_? (t, dt) ) log.warning( "[GraphitePublisher] Possible  duplicate: [{}]", tbp)
+//        else seen += (t, dt)
+//      }
+//    }
   }
 }
