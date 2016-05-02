@@ -216,10 +216,8 @@ class OutlierPlanDetectionRouter extends Actor with InstrumentedActor with Actor
     .mapConcat { identity }
   }
 
-  val detectionId = new java.util.concurrent.atomic.AtomicInteger()
-
   def detectionFlow( plan: OutlierPlan )( implicit system: ActorSystem ): Flow[TimeSeriesBase, Outliers, NotUsed] = {
-    val label = Symbol( s"${OutlierDetection.WatchPoints.DetectionFlow.name}-${plan.name}-${detectionId.incrementAndGet()}" )
+    val label = Symbol( OutlierDetection.WatchPoints.DetectionFlow.name + "." + plan.name )
 
     val flow = Flow[TimeSeriesBase]
     .filter { plan.appliesTo }
