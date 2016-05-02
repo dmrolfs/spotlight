@@ -1,20 +1,15 @@
 package spotlight.analysis.outlier
 
-import scala.collection.immutable
 import scala.concurrent.ExecutionContext
-import scala.concurrent.duration._
-import akka.actor.{Actor, ActorLogging, ActorPath, ActorRef, ActorSystem, Props}
+import akka.actor.{Actor, ActorLogging, ActorPath, ActorRef, Props}
 import akka.event.LoggingReceive
 import akka.pattern.AskTimeoutException
-import akka.stream.{Materializer, Supervision}
-import akka.stream.scaladsl._
+import akka.stream.Supervision
 import com.codahale.metrics.{Metric, MetricFilter}
-import scalaz.\/-
 import org.slf4j.LoggerFactory
 import com.typesafe.scalalogging.{Logger, StrictLogging}
 import nl.grons.metrics.scala.{Meter, MetricName, Timer}
 import peds.akka.metrics.{Instrumented, InstrumentedActor}
-import peds.akka.stream.ProcessorAdapter
 import peds.commons.identifier.ShortUUID
 import peds.commons.log.Trace
 import spotlight.model.timeseries._
@@ -225,11 +220,11 @@ with ActorLogging {
     }
     _score += key -> s
     outlierLogger.debug(
-      "\t\toutlier-rate[{}]:[{}] = [{}%] [{} (count, points)]",
-      os.plan.name,
-      os.topic,
+      "\t\toutlier-rate[{}] = [{}%] [{} (count, points)] [control-data:[{}]]",
+      s"${os.plan.name}:${os.topic}",
       (s._1.toDouble / s._2.toDouble).toString,
-      (s._1.toString, s._2.toString)
+      (s._1.toString, s._2.toString),
+      os.algorithmControlBoundaries
     )
   }
 }

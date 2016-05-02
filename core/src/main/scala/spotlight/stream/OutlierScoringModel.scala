@@ -1,6 +1,7 @@
 package spotlight.stream
 
 import java.util.concurrent.atomic.AtomicInteger
+
 import scala.concurrent.duration._
 import akka.NotUsed
 import akka.stream.FanOutShape.{Init, Name}
@@ -12,6 +13,7 @@ import com.typesafe.scalalogging.{Logger, StrictLogging}
 import org.slf4j.LoggerFactory
 import peds.akka.metrics.Instrumented
 import peds.akka.stream.StreamMonitor
+import peds.commons.{V, Valid}
 import peds.commons.collection.BloomFilter
 import spotlight.analysis.outlier.OutlierPlanDetectionRouter
 import spotlight.model.outlier._
@@ -65,11 +67,6 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
         Flow[TimeSeries].filter{ !isPlanned( _, config.plans ) }.via( watchUnrecognized )
       )
 
-      val maxInDetectionCpuFactor = {
-        val path = "spotlight.workflow.detect.max-in-flight-cpu-factor"
-        if ( config hasPath path ) config.getDouble( path ) else 1.0
-      }
-
       val planConcat = b.add(
         Flow[TimeSeries]
         .map { ts => config.plans collect { case p if p appliesTo ts => (ts, p) } }
@@ -78,14 +75,14 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
 
       val planBuffer = b.add(
         Flow[(TimeSeries, OutlierPlan)]
-        .buffer( 10000, OverflowStrategy.backpressure).watchFlow( Symbol("plan.buffer") )
-        .via( batchSeriesByPlan(10000) )
+        .buffer( 1000, OverflowStrategy.backpressure).watchFlow( Symbol("plan.buffer") )
+        .via( batchSeriesByPlan(100000) )
       )
 
       val plansDetectOutliers = b.add(
         OutlierPlanDetectionRouter.elasticPlanDetectionRouterFlow(
           planDetectorRouterRef = planRouterRef,
-          maxInDetectionCpuFactor = maxInDetectionCpuFactor
+          maxInDetectionCpuFactor = config.maxInDetectionCpuFactor
         )
       )
 
@@ -163,6 +160,7 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
   def isOutlierReport( ts: TimeSeriesBase ): Boolean = ts.topic.name.startsWith( OutlierMetricPrefix )
   def isPlanned( ts: TimeSeriesBase, plans: Seq[OutlierPlan] ): Boolean = plans.exists{ _ appliesTo ts }
 
+  val debugLogger = Logger( LoggerFactory getLogger "Debug" )
 
   def batchSeriesByPlan(
     max: Long
@@ -171,19 +169,62 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
     materializer: Materializer,
     tsMerging: Merging[TimeSeries]
   ): Flow[(TimeSeries, OutlierPlan), (TimeSeries, OutlierPlan), NotUsed] = {
-    val seed: ((TimeSeries, OutlierPlan)) => Map[(Topic, OutlierPlan), TimeSeries] = (tsp: (TimeSeries, OutlierPlan)) => {
+    type PlanSeriesAccumulator = Map[(Topic, OutlierPlan), TimeSeries]
+    val seed: ((TimeSeries, OutlierPlan)) => (PlanSeriesAccumulator, Int) = (tsp: (TimeSeries, OutlierPlan)) => {
       val (ts, p) = tsp
       val key = (ts.topic, p)
-      Map( key -> ts )
+      ( Map( key -> ts ), 0 )
     }
 
     Flow[(TimeSeries, OutlierPlan)]
-    .buffer( 1000, OverflowStrategy.backpressure )
-    .batch( max, seed ){ case (acc, (ts, p)) =>
-      val key = (ts.topic, p)
-      acc + ( key -> ts )
+    .batch( max, seed ){ case ((acc, count), (ts, p)) =>
+      import scalaz._, Scalaz._
+
+      val key: (Topic, OutlierPlan) = (ts.topic, p)
+      val existing: Option[TimeSeries]  = acc get key
+
+      val newAcc: V[PlanSeriesAccumulator] = for {
+        updated <- existing.map{ e => tsMerging.merge(e, ts).disjunction } getOrElse ts.right
+      } yield {
+        acc + ( key -> updated )
+      }
+
+      val resultingAcc = newAcc match {
+        case \/-( a ) => {
+          val points: Int = a.values.foldLeft( 0 ){ _ + _.points.size }
+          debugLogger.info(
+            "batchSeriesByPlan batching count:[{}] topic-plans & points = [{}] [{}] avg pts/topic-plan combo=[{}]",
+            count.toString,
+            a.keys.size.toString,
+            points.toString,
+            ( points.toDouble / a.keys.size.toDouble ).toString
+          )
+          a
+        }
+        case -\/( exs ) => {
+          exs foreach { ex => logger.error( "batching series by plan failed: {}", ex ) }
+          acc
+        }
+      }
+
+      ( resultingAcc, count + 1 )
     }
-    .mapConcat { _.map { case ((topic, plan), ts) => ( ts, plan ) } }
+    .map { ec: (PlanSeriesAccumulator, Int) =>
+      val (elems, count) = ec
+      val recs: Seq[((Topic, OutlierPlan), TimeSeries)] = elems.toSeq
+      debugLogger.info(
+        "batchSeriesByPlan pushing combos downstream topic:plans combos:[{}] total points:[{}]",
+        recs.size.toString,
+        recs.foldLeft( 0 ){ _ + _._2.points.size }.toString
+      )
+      ec
+    }
+    .mapConcat { case (ps, _) => ps.toSeq.to[scala.collection.immutable.Seq].map { case ((topic, plan), ts) => ( ts, plan ) } }
+    .map { tsp: (TimeSeries, OutlierPlan) =>
+      val (ts, p) = tsp
+      debugLogger.info( "batchSeriesByPlan pushing downstream topic:plan=[{}:{}]\t# points:[{}]", ts.topic, p.name, ts.points.size.toString )
+      tsp
+    }
   }
 
 

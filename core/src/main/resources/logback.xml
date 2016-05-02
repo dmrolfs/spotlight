@@ -30,6 +30,27 @@
     </rollingPolicy>
   </appender>
 
+  <appender name="DEBUG_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+    <file>${LOG_HOME}/debug.log</file>
+    <append>true</append>
+    <!-- encoders are assigned the type
+         ch.qos.logback.classic.encoder.PatternLayoutEncoder by default -->
+    <encoder>
+      <pattern>%-4relative [%thread] %-5level %logger{35} - %msg%n</pattern>
+    </encoder>
+    <rollingPolicy class="ch.qos.logback.core.rolling.FixedWindowRollingPolicy">
+      <!-- rollover daily -->
+      <fileNamePattern>${LOG_HOME}/debug-%i.log.gz</fileNamePattern>
+      <cleanHistoryOnStart>true</cleanHistoryOnStart>
+      <minIndex>1</minIndex>
+      <maxIndex>1</maxIndex>
+    </rollingPolicy>
+    <triggeringPolicy class="ch.qos.logback.core.rolling.SizeBasedTriggeringPolicy">
+      <maxFileSize>1GB</maxFileSize>
+    </triggeringPolicy>
+  </appender>
+
+
   <appender name="OUTLIERS_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
     <file>${LOG_HOME}/outliers.log</file>
     <append>true</append>
@@ -45,8 +66,8 @@
       <minIndex>1</minIndex>
       <maxIndex>10</maxIndex>
       <!--<timeBasedFileNamingAndTriggeringPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">-->
-        <!--&lt;!&ndash; or whenever the file size reaches 1GB &ndash;&gt;-->
-        <!--<maxFileSize>1GB</maxFileSize>-->
+      <!--&lt;!&ndash; or whenever the file size reaches 1GB &ndash;&gt;-->
+      <!--<maxFileSize>1GB</maxFileSize>-->
       <!--</timeBasedFileNamingAndTriggeringPolicy>-->
     </rollingPolicy>
     <triggeringPolicy class="ch.qos.logback.core.rolling.SizeBasedTriggeringPolicy">
@@ -164,6 +185,10 @@
 
   <logger name="Publish" level="DEBUG" additivity="false">
     <appender-ref ref="PUBLISH_FILE" />
+  </logger>
+
+  <logger name="Debug" level="DEBUG" additivity="false">
+    <appender-ref ref="DEBUG_FILE" />
   </logger>
 
   <!--<root level="WARN">-->

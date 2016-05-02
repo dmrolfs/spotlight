@@ -1,14 +1,12 @@
 package spotlight.app
 
 import java.net.{InetSocketAddress, Socket}
-import java.util.concurrent.TimeoutException
 
-import akka.NotUsed
-
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.{ExecutionContext, Future, TimeoutException}
 import scala.concurrent.duration._
 import scala.util.{Failure, Success}
 import scala.util.matching.Regex
+import akka.NotUsed
 import akka.actor.{ActorRef, ActorSystem}
 import akka.stream.scaladsl._
 import akka.stream._
@@ -182,8 +180,10 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
         )
         val ingressBroadcast = b.add( Broadcast[TimeSeries](outputPorts = 2, eagerCancel = false) )
         val egressBroadcast = b.add( Broadcast[Outliers](outputPorts = 2, eagerCancel = true) )
+
+        //todo remove after working
         val publishBuffer = b.add(
-          Flow[Outliers].buffer( 10000, OverflowStrategy.backpressure ).watchFlow( Symbol("publish.buffer"))
+          Flow[Outliers].buffer( 1000, OverflowStrategy.backpressure ).watchFlow( Symbol("publish.buffer"))
         )
         val publish = b.add( publishOutliers( context.config.graphiteAddress ) )
         val tcpOut = b.add( Flow[Outliers].map{ _ => ByteString() } )
@@ -260,7 +260,7 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
       GraphitePublisher.props {
         new GraphitePublisher with GraphitePublisher.PublishProvider {
           // cannot use vals; compiler is setting to null regardless of value.
-          override lazy val maxOutstanding: Int = 1000000
+          override lazy val maxOutstanding: Int = 500000
           override lazy val metricBaseName = MetricName( classOf[GraphitePublisher] )
           override lazy val destinationAddress: InetSocketAddress = address
           override lazy val batchSize: Int = 1000
@@ -276,7 +276,7 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
       LogPublisher.props
     }
 
-    Sink actorSubscriber[Outliers] props
+    Sink actorSubscriber[Outliers] props.withDispatcher( "publisher-dispatcher" )
   }
 
   def startPlanWatcher( config: Configuration, listeners: Set[ActorRef] )( implicit system: ActorSystem ): Unit = {
