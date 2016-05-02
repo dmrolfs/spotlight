@@ -5,7 +5,7 @@ import java.net.{InetSocketAddress, Socket}
 import scala.annotation.tailrec
 import scala.collection.immutable
 import scala.concurrent.duration._
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.Future
 import scala.util.{Failure, Success, Try}
 import akka.actor._
 import akka.event.LoggingReceive
@@ -18,7 +18,6 @@ import org.joda.{time => joda}
 import com.typesafe.scalalogging.{LazyLogging, Logger}
 import org.slf4j.LoggerFactory
 import nl.grons.metrics.scala.{Meter, Timer}
-import peds.commons.collection.BloomFilter
 import spotlight.model.timeseries.Topic
 import spotlight.model.outlier.{OutlierPlan, Outliers}
 import spotlight.protocol.PythonPickleProtocol
@@ -46,12 +45,13 @@ object GraphitePublisher extends LazyLogging {
 
   trait PublishProvider  {
     def maxOutstanding: Int
+    def overflowFactor: Double = 0.75
+    def batchFairnessDivisor: Int = 100
     def separation: FiniteDuration = 10.seconds
     def destinationAddress: InetSocketAddress
     def createSocket( address: InetSocketAddress ): Socket
     def batchSize: Int
-    def minimumBatchInterval: FiniteDuration = 500.milliseconds
-    def maximumBatchInterval: FiniteDuration = 5.seconds
+    def batchInterval: FiniteDuration = 5.seconds
     def publishingTopic( p: OutlierPlan, t: Topic ): Topic = s"${p.name}.${t}"
     def publishAlgorithmControlBoundaries( p: OutlierPlan, algorithm: Symbol ): Boolean = {
       val publishKey = algorithm.name + ".publish-controls"
@@ -81,6 +81,8 @@ class GraphitePublisher extends DenseOutlierPublisher { outer: GraphitePublisher
   import OutlierPublisher._
   import context.dispatcher
 
+  val debugLogger = Logger( LoggerFactory getLogger "Debug" )
+
   override protected def requestStrategy: RequestStrategy = new MaxInFlightRequestStrategy( outer.maxOutstanding ) {
     override def inFlightInternally: Int = waitQueue.size
   }
@@ -97,25 +99,18 @@ class GraphitePublisher extends DenseOutlierPublisher { outer: GraphitePublisher
   lazy val circuitRequestsMeter: Meter = metrics.meter( "circuit", "requests" )
   lazy val bytesPublishedMeter: Meter = metrics.meter( "bytes-published" )
   lazy val publishingTimer: Timer = metrics.timer( "publishing" )
+  lazy val publishRequestMeter: Meter = metrics.meter( "request", "publish" )
+  lazy val sendBatchRequestMeter: Meter = metrics.meter( "request", "sendBatch" )
   var gaugeStatus: BreakerStatus = BreakerClosed
 
   val publishLogger: Logger = Logger( LoggerFactory getLogger "Publish" )
 
   val publishDispatcher = context.system.dispatchers.lookup( "publish-dispatcher" )
 
-
   var lastQueueClearingNanos: Long = System.nanoTime()
   def markClearing(): Unit = lastQueueClearingNanos = System.nanoTime()
   def sinceLastClearing(): FiniteDuration = FiniteDuration( System.nanoTime() - lastQueueClearingNanos, NANOSECONDS )
 
-  final def batchInterval: FiniteDuration = {
-    val calculated = FiniteDuration( ( publishingTimer.mean + 10 * publishingTimer.stdDev ).toLong, NANOSECONDS )
-    calculated match {
-      case c if c < minimumBatchInterval => minimumBatchInterval
-      case c if maximumBatchInterval < c => maximumBatchInterval
-      case c => c
-    }
-  }
 
   def initializeMetrics(): Unit = {
     stripLingeringMetrics()
@@ -181,27 +176,20 @@ class GraphitePublisher extends DenseOutlierPublisher { outer: GraphitePublisher
       circuitClosedMeter.mark()
       gaugeStatus = BreakerClosed
       log info "graphite connection established and circuit breaker is closed"
-      resetNextScheduled()
       ()
     }
   }
 
-  var _nextScheduled: Option[Cancellable] = None
-  def cancelNextSchedule(): Unit = {
-    _nextScheduled foreach { _.cancel() }
-    _nextScheduled = None
+  var _scheduled: Option[Cancellable] = None
+  def scheduleBatches(): Option[Cancellable] = {
+    _scheduled foreach { _.cancel() }
+    _scheduled = Option( context.system.scheduler.schedule( outer.batchInterval, outer.batchInterval, self, SendBatch ) )
+    _scheduled
   }
 
-  def resetNextScheduled(): Option[Cancellable] = {
-    cancelNextSchedule()
-
-    //todo this wont log -- what do i care to show?
-    if ( log.isInfoEnabled && batchInterval > outer.maximumBatchInterval ) {
-      log.info( "GraphitePublisher: batch interval = {}", batchInterval.toCoarsest )
-    }
-
-    _nextScheduled = Some( context.system.scheduler.scheduleOnce(batchInterval, self, SendBatch) )
-    _nextScheduled
+  def cancelScheduledBatches(): Unit = {
+    _scheduled foreach { _.cancel() }
+    _scheduled = None
   }
 
 
@@ -213,7 +201,6 @@ class GraphitePublisher extends DenseOutlierPublisher { outer: GraphitePublisher
   }
 
   override def postStop(): Unit = {
-    cancelNextSchedule()
     close()
     context.parent ! Closed
     context become around( closed )
@@ -287,17 +274,32 @@ class GraphitePublisher extends DenseOutlierPublisher { outer: GraphitePublisher
     }
 
     case SendBatch => {
-      log.debug( "GraphitePublisher received SendBatch: next schedule in [{}]", batchInterval.toCoarsest )
-      resetNextScheduled()
-      if ( sinceLastClearing() > batchInterval || waitQueue.size >= outer.batchSize ) batchAndSend()
+      debugLogger.info(
+        "GraphitePublisher received SendBatch: next schedule in [{}]; last-clearing?[{}] wait-queue?[{}]",
+        batchInterval.toCoarsest,
+        (sinceLastClearing() > batchInterval).toString,
+        (waitQueue.size >= outer.batchSize).toString
+      )
+      batchAndSend()
     }
   }
 
   override def publish( o: Outliers ): Unit = {
+    publishRequestMeter.mark()
     val points = markPoints( o )
     waitQueue = points.foldLeft( waitQueue ){ _ enqueue _ }
     log.debug( "publish[{}]: added [{} / {}] to wait queue - now at [{}]", o.topic, o.anomalySize, o.size, waitQueue.size )
-    if ( waitQueue.size > outer.maxOutstanding ) batchAndSend()
+
+    if ( publishRequestMeter.count % outer.batchFairnessDivisor == 0 ) {
+      debugLogger.info( "GraphitePublisher SendBatch out of fairness" )
+      self ! SendBatch
+    }
+
+    val overflow = outer.maxOutstanding * outer.overflowFactor
+    if ( waitQueue.size > overflow ) {
+      debugLogger.info( "GraphitePublisher flushing overflow" )
+      flush()
+    }
   }
 
   object ControlLabeling {
@@ -342,38 +344,36 @@ class GraphitePublisher extends DenseOutlierPublisher { outer: GraphitePublisher
   def isConnected: Boolean = socket map { s => s.isConnected && !s.isClosed } getOrElse { false }
 
   def open(): Try[Unit] = {
-    if ( isConnected ) Try { () }
-    else {
-      val socketOpen = Try { createSocket( destinationAddress ) }
-      socket = socketOpen.toOption
-      socketOpen match {
-        case Success(s) => {
-          resetNextScheduled()
-          log.info( "{} opened [{}] [{}] nextScheduled:[{}]", self.path, socket, socketOpen, _nextScheduled.map{!_.isCancelled} )
+    val result = {
+      if ( isConnected ) Try { () }
+      else {
+        val socketOpen = Try { createSocket( destinationAddress ) }
+        socket = socketOpen.toOption
+        socketOpen match {
+          case Success(s) => log.info( "{} opened [{}] [{}]", self.path, socket, socketOpen )
+          case Failure(ex) => {
+            log.error( "open failed - could not connect with graphite server [{}]: [{}]", destinationAddress, ex.getMessage )
+          }
         }
 
-        case Failure(ex) => {
-          log.error( "open failed - could not connect with graphite server [{}]: [{}]", destinationAddress, ex.getMessage )
-          cancelNextSchedule()
-        }
+        socketOpen map { s => () }
       }
-
-      socketOpen map { s => () }
     }
+
+    result foreach { _ => scheduleBatches() }
+    result
   }
 
   def close(): Unit = {
     val f = Try { flush() }
     val socketClose = Try { socket foreach { _.close() } }
     socket = None
-    cancelNextSchedule()
+    cancelScheduledBatches()
     context become around( closed )
     log.info( "{} closed [{}] [{}]", self.path, socket, socketClose )
   }
 
   @tailrec final def flush(): Unit = {
-    cancelNextSchedule()
-
     if ( waitQueue.isEmpty ) {
       log.info( "{} flushing complete", self.path )
       ()
@@ -406,6 +406,8 @@ class GraphitePublisher extends DenseOutlierPublisher { outer: GraphitePublisher
   def serialize( payload: TopicPoint* ): ByteString = pickler.pickleFlattenedTimeSeries( payload:_* )
 
   def batchAndSend(): Unit = {
+    sendBatchRequestMeter.mark()
+
     if ( gaugeStatus == BreakerClosed ) {
       val waiting = waitQueue.size
       val (toBePublished, remainingQueue) = waitQueue splitAt batchSize
@@ -413,11 +415,11 @@ class GraphitePublisher extends DenseOutlierPublisher { outer: GraphitePublisher
 
       if ( toBePublished.nonEmpty ) {
         publishLogger.info(
-                            "BatchAndSend: from waiting:[{}] toBePublished:[{}]\tremainingQueue:[{}]",
-                            waiting.toString,
-                            s"${toBePublished.size} / ${outer.batchSize}",
-                            remainingQueue.size.toString
-                          )
+          "BatchAndSend: from waiting:[{}] toBePublished:[{}]\tremainingQueue:[{}]",
+          waiting.toString,
+          s"${toBePublished.size} / ${outer.batchSize}",
+          remainingQueue.size.toString
+        )
 
         reportDuplicates( toBePublished )
 
@@ -427,7 +429,6 @@ class GraphitePublisher extends DenseOutlierPublisher { outer: GraphitePublisher
           val body = Future {
             circuitRequestsMeter.mark()
             sendToGraphite( report )
-            resetNextScheduled()
             self ! SendBatch
           }( publishDispatcher ) map { _ =>
             toBePublished foreach { tbp => publishLogger.info( "{}: timestamp:[{}] value:[{}]", tbp._1, tbp._2, tbp._3.toString) }
@@ -449,8 +450,6 @@ class GraphitePublisher extends DenseOutlierPublisher { outer: GraphitePublisher
         markClearing()
       }
     }
-
-    resetNextScheduled()
   }
 
   def sendToGraphite( pickle: ByteString ): Unit = {
