@@ -224,24 +224,27 @@
           },
           "targets": [
             {
-              "target": "aliasByNode(spotlight.publish.GraphitePublisher.circuit.open.m1_rate, 4)"
-            },
-            {
-              "target": "aliasByNode(spotlight.publish.GraphitePublisher.circuit.pending.m1_rate, 4)"
-            },
-            {
               "target": "aliasByNode(spotlight.publish.GraphitePublisher.circuit.requests.m1_rate, 4)",
               "hide": false
             },
             {
-              "target": "aliasByMetric(spotlight.publish.GraphitePublisher.publishing.p95)"
+              "target": "aliasByMetric(spotlight.publish.GraphitePublisher.publishing.p95)",
+              "hide": false
+            },
+            {
+              "target": "aliasByNode(spotlight.publish.GraphitePublisher.circuit.open.m1_rate, 4)"
+            },
+            {
+              "target": "aliasByNode(spotlight.publish.GraphitePublisher.circuit.pending.m1_rate, 4)",
+              "hide": false
+            },
+            {
+              "target": "aliasByNode(spotlight.publish.GraphitePublisher.circuit.closed.m1_rate, 4)",
+              "hide": false
             },
             {
               "target": "spotlight.publish.GraphitePublisher.waiting",
               "hide": true
-            },
-            {
-              "target": "spotlight.publish.GraphitePublisher.select metric"
             }
           ],
           "aliasColors": {},
@@ -549,7 +552,7 @@
   "annotations": {
     "list": []
   },
-  "refresh": "10s",
+  "refresh": "5s",
   "version": 6,
   "hideAllLegends": false
 }

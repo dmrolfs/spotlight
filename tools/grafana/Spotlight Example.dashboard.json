@@ -57,7 +57,7 @@
             "total": false,
             "avg": false
           },
-          "nullPointMode": "connected",
+          "nullPointMode": "null",
           "steppedLine": true,
           "tooltip": {
             "value_type": "individual",
@@ -190,7 +190,7 @@
             "total": false,
             "avg": false
           },
-          "nullPointMode": "connected",
+          "nullPointMode": "null",
           "steppedLine": true,
           "tooltip": {
             "value_type": "individual",
@@ -330,7 +330,7 @@
             "total": false,
             "avg": false
           },
-          "nullPointMode": "connected",
+          "nullPointMode": "null",
           "steppedLine": true,
           "tooltip": {
             "value_type": "individual",
@@ -449,7 +449,7 @@
     }
   ],
   "time": {
-    "from": "now-5m",
+    "from": "now-15m",
     "to": "now"
   },
   "templating": {
