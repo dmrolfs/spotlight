@@ -260,7 +260,7 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
       GraphitePublisher.props {
         new GraphitePublisher with GraphitePublisher.PublishProvider {
           // cannot use vals; compiler is setting to null regardless of value.
-          override lazy val maxOutstanding: Int = 500000
+          override lazy val maxOutstanding: Int = 1000000
           override lazy val metricBaseName = MetricName( classOf[GraphitePublisher] )
           override lazy val destinationAddress: InetSocketAddress = address
           override lazy val batchSize: Int = 1000
