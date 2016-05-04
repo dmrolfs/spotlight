@@ -126,11 +126,11 @@
               "target": "prod.em.authz-proxy.*.proxy.p95"
             },
             {
-              "target": "aliasByNode(spotlight.outlier.skyline.*.ceiling.prod.em.authz-proxy.*.proxy.p95, 3)",
+              "target": "aliasSub(spotlight.outlier.skyline.*.ceiling.prod.em.authz-proxy.*.proxy.p95, '([^.]+\\.){3}([^.]+\\.[^.]+)\\..*', '\\2')",
               "hide": false
             },
             {
-              "target": "aliasByNode(spotlight.outlier.skyline.*.expected.prod.em.authz-proxy.*.proxy.p95, 3)",
+              "target": "aliasSub(spotlight.outlier.skyline.*.expected.prod.em.authz-proxy.*.proxy.p95, '([^.]+\\.){3}([^.]+\\.[^.]+)\\..*', '\\2')",
               "hide": true
             }
           ],
@@ -265,11 +265,12 @@
               "target": "prod.em.authz-proxy.*.http.summary.requests.count"
             },
             {
-              "target": "aliasSub(spotlight.outlier.*.*.ceiling.prod.em.authz-proxy.*.http.summary.requests.count, '([^.]+\\.){2}([^.]+\\.[^.]+)\\..*', '\\2')",
-              "hide": true
+              "target": "aliasSub(spotlight.outlier.skyline.ewma.*.prod.em.authz-proxy.*.http.summary.requests.count, '([^.]+\\.){3}([^.]+\\.[^.]+)\\..*', '\\2')",
+              "hide": false
             },
             {
-              "target": "aliasByNode(spotlight.outlier.*.simple-moving-average.*.prod.em.authz-proxy.*.http.summary.requests.count, 4)"
+              "target": "aliasByNode(spotlight.outlier.*.simple-moving-average.*.prod.em.authz-proxy.*.http.summary.requests.count, 4)",
+              "hide": true
             }
           ],
           "aliasColors": {
@@ -338,11 +339,11 @@
           },
           "targets": [
             {
-              "target": "prod.bi.audience-insights.*.segments-by-webId.p95",
+              "target": "prod.bi.audience-insights.1.segments-by-webId.p95",
               "hide": true
             },
             {
-              "target": "aliasSub(spotlight.outlier.*.prod.bi.audience-insights.*.segments-by-webId.p95, '([^.]+\\.){2}([^.]+)\\.([^.]+\\.){3}([^.]+)\\..*', '\\2.\\4')"
+              "target": "aliasSub(spotlight.outlier.*.prod.bi.audience-insights.1.segments-by-webId.p95, '([^.]+\\.){2}([^.]+)\\.([^.]+\\.){3}([^.]+)\\..*', '\\2.\\4')"
             }
           ],
           "aliasColors": {},
@@ -399,10 +400,10 @@
           },
           "targets": [
             {
-              "target": "prod.bi.audience-insights.*.segments-by-webId.p95"
+              "target": "prod.bi.audience-insights.1.segments-by-webId.p95"
             },
             {
-              "target": "aliasSub(spotlight.outlier.*.*.ceiling.prod.bi.audience-insights.*.segments-by-webId.p95, '([^.]+\\.){2}([^.]+\\.[^.]+)\\.([^.]+\\.){4}([^.]+)\\..*', '\\2.\\4')"
+              "target": "aliasSub(spotlight.outlier.*.*.ceiling.prod.bi.audience-insights.1.segments-by-webId.p95, '([^.]+\\.){2}([^.]+\\.[^.]+)\\.([^.]+\\.){4}([^.]+)\\..*', '\\2.\\4')"
             }
           ],
           "aliasColors": {
@@ -458,7 +459,7 @@
   "annotations": {
     "list": []
   },
-  "refresh": "5s",
+  "refresh": "10s",
   "version": 6,
   "hideAllLegends": false
 }
