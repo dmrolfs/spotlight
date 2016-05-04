@@ -7,7 +7,7 @@ import javax.net._
 import javax.script.{Compilable, ScriptEngineManager, SimpleBindings}
 
 import akka.actor.Props
-import akka.testkit.TestActorRef
+import akka.testkit.{TestActorRef, TestProbe}
 import akka.util.ByteString
 import com.typesafe.config.ConfigFactory
 import spotlight.model.outlier.{NoOutliers, OutlierPlan, Outliers, SeriesOutliers}
@@ -59,6 +59,7 @@ with MockitoSugar {
   override val trace = Trace[GraphitePublisherSpec]
 
   class Fixture extends AkkaFixture { outer =>
+    val senderProbe = TestProbe( "test-sender" )
     val connected: AtomicBoolean = new AtomicBoolean( true )
     val closed: AtomicBoolean = new AtomicBoolean( false )
     val openCount: AtomicInteger = new AtomicInteger( 0 )
@@ -190,7 +191,7 @@ with MockitoSugar {
       }
     }
 
-    "write one-point batch" taggedAs (WIP) in { f: Fixture =>
+    "write one-point batch" in { f: Fixture =>
       import f._
       val outliers = NoOutliers(
         algorithms = Set('dbscan),
@@ -198,7 +199,8 @@ with MockitoSugar {
         plan = plan
       )
       graphite.receive( Publish(outliers) )
-      graphite.receive( Flush )
+      graphite.receive( Flush, senderProbe.ref )
+      senderProbe.expectMsg( GraphitePublisher.Flushed(true) )
       val actual = ByteString( output.toByteArray )
       unpickleOutput( actual ) mustBe "foo 0.0 100\n"
     }
@@ -213,7 +215,8 @@ with MockitoSugar {
       )
       // NoOutlier pickle will be include 0.0 for each second in source range
       graphite.receive( Publish(outliers) )
-      graphite.receive( Flush )
+      graphite.receive( Flush, senderProbe.ref )
+      senderProbe.expectMsg( GraphitePublisher.Flushed(true) )
       unpickleOutput() mustBe "foo 0.0 100\nfoo 1.0 117\n"
     }
 
@@ -246,7 +249,8 @@ with MockitoSugar {
         plan = plan
       )
       graphite2.receive( Publish(outliers) )
-      graphite2.receive( Flush )
+      graphite2.receive( Flush, senderProbe.ref )
+      senderProbe.expectMsg( GraphitePublisher.Flushed(true) )
       unpickleOutput() mustBe "spotlight.outlier.plan.foo 1.0 100\nspotlight.outlier.plan.foo 0.0 117\nspotlight.outlier.plan.foo 0.0 9821\n"
     }
 
@@ -259,7 +263,8 @@ with MockitoSugar {
       )
       // NoOutlier pickle will be include 0.0 for each second in source range
       graphite.receive( Publish(outliers) )
-      graphite.receive( Flush )
+      graphite.receive( Flush, senderProbe.ref )
+      senderProbe.expectMsg( GraphitePublisher.Flushed(true) )
       unpickleOutput() mustBe "foo 0.0 100\nfoo 0.0 101\nfoo 0.0 102\nfoo 0.0 103\n"
     }
 
@@ -272,7 +277,8 @@ with MockitoSugar {
         plan = plan
       )
       graphite.receive( Publish(outliers) )
-      graphite.receive( Flush )
+      graphite.receive( Flush, senderProbe.ref )
+      senderProbe.expectMsg( GraphitePublisher.Flushed(true) )
       unpickleOutput() mustBe "foo-bar 1.0 100\nfoo-bar 0.0 117\nfoo-bar 0.0 9821\n"
     }
 
@@ -303,7 +309,7 @@ with MockitoSugar {
             override val maxOutstanding: Int = 1000000
             override val separation: FiniteDuration = 1.second
             override def initializeMetrics(): Unit = { }
-            override val batchSize: Int = 100
+            override val batchSize: Int = 2
             override def destinationAddress: InetSocketAddress = f.address
             override def createSocket( address: InetSocketAddress ): Socket = {
               openCount.incrementAndGet()
@@ -336,7 +342,8 @@ with MockitoSugar {
       )
 
       graphite2.receive( Publish(outliers) )
-      graphite2.receive( Flush )
+      graphite2.receive( Flush, senderProbe.ref )
+      senderProbe.expectMsg( GraphitePublisher.Flushed(true) )
       unpickleOutput() mustBe (
         "spotlight.outlier.plan.foo 1.0 100\nspotlight.outlier.plan.foo 0.0 117\nspotlight.outlier.plan.foo 0.0 9821\n" +
         "spotlight.outlier.plan.x.floor.foo 0.9 100\nspotlight.outlier.plan.x.expected.foo 1.0 100\nspotlight.outlier.plan.x.ceiling.foo 1.1 100\n" +

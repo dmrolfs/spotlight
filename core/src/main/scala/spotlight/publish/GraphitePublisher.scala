@@ -5,11 +5,13 @@ import java.net.{InetSocketAddress, Socket}
 import scala.annotation.tailrec
 import scala.collection.immutable
 import scala.concurrent.duration._
-import scala.concurrent.Future
+import scala.concurrent.{Await, Future}
 import scala.util.{Failure, Success, Try}
 import akka.actor._
+import akka.agent.Agent
+import akka.dispatch.MessageDispatcher
 import akka.event.LoggingReceive
-import akka.pattern.CircuitBreaker
+import akka.pattern.{CircuitBreaker, pipe}
 import akka.stream.actor.{ActorSubscriberMessage, MaxInFlightRequestStrategy, RequestStrategy}
 import akka.util.ByteString
 import shapeless.syntax.typeable._
@@ -39,7 +41,7 @@ object GraphitePublisher extends LazyLogging {
 
   case object Opened extends GraphitePublisherProtocol
   case object Closed extends GraphitePublisherProtocol
-  case object Flushed extends GraphitePublisherProtocol
+  case class Flushed( performed: Boolean ) extends GraphitePublisherProtocol
   case class Recover( points: Seq[OutlierPublisher.TopicPoint] ) extends GraphitePublisherProtocol
 
 
@@ -55,17 +57,7 @@ object GraphitePublisher extends LazyLogging {
     def publishingTopic( p: OutlierPlan, t: Topic ): Topic = s"${p.name}.${t}"
     def publishAlgorithmControlBoundaries( p: OutlierPlan, algorithm: Symbol ): Boolean = {
       val publishKey = algorithm.name + ".publish-controls"
-      if ( p.algorithmConfig hasPath publishKey ) p.algorithmConfig getBoolean publishKey
-      else {
-        //todo dmr remove after determining prob with control publishing
-        logger.warn(
-          "Plan[{}] algorithm[{}] will not publishing controls; algo-config:[{}]",
-          p.name,
-          algorithm.name,
-          p.algorithmConfig
-        )
-        false
-      }
+      if ( p.algorithmConfig hasPath publishKey ) p.algorithmConfig getBoolean publishKey else false
     }
   }
 
@@ -88,7 +80,7 @@ class GraphitePublisher extends DenseOutlierPublisher { outer: GraphitePublisher
   }
 
   val pickler: PythonPickleProtocol = new PythonPickleProtocol
-  var socket: Option[Socket] = None //todo: if socket fails supervisor should restart actor
+  var socket: Option[Socket] = None
   var waitQueue: immutable.Queue[TopicPoint] = immutable.Queue.empty[TopicPoint]
   override val fillSeparation: FiniteDuration = outer.separation
 
@@ -101,11 +93,12 @@ class GraphitePublisher extends DenseOutlierPublisher { outer: GraphitePublisher
   lazy val publishingTimer: Timer = metrics.timer( "publishing" )
   lazy val publishRequestMeter: Meter = metrics.meter( "request", "publish" )
   lazy val sendBatchRequestMeter: Meter = metrics.meter( "request", "sendBatch" )
-  var circuitStatus: BreakerStatus = BreakerClosed
+
+  val publishDispatcher: MessageDispatcher = context.system.dispatchers.lookup( "publish-dispatcher" )
+
+  val circuitStatus: Agent[BreakerStatus] = Agent[BreakerStatus]( BreakerClosed )( publishDispatcher )
 
   val publishLogger: Logger = Logger( LoggerFactory getLogger "Publish" )
-
-  val publishDispatcher = context.system.dispatchers.lookup( "publish-dispatcher" )
 
   var lastQueueClearingNanos: Long = System.nanoTime()
   def markClearing(): Unit = lastQueueClearingNanos = System.nanoTime()
@@ -115,7 +108,7 @@ class GraphitePublisher extends DenseOutlierPublisher { outer: GraphitePublisher
   def initializeMetrics(): Unit = {
     stripLingeringMetrics()
     metrics.gauge( "waiting" ) { waitQueue.size }
-    metrics.gauge( "circuit", "breaker" ) { circuitStatus.toString }
+    metrics.gauge( "circuit", "breaker" ) { circuitStatus().toString }
   }
 
   def stripLingeringMetrics(): Unit = {
@@ -129,55 +122,89 @@ class GraphitePublisher extends DenseOutlierPublisher { outer: GraphitePublisher
     )
   }
 
-  val breaker: CircuitBreaker = {
-    val Reset = 2.minutes
+  val BreakerReset: FiniteDuration = 30.seconds
 
+  val breaker: CircuitBreaker = {
     //todo currently uses GraphitePublisher's dispatcher for state transitions; maybe used publishDispatcher executor instead?
+    //todo would need to protect socket in Agent?
     CircuitBreaker(
       context.system.scheduler,
       maxFailures = 5,
       callTimeout = 10.seconds,
-      resetTimeout = Reset
+      resetTimeout = BreakerReset
     )
-    .onOpen {
-      outer.circuitOpenMeter.mark()
-      outer.circuitStatus = BreakerOpen
-      val oldConnected = isConnected
-      val socketClose = Try { socket foreach { _.close() } }
-      outer.socket = None
-      val reopened = open()
+    .onOpen { notifyOnOpenCircuit() }
+    .onHalfOpen { notifyOnPendingCircuit() }
+    .onClose { notifyOnClosedCircuit() }
+  }
 
-      if ( reopened.isSuccess && isConnected ) {
-        log.info(
-          "graphite connection is down, closed[{}], reconnection [{}] " +
-            "and circuit breaker will remain open for [{}] before trying again",
-          socketClose,
-          "succeeded",
-          Reset.toCoarsest
-        )
-      } else {
-        log.error(
-          "graphite connection is down, closed[{}], reconnection [{}] " +
-            "and circuit breaker will remain open for [{}] before trying again",
-          socketClose,
-          "failed",
-          Reset.toCoarsest
-        )
+  def notifyOnOpenCircuit(): Unit = {
+    outer.circuitStatus send { s =>
+      outer.circuitOpenMeter.mark()
+      val newStatus = BreakerOpen
+      log.info( "setting graphite circuit breaker from [{}] to [{}]", s, newStatus )
+      newStatus
+    }
+    val oldConnected = isConnected
+    val socketClose = {
+      Try {
+        socket foreach { _.close() }
+      } recoverWith {
+        case ex => {
+          log.info( "closing socket upon open circuit caused error: [{}]", ex.getMessage )
+          Failure( ex )
+        }
       }
-      ()
     }
-    .onHalfOpen {
+
+    outer.socket = None
+    val reopened = open()
+
+    if ( reopened.isSuccess && isConnected ) {
+      log.info(
+        "graphite connection is down, closed[{}], reconnection succeeded " +
+          "and circuit breaker will remain open for [{}] before trying again",
+        socketClose,
+        BreakerReset.toCoarsest
+      )
+    } else {
+      log.error(
+        "graphite connection is down, closed[{}], reconnection failed " +
+          "and circuit breaker will remain open for [{}] before trying again",
+        socketClose,
+        BreakerReset.toCoarsest
+      )
+    }
+  }
+
+  def notifyOnPendingCircuit(): Unit = {
+    log info "attempting to publish to graphite and close circuit breaker"
+    outer.circuitStatus alter { s =>
       outer.circuitPendingMeter.mark()
-      outer.circuitStatus = BreakerPending
-      log info "attempting to publish to graphite and close circuit breaker"
-      ()
+      val newStatus = BreakerPending
+      log.info( "setting graphite circuit breaker from [{}] to [{}]", s, newStatus )
+      newStatus
+    } map { s =>
+      if ( !isConnected ) {
+        log.info( "[{}] is not connected attempting to reopen socket to Graphite", s )
+        val reopened = open()
+        if ( reopened.isSuccess && isConnected ) {
+          log.info( "[{}] graphite socket reopened", s )
+        } else {
+          log.warning( "[{}] failed to reopen graphite socket", s )
+        }
+      }
     }
-    .onClose {
+  }
+
+  def notifyOnClosedCircuit(): Unit = {
+    outer.circuitStatus send { s =>
       outer.circuitClosedMeter.mark()
-      outer.circuitStatus = BreakerClosed
-      log info "graphite connection established and circuit breaker is closed"
-      ()
+      val newStatus = BreakerClosed
+      log.info( "setting graphite circuit breaker from [{}] to [{}]", s, newStatus )
+      newStatus
     }
+    log info "graphite connection established and circuit breaker is closed"
   }
 
   var _scheduled: Option[Cancellable] = None
@@ -245,8 +272,15 @@ class GraphitePublisher extends DenseOutlierPublisher { outer: GraphitePublisher
     }
 
     case Recover( points ) => {
-      log.info( "GraphitePublisher recovered [{}] points delayed by open publish circuit", points.size.toString )
       waitQueue = points ++: waitQueue
+
+      circuitStatus.future() map { status =>
+        log.info(
+          "GraphitePublisher recovered [{}] points delayed by circuit failure [{}]",
+          points.size.toString,
+          status
+        )
+      }
     }
 
     case Publish( outliers ) => {
@@ -270,7 +304,8 @@ class GraphitePublisher extends DenseOutlierPublisher { outer: GraphitePublisher
 
     case Flush => {
       log.debug( "GraphitePublisher received Flush" )
-      flush()
+      val source = sender()
+      flush( Some(source) )
     }
 
     case SendBatch => {
@@ -289,7 +324,10 @@ class GraphitePublisher extends DenseOutlierPublisher { outer: GraphitePublisher
     val points = markPoints( o )
     waitQueue = points.foldLeft( waitQueue ){ _ enqueue _ }
     log.debug( "publish[{}]: added [{} / {}] to wait queue - now at [{}]", o.topic, o.anomalySize, o.size, waitQueue.size )
+    fairSharing()
+  }
 
+  def fairSharing(): Unit = {
     if ( publishRequestMeter.count % outer.batchFairnessDivisor == 0 ) {
       debugLogger.info( "GraphitePublisher SendBatch out of fairness" )
       self ! SendBatch
@@ -301,6 +339,7 @@ class GraphitePublisher extends DenseOutlierPublisher { outer: GraphitePublisher
       flush()
     }
   }
+
 
   object ControlLabeling {
     type ControlLabel = Symbol => String
@@ -365,44 +404,71 @@ class GraphitePublisher extends DenseOutlierPublisher { outer: GraphitePublisher
   }
 
   def close(): Unit = {
-    val f = Try { flush() }
+    val ctx = context
+    val flushStatus = Await.ready( flush(), 2.minutes ) //todo make atMost configurable
     val socketClose = Try { socket foreach { _.close() } }
     socket = None
     cancelScheduledBatches()
-    context become around( closed )
-    log.info( "{} closed [{}] [{}]", self.path, socket, socketClose )
+    ctx become LoggingReceive { around( closed ) }
+    log.info( "{} flushed:[{}] closed socket:[{}] = [{}]", flushStatus.value, self.path, socket, socketClose )
   }
 
-  @tailrec final def flush(): Unit = {
-    if ( waitQueue.isEmpty ) {
-      log.info( "{} flushing complete", self.path )
-      ()
-    } else if ( circuitStatus != BreakerClosed ) {
-      debugLogger.info( "GraphitePublisher NOT flushing since circuit status = [{}]", circuitStatus )
-      ()
-    } else {
-      val (toBePublished, remainingQueue) = waitQueue splitAt outer.batchSize
-      waitQueue = remainingQueue
+  final def flush( source: Option[ActorRef] = None ): Future[Boolean] = {
+    @tailrec def loop( status: BreakerStatus, count: Int = 1 ): Boolean = {
+      def execute(): Unit = {
+        val (toBePublished, remainingQueue) = waitQueue splitAt outer.batchSize
+        waitQueue = remainingQueue
 
-      reportDuplicates( toBePublished )
+        reportDuplicates( toBePublished )
 
-      publishLogger.info(
-        "Flush: toBePublished:[{}]\tremainingQueue:[{}]\tbatchSize:[{}]",
-        toBePublished.size.toString,
-        remainingQueue.size.toString,
-        outer.batchSize.toString
-      )
+        publishLogger.info(
+          "Flush[{}]: toBePublished:[{}]\tremainingQueue:[{}]\tbatchSize:[{}]",
+          count.toString,
+          toBePublished.size.toString,
+          remainingQueue.size.toString,
+          outer.batchSize.toString
+        )
 
-      toBePublished foreach { tbp => publishLogger.info( "{}: timestamp:[{}] value:[{}]", tbp._1, tbp._2, tbp._3.toString) }
+        toBePublished foreach { tbp =>
+          publishLogger.info( "[{}] {}: timestamp:[{}] value:[{}]", count.toString, tbp._1, tbp._2, tbp._3.toString)
+        }
 
-      //      log.debug( "flush: batch=[{}]", toBePublished.mkString(",") )
-      val report = serialize( toBePublished:_* )
-      breaker withSyncCircuitBreaker {
-        circuitRequestsMeter.mark()
-        sendToGraphite( report )
+        log.debug( "flush: batch=[{}]", toBePublished.mkString(",") )
+        val report = serialize( toBePublished:_* )
+        breaker withSyncCircuitBreaker {
+          circuitRequestsMeter.mark()
+          sendToGraphite( report )
+        }
       }
-      flush()
+
+      if ( waitQueue.isEmpty ) {
+        log.info( "{} flushing complete after [{}] loops", self.path, count )
+        true
+      } else {
+        status match {
+          case BreakerClosed => {
+            execute()
+            loop( status, count + 1 )
+          }
+
+          case BreakerPending => {
+            log.info( "attempting to flush to graphite under circuit[{}]", BreakerPending )
+            execute()
+            loop( status, count + 1 )
+          }
+
+          case s => {
+            debugLogger.info( "GraphitePublisher[{}] NOT flushing since circuit status = [{}]", count.toString, circuitStatus() )
+            false
+          }
+        }
+      }
     }
+
+    val flushStatus = circuitStatus.future() map { status => loop( status ) }
+    val flushed = flushStatus map { Flushed }
+    source foreach { flushed pipeTo _ }
+    flushStatus
   }
 
   def serialize( payload: TopicPoint* ): ByteString = pickler.pickleFlattenedTimeSeries( payload:_* )
@@ -410,48 +476,61 @@ class GraphitePublisher extends DenseOutlierPublisher { outer: GraphitePublisher
   def batchAndSend(): Unit = {
     sendBatchRequestMeter.mark()
 
-    circuitStatus match {
-      case BreakerClosed => {
-        val waiting = waitQueue.size
-        val (toBePublished, remainingQueue) = waitQueue splitAt batchSize
-        waitQueue = remainingQueue
+    def execute(): Unit = {
+      val waiting = waitQueue.size
+      val (toBePublished, remainingQueue) = waitQueue splitAt batchSize
+      waitQueue = remainingQueue
 
-        if ( toBePublished.nonEmpty ) {
-          publishLogger.info(
-            "BatchAndSend: from waiting:[{}] toBePublished:[{}]\tremainingQueue:[{}]",
-            waiting.toString,
-            s"${toBePublished.size} / ${outer.batchSize}",
-            remainingQueue.size.toString
-          )
+      if ( toBePublished.nonEmpty ) {
+        publishLogger.info(
+          "BatchAndSend: from waiting:[{}] toBePublished:[{}]\tremainingQueue:[{}]",
+          waiting.toString,
+          s"${toBePublished.size} / ${outer.batchSize}",
+          remainingQueue.size.toString
+        )
 
-          reportDuplicates( toBePublished )
+        reportDuplicates( toBePublished )
 
-          val report = pickler.pickleFlattenedTimeSeries( toBePublished:_* )
+        val report = pickler.pickleFlattenedTimeSeries( toBePublished:_* )
 
-          breaker withCircuitBreaker {
-            val body = Future {
-              circuitRequestsMeter.mark()
-              sendToGraphite( report )
-              self ! SendBatch
-            }( publishDispatcher ) map { _ =>
-              toBePublished foreach { tbp => publishLogger.info( "{}: timestamp:[{}] value:[{}]", tbp._1, tbp._2, tbp._3.toString) }
-            }
-
-            body onFailure {
-              case ex => {
-                log.warning( "GraphitePublisher recovering [{}] points due to open publish circuit", toBePublished.size.toString )
-                self ! Recover( toBePublished )
-              }
-            }
-
-            body
+        breaker
+        .withCircuitBreaker {
+          Future {
+            circuitRequestsMeter.mark()
+            sendToGraphite( report )
+            self ! SendBatch
+          }( publishDispatcher ) map { _ =>
+            toBePublished foreach { tbp => publishLogger.info( "{}: timestamp:[{}] value:[{}]", tbp._1, tbp._2, tbp._3.toString) }
           }
         }
+        .recover {
+          case ex => {
+            self ! Recover( toBePublished )
 
-        if ( waitQueue.isEmpty ) {
-          publishLogger.info( "BatchAndSend: cleared no toBePublish. remainingQueue:[{}]", waitQueue.size.toString )
-          markClearing()
+            circuitStatus.future() map { status =>
+              log.info(
+                "GraphitePublisher recovering [{}] points due to circuit failure [{}]. ex message:[{}]",
+                toBePublished.size.toString,
+                status,
+                ex.getMessage
+              )
+            }
+          }
         }
+      }
+
+      if ( waitQueue.isEmpty ) {
+        publishLogger.info( "BatchAndSend: cleared no toBePublish. remainingQueue:[{}]", waitQueue.size.toString )
+        markClearing()
+      }
+    }
+
+    circuitStatus() match {
+      case BreakerClosed => execute()
+
+      case BreakerPending => {
+        log.info( "attempting to send to graphite under circuit[{}]", BreakerPending )
+        execute()
       }
 
       case status => debugLogger.info( "GraphitePublisher NOT SENDING due to circuit status = [{}]", status )

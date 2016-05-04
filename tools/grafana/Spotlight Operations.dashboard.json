@@ -16,7 +16,7 @@
       "collapse": false,
       "panels": [
         {
-          "title": "Stage Monitor",
+          "title": "Processing Stages",
           "error": false,
           "span": 6,
           "editable": true,
@@ -75,7 +75,7 @@
               "hide": false
             },
             {
-              "target": "alias(streammonitor.plan.buffer.flow.count, 'plan.buffer')",
+              "target": "alias(log(streammonitor.plan.buffer.flow.count, 10), 'plan.buffer - log')",
               "hide": false
             },
             {
@@ -83,7 +83,7 @@
               "hide": false
             },
             {
-              "target": "aliasByNode(streammonitor.publish.buffer.flow.count, 1)",
+              "target": "alias(log(streammonitor.publish.buffer.flow.count, 10), 'publish - log')",
               "hide": false
             },
             {
@@ -95,7 +95,7 @@
           "links": []
         },
         {
-          "title": "Stage Monitor",
+          "title": "Input / Output",
           "error": false,
           "span": 6,
           "editable": true,
@@ -146,18 +146,18 @@
           },
           "targets": [
             {
-              "target": "aliasByNode(log(streammonitor.framing.source.m1_rate, 10), 1)",
+              "target": "alias(log(streammonitor.framing.source.m1_rate, 10), 'framing - log')",
               "hide": false
             },
             {
-              "target": "aliasByNode(log(streammonitor.intakeBuffer.flow.count, 10), 1)",
+              "target": "alias(log(streammonitor.intakeBuffer.flow.count, 10), 'intake.buffer - log')",
               "hide": false
             },
             {
-              "target": "alias(log(spotlight.publish.GraphitePublisher.waiting, 10), 'publish.waiting')"
+              "target": "alias(log(spotlight.publish.GraphitePublisher.waiting, 10), 'publish.waiting - log')"
             },
             {
-              "target": "alias(spotlight.publish.GraphitePublisher.waiting, 'publish.waiting.raw')"
+              "target": "alias(spotlight.publish.GraphitePublisher.waiting, 'publish.waiting - raw')"
             }
           ],
           "aliasColors": {},
@@ -173,9 +173,143 @@
       "collapse": false,
       "panels": [
         {
-          "title": "Publish",
+          "title": "Algorithm Timers",
           "error": false,
           "span": 6,
+          "editable": true,
+          "type": "graph",
+          "id": 6,
+          "datasource": null,
+          "renderer": "flot",
+          "x-axis": true,
+          "y-axis": true,
+          "y_formats": [
+            "short",
+            "short"
+          ],
+          "grid": {
+            "leftMax": null,
+            "rightMax": null,
+            "leftMin": null,
+            "rightMin": null,
+            "threshold1": null,
+            "threshold2": null,
+            "threshold1Color": "rgba(216, 200, 27, 0.27)",
+            "threshold2Color": "rgba(234, 112, 112, 0.22)"
+          },
+          "lines": true,
+          "fill": 1,
+          "linewidth": 2,
+          "points": true,
+          "pointradius": 1,
+          "bars": false,
+          "stack": true,
+          "percentage": false,
+          "legend": {
+            "show": true,
+            "values": true,
+            "min": false,
+            "max": false,
+            "current": true,
+            "total": false,
+            "avg": true,
+            "alignAsTable": true,
+            "rightSide": true
+          },
+          "nullPointMode": "null",
+          "steppedLine": false,
+          "tooltip": {
+            "value_type": "individual",
+            "shared": true
+          },
+          "targets": [
+            {
+              "target": "aliasSub(spotlight.analysis.outlier.algorithm.skyline.ExponentialMovingAverageAnalyzer.receiveTimer.p95, '([^.]+\\.){4}([^.]+\\.[^.]+)\\..*', '\\2')",
+              "hide": true
+            },
+            {
+              "target": "alias(spotlight.analysis.outlier.OutlierQuorumAggregator.receiveTimer.p95, 'plan.quorum')"
+            },
+            {
+              "target": "aliasByNode(spotlight.analysis.outlier.algorithm.*.*.algorithm.*.p95, 7)"
+            }
+          ],
+          "aliasColors": {},
+          "seriesOverrides": [],
+          "links": []
+        },
+        {
+          "title": "Plan Quorum",
+          "error": false,
+          "span": 6,
+          "editable": true,
+          "type": "graph",
+          "id": 7,
+          "datasource": null,
+          "renderer": "flot",
+          "x-axis": true,
+          "y-axis": true,
+          "y_formats": [
+            "short",
+            "short"
+          ],
+          "grid": {
+            "leftMax": null,
+            "rightMax": null,
+            "leftMin": null,
+            "rightMin": null,
+            "threshold1": null,
+            "threshold2": null,
+            "threshold1Color": "rgba(216, 200, 27, 0.27)",
+            "threshold2Color": "rgba(234, 112, 112, 0.22)"
+          },
+          "lines": true,
+          "fill": 1,
+          "linewidth": 1,
+          "points": true,
+          "pointradius": 1,
+          "bars": false,
+          "stack": false,
+          "percentage": false,
+          "legend": {
+            "show": true,
+            "values": true,
+            "min": false,
+            "max": false,
+            "current": true,
+            "total": false,
+            "avg": true,
+            "alignAsTable": true,
+            "rightSide": true,
+            "sortDesc": false
+          },
+          "nullPointMode": "connected",
+          "steppedLine": false,
+          "tooltip": {
+            "value_type": "cumulative",
+            "shared": false
+          },
+          "targets": [
+            {
+              "target": "aliasByNode(spotlight.analysis.outlier.OutlierQuorumAggregator.quorum.*.m1_rate, 5)"
+            }
+          ],
+          "aliasColors": {},
+          "seriesOverrides": [],
+          "links": []
+        }
+      ]
+    },
+    {
+      "title": "New row",
+      "height": "250px",
+      "editable": true,
+      "collapse": false,
+      "panels": [
+        {
+          "title": "Publishing Circuit",
+          "error": false,
+          "span": 4,
           "editable": true,
           "type": "graph",
           "id": 2,
@@ -208,13 +342,13 @@
           "legend": {
             "show": true,
             "values": true,
-            "min": true,
+            "min": false,
             "max": true,
             "current": true,
             "total": false,
             "avg": true,
             "alignAsTable": true,
-            "rightSide": true
+            "rightSide": false
           },
           "nullPointMode": "connected",
           "steppedLine": false,
@@ -252,9 +386,9 @@
           "links": []
         },
         {
-          "title": "Publish Throughput",
+          "title": "Publishing Throughput",
           "error": false,
-          "span": 6,
+          "span": 4,
           "editable": true,
           "type": "graph",
           "id": 4,
@@ -310,149 +444,11 @@
           "aliasColors": {},
           "seriesOverrides": [],
           "links": []
-        }
-      ]
-    },
-    {
-      "title": "New row",
-      "height": "250px",
-      "editable": true,
-      "collapse": false,
-      "panels": [
-        {
-          "title": "Algorithm Timers",
-          "error": false,
-          "span": 6,
-          "editable": true,
-          "type": "graph",
-          "id": 6,
-          "datasource": null,
-          "renderer": "flot",
-          "x-axis": true,
-          "y-axis": true,
-          "y_formats": [
-            "short",
-            "short"
-          ],
-          "grid": {
-            "leftMax": null,
-            "rightMax": null,
-            "leftMin": null,
-            "rightMin": null,
-            "threshold1": null,
-            "threshold2": null,
-            "threshold1Color": "rgba(216, 200, 27, 0.27)",
-            "threshold2Color": "rgba(234, 112, 112, 0.22)"
-          },
-          "lines": true,
-          "fill": 1,
-          "linewidth": 2,
-          "points": true,
-          "pointradius": 1,
-          "bars": false,
-          "stack": true,
-          "percentage": false,
-          "legend": {
-            "show": true,
-            "values": true,
-            "min": true,
-            "max": true,
-            "current": true,
-            "total": false,
-            "avg": true,
-            "alignAsTable": true,
-            "rightSide": true
-          },
-          "nullPointMode": "connected",
-          "steppedLine": false,
-          "tooltip": {
-            "value_type": "cumulative",
-            "shared": false
-          },
-          "targets": [
-            {
-              "target": "aliasSub(spotlight.analysis.outlier.algorithm.*.*.receiveTimer.p95, '([^.]+\\.){4}([^.]+\\.[^.]+)\\..*', '\\2')"
-            },
-            {
-              "target": "alias(spotlight.analysis.outlier.OutlierQuorumAggregator.receiveTimer.p95, 'plan.quorum')"
-            }
-          ],
-          "aliasColors": {},
-          "seriesOverrides": [],
-          "links": []
         },
-        {
-          "title": "Plan Quorum",
-          "error": false,
-          "span": 6,
-          "editable": true,
-          "type": "graph",
-          "id": 7,
-          "datasource": null,
-          "renderer": "flot",
-          "x-axis": true,
-          "y-axis": true,
-          "y_formats": [
-            "short",
-            "short"
-          ],
-          "grid": {
-            "leftMax": null,
-            "rightMax": null,
-            "leftMin": null,
-            "rightMin": null,
-            "threshold1": null,
-            "threshold2": null,
-            "threshold1Color": "rgba(216, 200, 27, 0.27)",
-            "threshold2Color": "rgba(234, 112, 112, 0.22)"
-          },
-          "lines": true,
-          "fill": 1,
-          "linewidth": 1,
-          "points": true,
-          "pointradius": 1,
-          "bars": false,
-          "stack": false,
-          "percentage": false,
-          "legend": {
-            "show": true,
-            "values": true,
-            "min": true,
-            "max": true,
-            "current": true,
-            "total": false,
-            "avg": true,
-            "alignAsTable": true,
-            "rightSide": true,
-            "sortDesc": false
-          },
-          "nullPointMode": "connected",
-          "steppedLine": false,
-          "tooltip": {
-            "value_type": "cumulative",
-            "shared": false
-          },
-          "targets": [
-            {
-              "target": "aliasByNode(spotlight.analysis.outlier.OutlierQuorumAggregator.quorum.*.m1_rate, 5)"
-            }
-          ],
-          "aliasColors": {},
-          "seriesOverrides": [],
-          "links": []
-        }
-      ]
-    },
-    {
-      "title": "New row",
-      "height": "250px",
-      "editable": true,
-      "collapse": false,
-      "panels": [
         {
           "title": "publish v SendBatch",
           "error": false,
-          "span": 12,
+          "span": 4,
           "editable": true,
           "type": "graph",
           "id": 5,
@@ -475,27 +471,29 @@
             "threshold2Color": "rgba(234, 112, 112, 0.22)"
           },
           "lines": true,
-          "fill": 0,
+          "fill": 1,
           "linewidth": 1,
-          "points": false,
-          "pointradius": 5,
+          "points": true,
+          "pointradius": 1,
           "bars": false,
-          "stack": false,
-          "percentage": false,
+          "stack": true,
+          "percentage": true,
           "legend": {
             "show": true,
-            "values": false,
+            "values": true,
             "min": false,
-            "max": false,
-            "current": false,
+            "max": true,
+            "current": true,
             "total": false,
-            "avg": false
+            "avg": true,
+            "alignAsTable": true,
+            "rightSide": false
           },
-          "nullPointMode": "connected",
+          "nullPointMode": "null",
           "steppedLine": false,
           "tooltip": {
-            "value_type": "cumulative",
-            "shared": false
+            "value_type": "individual",
+            "shared": true
           },
           "targets": [
             {
@@ -507,6 +505,13 @@
           "links": []
         }
       ]
+    },
+    {
+      "title": "New row",
+      "height": "250px",
+      "editable": true,
+      "collapse": false,
+      "panels": []
     }
   ],
   "nav": [
@@ -543,7 +548,7 @@
     }
   ],
   "time": {
-    "from": "now-15m",
+    "from": "now-5m",
     "to": "now"
   },
   "templating": {
