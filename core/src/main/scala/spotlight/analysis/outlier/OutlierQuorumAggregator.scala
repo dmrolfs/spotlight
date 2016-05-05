@@ -83,23 +83,24 @@ extends Actor with InstrumentedActor with ActorLogging { outer: ConfigurationPro
 
     case unknown: UnrecognizedPayload => {
       warningsMeter.mark()
-      log.warning( "dropping unrecognized response [{}]", unknown)
-//      _fulfilled += unknown.algorithm -> NoOutliers( algorithms = Set(unknown.algorithm), source = unknown.source, plan = plan, algorithmControlBoundaries = Map.empty[Symbol, Seq[ControlBoundary]] )
-//      process( _fulfilled )
+      log.warning( "plan[{}] aggregator is dropping unrecognized response [{}]", plan.name, unknown )
     }
 
-    //todo: this whole retry approach is wrong; should simply increase timeout
+    //todo: this whole retry approach ROI doesn't pencil; should simply increase timeout
     case _: AnalysisTimedOut if retries > 0 => {
       val retriesLeft = retries - 1
 
       warningsMeter.mark()
-      log.warning(
-        "quorum not reached for topic:[{}] tries-left:[{}] received:[{}] plan:[{}]",
-        source.topic,
-        retriesLeft,
-        _fulfilled.keys.mkString(","),
-        plan.summary
-      )
+
+      if ( !plan.isQuorum(_fulfilled) ) {
+        log.debug(
+          "may not reach quorum for topic:[{}] tries-left:[{}] received:[{}] of planned:[{}]",
+          source.topic,
+          retriesLeft,
+          _fulfilled.keys.mkString(","),
+          plan.summary
+        )
+      }
 
       scheduleWhistle()
       context become around( quorum(retriesLeft) )
@@ -110,6 +111,13 @@ extends Actor with InstrumentedActor with ActorLogging { outer: ConfigurationPro
       if ( plan isQuorum _fulfilled ) {
         publishAndStop( _fulfilled )
       } else {
+        log.info(
+          "Analysis timed out and quorum was not reached for plan-topic:[{}] interval:[{}] received:[{}] of planned:[{}]",
+          plan.name + ":" + source.topic,
+          source.interval,
+          _fulfilled.keys.mkString(","),
+          plan.summary
+        )
         context.parent ! timeout
         context stop self
       }
