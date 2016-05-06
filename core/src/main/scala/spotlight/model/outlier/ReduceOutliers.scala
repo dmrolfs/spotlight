@@ -2,7 +2,9 @@ package spotlight.model.outlier
 
 import scalaz._
 import Scalaz._
-import com.typesafe.scalalogging.LazyLogging
+import com.typesafe.scalalogging.{LazyLogging, Logger}
+import org.slf4j.LoggerFactory
+import org.joda.{time => joda}
 import peds.commons.{V, Valid}
 import shapeless.syntax.typeable._
 import spotlight.model.outlier.ReduceOutliers.CorroboratedReduceOutliers.Check
@@ -73,10 +75,9 @@ object ReduceOutliers extends LazyLogging {
       plan: OutlierPlan
     ): Valid[Outliers] = {
       val tally = OutlierAlgorithmResults tally results
-      val corroboratedTimestamps = tally.collect{ case (dp, c) if isCorroborated( plan )( c ) => dp }.toSet
-      logger.debug( "REDUCE corroborated timestamps: [{}]", corroboratedTimestamps.mkString(",") )
+
+      val corroboratedTimestamps = tally.collect{ case (dp, c) if isCorroborated( plan )( c.size ) => dp }.toSet
       val corroboratedOutliers = source.points filter { dp => corroboratedTimestamps contains dp.timestamp }
-      logger.debug( "REDUCE corroborated outlier points: [{}]", corroboratedOutliers.mkString(",") )
 
       val combinedControls = {
         Map(
@@ -87,6 +88,8 @@ object ReduceOutliers extends LazyLogging {
       }
       logger.debug( "REDUCE combined controls: [{}]", combinedControls.mkString(",") )
 
+      logDebug( results, source, plan, tally, corroboratedTimestamps, corroboratedOutliers )
+
       Outliers.forSeries(
         algorithms = results.keySet,
         plan = plan,
@@ -94,6 +97,37 @@ object ReduceOutliers extends LazyLogging {
         outliers = corroboratedOutliers,
         algorithmControlBoundaries = combinedControls
       )
+    }
+
+    private def logDebug(
+      results: OutlierAlgorithmResults,
+      source: TimeSeriesBase,
+      plan: OutlierPlan,
+      tally: Map[joda.DateTime, Set[Symbol]],
+      corroboratedTimestamps: Set[joda.DateTime],
+      corroboratedOutliers: Seq[DataPoint]
+    ): Unit = {
+      val WatchedTopic = "prod.em.authz-proxy.1.proxy.p95"
+      def acknowledge( t: Topic ): Boolean = t.name == WatchedTopic
+
+      if ( acknowledge(source.topic) ) {
+        val debugLogger = Logger( LoggerFactory getLogger "Debug" )
+
+        debugLogger.info(
+          """
+            |REDUCE:[{}] [{}] outliers[{}] details:
+            |    REDUCE: corroborated timestamps: [{}]
+            |    REDUCE: corroborated outlier points: [{}]
+            |    REDUCE: tally: [{}]
+          """.stripMargin,
+          WatchedTopic,
+          source.interval.getOrElse(""),
+          corroboratedOutliers.size,
+          corroboratedTimestamps.mkString(","),
+          corroboratedOutliers.mkString(","),
+          tally.map{ case (ts, as) => s"""${ts}: [${as.mkString(", ")}]""" }.mkString( "\n", "\n    REDUCE:  - ", "\n")
+        )
+      }
     }
   }
 }
