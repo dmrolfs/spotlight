@@ -309,12 +309,12 @@ class GraphitePublisher extends DenseOutlierPublisher { outer: GraphitePublisher
     }
 
     case SendBatch => {
-      debugLogger.info(
-        "GraphitePublisher received SendBatch: next schedule in [{}]; last-clearing?[{}] wait-queue?[{}]",
-        batchInterval.toCoarsest,
-        (sinceLastClearing() > batchInterval).toString,
-        (waitQueue.size >= outer.batchSize).toString
-      )
+//      debugLogger.info(
+//        "GraphitePublisher received SendBatch: next schedule in [{}]; last-clearing?[{}] wait-queue?[{}]",
+//        batchInterval.toCoarsest,
+//        (sinceLastClearing() > batchInterval).toString,
+//        (waitQueue.size >= outer.batchSize).toString
+//      )
       batchAndSend()
     }
   }
@@ -329,7 +329,7 @@ class GraphitePublisher extends DenseOutlierPublisher { outer: GraphitePublisher
 
   def fairSharing(): Unit = {
     if ( publishRequestMeter.count % outer.batchFairnessDivisor == 0 ) {
-      debugLogger.info( "GraphitePublisher SendBatch out of fairness" )
+//      debugLogger.info( "GraphitePublisher SendBatch out of fairness" )
       self ! SendBatch
     }
 

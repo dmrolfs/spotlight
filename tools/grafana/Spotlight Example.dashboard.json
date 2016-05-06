@@ -132,6 +132,9 @@
             {
               "target": "aliasSub(spotlight.outlier.skyline.*.expected.prod.em.authz-proxy.*.proxy.p95, '([^.]+\\.){3}([^.]+\\.[^.]+)\\..*', '\\2')",
               "hide": true
+            },
+            {
+              "target": "spotlight.outlier.skyline.prod.em.authz-proxy.*.proxy.p95"
             }
           ],
           "aliasColors": {

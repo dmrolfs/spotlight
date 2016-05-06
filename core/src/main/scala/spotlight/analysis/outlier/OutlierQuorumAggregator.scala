@@ -118,6 +118,7 @@ extends Actor with InstrumentedActor with ActorLogging { outer: ConfigurationPro
           _fulfilled.keys.mkString(","),
           plan.summary
         )
+
         context.parent ! timeout
         context stop self
       }

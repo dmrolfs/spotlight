@@ -191,14 +191,14 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
 
       val resultingAcc = newAcc match {
         case \/-( a ) => {
-          val points: Int = a.values.foldLeft( 0 ){ _ + _.points.size }
-          debugLogger.info(
-            "batchSeriesByPlan batching count:[{}] topic-plans & points = [{}] [{}] avg pts/topic-plan combo=[{}]",
-            count.toString,
-            a.keys.size.toString,
-            points.toString,
-            ( points.toDouble / a.keys.size.toDouble ).toString
-          )
+//          val points: Int = a.values.foldLeft( 0 ){ _ + _.points.size }
+//          debugLogger.info(
+//            "batchSeriesByPlan batching count:[{}] topic-plans & points = [{}] [{}] avg pts/topic-plan combo=[{}]",
+//            count.toString,
+//            a.keys.size.toString,
+//            points.toString,
+//            ( points.toDouble / a.keys.size.toDouble ).toString
+//          )
           a
         }
         case -\/( exs ) => {
@@ -210,19 +210,19 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
       ( resultingAcc, count + 1 )
     }
     .map { ec: (PlanSeriesAccumulator, Int) =>
-      val (elems, count) = ec
-      val recs: Seq[((Topic, OutlierPlan), TimeSeries)] = elems.toSeq
-      debugLogger.info(
-        "batchSeriesByPlan pushing combos downstream topic:plans combos:[{}] total points:[{}]",
-        recs.size.toString,
-        recs.foldLeft( 0 ){ _ + _._2.points.size }.toString
-      )
+//      val (elems, count) = ec
+//      val recs: Seq[((Topic, OutlierPlan), TimeSeries)] = elems.toSeq
+//      debugLogger.info(
+//        "batchSeriesByPlan pushing combos downstream topic:plans combos:[{}] total points:[{}]",
+//        recs.size.toString,
+//        recs.foldLeft( 0 ){ _ + _._2.points.size }.toString
+//      )
       ec
     }
     .mapConcat { case (ps, _) => ps.toSeq.to[scala.collection.immutable.Seq].map { case ((topic, plan), ts) => ( ts, plan ) } }
     .map { tsp: (TimeSeries, OutlierPlan) =>
-      val (ts, p) = tsp
-      debugLogger.info( "batchSeriesByPlan pushing downstream topic:plan=[{}:{}]\t# points:[{}]", ts.topic, p.name, ts.points.size.toString )
+//      val (ts, p) = tsp
+//      debugLogger.info( "batchSeriesByPlan pushing downstream topic:plan=[{}:{}]\t# points:[{}]", ts.topic, p.name, ts.points.size.toString )
       tsp
     }
   }
