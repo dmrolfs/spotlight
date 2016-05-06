@@ -246,8 +246,9 @@ object OutlierPlan {
 
     override val toString: String = {
       getClass.safeSimpleName + s"[${id}](" +
-        s"""name:[$name], ${appliesTo.toString} timeout:[${timeout.toCoarsest}], """ +
-        s"""algorithms:[${algorithms.mkString(",")}], grouping:[${grouping}], algorithm-config:[${algorithmConfig.root}]""" +
+        s"""name:[$name], ${appliesTo.toString}, quorum:[${isQuorum}], reduce:[${reduce}] """ +
+        s"""algorithms:[${algorithms.mkString(",")}], timeout:[${timeout.toCoarsest}], """ +
+        s"""grouping:[${grouping}], algorithm-config:[${algorithmConfig.root}]""" +
         ")"
     }
   }

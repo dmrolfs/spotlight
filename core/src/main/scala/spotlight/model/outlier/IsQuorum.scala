@@ -2,6 +2,7 @@ package spotlight.model.outlier
 
 import org.joda.{time => joda}
 import peds.commons.log.Trace
+import peds.commons.util._
 
 
 trait IsQuorum {
@@ -23,6 +24,8 @@ object IsQuorum {
         evaluateRemainder( results )
       }
     }
+
+    override def toString: String = s"${getClass.safeSimpleName}(trigger:[${triggerPoint}] of total:[${totalIssued}])"
   }
 
   case class MajorityQuorumSpecification( override val totalIssued: Int, triggerPoint: Double ) extends IsQuorum {
@@ -37,5 +40,7 @@ object IsQuorum {
         evaluateRemainder( results )
       }
     }
+
+    override def toString: String = s"${getClass.safeSimpleName}(trigger:[${triggerPoint}]% of total:[${totalIssued}])"
   }
 }

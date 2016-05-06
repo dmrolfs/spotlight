@@ -24,6 +24,8 @@ object ReduceOutliers extends LazyLogging {
     override def isCorroborated: Check = ( plan: OutlierPlan ) => ( count: Int ) => {
       ( threshold / 100D * plan.algorithms.size.toDouble ) <= count
     }
+
+    override def toString: String = s"CorroboratedReduceOutliers( required-percent-of-votes-per-point:[${threshold}]% )"
   }
 
 
@@ -31,6 +33,8 @@ object ReduceOutliers extends LazyLogging {
     override def isCorroborated: Check = ( plan: OutlierPlan ) => ( count: Int ) => {
       minimum <= count || plan.algorithms.size <= count
     }
+
+    override def toString: String = s"CorroboratedReduceOutliers( required-votes-per-point:[${minimum}] )"
   }
 
 
@@ -115,17 +119,18 @@ object ReduceOutliers extends LazyLogging {
 
         debugLogger.info(
           """
-            |REDUCE:[{}] [{}] outliers[{}] details:
+            |REDUCE:[{}] outliers[{}] of [{}] total points in [{}] details:
             |    REDUCE: corroborated timestamps: [{}]
             |    REDUCE: corroborated outlier points: [{}]
             |    REDUCE: tally: [{}]
           """.stripMargin,
-          WatchedTopic,
+          plan.name + ":" + WatchedTopic,
+          corroboratedOutliers.size.toString,
+          source.points.size.toString,
           source.interval.getOrElse(""),
-          corroboratedOutliers.size,
           corroboratedTimestamps.mkString(","),
           corroboratedOutliers.mkString(","),
-          tally.map{ case (ts, as) => s"""${ts}: [${as.mkString(", ")}]""" }.mkString( "\n", "\n    REDUCE:  - ", "\n")
+          tally.map{ case (ts, as) => s"""${ts}: [${as.mkString(", ")}]""" }.mkString( "\n      REDUCE:  - ", "\n      REDUCE:  - ", "\n")
         )
       }
     }
