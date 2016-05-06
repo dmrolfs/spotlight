@@ -186,7 +186,17 @@ object Configuration {
     )
   }
 
-  val defaultOutlierReducer: ReduceOutliers = ReduceOutliers.byCorroborationPercentage( 50 )
+  def makeOutlierReducer( spec: Config ): ReduceOutliers = {
+    val MAJORITY = "majority"
+    val AT_LEAST = "at-least"
+    if ( spec hasPath AT_LEAST ) {
+      val threshold = spec getInt AT_LEAST
+      ReduceOutliers.byCorroborationCount( threshold )
+    } else {
+      val threshold = if ( spec hasPath MAJORITY ) spec.getDouble( MAJORITY ) else 50D
+      ReduceOutliers.byCorroborationPercentage( threshold )
+    }
+  }
 
 
   final case class SimpleConfiguration private[stream](
@@ -257,7 +267,7 @@ object Configuration {
                 name = name,
                 timeout = timeout,
                 isQuorum = makeIsQuorum( spec, algorithms.size ),
-                reduce = defaultOutlierReducer,
+                reduce = makeOutlierReducer( spec ),
                 algorithms = algorithms,
                 grouping = grouping,
                 planSpecification = spec
@@ -272,7 +282,7 @@ object Configuration {
                 name = name,
                 timeout = timeout,
                 isQuorum = makeIsQuorum( spec, algorithms.size ),
-                reduce = defaultOutlierReducer,
+                reduce = makeOutlierReducer( spec ),
                 algorithms = algorithms,
                 grouping = grouping,
                 planSpecification = spec,
@@ -287,7 +297,7 @@ object Configuration {
                 name = name,
                 timeout = timeout,
                 isQuorum = makeIsQuorum( spec, algorithms.size ),
-                reduce = defaultOutlierReducer,
+                reduce = makeOutlierReducer( spec ),
                 algorithms = algorithms,
                 grouping = grouping,
                 planSpecification = spec,

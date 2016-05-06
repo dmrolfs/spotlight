@@ -101,7 +101,7 @@ class OutlierPlanDetectionRouterSpec extends ParallelAkkaSpec with LazyLogging {
         grouping = g,
         timeout = 500.millis,
         isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = 1, triggerPoint = 1 ),
-        reduce = Configuration.defaultOutlierReducer,
+        reduce = ReduceOutliers.byCorroborationPercentage(50),
         planSpecification = ConfigFactory.parseString(
           s"""
              |algorithm-config.${algo.name}.seedEps: 5.0
@@ -432,7 +432,7 @@ class OutlierPlanDetectionRouterSpec extends ParallelAkkaSpec with LazyLogging {
 //        grouping = grouping,
 //        timeout = 5000.millis,
 //        isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = algos.size, triggerPoint = 1 ),
-//        reduce = Configuration.defaultOutlierReducer,
+//        reduce = Configuration.makeOutlierReducer,
 //        planSpecification = ConfigFactory.parseString(
 //          algos
 //          .map { a =>
