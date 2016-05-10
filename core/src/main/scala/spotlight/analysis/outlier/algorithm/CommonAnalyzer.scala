@@ -84,7 +84,7 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
     router ! DetectionAlgorithmRouter.RegisterDetectionAlgorithm( algorithm, self )
   }
 
-  override def detect: Receive = LoggingReceive {
+  override def detect: Receive = {
     case msg @ DetectUsing( algo, aggregator, payload: DetectOutliersInSeries, history, algorithmConfig ) => {
       val toOutliers = kleisli[TryV, (Outliers, AlgorithmContext), Outliers] { case (o, _) => o.right }
 

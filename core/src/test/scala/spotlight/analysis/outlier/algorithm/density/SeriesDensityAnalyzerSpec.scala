@@ -20,6 +20,7 @@ import spotlight.model.outlier._
 import spotlight.model.timeseries._
 import spotlight.testkit.ParallelAkkaSpec
 
+import scala.annotation.tailrec
 import scala.concurrent.duration._
 
 
@@ -83,6 +84,46 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
 //        s :+ new EuclideanDistance().compute( p.getPoint, c.getPoint )
       }
     }
+
+    def makeDataPoints(
+      values: Seq[Double],
+      start: joda.DateTime = joda.DateTime.now,
+      period: FiniteDuration = 1.second,
+      timeWiggle: (Double, Double) = (1D, 1D),
+      valueWiggle: (Double, Double) = (1D, 1D)
+    ): Seq[DataPoint] = {
+      val secs = start.getMillis / 1000L
+      val epochStart = new joda.DateTime( secs * 1000L )
+      val random = new RandomDataGenerator
+      def nextFactor( wiggle: (Double, Double) ): Double = {
+        val (lower, upper) = wiggle
+        if ( upper <= lower ) upper else random.nextUniform( lower, upper )
+      }
+
+      values.zipWithIndex map { vi =>
+        import com.github.nscala_time.time.Imports._
+        val (v, i) = vi
+        val tadj = ( i * nextFactor(timeWiggle) ) * period
+        val ts = epochStart + tadj.toJodaDuration
+        val vadj = nextFactor( valueWiggle )
+        DataPoint( timestamp = ts, value = (v * vadj) )
+      }
+    }
+
+    def spike( data: Seq[DataPoint], value: Double = 1000D )( position: Int = data.size - 1 ): TimeSeries = {
+      val (front, last) = data.sortBy{ _.timestamp.getMillis }.splitAt( position )
+      val spiked = ( front :+ last.head.copy( value = value ) ) ++ last.tail
+      TimeSeries( "test-series", spiked )
+    }
+
+    def historyWith( prior: Option[HistoricalStatistics], series: TimeSeries ): HistoricalStatistics = {
+      prior map { h =>
+        series.points.foldLeft( h ){ (history, dp) => history :+ dp.getPoint }
+      } getOrElse {
+        HistoricalStatistics.fromActivePoints( DataPoint.toDoublePoints(series.points).toArray, false )
+      }
+    }
+
   }
 
   def assertHistoricalStats( actual: HistoricalStatistics, expected: HistoricalStatistics ): Unit = {
@@ -101,14 +142,6 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
   }
 
   def assertDescriptiveStats(actual: DescriptiveStatistics, expected: DescriptiveStatistics ): Unit = {
-//    actual.statistics.isDefined mustBe expected.statistics.isDefined
-//    for {
-//      a <- actual.statistics
-//      e <- expected.statistics
-//    } {
-//      a.ewma mustBe e.ewma
-//      a.ewmsd mustBe e.ewmsd
-//    }
     actual.getN mustBe expected.getN
     actual.getMax mustBe expected.getMax
     actual.getMean mustBe expected.getMean
@@ -229,6 +262,105 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       }
     }
 
+    "detect outlier through series of micro batches"  in { f: Fixture =>
+      import f._
+      import spotlight.model.timeseries.DataPoint._
+
+      def detectUsing( series: TimeSeries, history: HistoricalStatistics ): DetectUsing = {
+        DetectUsing(
+          algorithm = algoS,
+          aggregator = aggregator.ref,
+          payload = OutlierDetectionMessage( series, plan ).toOption.get,
+          history = history,
+          properties = ConfigFactory.parseString(
+            s"""
+               |${algoS.name}.seedEps: 5.0
+               |${algoS.name}.tolerance: 2.0
+               |${algoS.name}.minDensityConnectedPoints: 3
+            """.stripMargin
+          )
+        )
+      }
+
+      val analyzer = TestActorRef[SeriesDensityAnalyzer]( SeriesDensityAnalyzer.props( router.ref ) )
+      analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
+
+      val topic = "test.series"
+      val start = joda.DateTime.now
+      val rnd = new RandomDataGenerator()
+
+      @tailrec def loop( i: Int, left: Int, previous: Option[(TimeSeries, HistoricalStatistics)] = None ): Unit = {
+        log.info( ">>>>>>>>>  LOOP( i:[{}] left:[{}]", i, left )
+        if ( left == 0 ) ()
+        else {
+          val dt = start plusSeconds (10 * i)
+          val v = if ( left == 1 ) 1000.0 else rnd.nextUniform( 0.99, 1.01, true )
+          val s = TimeSeries( topic, Seq( DataPoint(dt, v) ) )
+          val h = {
+            previous
+            .map { case (ps, ph) => s.points.foldLeft( ph recordLastDataPoints ps.points ) { (acc, p) => acc :+ p } }
+            .getOrElse { HistoricalStatistics.fromActivePoints( DataPoint.toDoublePoints(s.points).toArray, false ) }
+          }
+          analyzer receive detectUsing( s, h )
+
+          val expected: PartialFunction[Any, Unit] = {
+            if ( left == 1 ) {
+              case m: SeriesOutliers => {
+                m.algorithms mustBe Set( algoS )
+                m.source mustBe s
+                m.hasAnomalies mustBe true
+                m.outliers mustBe s.points
+              }
+            } else {
+              case m: NoOutliers => {
+                m.algorithms mustBe Set( algoS )
+                m.source mustBe s
+                m.hasAnomalies mustBe false
+              }
+            }
+          }
+
+          aggregator.expectMsgPF( 2.seconds.dilated, s"point-$i" )( expected )
+          loop( i + 1, left - 1, Some( (s, h) ) )
+        }
+      }
+
+      loop( 0, 20 )
+//      val s1 = TimeSeries( topic, Seq( DataPoint(start, 1.0) ) )
+//      val h1 = HistoricalStatistics.fromActivePoints( DataPoint.toDoublePoints(s1.points).toArray, false )
+//      analyzer receive detectUsing( s1, h1 )
+//      aggregator.expectMsgPF( 2.seconds.dilated, "point 1" ) {
+//        case m: NoOutliers => {
+//          m.algorithms mustBe Set( algoS )
+//          m.source mustBe s1
+//          m.hasAnomalies mustBe false
+//        }
+//      }
+//
+//      val s2 = TimeSeries( topic, Seq( DataPoint(start plusSeconds 10, 1.0) ) )
+//      val h2 = h1.recordLastDataPoints(s1.points) :+ s2.points.head
+//      analyzer receive detectUsing( s2, h2 )
+//      aggregator.expectMsgPF( 2.seconds.dilated, "point 2" ) {
+//        case m: NoOutliers => {
+//          m.algorithms mustBe Set( algoS )
+//          m.source mustBe s2
+//          m.hasAnomalies mustBe false
+//        }
+//      }
+//
+//      val s3 = TimeSeries( topic, Seq( DataPoint(start plusSeconds 20, 1000.0) ) )
+//      val h3 = h2.recordLastDataPoints(s2.points) :+ s3.points.head
+//      analyzer receive detectUsing( s3, h3 )
+//      aggregator.expectMsgPF( 2.seconds.dilated, "point 3" ) {
+//        case m: SeriesOutliers => {
+//          m.algorithms mustBe Set( algoS )
+//          m.source mustBe s3
+//          m.hasAnomalies mustBe true
+//          m.outliers mustBe s3.points
+//        }
+//      }
+    }
+
     "series analyzer doesn't recognize cohort" in { f: Fixture =>
       import f._
       val analyzer = TestActorRef[SeriesDensityAnalyzer]( SeriesDensityAnalyzer.props(router.ref) )
@@ -243,7 +375,8 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
 
       val algProps = ConfigFactory.parseString(
         s"""
-           |${algoC.name}.eps: 5.0
+           |${algoS.name}.tolerance: 3.0
+           |${algoC.name}.seedEps: 5.0
            |${algoC.name}.minDensityConnectedPoints: 2
         """.stripMargin
       )
@@ -275,6 +408,8 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
         DetectUsing( algorithm = algoS, aggregator.ref, payload = message, history, properties = config )
       }
 
+      val PointsForLast = HistoricalStatistics.LastN
+
       val analyzer = TestActorRef[SeriesDensityAnalyzer]( SeriesDensityAnalyzer.props( router.ref ) )
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
 
@@ -300,7 +435,9 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       val detectHistoryAB = DataPoint.toDoublePoints( pointsB ).foldLeft( detectHistoryARecorded ){ (h, dp) => h :+ dp.getPoint }
       detectHistoryAB.N mustBe (pointsA.size + pointsB.size )
       val detectHistoryABLast: Seq[Point] = detectHistoryAB.lastPoints
-      val pointsALast: Seq[Point] = pointsA.drop( pointsA.size - 3 ).map{ dp => Array(dp.timestamp.getMillis.toDouble, dp.value) }.toList
+      val pointsALast: Seq[Point] = {
+        pointsA.drop( pointsA.size - PointsForLast ).map{ dp => Array(dp.timestamp.getMillis.toDouble, dp.value) }.toList
+      }
       detectHistoryABLast.size mustBe pointsALast.size
       detectHistoryABLast.zip(pointsALast).foreach{ case (f, b) => f mustBe b }
 

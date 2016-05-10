@@ -1,12 +1,15 @@
 package spotlight.analysis
 
-import java.time.DayOfWeek
 import akka.actor.ActorRef
-import scalaz._, Scalaz._
-import com.typesafe.config.{ ConfigFactory, Config }
+
+import scalaz._
+import Scalaz._
+import com.typesafe.config.{Config, ConfigFactory}
+import org.apache.commons.math3.ml.distance.{DistanceMeasure, EuclideanDistance}
 import peds.commons.Valid
+import peds.commons.math.MahalanobisDistance
 import spotlight.model.outlier.OutlierPlan
-import spotlight.model.timeseries.{ Topic, TimeSeriesBase, TimeSeriesCohort, TimeSeries }
+import spotlight.model.timeseries.{TimeSeries, TimeSeriesBase, TimeSeriesCohort, Topic}
 
 
 /**
@@ -35,6 +38,34 @@ package object outlier {
     def checkPlan( plan: OutlierPlan, ts: TimeSeriesBase ): Valid[OutlierPlan] = {
       if ( plan appliesTo ts ) plan.successNel else Validation.failureNel( PlanMismatchError( plan, ts ) )
     }
+  }
+
+
+  /**
+    * Type class that determines circumstance when a distance measure is valid to use.
+ *
+    * @tparam D
+    */
+  trait DistanceMeasureValidity[D <: DistanceMeasure] {
+    def isApplicable(distance: D, history: HistoricalStatistics ): Boolean
+  }
+
+  /**
+    * Mahalanobis distance should not be applied when the historical covariance matrix has a determinant of 0.0
+    */
+  implicit val mahalanobisValidity = new DistanceMeasureValidity[MahalanobisDistance] {
+    override def isApplicable(distance: MahalanobisDistance, history: HistoricalStatistics ): Boolean = {
+      import org.apache.commons.math3.linear.EigenDecomposition
+      val determinant = new EigenDecomposition( history.covariance ).getDeterminant
+      determinant != 0.0
+    }
+  }
+
+  /**
+    * Euclidean distance can always be applied.
+    */
+  implicit val euclideanValidity = new DistanceMeasureValidity[EuclideanDistance] {
+    override def isApplicable(distance: EuclideanDistance, history: HistoricalStatistics ): Boolean = true
   }
 
 

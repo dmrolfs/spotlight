@@ -3,6 +3,7 @@ package spotlight.analysis.outlier.algorithm.density
 import scala.annotation.tailrec
 import scala.reflect.ClassTag
 import akka.actor.{ActorRef, Props}
+import org.apache.commons.math3.linear.EigenDecomposition
 
 import scalaz._
 import Scalaz._
@@ -10,8 +11,10 @@ import scalaz.Kleisli.{ask, kleisli}
 import peds.commons.{KOp, TryV, Valid}
 import peds.commons.util._
 import org.apache.commons.math3.ml.clustering.{Cluster, DBSCANClusterer, DoublePoint}
-import org.apache.commons.math3.ml.distance.DistanceMeasure
+import org.apache.commons.math3.ml.distance.{DistanceMeasure, EuclideanDistance}
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
+import peds.commons.math.MahalanobisDistance
+import spotlight.analysis.outlier.HistoricalStatistics
 import spotlight.model.outlier.Outliers
 import spotlight.model.timeseries.{ControlBoundary, DataPoint, TimeSeriesBase}
 import spotlight.analysis.outlier.algorithm.AlgorithmActor.AlgorithmContext
@@ -80,21 +83,43 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
   val distanceMeasure: KOp[AlgorithmContext, DistanceMeasure] = kleisli { _.distanceMeasure }
 
   val updateDistanceMoment: KOp[AlgorithmContext, AlgorithmContext] = {
+    import spotlight.analysis.outlier._
+
+    def distanceIsValid( d: DistanceMeasure, h: HistoricalStatistics ): Boolean = {
+      // stinks have to resort to this match. Type class is muted due to instantiating distance measure from configuration.
+      d match {
+        case m: MahalanobisDistance => mahalanobisValidity.isApplicable(m, h)
+        case e: EuclideanDistance => euclideanValidity.isApplicable(e, h)
+        case _ => true
+      }
+    }
+
     for {
       ctx <- toConcreteContextK
       distance <- distanceMeasure
     } yield {
-      val distances = contiguousPairs( ctx ) map { case (cur, prev) =>
-        val d = distance.compute( cur.getPoint, prev.getPoint )
-        log.debug( "distance:[{}] for contiguous pairs: [{}, {}]", d, prev.getPoint.mkString("(", ",",")"), cur.getPoint.mkString("(",",",")") )
-        d
+      if ( !distanceIsValid(distance, ctx.message.history) ) {
+        log.info( "updateDistanceMoment: distance covariance matrix has ZERO DETERMINANT topic:[{}]", ctx.message.topic )
+        ctx
+      } else {
+        val distances = contiguousPairs( ctx ) map { case (cur, prev) =>
+          val d = distance.compute( cur.getPoint, prev.getPoint )
+          log.debug( "distance:[{}] for contiguous pairs: [{}, {}]", d, prev.getPoint.mkString("(", ",",")"), cur.getPoint.mkString("(",",",")") )
+          d
+        }
+        val updatedStats = distances.foldLeft( ctx.distanceStatistics ) { (stats, d) =>
+          if ( !d.isNaN ) stats addValue d
+          stats
+        }
+        log.debug( "updated distance m:[{}] sd:[{}] stats: [{}]", updatedStats.getMean, updatedStats.getStandardDeviation, updatedStats )
+        ctx.copy( distanceStatistics = updatedStats ).asInstanceOf[AlgorithmContext]
       }
-      val updatedStats = distances.foldLeft( ctx.distanceStatistics ) { (stats, d) =>
-        if ( !d.isNaN ) stats addValue d
-        stats
-      }
-      log.debug( "updated distance m:[{}] sd:[{}] stats: [{}]", updatedStats.getMean, updatedStats.getStandardDeviation, updatedStats )
-      ctx.copy( distanceStatistics = updatedStats ).asInstanceOf[AlgorithmContext]
+    }
+  }
+
+  val minDensityPoints: KOp[AlgorithmContext, Int] = {
+    kleisli[TryV, AlgorithmContext, Int] { ctx =>
+      \/ fromTryCatchNonFatal { ctx.messageConfig getInt algorithm.name + ".minDensityConnectedPoints" }
     }
   }
 
@@ -102,17 +127,17 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
   val cluster: KOp[AlgorithmContext, (Clusters, AlgorithmContext)] = {
     for {
       ctx <- toConcreteContextK
+      data <- fillData
       e <- eps <=< toConcreteContextK
       distance <- distanceMeasure
-      minDensityPoints <- kleisli[TryV, AlgorithmContext, Int] { c =>
-        \/ fromTryCatchNonFatal { c.messageConfig getInt algorithm.name + ".minDensityConnectedPoints" }
-      }
+      minPoints <- minDensityPoints
     } yield {
       log.debug( "DBSCAN eps = [{}]", e )
-      log.debug( "cluster: context dist-stats=[{}]", ctx.distanceStatistics )
+      log.debug( "DBSCAN filled orig:[{}] past:[{}] points=[{}]", ctx.data.size, data.size - ctx.data.size, data.mkString(",") )
+//      log.debug( "cluster: context dist-stats=[{}]", ctx.distanceStatistics )
       import scala.collection.JavaConverters._
       val clustersD = \/ fromTryCatchNonFatal {
-        new DBSCANClusterer[DoublePoint]( e, minDensityPoints, distance ).cluster( ctx.data.asJava ).asScala.toSeq
+        new DBSCANClusterer[DoublePoint]( e, minPoints, distance ).cluster( data.asJava ).asScala.toSeq
       }
 
       if ( log.isDebugEnabled ) {
@@ -123,6 +148,22 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
       }
 
       ( clustersD valueOr { _ => Seq.empty[Cluster[DoublePoint]] }, ctx )
+    }
+  }
+
+  val fillData: KOp[AlgorithmContext, Seq[DoublePoint]] = {
+    for {
+      ctx <- ask[TryV, AlgorithmContext]
+    } yield {
+      val minPoints = HistoricalStatistics.LastN
+      val original = ctx.data
+      if ( minPoints < original.size ) original
+      else {
+        val inHistory = ctx.history.lastPoints.size
+        val needed = minPoints + 1 - original.size
+        val past = ctx.history.lastPoints.drop( inHistory - needed ).map { pt => new DoublePoint( pt ) }
+        past ++ original
+      }
     }
   }
 

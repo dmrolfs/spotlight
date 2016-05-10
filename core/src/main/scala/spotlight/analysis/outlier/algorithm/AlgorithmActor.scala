@@ -9,11 +9,11 @@ import scalaz.Kleisli.kleisli
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.LazyLogging
 import nl.grons.metrics.scala.Timer
-import org.apache.commons.math3.linear.MatrixUtils
+import org.apache.commons.math3.linear.{EigenDecomposition, MatrixUtils}
 import org.apache.commons.math3.ml.distance.{DistanceMeasure, EuclideanDistance}
 import org.apache.commons.math3.ml.clustering.DoublePoint
 import peds.akka.metrics.InstrumentedActor
-import peds.commons.{TryV, KOp}
+import peds.commons.{KOp, TryV}
 import peds.commons.math.MahalanobisDistance
 import spotlight.model.outlier.OutlierPlan
 import spotlight.model.timeseries.{ControlBoundary, DataPoint, TimeSeriesBase, Topic}
@@ -34,12 +34,12 @@ trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
     router ! DetectionAlgorithmRouter.RegisterDetectionAlgorithm( algorithm, self )
   }
 
-  override def receive: Receive = around( quiescent )
+  override def receive: Receive = LoggingReceive{ around( quiescent ) }
 
-  def quiescent: Receive = LoggingReceive {
+  def quiescent: Receive = {
     case DetectionAlgorithmRouter.AlgorithmRegistered( a ) if a == algorithm => {
       log.info( "registration confirmed for [{}] @ [{}] with {}", algorithm.name, self.path, sender().path )
-      context become around( detect )
+      context become LoggingReceive{ around( detect ) }
     }
 
     case m: DetectUsing => throw AlgorithmActor.AlgorithmUsedBeforeRegistrationError( algorithm, self.path )
@@ -113,13 +113,17 @@ object AlgorithmActor {
       override def distanceMeasure: TryV[DistanceMeasure] = {
         def makeMahalanobisDistance: TryV[DistanceMeasure] = {
           val mahal = if ( message.history.N > 0 ) {
-            logger.debug( "DISTANCE_MEASURE message.history.covariance = {}", message.history.covariance)
+            logger.debug(
+              "DISTANCE_MEASURE message.history.covariance = [{}] determinant:[{}]",
+              message.history.covariance,
+              new EigenDecomposition(message.history.covariance).getDeterminant.toString
+            )
             MahalanobisDistance.fromCovariance( message.history.covariance )
           } else {
             logger.debug( "DISTANCE_MEASURE point data = {}", data.mkString("[",",","]"))
             MahalanobisDistance.fromPoints( MatrixUtils.createRealMatrix( data.toArray map { _.getPoint } ) )
           }
-          logger.debug( "DISTANCE_MEASURE mahal = {}  sample distance={}", mahal, mahal.map{ _.compute(Array(3D, 18.4), Array(2D, 19.2))})
+          logger.debug( "DISTANCE_MEASURE mahal = [{}]", mahal )
           mahal.disjunction.leftMap{ _.head }
         }
 

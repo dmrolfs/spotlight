@@ -35,7 +35,7 @@ trait HistoricalStatistics extends Serializable {
 
 
 object HistoricalStatistics {
-  val LastN: Int = 3
+  val LastN: Int = 6 * 60 * 24 // 6pts / sec for 1-day    // 3
 
   def apply( k: Int, isCovarianceBiasCorrected: Boolean ): HistoricalStatistics = {
     ApacheMath3HistoricalStatistics( new MultivariateSummaryStatistics(k, isCovarianceBiasCorrected) )

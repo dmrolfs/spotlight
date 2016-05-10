@@ -232,7 +232,7 @@ class OutlierPlanDetectionRouterSpec extends ParallelAkkaSpec with LazyLogging {
       subscriber.expectMsgClass( 200.millis.dilated, classOf[NoOutliers] )
     }
 
-    "plan router flow routes to all applicable plans" taggedAs (WIP) in { f: Fixture =>
+    "plan router flow routes to all isApplicable plans" taggedAs (WIP) in { f: Fixture =>
       import f._
 
 //      def batchSeriesByPlan(
