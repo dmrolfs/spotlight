@@ -262,7 +262,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       }
     }
 
-    "detect outlier through series of micro batches"  in { f: Fixture =>
+    "detect outlier through series of micro batches" taggedAs (WIP) in { f: Fixture =>
       import f._
       import spotlight.model.timeseries.DataPoint._
 
@@ -290,42 +290,40 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       val rnd = new RandomDataGenerator()
 
       @tailrec def loop( i: Int, left: Int, previous: Option[(TimeSeries, HistoricalStatistics)] = None ): Unit = {
-        log.info( ">>>>>>>>>  LOOP( i:[{}] left:[{}]", i, left )
-        if ( left == 0 ) ()
-        else {
-          val dt = start plusSeconds (10 * i)
-          val v = if ( left == 1 ) 1000.0 else rnd.nextUniform( 0.99, 1.01, true )
-          val s = TimeSeries( topic, Seq( DataPoint(dt, v) ) )
-          val h = {
-            previous
-            .map { case (ps, ph) => s.points.foldLeft( ph recordLastDataPoints ps.points ) { (acc, p) => acc :+ p } }
-            .getOrElse { HistoricalStatistics.fromActivePoints( DataPoint.toDoublePoints(s.points).toArray, false ) }
-          }
-          analyzer receive detectUsing( s, h )
+        log.info( ">>>>>>>>>  TEST-LOOP( i:[{}] left:[{}]", i, left )
+        val dt = start plusSeconds (10 * i)
+        val v = if ( left == 0 ) 1000.0 else rnd.nextUniform( 0.99, 1.01, true )
+        val s = TimeSeries( topic, Seq( DataPoint(dt, v) ) )
+        val h = {
+          previous
+          .map { case (ps, ph) => s.points.foldLeft( ph recordLastDataPoints ps.points ) { (acc, p) => acc :+ p } }
+          .getOrElse { HistoricalStatistics.fromActivePoints( DataPoint.toDoublePoints(s.points).toArray, false ) }
+        }
+        analyzer receive detectUsing( s, h )
 
-          val expected: PartialFunction[Any, Unit] = {
-            if ( left == 1 ) {
-              case m: SeriesOutliers => {
-                m.algorithms mustBe Set( algoS )
-                m.source mustBe s
-                m.hasAnomalies mustBe true
-                m.outliers mustBe s.points
-              }
-            } else {
-              case m: NoOutliers => {
-                m.algorithms mustBe Set( algoS )
-                m.source mustBe s
-                m.hasAnomalies mustBe false
-              }
+        val expected: PartialFunction[Any, Unit] = {
+          if ( left == 0 ) {
+            case m: SeriesOutliers => {
+              m.algorithms mustBe Set( algoS )
+              m.source mustBe s
+              m.hasAnomalies mustBe true
+              m.outliers mustBe s.points
+            }
+          } else {
+            case m: NoOutliers => {
+              m.algorithms mustBe Set( algoS )
+              m.source mustBe s
+              m.hasAnomalies mustBe false
             }
           }
-
-          aggregator.expectMsgPF( 2.seconds.dilated, s"point-$i" )( expected )
-          loop( i + 1, left - 1, Some( (s, h) ) )
         }
+
+        aggregator.expectMsgPF( 2.seconds.dilated, s"point-$i" )( expected )
+
+        if ( left == 0 ) () else loop( i + 1, left - 1, Some( (s, h) ) )
       }
 
-      loop( 0, 20 )
+      loop( 0, 15 )
 //      val s1 = TimeSeries( topic, Seq( DataPoint(start, 1.0) ) )
 //      val h1 = HistoricalStatistics.fromActivePoints( DataPoint.toDoublePoints(s1.points).toArray, false )
 //      analyzer receive detectUsing( s1, h1 )
@@ -392,7 +390,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
     }
 
 
-    "history is updated with each detect request" taggedAs (WIP) in { f: Fixture =>
+    "history is updated with each detect request" in { f: Fixture =>
       import f._
 
       def detectUsing( message: OutlierDetectionMessage, history: HistoricalStatistics ): DetectUsing = {
