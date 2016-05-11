@@ -144,31 +144,42 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
 
   def toConcreteContextK: KOp[AlgorithmContext, C] = kleisli { toConcreteContext }
 
-  val tailAverage: KOp[AlgorithmContext, Seq[Point2D]] = Kleisli[TryV, AlgorithmContext, Seq[Point2D]] { context =>
-    val TailLength = 3
-
-    val data = context.data.map{ _.getPoint.apply( 1 ) }
-    val last = context.history.lastPoints.drop( context.history.lastPoints.size - TailLength + 1 ) map { case Array(_, v) => v }
-    log.debug( "tail-average: last=[{}]", last.mkString(",") )
-
-    context.data
-    .map{ _.getPoint.apply( 0 ) }
-    .zipWithIndex
-    .map { case (ts, i) =>
-      val pointsToAverage = if ( i < TailLength ) {
-        val all = last ++ data.take( i + 1 )
-        all.drop( all.size - TailLength )
-      } else {
-        data.drop( i - TailLength + 1 ).take( TailLength )
+  def tailAverage( data: Seq[DoublePoint], tailLength: Int = 3 ): KOp[AlgorithmContext, Seq[Point2D]] = {
+    kleisli[TryV, AlgorithmContext, Seq[Point2D]] { ctx =>
+      val values = data map { _.getPoint.apply( 1 ) }
+      val lastPos: Int = {
+        data.headOption
+        .map { h =>
+          val Array( dts, _ ) = h.getPoint
+          ctx.history.lastPoints indexWhere { p: Point => p(0) == dts }
+        }
+        .getOrElse { ctx.history.lastPoints.size }
       }
 
-      ( ts, pointsToAverage )
+      val last: Seq[Double] = ctx.history.lastPoints.drop( lastPos - tailLength + 1 ) map { case Array(_, v) => v }
+      log.debug( "tail-average: last=[{}]", last.mkString(",") )
+
+      data
+      .map{ _.getPoint.apply( 0 ) }
+      .zipWithIndex
+      .map { case (ts, i) =>
+        val pointsToAverage: Seq[Double] = {
+          if ( i < tailLength ) {
+            val all = last ++ values.take( i + 1 )
+            all.drop( all.size - tailLength )
+          } else {
+            values.drop( i - tailLength + 1 ).take( tailLength )
+          }
+        }
+
+        ( ts, pointsToAverage )
+      }
+      .map { case (ts, pts) =>
+        log.debug( "points to tail average ({}, [{}]) = {}", ts.toLong, pts.mkString(","), pts.sum / pts.size )
+        (ts, pts.sum / pts.size)
+      }
+      .right
     }
-    .map { case (ts, pts) =>
-      log.debug( "points to tail average ({}, [{}]) = {}", ts.toLong, pts.mkString(","), pts.sum / pts.size )
-      (ts, pts.sum / pts.size)
-    }
-    .right
   }
 
 

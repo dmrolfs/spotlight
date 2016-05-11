@@ -47,5 +47,5 @@ case class ControlBoundary(
     equalOrAboveFloor && equalOrBelowCeiling
   }
 
-  override def toString: String = s"ControlBoundary( ${timestamp}[${timestamp.getMillis}]f:${floor}, e:${expected}, c:${ceiling} )"
+  override def toString: String = s"ControlBoundary( ${timestamp}[${timestamp.getMillis}] [f:${floor}, e:${expected}, c:${ceiling}] )"
 }

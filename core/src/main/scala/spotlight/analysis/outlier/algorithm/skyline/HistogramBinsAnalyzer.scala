@@ -58,24 +58,24 @@ class HistogramBinsAnalyzer( override val router: ActorRef ) extends CommonAnaly
     */
     override val findOutliers: KOp[AlgorithmContext, (Outliers, AlgorithmContext)] = {
     val outliers = for {
-      context <- toConcreteContextK <=< ask[TryV, AlgorithmContext]
-      taverages <- tailAverage <=< ask[TryV, AlgorithmContext]
-      tolerance <- tolerance <=< ask[TryV, AlgorithmContext]
+      ctx <- toConcreteContextK
+      taverages <- tailAverage( ctx.data )
+      tolerance <- tolerance
     } yield {
       val tol = tolerance getOrElse 3D
 
       val MinBinSize = "minimum-bin-size"
-      val config = context.messageConfig
+      val config = ctx.messageConfig
       val minimumBinSize = if ( config.hasPath(MinBinSize) ) config.getInt( MinBinSize ) else 5
 
       //todo: not sure why skyline creates a histogram from raw data then compares 3-pt average against histogram
       // easy case of 3-pt avg falling into a 0-size bin
-      val data = context.data.map{ _.getPoint }.map{ case Array(ts, v) => (ts, v) }
+      val data = ctx.data.map{ _.getPoint }.map{ case Array(ts, v) => (ts, v) }
       val h = histogram( data )()
 
       collectOutlierPoints(
         points = taverages,
-        context = context,
+        context = ctx,
         evaluateOutlier = (p: Point2D, ctx: Context) => {
           val (ts, v) = p
           val isOutlier = h.binFor( p )

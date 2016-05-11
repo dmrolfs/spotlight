@@ -88,23 +88,36 @@ abstract class SkylineBaseSpec extends ParallelAkkaSpec with MockitoSugar with L
       }
     }
 
-    def tailAverage( data: Seq[DataPoint], last: Seq[DataPoint] = Seq.empty[DataPoint], tailLength: Int = 3 ): Seq[DataPoint] = {
-      val l = last.drop( last.size - tailLength + 1 )
+    def tailAverage( data: Seq[DataPoint], lastPoints: Seq[DataPoint], tailLength: Int = 3 ): Seq[DataPoint] = {
+      val values = data map { _.value }
+      val lastPos: Int = {
+        data.headOption
+        .map { h => lastPoints indexWhere { _.timestamp == h.timestamp } }
+        .getOrElse { lastPoints.size }
+      }
+
+      val last: Seq[Double] = lastPoints.drop( lastPos - tailLength + 1 ) map { _.value }
+      log.debug( "tail-average: last=[{}]", last.mkString(",") )
 
       data
       .map { _.timestamp }
       .zipWithIndex
       .map { case (ts, i) =>
-        val valuesToAverage = if ( i < tailLength ) {
-          val all = l ++ data.take( i + 1 )
-          all.drop( all.size - tailLength )
-        } else {
-          data.drop( i - tailLength + 1 ).take( tailLength )
+        val pointsToAverage: Seq[Double] = {
+          if ( i < tailLength ) {
+            val all = last ++ values.take( i + 1 )
+            all.drop( all.size - tailLength )
+          } else {
+            values.drop( i - tailLength + 1 ).take( tailLength )
+          }
         }
 
-        ( ts, valuesToAverage.map{ _.value } )
+        ( ts, pointsToAverage )
       }
-      .map { case (ts, vs) => DataPoint( timestamp = ts, value = vs.sum / vs.size ) }
+      .map { case (ts, pts) =>
+        log.debug( "points to tail average ({}, [{}]) = {}", ts, pts.mkString(","), pts.sum / pts.size )
+        DataPoint( timestamp = ts, value = pts.sum / pts.size )
+      }
     }
   }
 

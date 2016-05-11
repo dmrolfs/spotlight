@@ -30,6 +30,25 @@ class SkylineGrubbsSpec extends SkylineBaseSpec {
     when( plan.appliesTo ).thenReturn( SkylineFixture.appliesToAll )
     when( plan.algorithms ).thenReturn( Set(algoS) )
 
+    def fillDataFromHistory(
+      original: Seq[DataPoint],
+      history: HistoricalStatistics,
+      targetSize: Int = HistoricalStatistics.LastN
+    ): Seq[DataPoint] = {
+      val minPoints = HistoricalStatistics.LastN
+      if ( minPoints < original.size ) original
+      else {
+        val inHistory = history.lastPoints.size
+        val needed = minPoints + 1 - original.size
+        val past = {
+          history.lastPoints
+          .drop( inHistory - needed )
+          .map { pt => DataPoint( timestamp = new joda.DateTime(pt(0).toLong), value = pt(1) ) }
+        }
+        past ++ original
+      }
+    }
+
     def tailAverageData( data: Seq[DataPoint], last: Seq[DataPoint] = Seq.empty[DataPoint] ): Seq[DataPoint] = {
       val TailLength = 3
       val lastPoints = last.drop( last.size - TailLength + 1 ) map { _.value }
@@ -122,7 +141,7 @@ class SkylineGrubbsSpec extends SkylineBaseSpec {
       }
     }
 
-    "detect outlier through series of micro events" taggedAs (WIP) in { f: Fixture =>
+    "detect outlier through series of micro events" in { f: Fixture =>
       import f._
 
       def detectUsing( series: TimeSeries, history: HistoricalStatistics ): DetectUsing = {
@@ -143,7 +162,7 @@ class SkylineGrubbsSpec extends SkylineBaseSpec {
       val rnd = new RandomDataGenerator
 
       @tailrec def loop( i: Int, left: Int, previous: Option[(TimeSeries, HistoricalStatistics)] = None ): Unit = {
-        log.info( ">>>>>>>>>  TEST-LOOP( i:[{}] left:[{}]", i, left )
+        log.debug( ">>>>>>>>>  TEST-LOOP( i:[{}] left:[{}]", i, left )
         val dt = start plusSeconds (10 * i)
         val v = if ( left == 0 ) 1000.0 else rnd.nextUniform( 0.99, 1.01, true )
         val s = TimeSeries( topic, Seq( DataPoint(dt, v) ) )
@@ -171,15 +190,15 @@ class SkylineGrubbsSpec extends SkylineBaseSpec {
           }
         }
 
-        aggregator.expectMsgPF( 2.seconds.dilated, s"point-$i" )( expected )
+        aggregator.expectMsgPF( 5.seconds.dilated, s"point-$i" )( expected )
 
         if ( left == 0 ) () else loop( i + 1, left - 1, Some( (s, h) ) )
       }
 
-      loop( 0, 1 )
+      loop( 0, 125 )
     }
 
-    "provide full control boundaries" in { f: Fixture =>
+    "provide full control boundaries" taggedAs (WIP) in { f: Fixture =>
       import f._
       val analyzer = TestActorRef[GrubbsAnalyzer]( GrubbsAnalyzer.props( router.ref ) )
       val now = joda.DateTime.now
@@ -197,11 +216,15 @@ class SkylineGrubbsSpec extends SkylineBaseSpec {
 
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
       val history1 = historyWith( None, series )
+      val tailAverages1 = tailAverage(
+        series.points,
+        history1.lastPoints.map{ p => DataPoint( new joda.DateTime(p(0).toLong), p(1) ) }
+      )
       analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series, plan), history1, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "sma control" ) {
         case m @ SeriesOutliers(alg, source, plan, outliers, actual) => {
           actual.keySet mustBe Set( algoS )
-          val expected = calculateControlBoundaries( tailAverage(series.points), 1 )
+          val expected = calculateControlBoundaries( points = tailAverages1, tolerance = 1 )
           actual( algoS ).zip( expected ).zipWithIndex foreach  { case ((a, e), i) => (i, a) mustBe (i, e) }
         }
       }
@@ -214,22 +237,17 @@ class SkylineGrubbsSpec extends SkylineBaseSpec {
       )
       val series2 = spike( full2, 100 )( 0 )
       val history2 = historyWith( Option(history1.recordLastDataPoints(series.points)), series2 )
-
+      val tailAverages2 = tailAverage(
+        data = fillDataFromHistory(series2.points, history2),
+        lastPoints = history2.lastPoints.map{ p => DataPoint( new joda.DateTime(p(0).toLong), p(1) ) }
+      )
       analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "sma control again" ) {
         case m: Outliers => {
           val actual = m.algorithmControlBoundaries
           actual.keySet mustBe Set( algoS )
-
-          val expected = calculateControlBoundaries(
-            points = tailAverage(series2.points, series.points),
-            tolerance = 1,
-            lastPoints = tailAverage(series.points)
-          )
-
-          actual( algoS ).zip( expected ).zipWithIndex foreach { case ((a, e), i) =>
-            (i, a) mustBe (i,e)
-          }
+          val expected = calculateControlBoundaries( points = tailAverages2, tolerance = 1.0, lastPoints = tailAverages1 )
+          actual( algoS ).zip( expected ).zipWithIndex foreach { case ((a, e), i) => (i, a) mustBe (i,e) }
         }
 //        case m @ SeriesOutliers(alg, source, plan, outliers, actual) => {
 //          actual.keySet mustBe Set( algoS )
