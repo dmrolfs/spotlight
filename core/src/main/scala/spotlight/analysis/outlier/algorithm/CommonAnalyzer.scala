@@ -2,7 +2,6 @@ package spotlight.analysis.outlier.algorithm
 
 import scala.annotation.tailrec
 import scala.reflect.ClassTag
-import akka.event.LoggingReceive
 
 import scalaz.Kleisli.kleisli
 import scalaz.Scalaz._
@@ -149,10 +148,7 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
       val values = data map { _.getPoint.apply( 1 ) }
       val lastPos: Int = {
         data.headOption
-        .map { h =>
-          val Array( dts, _ ) = h.getPoint
-          ctx.history.lastPoints indexWhere { p: PointA => p(0 ) == dts }
-        }
+        .map { h => ctx.history.lastPoints indexWhere { p=> p(0) == h._1 } }
         .getOrElse { ctx.history.lastPoints.size }
       }
 
@@ -187,10 +183,10 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
   type EvaluateOutlier[CTX <: AlgorithmContext] = (PointT, CTX) => (Boolean, ControlBoundary)
 
   def collectOutlierPoints[CTX <: AlgorithmContext](
-                                                     points: Seq[PointT],
-                                                     context: CTX,
-                                                     evaluateOutlier: EvaluateOutlier[CTX],
-                                                     update: UpdateContext[CTX]
+    points: Seq[PointT],
+    context: CTX,
+    evaluateOutlier: EvaluateOutlier[CTX],
+    update: UpdateContext[CTX]
   ): (Seq[DataPoint], AlgorithmContext) = {
     @tailrec def loop(pts: List[PointT], ctx: CTX, acc: Seq[DataPoint] ): (Seq[DataPoint], AlgorithmContext) = {
       ctx.cast[WrappingContext] foreach { setScopedContext }

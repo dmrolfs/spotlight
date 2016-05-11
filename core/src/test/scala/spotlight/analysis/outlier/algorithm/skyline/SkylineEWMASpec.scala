@@ -61,7 +61,7 @@ class SkylineEWMASpec extends SkylineBaseSpec {
       )
 
       val series2 = spike( full2 )( 0 )
-      val history2 = historyWith( Option(history1.recordLastDataPoints(series.points)), series2 )
+      val history2 = historyWith( Option(history1 recordLastPoints series.points), series2 )
 
       analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "stddev from moving average again" ) {

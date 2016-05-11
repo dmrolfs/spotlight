@@ -323,7 +323,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
         }
       }
 
-      val expectedAB = DataPoint.toDoublePoints( pointsB ).foldLeft( expectedA.recordLastDataPoints(pointsA) ){ (h, dp) => h :+ dp.getPoint }
+      val expectedAB = DataPoint.toDoublePoints( pointsB ).foldLeft( expectedA.recordLastPoints(pointsA) ){ (h, dp) => h :+ dp.getPoint }
       expectedAB.N mustBe ( pointsA.size + pointsB.size)
       trace( s"expectedAB = $expectedAB" )
       trace( s"""expectedAB LAST= [${expectedAB.lastPoints.map{case Array(t,v) => (t,v) }.mkString(",")}]""" )

@@ -296,7 +296,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
         val s = TimeSeries( topic, Seq( DataPoint(dt, v) ) )
         val h = {
           previous
-          .map { case (ps, ph) => s.points.foldLeft( ph recordLastDataPoints ps.points ) { (acc, p) => acc :+ p } }
+          .map { case (ps, ph) => s.points.foldLeft( ph recordLastPoints ps.points ) { (acc, p) => acc :+ p } }
           .getOrElse { HistoricalStatistics.fromActivePoints( DataPoint.toDoublePoints(s.points), false ) }
         }
         analyzer receive detectUsing( s, h )
@@ -428,7 +428,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       )
 
       detectHistoryA.N mustBe (pointsA.size)
-      val detectHistoryARecorded = detectHistoryA.recordLastDataPoints( pointsA )
+      val detectHistoryARecorded = detectHistoryA recordLastPoints pointsA
       detectHistoryARecorded.N mustBe (pointsA.size)
       val detectHistoryAB = DataPoint.toDoublePoints( pointsB ).foldLeft( detectHistoryARecorded ){ (h, dp) => h :+ dp.getPoint }
       detectHistoryAB.N mustBe (pointsA.size + pointsB.size )

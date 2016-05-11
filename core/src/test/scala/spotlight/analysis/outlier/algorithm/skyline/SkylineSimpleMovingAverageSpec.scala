@@ -109,7 +109,7 @@ class SkylineSimpleMovingAverageSpec extends SkylineBaseSpec {
         valueWiggle = (1.0, 1.0)
       )
       val series2 = spike( full2 )( 0 )
-      val history2 = historyWith( Option(history1.recordLastDataPoints(series.points)), series2 )
+      val history2 = historyWith( Option(history1 recordLastPoints series.points), series2 )
 
       analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "stddev from average again" ) {
@@ -161,7 +161,7 @@ class SkylineSimpleMovingAverageSpec extends SkylineBaseSpec {
         valueWiggle = (0.0, 10)
       )
       val series2 = spike( full2, 100 )( 0 )
-      val history2 = historyWith( Option(history1.recordLastDataPoints(series.points)), series2 )
+      val history2 = historyWith( Option(history1 recordLastPoints series.points), series2 )
       val lastPoints2 = history2.lastPoints.map{ p => DataPoint( new joda.DateTime(p(0).toLong), p(1) ) }
       analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "sma control again" ) {

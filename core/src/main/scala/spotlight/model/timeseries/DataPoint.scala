@@ -18,7 +18,10 @@ object DataPoint {
     new ml.DoublePoint( Array(dp.timestamp.getMillis.toDouble, dp.value) )
   }
 
-  implicit def toPoint( dp: DataPoint ): PointA = toDoublePoint( dp ).getPoint
+  implicit def toPointA( dp: DataPoint ): PointA = toDoublePoint( dp ).getPoint
+  implicit def toPointT( dp: DataPoint ): PointT = ( dp.timestamp.getMillis.toDouble, dp.value )
 
   implicit def toDoublePoints( dps: Seq[DataPoint] ): Seq[ml.DoublePoint] = dps map { toDoublePoint }
+  implicit def toPointAs( dps: Seq[DataPoint] ): Seq[PointA] = dps map { toPointA }
+  implicit def toPointTs( dps: Seq[DataPoint] ): Seq[PointT] = dps map { toPointT }
 }

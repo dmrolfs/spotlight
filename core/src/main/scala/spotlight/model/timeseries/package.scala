@@ -4,10 +4,16 @@ import org.apache.commons.math3.ml.clustering.DoublePoint
 
 
 package object timeseries {
-  type DoublePoints = Seq[DoublePoint]
   type PointA = Array[Double]
   type PointT = (Double, Double)
 
+  implicit def doublepoint2PointA( dp: DoublePoint ): PointA = dp.getPoint
+  implicit def doublepoint2PointT( dp: DoublePoint ): PointT = {
+    val Array( ts, v ) = dp.getPoint
+    ( ts, v )
+  }
+
+  implicit def pointa2Pointt( pt: PointA ): PointT = ( pt(0), pt(1) )
 
   type Matrix[T] = IndexedSeq[IndexedSeq[T]]
 
