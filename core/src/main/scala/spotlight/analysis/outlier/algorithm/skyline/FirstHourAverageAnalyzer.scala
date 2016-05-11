@@ -5,7 +5,6 @@ import akka.actor.{ActorRef, Props}
 
 import scalaz._
 import Scalaz._
-import scalaz.Kleisli.ask
 import org.joda.{time => joda}
 import com.typesafe.scalalogging.LazyLogging
 import org.apache.commons.math3.ml.clustering.DoublePoint
@@ -16,7 +15,7 @@ import spotlight.analysis.outlier.algorithm.AlgorithmActor.AlgorithmContext
 import spotlight.analysis.outlier.algorithm.CommonAnalyzer
 import CommonAnalyzer.WrappingContext
 import spotlight.model.outlier.Outliers
-import spotlight.model.timeseries.{ControlBoundary, PointT, TimeSeriesBase}
+import spotlight.model.timeseries._
 
 
 /**
@@ -50,16 +49,7 @@ object FirstHourAverageAnalyzer {
     }
 
     def withPoints( points: Seq[DoublePoint] ): Context = {
-      val firstHourPoints = {
-        points
-        .map { _.getPoint }
-//        .map { p =>
-//          logger.info( "FirstHour.withPoint [{}] in first-hour:[{}] = {}", (new joda.DateTime(p(0).toLong), p(1)), Context.FirstHour, Context.FirstHour.contains(p(0).toLong).toString )
-//          p
-//        }
-        .collect { case Array( ts, v ) if Context.FirstHour contains ts.toLong => v }
-      }
-
+      val firstHourPoints = points collect { case p if Context.FirstHour contains p.timestamp.toLong => p.value }
       if ( firstHourPoints.nonEmpty ) {
         logger.debug( s"""adding values to first hour: [${firstHourPoints.mkString(",")}]"""  )
         val updated = firstHourPoints.foldLeft( firstHour.copy ) { (s, v) => s.addValue( v ); s }
@@ -117,17 +107,30 @@ class FirstHourAverageAnalyzer( override val router: ActorRef ) extends CommonAn
         points = taverages,
         context = ctx,
         evaluateOutlier = (p: PointT, c: Context) => {
-          val (ts, v) = p
           val control = ControlBoundary.fromExpectedAndDistance(
-            timestamp = ts.toLong,
+            timestamp = p.timestamp.toLong,
             expected = c.firstHour.getMean,
             distance = math.abs( tol * c.firstHour.getStandardDeviation )
           )
-          log.debug( "first hour[{}] mean[{}] stdev[{}] tolerance[{}]", c.firstHour.getN, c.firstHour.getMean, c.firstHour.getStandardDeviation, tol )
-          log.debug( "first hour[{}] [{}] is-outlier:{} control = [{}]", algorithm.name, v, control.isOutlier(v), control )
-          ( control.isOutlier(v), control )
+
+          log.debug(
+            "first hour[{}] mean[{}] stdev[{}] tolerance[{}]",
+            c.firstHour.getN,
+            c.firstHour.getMean,
+            c.firstHour.getStandardDeviation,
+            tol
+          )
+          log.debug(
+            "first hour[{}] [{}] is-outlier:{} control = [{}]",
+            algorithm.name,
+            p.value,
+            control.isOutlier(p.value),
+            control
+          )
+
+          ( control isOutlier p.value, control )
         },
-        update = (c: Context, pt: PointT) => c
+        update = (c: Context, p: PointT) => c
       )
     }
 

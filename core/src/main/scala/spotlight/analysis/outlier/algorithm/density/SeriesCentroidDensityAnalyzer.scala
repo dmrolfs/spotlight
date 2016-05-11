@@ -38,9 +38,11 @@ class SeriesCentroidDensityAnalyzer( override val router: ActorRef ) extends DBS
     }
 
     Kleisli[TryV, DetectUsing, AlgorithmContext] { d =>
-      val points: TryV[Seq[DoublePoint]] = d.payload.source match {
-        case s: TimeSeries => centroidDistances( s.points.toDoublePoints, d.history ).right
-        case x => -\/( new UnsupportedOperationException( s"cannot extract test context from [${x.getClass}]" ) )
+      val points = {
+        d.payload.source match {
+          case s: TimeSeries => centroidDistances( s.points.toDoublePoints, d.history ).right
+          case x => -\/( new UnsupportedOperationException( s"cannot extract test context from [${x.getClass}]" ) )
+        }
       }
 
       points map { pts => AlgorithmContext( message = d, data = pts ) }
@@ -53,11 +55,11 @@ class SeriesCentroidDensityAnalyzer( override val router: ActorRef ) extends DBS
       val centroidOutliers: Set[Long] = {
         context.data
         .filter { isOutlier }
-        .map { _.getPoint.apply(0).toLong }
+        .map { _.timestamp.toLong }
         .toSet
       }
 
-      val outliers = context.source.points filter { dp => centroidOutliers.contains( dp.getPoint.apply(0).toLong ) }
+      val outliers = context.source.points filter { dp => centroidOutliers contains dp.timestamp.getMillis }
       val tsTag = ClassTag[TimeSeries]( classOf[TimeSeries] )
       context.source match {
         case tsTag( src ) if outliers.nonEmpty => {

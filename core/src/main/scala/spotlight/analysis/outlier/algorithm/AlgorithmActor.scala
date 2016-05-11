@@ -85,8 +85,8 @@ trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
       else {
         val inHistory = ctx.history.lastPoints.size
         val needed = minPoints + 1 - original.size
-        val past = pointas2doublepoints( ctx.history.lastPoints.drop( inHistory - needed ) )
-        past ++ original
+        val past = ctx.history.lastPoints.drop( inHistory - needed )
+        past.toDoublePoints ++ original
       }
     }
   }
@@ -142,7 +142,7 @@ object AlgorithmActor {
             MahalanobisDistance.fromCovariance( message.history.covariance )
           } else {
             logger.debug( "DISTANCE_MEASURE point data = {}", data.mkString("[",",","]"))
-            MahalanobisDistance.fromPoints( MatrixUtils.createRealMatrix( data.toArray map { _.getPoint } ) )
+            MahalanobisDistance.fromPoints( MatrixUtils.createRealMatrix( data.toArray map { _.toPointA } ) )
           }
           logger.debug( "DISTANCE_MEASURE mahal = [{}]", mahal )
           mahal.disjunction.leftMap{ _.head }

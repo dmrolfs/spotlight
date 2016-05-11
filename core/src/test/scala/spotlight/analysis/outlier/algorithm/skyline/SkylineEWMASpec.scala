@@ -29,7 +29,7 @@ class SkylineEWMASpec extends SkylineBaseSpec {
 
 
   "ExponentialMovingAverageAnalyzer" should {
-    "find outliers deviating stddev from exponential moving average" in { f: Fixture =>
+    "find outliers deviating stddev from exponential moving average" taggedAs (WIP) in { f: Fixture =>
       import f._
       val analyzer = TestActorRef[ExponentialMovingAverageAnalyzer]( ExponentialMovingAverageAnalyzer.props(router.ref) )
       val full = makeDataPoints(

@@ -10,7 +10,7 @@ import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import peds.commons.V
 import peds.commons.log.Trace
 import peds.commons.math.MahalanobisDistance
-import spotlight.model.timeseries.{ Topic, TimeSeriesCohort, TimeSeries }
+import spotlight.model.timeseries._
 
 
 /**
@@ -52,7 +52,7 @@ object LogStatisticsTrainingRepositoryInterpreter {
     val valueStats = new DescriptiveStatistics
     series.points foreach { valueStats addValue _.value }
 
-    val data = series.points map { p => Array(p.timestamp.getMillis.toDouble, p.value) }
+    val data = series.points.toPointAs
 
     val result = for {
       mahalanobisDistance <- MahalanobisDistance.fromPoints( MatrixUtils.createRealMatrix(data.toArray) ).disjunction

@@ -188,19 +188,19 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
     evaluateOutlier: EvaluateOutlier[CTX],
     update: UpdateContext[CTX]
   ): (Seq[DataPoint], AlgorithmContext) = {
-    @tailrec def loop(pts: List[PointT], ctx: CTX, acc: Seq[DataPoint] ): (Seq[DataPoint], AlgorithmContext) = {
+    @tailrec def loop( pts: List[PointT], ctx: CTX, acc: Seq[DataPoint] ): (Seq[DataPoint], AlgorithmContext) = {
       ctx.cast[WrappingContext] foreach { setScopedContext }
 
       pts match {
         case Nil => ( acc, ctx )
 
         case pt :: tail => {
-          val ts = new joda.DateTime( pt._1.toLong  )
+          val timestamp = pt.timestamp.toLong
           val (isOutlier, control) = evaluateOutlier( pt, ctx )
           val updatedAcc = {
             if ( isOutlier ) {
               ctx.source.points
-              .find { _.timestamp.getMillis == ts.getMillis }
+              .find { _.timestamp.getMillis == timestamp }
               .map { original => acc :+ original }
               .getOrElse { acc }
             } else {

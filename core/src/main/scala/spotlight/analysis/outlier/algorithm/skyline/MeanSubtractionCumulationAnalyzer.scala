@@ -5,13 +5,12 @@ import akka.actor.{ActorRef, Props}
 
 import scalaz._
 import Scalaz._
-import scalaz.Kleisli.ask
-import peds.commons.{KOp, TryV, Valid}
+import peds.commons.{KOp, Valid}
 import spotlight.analysis.outlier.algorithm.AlgorithmActor.AlgorithmContext
 import spotlight.analysis.outlier.algorithm.CommonAnalyzer
 import CommonAnalyzer.WrappingContext
 import spotlight.model.outlier.Outliers
-import spotlight.model.timeseries.{ControlBoundary, PointT}
+import spotlight.model.timeseries._
 
 
 /**
@@ -41,28 +40,27 @@ extends CommonAnalyzer[CommonAnalyzer.SimpleWrappingContext] {
     */
   override val findOutliers: KOp[AlgorithmContext, (Outliers, AlgorithmContext)] = {
     val outliers = for {
-      context <- toConcreteContextK <=< ask[TryV, AlgorithmContext]
-      tolerance <- tolerance <=< ask[TryV, AlgorithmContext]
+      ctx <- toConcreteContextK
+      tolerance <- tolerance
     } yield {
       val tol = tolerance getOrElse 3D
 
       collectOutlierPoints(
-        points = context.source.pointsAsPairs,
-        context = context,
-        evaluateOutlier = (p: PointT, ctx: Context) => {
-          val (ts, v) = p
+        points = ctx.source.points,
+        context = ctx,
+        evaluateOutlier = (p: PointT, c: Context) => {
           val control = ControlBoundary.fromExpectedAndDistance(
-            timestamp = ts.toLong,
-            expected = ctx.history.mean( 1 ),
-            distance = math.abs( tol * ctx.history.standardDeviation(1) )
+            timestamp = p.timestamp.toLong,
+            expected = c.history.mean( 1 ),
+            distance = math.abs( tol * c.history.standardDeviation(1) )
           )
 
-          ( control isOutlier v, control )
+          ( control isOutlier p.value, control )
 //          val cumulativeMean = ctx.history.mean( 1 )
 //          val cumulativeStddev = ctx.history.standardDeviation( 1 )
 //          math.abs( v - cumulativeMean ) > ( tol * cumulativeStddev )
         },
-        update = (ctx: Context, pt: PointT) => {ctx }
+        update = (c: Context, p: PointT) => { c }
       )
     }
 
