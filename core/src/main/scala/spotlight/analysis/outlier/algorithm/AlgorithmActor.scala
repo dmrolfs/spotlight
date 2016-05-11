@@ -5,7 +5,7 @@ import akka.event.LoggingReceive
 
 import scalaz._
 import Scalaz._
-import scalaz.Kleisli.kleisli
+import scalaz.Kleisli.{ask, kleisli}
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.LazyLogging
 import nl.grons.metrics.scala.Timer
@@ -69,6 +69,27 @@ trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
 
   val messageConfig: KOp[AlgorithmContext, Config] = kleisli[TryV, AlgorithmContext, Config] { _.messageConfig.right }
 
+  /**
+    * Some algorithms require a minimum number of points in order to determine an anomaly. To address this circumstance, these
+    * algorithms can use fillDataFromHistory to draw from history the points necessary to create an appropriate group.
+    * @param targetSize of the data grouping
+    * @return
+    */
+  def fillDataFromHistory( targetSize: Int = HistoricalStatistics.LastN ): KOp[AlgorithmContext, Seq[DoublePoint]] = {
+    for {
+      ctx <- ask[TryV, AlgorithmContext]
+    } yield {
+      val minPoints = HistoricalStatistics.LastN
+      val original = ctx.data
+      if ( minPoints < original.size ) original
+      else {
+        val inHistory = ctx.history.lastPoints.size
+        val needed = minPoints + 1 - original.size
+        val past = ctx.history.lastPoints.drop( inHistory - needed ).map { pt => new DoublePoint( pt ) }
+        past ++ original
+      }
+    }
+  }
 }
 
 object AlgorithmActor {
