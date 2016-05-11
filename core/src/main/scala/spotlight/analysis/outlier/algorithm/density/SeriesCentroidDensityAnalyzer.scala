@@ -29,7 +29,7 @@ class SeriesCentroidDensityAnalyzer( override val router: ActorRef ) extends DBS
 
   override val algorithmContext: KOp[DetectUsing, AlgorithmContext] = {
     def centroidDistances( points: Seq[DoublePoint], history: HistoricalStatistics ): Seq[DoublePoint] = {
-      val h = if ( history.N > 0 ) history else {HistoricalStatistics.fromActivePoints( points.toArray, false ) }
+      val h = if ( history.N > 0 ) history else HistoricalStatistics.fromActivePoints( points, false )
       val mean = h.mean( 1 )
       val distFromCentroid = points map { _.getPoint } map { case Array(x, y) => new DoublePoint( Array(x, y - mean) ) }
       log.debug( "points             : [{}]", points.mkString(",") )

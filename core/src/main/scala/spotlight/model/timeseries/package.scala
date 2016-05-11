@@ -4,9 +4,9 @@ import org.apache.commons.math3.ml.clustering.DoublePoint
 
 
 package object timeseries {
-  type Points = Seq[DoublePoint]
-  type Point = Array[Double]
-  type Point2D = (Double, Double)
+  type DoublePoints = Seq[DoublePoint]
+  type PointA = Array[Double]
+  type PointT = (Double, Double)
 
 
   type Matrix[T] = IndexedSeq[IndexedSeq[T]]

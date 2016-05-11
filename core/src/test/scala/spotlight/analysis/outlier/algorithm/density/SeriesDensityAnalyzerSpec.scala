@@ -120,7 +120,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       prior map { h =>
         series.points.foldLeft( h ){ (history, dp) => history :+ dp.getPoint }
       } getOrElse {
-        HistoricalStatistics.fromActivePoints( DataPoint.toDoublePoints(series.points).toArray, false )
+        HistoricalStatistics.fromActivePoints( DataPoint.toDoublePoints(series.points), false )
       }
     }
 
@@ -297,7 +297,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
         val h = {
           previous
           .map { case (ps, ph) => s.points.foldLeft( ph recordLastDataPoints ps.points ) { (acc, p) => acc :+ p } }
-          .getOrElse { HistoricalStatistics.fromActivePoints( DataPoint.toDoublePoints(s.points).toArray, false ) }
+          .getOrElse { HistoricalStatistics.fromActivePoints( DataPoint.toDoublePoints(s.points), false ) }
         }
         analyzer receive detectUsing( s, h )
 
@@ -323,7 +323,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
         if ( left == 0 ) () else loop( i + 1, left - 1, Some( (s, h) ) )
       }
 
-      loop( 0, 15 )
+      loop( 0, 20 )
 //      val s1 = TimeSeries( topic, Seq( DataPoint(start, 1.0) ) )
 //      val h1 = HistoricalStatistics.fromActivePoints( DataPoint.toDoublePoints(s1.points).toArray, false )
 //      analyzer receive detectUsing( s1, h1 )
@@ -411,7 +411,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       val analyzer = TestActorRef[SeriesDensityAnalyzer]( SeriesDensityAnalyzer.props( router.ref ) )
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
 
-      val detectHistoryA = HistoricalStatistics.fromActivePoints( DataPoint.toDoublePoints(pointsA).toArray, false )
+      val detectHistoryA = HistoricalStatistics.fromActivePoints( DataPoint.toDoublePoints(pointsA), false )
       val msgA = detectUsing(
         message = OutlierDetectionMessage( TimeSeries(topic = metric, points = pointsA), plan ).toOption.get,
         history = detectHistoryA
@@ -432,8 +432,8 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       detectHistoryARecorded.N mustBe (pointsA.size)
       val detectHistoryAB = DataPoint.toDoublePoints( pointsB ).foldLeft( detectHistoryARecorded ){ (h, dp) => h :+ dp.getPoint }
       detectHistoryAB.N mustBe (pointsA.size + pointsB.size )
-      val detectHistoryABLast: Seq[Point] = detectHistoryAB.lastPoints
-      val pointsALast: Seq[Point] = {
+      val detectHistoryABLast: Seq[PointA] = detectHistoryAB.lastPoints
+      val pointsALast: Seq[PointA] = {
         pointsA.drop( pointsA.size - PointsForLast ).map{ dp => Array(dp.timestamp.getMillis.toDouble, dp.value) }.toList
       }
       detectHistoryABLast.size mustBe pointsALast.size

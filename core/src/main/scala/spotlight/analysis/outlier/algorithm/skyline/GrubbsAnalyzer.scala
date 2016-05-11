@@ -13,7 +13,7 @@ import spotlight.analysis.outlier.algorithm.AlgorithmActor.AlgorithmContext
 import spotlight.analysis.outlier.algorithm.CommonAnalyzer
 import CommonAnalyzer.WrappingContext
 import spotlight.model.outlier.Outliers
-import spotlight.model.timeseries.{ControlBoundary, Point2D}
+import spotlight.model.timeseries.{ControlBoundary, PointT}
 
 
 /**
@@ -41,7 +41,7 @@ class GrubbsAnalyzer( override val router: ActorRef ) extends CommonAnalyzer[Com
     * A timeseries is anomalous if the Z score is greater than the Grubb's score.
     */
   override val findOutliers: KOp[AlgorithmContext, (Outliers, AlgorithmContext)] = {
-    def dataThreshold( data: Seq[Point2D] ) = kleisli[TryV, AlgorithmContext, Double] { context =>
+    def dataThreshold( data: Seq[PointT] ) = kleisli[TryV, AlgorithmContext, Double] { context =>
       val Alpha = 0.05  //todo drive from context's algoConfig
       val degreesOfFreedom = math.max( data.size - 2, 1 ) //todo: not a great idea but for now avoiding error if size <= 2
       \/ fromTryCatchNonFatal {
@@ -78,7 +78,7 @@ class GrubbsAnalyzer( override val router: ActorRef ) extends CommonAnalyzer[Com
       collectOutlierPoints(
         points = taverages,
         context = context,
-        evaluateOutlier = (p: Point2D, ctx: Context) => {
+        evaluateOutlier = (p: PointT, ctx: Context) => {
           val (ts, v) = p
           val control = ControlBoundary.fromExpectedAndDistance(
             timestamp = ts.toLong,
@@ -88,7 +88,7 @@ class GrubbsAnalyzer( override val router: ActorRef ) extends CommonAnalyzer[Com
 
           ( control isOutlier v, control )
         },
-        update = (ctx: Context, pt: Point2D) => { ctx }
+        update = (ctx: Context, pt: PointT) => {ctx }
       )
     }
 

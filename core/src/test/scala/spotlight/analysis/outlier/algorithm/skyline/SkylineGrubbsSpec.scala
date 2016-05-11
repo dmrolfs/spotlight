@@ -169,7 +169,7 @@ class SkylineGrubbsSpec extends SkylineBaseSpec {
         val h = {
           previous
           .map { case (ps, ph) => s.points.foldLeft( ph recordLastDataPoints ps.points ) { (acc, p) => acc :+ p } }
-          .getOrElse { HistoricalStatistics.fromActivePoints( DataPoint.toDoublePoints(s.points).toArray, false ) }
+          .getOrElse { HistoricalStatistics.fromActivePoints( DataPoint.toDoublePoints(s.points), false ) }
         }
         analyzer receive detectUsing( s, h )
 

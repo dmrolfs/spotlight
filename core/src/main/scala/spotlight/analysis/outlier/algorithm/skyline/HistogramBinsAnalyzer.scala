@@ -11,7 +11,7 @@ import spotlight.analysis.outlier.algorithm.AlgorithmActor.AlgorithmContext
 import spotlight.analysis.outlier.algorithm.CommonAnalyzer
 import CommonAnalyzer.WrappingContext
 import spotlight.model.outlier.Outliers
-import spotlight.model.timeseries.{ControlBoundary, Point2D}
+import spotlight.model.timeseries.{ControlBoundary, PointT}
 
 
 /**
@@ -24,8 +24,8 @@ object HistogramBinsAnalyzer {
 
   //todo rewrite because it's not working. Consider http://stackoverflow.com/questions/10786465/how-to-generate-bins-for-histogram-using-apache-math-3-0-in-java
   final case class Histogram private[skyline]( bins: IndexedSeq[Bin], binSize: Double, min: Double, max: Double ) {
-    def binFor( p: Point2D ): Option[Bin] = bins.lift( binIndexFor(p) )
-    def binIndexFor( p: Point2D ): Int = ( ( p._2 - min ) / binSize ).toInt
+    def binFor( p: PointT ): Option[Bin] = bins.lift( binIndexFor( p ) )
+    def binIndexFor( p: PointT ): Int = ( ( p._2 - min ) / binSize ).toInt
   }
 
   final case class Bin private[skyline](
@@ -76,7 +76,7 @@ class HistogramBinsAnalyzer( override val router: ActorRef ) extends CommonAnaly
       collectOutlierPoints(
         points = taverages,
         context = ctx,
-        evaluateOutlier = (p: Point2D, ctx: Context) => {
+        evaluateOutlier = (p: PointT, ctx: Context) => {
           val (ts, v) = p
           val isOutlier = h.binFor( p )
           .map { bin =>
@@ -88,7 +88,7 @@ class HistogramBinsAnalyzer( override val router: ActorRef ) extends CommonAnaly
           //todo: outlier based more on frequency than past some threshold, so does control apply?
           ( isOutlier, ControlBoundary.empty(ts.toLong) )
         },
-        update = (ctx: Context, pt: Point2D) => { ctx }
+        update = (ctx: Context, pt: PointT) => {ctx }
       )
     }
 

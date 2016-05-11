@@ -13,7 +13,7 @@ import spotlight.analysis.outlier.algorithm.AlgorithmActor.AlgorithmContext
 import spotlight.analysis.outlier.algorithm.CommonAnalyzer
 import CommonAnalyzer.WrappingContext
 import spotlight.model.outlier.Outliers
-import spotlight.model.timeseries.{ControlBoundary, Point2D, TimeSeriesBase}
+import spotlight.model.timeseries.{ControlBoundary, PointT, TimeSeriesBase}
 
 
 /**
@@ -91,7 +91,7 @@ extends CommonAnalyzer[MedianAbsoluteDeviationAnalyzer.Context] {
       collectOutlierPoints(
         points = context.source.pointsAsPairs,
         context = context,
-        evaluateOutlier = (p: Point2D, ctx: Context) => {
+        evaluateOutlier = (p: PointT, ctx: Context) => {
           val (ts, v) = p
           val control = ControlBoundary.fromExpectedAndDistance(
             timestamp = ts.toLong,
@@ -104,7 +104,7 @@ extends CommonAnalyzer[MedianAbsoluteDeviationAnalyzer.Context] {
 //          log.debug( "medianAbsoluteDeviation: N:[{}] deviation:[{}] deviationMedian:[{}]", ctx.deviationStatistics.getN, d, deviationMedian )
 //          d > ( tol * deviationMedian )
         },
-        update = (ctx: Context, pt: Point2D) => {
+        update = (ctx: Context, pt: PointT) => {
           val (_, v) = pt
           ctx.movingStatistics addValue v
           ctx.deviationStatistics addValue math.abs( v - ctx.movingStatistics.getPercentile(50) )

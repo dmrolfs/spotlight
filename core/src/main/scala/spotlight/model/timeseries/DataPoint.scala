@@ -9,7 +9,7 @@ case class DataPoint( timestamp: joda.DateTime, value: Double ) {
 }
 
 object DataPoint {
-  def fromPoint2D( pt: Point2D ): DataPoint = {
+  def fromPoint2D( pt: PointT ): DataPoint = {
     val (ts, v) = pt
     DataPoint( timestamp = new joda.DateTime(ts.toLong), value = v )
   }
@@ -18,7 +18,7 @@ object DataPoint {
     new ml.DoublePoint( Array(dp.timestamp.getMillis.toDouble, dp.value) )
   }
 
-  implicit def toPoint( dp: DataPoint ): Point = toDoublePoint( dp ).getPoint
+  implicit def toPoint( dp: DataPoint ): PointA = toDoublePoint( dp ).getPoint
 
   implicit def toDoublePoints( dps: Seq[DataPoint] ): Seq[ml.DoublePoint] = dps map { toDoublePoint }
 }

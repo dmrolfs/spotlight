@@ -5,15 +5,15 @@ import java.io.Serializable
 import org.apache.commons.math3.linear.RealMatrix
 import org.apache.commons.math3.ml.clustering.DoublePoint
 import org.apache.commons.math3.stat.descriptive.MultivariateSummaryStatistics
-import spotlight.model.timeseries.{DataPoint, Point}
+import spotlight.model.timeseries.{DataPoint, PointA}
 
 
 /**
   * Created by rolfsd on 1/26/16.
   */
 trait HistoricalStatistics extends Serializable {
-  def :+( point: Point ): HistoricalStatistics
-  def recordLastPoints( points: Seq[Point] ): HistoricalStatistics
+  def :+( point: PointA ): HistoricalStatistics
+  def recordLastPoints( points: Seq[PointA] ): HistoricalStatistics
   def recordLastDataPoints( datapoints: Seq[DataPoint] ): HistoricalStatistics = {
     val points = DataPoint.toDoublePoints( datapoints ).map{ _.getPoint }
     recordLastPoints( points )
@@ -21,16 +21,16 @@ trait HistoricalStatistics extends Serializable {
 
   def covariance: RealMatrix
   def dimension: Int
-  def geometricMean: Point
-  def max: Point
-  def mean: Point
-  def min: Point
+  def geometricMean: PointA
+  def max: PointA
+  def mean: PointA
+  def min: PointA
   def N: Long
-  def standardDeviation: Point
-  def sum: Point
-  def sumLog: Point
-  def sumOfSquares: Point
-  def lastPoints: Seq[Point]
+  def standardDeviation: PointA
+  def sum: PointA
+  def sumLog: PointA
+  def sumOfSquares: PointA
+  def lastPoints: Seq[PointA]
 }
 
 
@@ -41,35 +41,35 @@ object HistoricalStatistics {
     ApacheMath3HistoricalStatistics( new MultivariateSummaryStatistics(k, isCovarianceBiasCorrected) )
   }
 
-  def fromActivePoints( points: Array[DoublePoint], isCovarianceBiasCorrected: Boolean ): HistoricalStatistics = {
+  def fromActivePoints( points: Seq[DoublePoint], isCovarianceBiasCorrected: Boolean ): HistoricalStatistics = {
     points.foldLeft( HistoricalStatistics(k = 2, isCovarianceBiasCorrected) ) { (h, p) => h :+ p.getPoint }
   }
 
 
   final case class ApacheMath3HistoricalStatistics private[outlier](
     all: MultivariateSummaryStatistics,
-    override val lastPoints: Seq[Point] = Seq.empty[Point]
+    override val lastPoints: Seq[PointA] = Seq.empty[PointA]
   ) extends HistoricalStatistics {
-    override def :+( point: Point ): HistoricalStatistics = {
+    override def :+( point: PointA ): HistoricalStatistics = {
       all addValue point
       this
     }
 
-    override def recordLastPoints( points: Seq[Point] ): HistoricalStatistics = {
+    override def recordLastPoints( points: Seq[PointA] ): HistoricalStatistics = {
       val recorded = points drop ( points.size - LastN )
       this.copy( lastPoints = this.lastPoints.drop(this.lastPoints.size - LastN + recorded.size) ++ recorded )
     }
 
     override def N: Long = all.getN
-    override def mean: Point = all.getMean
-    override def sumOfSquares: Point = all.getSumSq
-    override def max: Point = all.getMax
-    override def standardDeviation: Point = all.getStandardDeviation
-    override def geometricMean: Point = all.getGeometricMean
-    override def min: Point = all.getMin
-    override def sum: Point = all.getSum
+    override def mean: PointA = all.getMean
+    override def sumOfSquares: PointA = all.getSumSq
+    override def max: PointA = all.getMax
+    override def standardDeviation: PointA = all.getStandardDeviation
+    override def geometricMean: PointA = all.getGeometricMean
+    override def min: PointA = all.getMin
+    override def sum: PointA = all.getSum
     override def covariance: RealMatrix = all.getCovariance
-    override def sumLog: Point = all.getSumLog
+    override def sumLog: PointA = all.getSumLog
     override def dimension: Int = all.getDimension
 
     override def toString: String = {

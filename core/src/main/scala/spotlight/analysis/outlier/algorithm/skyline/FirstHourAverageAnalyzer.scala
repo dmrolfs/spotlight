@@ -16,7 +16,7 @@ import spotlight.analysis.outlier.algorithm.AlgorithmActor.AlgorithmContext
 import spotlight.analysis.outlier.algorithm.CommonAnalyzer
 import CommonAnalyzer.WrappingContext
 import spotlight.model.outlier.Outliers
-import spotlight.model.timeseries.{ControlBoundary, Point2D, TimeSeriesBase}
+import spotlight.model.timeseries.{ControlBoundary, PointT, TimeSeriesBase}
 
 
 /**
@@ -116,7 +116,7 @@ class FirstHourAverageAnalyzer( override val router: ActorRef ) extends CommonAn
       collectOutlierPoints(
         points = taverages,
         context = ctx,
-        evaluateOutlier = (p: Point2D, c: Context) => {
+        evaluateOutlier = (p: PointT, c: Context) => {
           val (ts, v) = p
           val control = ControlBoundary.fromExpectedAndDistance(
             timestamp = ts.toLong,
@@ -127,7 +127,7 @@ class FirstHourAverageAnalyzer( override val router: ActorRef ) extends CommonAn
           log.debug( "first hour[{}] [{}] is-outlier:{} control = [{}]", algorithm.name, v, control.isOutlier(v), control )
           ( control.isOutlier(v), control )
         },
-        update = (c: Context, pt: Point2D) => c
+        update = (c: Context, pt: PointT) => c
       )
     }
 

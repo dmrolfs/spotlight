@@ -144,14 +144,14 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
 
   def toConcreteContextK: KOp[AlgorithmContext, C] = kleisli { toConcreteContext }
 
-  def tailAverage( data: Seq[DoublePoint], tailLength: Int = 3 ): KOp[AlgorithmContext, Seq[Point2D]] = {
-    kleisli[TryV, AlgorithmContext, Seq[Point2D]] { ctx =>
+  def tailAverage( data: Seq[DoublePoint], tailLength: Int = 3 ): KOp[AlgorithmContext, Seq[PointT]] = {
+    kleisli[TryV, AlgorithmContext, Seq[PointT]] { ctx =>
       val values = data map { _.getPoint.apply( 1 ) }
       val lastPos: Int = {
         data.headOption
         .map { h =>
           val Array( dts, _ ) = h.getPoint
-          ctx.history.lastPoints indexWhere { p: Point => p(0) == dts }
+          ctx.history.lastPoints indexWhere { p: PointA => p(0 ) == dts }
         }
         .getOrElse { ctx.history.lastPoints.size }
       }
@@ -183,16 +183,16 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
   }
 
 
-  type UpdateContext[CTX <: AlgorithmContext] = (CTX, Point2D) => CTX
-  type EvaluateOutlier[CTX <: AlgorithmContext] = (Point2D, CTX) => (Boolean, ControlBoundary)
+  type UpdateContext[CTX <: AlgorithmContext] = (CTX, PointT) => CTX
+  type EvaluateOutlier[CTX <: AlgorithmContext] = (PointT, CTX) => (Boolean, ControlBoundary)
 
   def collectOutlierPoints[CTX <: AlgorithmContext](
-    points: Seq[Point2D],
-    context: CTX,
-    evaluateOutlier: EvaluateOutlier[CTX],
-    update: UpdateContext[CTX]
+                                                     points: Seq[PointT],
+                                                     context: CTX,
+                                                     evaluateOutlier: EvaluateOutlier[CTX],
+                                                     update: UpdateContext[CTX]
   ): (Seq[DataPoint], AlgorithmContext) = {
-    @tailrec def loop( pts: List[Point2D], ctx: CTX, acc: Seq[DataPoint] ): (Seq[DataPoint], AlgorithmContext) = {
+    @tailrec def loop(pts: List[PointT], ctx: CTX, acc: Seq[DataPoint] ): (Seq[DataPoint], AlgorithmContext) = {
       ctx.cast[WrappingContext] foreach { setScopedContext }
 
       pts match {

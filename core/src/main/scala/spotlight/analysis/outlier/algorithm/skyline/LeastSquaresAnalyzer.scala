@@ -14,7 +14,7 @@ import spotlight.analysis.outlier.algorithm.AlgorithmActor.AlgorithmContext
 import spotlight.analysis.outlier.algorithm.CommonAnalyzer
 import CommonAnalyzer.WrappingContext
 import spotlight.model.outlier.Outliers
-import spotlight.model.timeseries.{ControlBoundary, Point2D, TimeSeriesBase}
+import spotlight.model.timeseries.{ControlBoundary, PointT, TimeSeriesBase}
 
 
 /**
@@ -80,7 +80,7 @@ class LeastSquaresAnalyzer( override val router: ActorRef ) extends CommonAnalyz
       collectOutlierPoints(
         points = context.source.pointsAsPairs,
         context = context,
-        evaluateOutlier = (p: Point2D, ctx: Context) => {
+        evaluateOutlier = (p: PointT, ctx: Context) => {
           val (ts, v) = p
           val result = \/ fromTryCatchNonFatal {
             ctx.regression.regress.getParameterEstimates
@@ -106,7 +106,7 @@ class LeastSquaresAnalyzer( override val router: ActorRef ) extends CommonAnalyz
           log.debug( "least squares [{}] = {}", p, result )
           result getOrElse ( false, ControlBoundary.empty(ts.toLong) )
         },
-        update = (ctx: Context, pt: Point2D) => {
+        update = (ctx: Context, pt: PointT) => {
           val (ts, v) = pt
           ctx.regression.addObservation( Array(ts), v )
           log.debug( "after update [{}] regression-adj r sq=[{}]", (pt._1.toLong, pt._2), \/.fromTryCatchNonFatal(ctx.regression.regress.getAdjustedRSquared) )
@@ -182,7 +182,7 @@ class LeastSquaresAnalyzer( override val router: ActorRef ) extends CommonAnalyz
 //  collectOutlierPoints(
 //  points = points2D,
 //  context = context,
-//  isOutlier = (p: Point2D, ctx: Context) => {
+//  isOutlier = (p: PointT, ctx: Context) => {
 //  val (ts, v) = p
 //  val result = regress map { r =>
 //  val Array( c, m ) = r.getParameterEstimates

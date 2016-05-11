@@ -300,7 +300,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
         planSpecification = ConfigFactory.empty
       )
 
-      val expectedA = HistoricalStatistics.fromActivePoints( DataPoint.toDoublePoints(pointsA).toArray, false )
+      val expectedA = HistoricalStatistics.fromActivePoints( DataPoint.toDoublePoints(pointsA), false )
 
       val msgA = OutlierDetectionMessage( TimeSeries( topic = metric, points = pointsA ), defaultPlan ).toOption.get
       detect receive msgA

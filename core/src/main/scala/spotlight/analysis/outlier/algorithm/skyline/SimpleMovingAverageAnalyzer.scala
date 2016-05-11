@@ -13,7 +13,7 @@ import spotlight.analysis.outlier.algorithm.AlgorithmActor.AlgorithmContext
 import spotlight.analysis.outlier.algorithm.CommonAnalyzer
 import CommonAnalyzer.WrappingContext
 import spotlight.model.outlier.Outliers
-import spotlight.model.timeseries.{ControlBoundary, Point2D, TimeSeriesBase}
+import spotlight.model.timeseries.{ControlBoundary, PointT, TimeSeriesBase}
 
 
 /**
@@ -79,7 +79,7 @@ class SimpleMovingAverageAnalyzer( override val router: ActorRef ) extends Commo
       collectOutlierPoints(
         points = taverages,
         context = ctx,
-        evaluateOutlier = (p: Point2D, c: Context) => {
+        evaluateOutlier = (p: PointT, c: Context) => {
           val (ts, v) = p
           val mean = c.movingStatistics.getMean
           val stddev = c.movingStatistics.getStandardDeviation
@@ -94,7 +94,7 @@ class SimpleMovingAverageAnalyzer( override val router: ActorRef ) extends Commo
           )
           ( control isOutlier v, control )
         },
-        update = (c: Context, pt: Point2D) => {
+        update = (c: Context, pt: PointT) => {
           val (_, v) = pt
           c.movingStatistics addValue v
           c

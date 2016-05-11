@@ -17,7 +17,7 @@ import spotlight.analysis.outlier.algorithm.AlgorithmActor.AlgorithmContext
 import spotlight.analysis.outlier.algorithm.CommonAnalyzer
 import CommonAnalyzer.WrappingContext
 import spotlight.model.outlier.Outliers
-import spotlight.model.timeseries.{ControlBoundary, Point2D, TimeSeriesBase}
+import spotlight.model.timeseries.{ControlBoundary, PointT, TimeSeriesBase}
 
 
 /**
@@ -224,7 +224,7 @@ class SeasonalExponentialMovingAverageAnalyzer(
       collectOutlierPoints(
         points = context.source.pointsAsPairs,
         context = context,
-        evaluateOutlier = (p: Point2D, ctx: Context) => {
+        evaluateOutlier = (p: PointT, ctx: Context) => {
           val (ts, v) = p
           ctx.seasonalModel.momentAt( new joda.DateTime( ts.toLong ) ).statistics map { stats =>
             log.debug( "pt:[{}] - bin:[{}] - from seasonal exponential moving average: (mean, stddev):[{}]\ttolerance:[{}]", (ts.toLong, v), ctx.seasonalModel.asInstanceOf[SeasonalModel.SimpleSeasonalModel].binFor(new joda.DateTime(ts.toLong)), (stats.ewma, stats.ewmsd), tol )
@@ -239,7 +239,7 @@ class SeasonalExponentialMovingAverageAnalyzer(
             ( false, ControlBoundary.empty(ts.toLong) )
           }
         },
-        update = (ctx: Context, pt: Point2D) => {
+        update = (ctx: Context, pt: PointT) => {
           val ts = new joda.DateTime( pt._1.toLong )
           val v = pt._2
           val model = ctx.seasonalModel

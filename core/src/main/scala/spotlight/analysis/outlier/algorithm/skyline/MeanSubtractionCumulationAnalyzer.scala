@@ -11,7 +11,7 @@ import spotlight.analysis.outlier.algorithm.AlgorithmActor.AlgorithmContext
 import spotlight.analysis.outlier.algorithm.CommonAnalyzer
 import CommonAnalyzer.WrappingContext
 import spotlight.model.outlier.Outliers
-import spotlight.model.timeseries.{ControlBoundary, Point2D}
+import spotlight.model.timeseries.{ControlBoundary, PointT}
 
 
 /**
@@ -49,7 +49,7 @@ extends CommonAnalyzer[CommonAnalyzer.SimpleWrappingContext] {
       collectOutlierPoints(
         points = context.source.pointsAsPairs,
         context = context,
-        evaluateOutlier = (p: Point2D, ctx: Context) => {
+        evaluateOutlier = (p: PointT, ctx: Context) => {
           val (ts, v) = p
           val control = ControlBoundary.fromExpectedAndDistance(
             timestamp = ts.toLong,
@@ -62,7 +62,7 @@ extends CommonAnalyzer[CommonAnalyzer.SimpleWrappingContext] {
 //          val cumulativeStddev = ctx.history.standardDeviation( 1 )
 //          math.abs( v - cumulativeMean ) > ( tol * cumulativeStddev )
         },
-        update = (ctx: Context, pt: Point2D) => { ctx }
+        update = (ctx: Context, pt: PointT) => {ctx }
       )
     }
 

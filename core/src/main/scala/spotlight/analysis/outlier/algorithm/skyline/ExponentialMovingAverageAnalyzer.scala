@@ -13,7 +13,7 @@ import spotlight.analysis.outlier.algorithm.AlgorithmActor.AlgorithmContext
 import spotlight.analysis.outlier.algorithm.CommonAnalyzer
 import CommonAnalyzer.WrappingContext
 import spotlight.model.outlier.Outliers
-import spotlight.model.timeseries.{ControlBoundary, Point2D, TimeSeriesBase}
+import spotlight.model.timeseries.{ControlBoundary, PointT, TimeSeriesBase}
 
 
 /**
@@ -74,7 +74,7 @@ class ExponentialMovingAverageAnalyzer(
       collectOutlierPoints(
         points = context.source.pointsAsPairs,
         context = context,
-        evaluateOutlier = (p: Point2D, ctx: Context) => {
+        evaluateOutlier = (p: PointT, ctx: Context) => {
           ctx.moment.statistics map { stats =>
             val (ts, v) = p
             log.debug( "pt:[{}] - Stddev from exponential moving Average: mean[{}]\tstdev[{}]\ttolerance[{}]", (ts.toLong, v), stats.ewma, stats.ewmsd, tol )
@@ -90,7 +90,7 @@ class ExponentialMovingAverageAnalyzer(
             ( false, ControlBoundary.empty(p._1.toLong) )
           }
         },
-        update = (ctx: Context, pt: Point2D) => {
+        update = (ctx: Context, pt: PointT) => {
           val (ts, v) = pt
           log.debug( "stddevFromMovingAverage: adding point ({}, {}) to historical momentAt: [{}]", ts.toLong, v, context.moment.statistics )
           ctx.copy( moment = ctx.moment :+ v )
