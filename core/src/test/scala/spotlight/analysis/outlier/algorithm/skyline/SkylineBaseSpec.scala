@@ -84,7 +84,7 @@ abstract class SkylineBaseSpec extends ParallelAkkaSpec with MockitoSugar with L
       prior map { h =>
         series.points.foldLeft( h ){ (history, dp) => history :+ dp.getPoint }
       } getOrElse {
-        HistoricalStatistics.fromActivePoints( DataPoint.toDoublePoints(series.points), false )
+        HistoricalStatistics.fromActivePoints( series.points, false )
       }
     }
 

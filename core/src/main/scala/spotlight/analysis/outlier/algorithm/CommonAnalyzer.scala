@@ -145,21 +145,21 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
 
   def tailAverage( data: Seq[DoublePoint], tailLength: Int = 3 ): KOp[AlgorithmContext, Seq[PointT]] = {
     kleisli[TryV, AlgorithmContext, Seq[PointT]] { ctx =>
-      val values = data map { _.getPoint.apply( 1 ) }
+      val values = data map { _.value }
       val lastPos: Int = {
         data.headOption
-        .map { h => ctx.history.lastPoints indexWhere { p=> p(0) == h._1 } }
+        .map { h => ctx.history.lastPoints indexWhere { _.timestamp == h.timestamp } }
         .getOrElse { ctx.history.lastPoints.size }
       }
 
-      val last: Seq[Double] = ctx.history.lastPoints.drop( lastPos - tailLength + 1 ) map { case Array(_, v) => v }
+      val last = ctx.history.lastPoints.drop( lastPos - tailLength + 1 ) map { _.value }
       log.debug( "tail-average: last=[{}]", last.mkString(",") )
 
       data
-      .map{ _.getPoint.apply( 0 ) }
+      .map { _.timestamp }
       .zipWithIndex
       .map { case (ts, i) =>
-        val pointsToAverage: Seq[Double] = {
+        val pointsToAverage = {
           if ( i < tailLength ) {
             val all = last ++ values.take( i + 1 )
             all.drop( all.size - tailLength )
@@ -172,7 +172,7 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
       }
       .map { case (ts, pts) =>
         log.debug( "points to tail average ({}, [{}]) = {}", ts.toLong, pts.mkString(","), pts.sum / pts.size )
-        (ts, pts.sum / pts.size)
+        ( ts, pts.sum / pts.size )
       }
       .right
     }

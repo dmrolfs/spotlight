@@ -16,7 +16,7 @@ import peds.akka.metrics.InstrumentedActor
 import peds.commons.{KOp, TryV}
 import peds.commons.math.MahalanobisDistance
 import spotlight.model.outlier.OutlierPlan
-import spotlight.model.timeseries.{ControlBoundary, DataPoint, TimeSeriesBase, Topic}
+import spotlight.model.timeseries._
 import spotlight.analysis.outlier._
 
 
@@ -62,7 +62,7 @@ trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
   // -- algorithm functional elements --
 
   def algorithmContext: KOp[DetectUsing, AlgorithmContext] = {
-    Kleisli[TryV, DetectUsing, AlgorithmContext] { m => AlgorithmContext( m, DataPoint.toDoublePoints( m.source.points ) ).right }
+    Kleisli[TryV, DetectUsing, AlgorithmContext] { m => AlgorithmContext( m, m.source.points ).right }
   }
 
   val tolerance: KOp[AlgorithmContext, Option[Double]] = Kleisli[TryV, AlgorithmContext, Option[Double]] { _.tolerance }
@@ -85,7 +85,7 @@ trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
       else {
         val inHistory = ctx.history.lastPoints.size
         val needed = minPoints + 1 - original.size
-        val past = ctx.history.lastPoints.drop( inHistory - needed ).map { pt => new DoublePoint( pt ) }
+        val past = pointas2doublepoints( ctx.history.lastPoints.drop( inHistory - needed ) )
         past ++ original
       }
     }

@@ -264,7 +264,7 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
     *         it is the primary from interated over the immediate context source.
     */
   def contiguousPairs( ctx: AlgorithmContext ): Seq[(DoublePoint, DoublePoint)] = {
-    val points = DataPoint toDoublePoints ctx.source.points
+    val points = ctx.source.points.toDoublePoints
     val last = ctx.history.lastPoints.lastOption map { p => new DoublePoint( p ) }
     last map { l => points.zip( l +: points ) } getOrElse { points.drop( 1 ) zip points }
   }

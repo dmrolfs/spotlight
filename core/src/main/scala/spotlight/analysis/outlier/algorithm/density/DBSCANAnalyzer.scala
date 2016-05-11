@@ -72,7 +72,7 @@ trait DBSCANAnalyzer extends AlgorithmActor {
       config <- messageConfig
       historyMean <- historyMean
       historyStdDev <- historyStandardDeviation
-      tol <- kleisli[TryV, AlgorithmContext, Option[Double]] { _.tolerance }
+      tol <- tolerance
     } yield ( context, config, historyMean, historyStdDev, tol )
 
     epsContext flatMapK { case (ctx, config, hsm, hsd, tol) =>
@@ -110,7 +110,7 @@ trait DBSCANAnalyzer extends AlgorithmActor {
       data = ctx.data
       e <- eps
       minDensityPts <- minDensityConnectedPoints <=< messageConfig
-      distance <- kleisli[TryV, AlgorithmContext, DistanceMeasure] {_.distanceMeasure }
+      distance <- kleisli[TryV, AlgorithmContext, DistanceMeasure] { _.distanceMeasure }
     } yield {
       log.debug( "cluster [{}]: eps = [{}]", ctx.message.topic, e )
       log.debug( "cluster: minDensityConnectedPoints = [{}]", minDensityPts )

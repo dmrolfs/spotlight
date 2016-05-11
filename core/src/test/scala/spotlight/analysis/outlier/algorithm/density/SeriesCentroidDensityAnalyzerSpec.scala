@@ -118,7 +118,7 @@ class SeriesCentroidDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSug
         """.stripMargin
       )
 
-      val history = HistoricalStatistics.fromActivePoints( DataPoint.toDoublePoints(points), false )
+      val history = HistoricalStatistics.fromActivePoints( points.toDoublePoints, false )
       trace( s"history = $history" )
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
       analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries( series, plan ), history, algProps ) )
