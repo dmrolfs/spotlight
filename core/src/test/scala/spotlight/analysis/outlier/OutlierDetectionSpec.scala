@@ -300,7 +300,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
         planSpecification = ConfigFactory.empty
       )
 
-      val expectedA = HistoricalStatistics.fromActivePoints( DataPoint.toDoublePoints(pointsA), false )
+      val expectedA = HistoricalStatistics.fromActivePoints( pointsA, false )
 
       val msgA = OutlierDetectionMessage( TimeSeries( topic = metric, points = pointsA ), defaultPlan ).toOption.get
       detect receive msgA
@@ -323,10 +323,10 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
         }
       }
 
-      val expectedAB = DataPoint.toDoublePoints( pointsB ).foldLeft( expectedA.recordLastDataPoints(pointsA) ){ (h, dp) => h :+ dp.getPoint }
+      val expectedAB = pointsB.foldLeft( expectedA.recordLastPoints(pointsA) ){ (h, dp) => h :+ dp }
       expectedAB.N mustBe ( pointsA.size + pointsB.size)
       trace( s"expectedAB = $expectedAB" )
-      trace( s"""expectedAB LAST= [${expectedAB.lastPoints.map{case Array(t,v) => (t,v) }.mkString(",")}]""" )
+      trace( s"""expectedAB LAST= [${expectedAB.lastPoints.toPointTs.mkString(",")}]""" )
 
       val msgB = OutlierDetectionMessage( TimeSeries( topic = metric, points = pointsB ), defaultPlan ).toOption.get
       detect receive msgB
@@ -337,8 +337,8 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
           m.topic mustBe metric
           algo must equal('foo)
           history.N mustBe ( pointsA.size + pointsB.size)
-          trace( s"""   history LAST= [${history.lastPoints.map{case Array(t,v) => (t,v) }.mkString(",")}]""" )
-          trace( s"""expectedAB LAST= [${expectedAB.lastPoints.map{case Array(t,v) => (t,v) }.mkString(",")}]""" )
+          trace( s"""   history LAST= [${history.lastPoints.toPointTs.mkString(",")}]""" )
+          trace( s"""expectedAB LAST= [${expectedAB.lastPoints.toPointTs.mkString(",")}]""" )
           assertHistoricalStats( history, expectedAB )
         }
       }

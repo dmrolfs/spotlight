@@ -16,7 +16,7 @@ import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import peds.commons.math.MahalanobisDistance
 import spotlight.analysis.outlier.HistoricalStatistics
 import spotlight.model.outlier.Outliers
-import spotlight.model.timeseries.{ControlBoundary, DataPoint, TimeSeriesBase}
+import spotlight.model.timeseries._
 import spotlight.analysis.outlier.algorithm.AlgorithmActor.AlgorithmContext
 import spotlight.analysis.outlier.algorithm.CommonAnalyzer
 import spotlight.analysis.outlier.algorithm.CommonAnalyzer.WrappingContext
@@ -103,7 +103,7 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
         ctx
       } else {
         val distances = contiguousPairs( ctx ) map { case (cur, prev) =>
-          val d = distance.compute( cur.getPoint, prev.getPoint )
+          val d = distance.compute( cur, prev )
           log.debug( "distance:[{}] for contiguous pairs: [{}, {}]", d, prev.getPoint.mkString("(", ",",")"), cur.getPoint.mkString("(",",",")") )
           d
         }
@@ -122,6 +122,7 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
       \/ fromTryCatchNonFatal { ctx.messageConfig getInt algorithm.name + ".minDensityConnectedPoints" }
     }
   }
+
 
   type Clusters = Seq[Cluster[DoublePoint]]
   val cluster: KOp[AlgorithmContext, (Clusters, AlgorithmContext)] = {
@@ -195,9 +196,9 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
       (clusters, ctx) = clustersAndContext
     } yield {
       val isOutlier = makeOutlierTest( clusters )
-      val outlyingTestPoints = ctx.data.filter { pt => isOutlier( pt ) }.map {_.getPoint.head.toLong}.toSet
+      val outlyingTestPoints = ctx.data.filter{ isOutlier }.map{ _.timestamp.toLong }.toSet
       val outliers = ctx.source.points filter { dp => outlyingTestPoints contains dp.timestamp.getMillis }
-      (outliers, ctx)
+      ( outliers, ctx )
     }
   }
 
@@ -228,20 +229,24 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
       else {
         val t = tol getOrElse 3.0
         contiguousPairs( ctx ) map { case (p2, p1) => // later point is paired first since primary
-          val Array( ts2, v2 ) = p2.getPoint
+//          val Array( ts2, v2 ) = p2.getPoint
 
           def extrapolate( label: String, target: Double ): Double => Double = (v: Double) => {
-            distance.compute( p1.getPoint, Array(ts2, v) ) - target
+            distance.compute( p1.toPointA, Array(p2.timestamp, v) ) - target
           }
 
           val expectedDistance = distanceStatistics.getMean
           val farthestDistance = distanceStatistics.getMean + t * distanceStatistics.getStandardDeviation
           log.debug( "expectedDistance=[{}]  farthest=[{}]", expectedDistance, farthestDistance )
 
-          val expected = valueSeek( precision = 0.001, maximumSteps = 20, start = v2 )( extrapolate("expected", expectedDistance) )
-          val farthest = valueSeek( precision = 0.001, maximumSteps = 20, start = expected )( extrapolate("farthest", farthestDistance) )
-          log.debug( "actual-value=[{}] expected-value=[{}]  farthest-value=[{}]", v2, expected, farthest )
-          val result = ControlBoundary.fromExpectedAndDistance( timestamp = ts2.toLong, expected = expected, distance = farthest - expected )
+          val expected = {
+            valueSeek( precision = 0.001, maximumSteps = 20, start = p2.value )( extrapolate("expected", expectedDistance) )
+          }
+          val farthest = {
+            valueSeek( precision = 0.001, maximumSteps = 20, start = expected )( extrapolate("farthest", farthestDistance) )
+          }
+          log.debug( "actual-value=[{}] expected-value=[{}]  farthest-value=[{}]", p2.value, expected, farthest )
+          val result = ControlBoundary.fromExpectedAndDistance( timestamp = p2.timestamp.toLong, expected = expected, distance = farthest - expected )
           log.debug(
             "dist-to-expected=[{}] dist-to-floor=[{}] dist-to-ceiling=[{}]",
             result.expected map { e => extrapolate("expected", expectedDistance)( e ) },
@@ -264,8 +269,8 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
     *         it is the primary from interated over the immediate context source.
     */
   def contiguousPairs( ctx: AlgorithmContext ): Seq[(DoublePoint, DoublePoint)] = {
-    val points = DataPoint toDoublePoints ctx.source.points
-    val last = ctx.history.lastPoints.lastOption map { p => new DoublePoint( p ) }
+    val points = ctx.source.points.toDoublePoints
+    val last = ctx.history.lastPoints.lastOption map { _.toDoublePoint }
     last map { l => points.zip( l +: points ) } getOrElse { points.drop( 1 ) zip points }
   }
 

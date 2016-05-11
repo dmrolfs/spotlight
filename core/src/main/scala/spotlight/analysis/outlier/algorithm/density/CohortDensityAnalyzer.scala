@@ -39,7 +39,7 @@ class CohortDensityAnalyzer( override val router: ActorRef ) extends DBSCANAnaly
       val outlierMarks = {
         cohortDistances( payload )
         .toList
-        .map { DataPoint.toDoublePoints }
+        .map { _.toDoublePoints }
         .map { frameDistances =>
           val context = AlgorithmContext( message = c, data = frameDistances )
 

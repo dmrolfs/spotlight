@@ -5,11 +5,10 @@ import akka.actor.{ActorRef, Props}
 
 import scalaz._
 import Scalaz._
-import scalaz.Kleisli.ask
 import org.joda.{time => joda}
 import com.github.nscala_time.time.Imports._
 import com.typesafe.scalalogging.LazyLogging
-import peds.commons.{KOp, TryV, Valid}
+import peds.commons.{KOp, Valid}
 import peds.commons.log.Trace
 import peds.commons.util._
 import spotlight.analysis.outlier.Moment
@@ -17,7 +16,7 @@ import spotlight.analysis.outlier.algorithm.AlgorithmActor.AlgorithmContext
 import spotlight.analysis.outlier.algorithm.CommonAnalyzer
 import CommonAnalyzer.WrappingContext
 import spotlight.model.outlier.Outliers
-import spotlight.model.timeseries.{ControlBoundary, PointT, TimeSeriesBase}
+import spotlight.model.timeseries._
 
 
 /**
@@ -215,37 +214,48 @@ class SeasonalExponentialMovingAverageAnalyzer(
     */
   override val findOutliers: KOp[AlgorithmContext, (Outliers, AlgorithmContext)] = {
     val outliers = for {
-      context <- toConcreteContextK <=< ask[TryV, AlgorithmContext]
-      tolerance <- tolerance <=< ask[TryV, AlgorithmContext]
+      ctx <- toConcreteContextK
+      tolerance <- tolerance
 //      taverages <- tailAverage <=< ask[TryV, AlgorithmContext]
     } yield {
       val tol = tolerance getOrElse 3D
 
       collectOutlierPoints(
-        points = context.source.pointsAsPairs,
-        context = context,
-        evaluateOutlier = (p: PointT, ctx: Context) => {
-          val (ts, v) = p
-          ctx.seasonalModel.momentAt( new joda.DateTime( ts.toLong ) ).statistics map { stats =>
-            log.debug( "pt:[{}] - bin:[{}] - from seasonal exponential moving average: (mean, stddev):[{}]\ttolerance:[{}]", (ts.toLong, v), ctx.seasonalModel.asInstanceOf[SeasonalModel.SimpleSeasonalModel].binFor(new joda.DateTime(ts.toLong)), (stats.ewma, stats.ewmsd), tol )
+        points = ctx.source.points,
+        context = ctx,
+        evaluateOutlier = (p: PointT, c: Context) => {
+          c.seasonalModel.momentAt( p.dateTime ).statistics map { stats =>
+            log.debug(
+              "pt:[{}] - bin:[{}] - from seasonal exponential moving average: (mean, stddev):[{}]\ttolerance:[{}]",
+              (p.timestamp.toLong, p.value),
+              c.seasonalModel.asInstanceOf[SeasonalModel.SimpleSeasonalModel].binFor(p.dateTime),
+              (stats.ewma, stats.ewmsd),
+              tol
+            )
+
             val control = ControlBoundary.fromExpectedAndDistance(
-              timestamp = ts.toLong,
+              timestamp = p.timestamp.toLong,
               expected = stats.ewma,
               distance = math.abs( tol * stats.ewmsd )
             )
-            ( control isOutlier v, control )
+
+            ( control isOutlier p.value, control )
             //            math.abs( v - stats.ewma ) > ( tol * stats.ewmsd )
           } getOrElse {
-            ( false, ControlBoundary.empty(ts.toLong) )
+            ( false, ControlBoundary.empty(p.timestamp.toLong) )
           }
         },
-        update = (ctx: Context, pt: PointT) => {
-          val ts = new joda.DateTime( pt._1.toLong )
-          val v = pt._2
-          val model = ctx.seasonalModel
-          val m = model.momentAt( ts )
-          log.debug( "FromSeasonalMovingAverage: adding point ({}, {}) to historical momentAt: [{}]", ts.getMillis, v, m.statistics )
-          ctx.copy( seasonalModel = model.withMomentAtDateTime( m :+ v, ts ) )
+        update = (c: Context, p: PointT) => {
+          val model = c.seasonalModel
+          val m = model momentAt p.dateTime
+          log.debug(
+            "FromSeasonalMovingAverage: adding point ({}, {}) to historical momentAt: [{}]",
+            p.timestamp.toLong,
+            p.value,
+            m.statistics
+          )
+
+          c.copy( seasonalModel = model.withMomentAtDateTime( m :+ p.value, p.dateTime ) )
         }
       )
     }

@@ -5,15 +5,14 @@ import akka.actor.{ActorRef, Props}
 
 import scalaz._
 import Scalaz._
-import scalaz.Kleisli.ask
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
-import peds.commons.{KOp, TryV, Valid}
+import peds.commons.{KOp, Valid}
 import peds.commons.util._
 import spotlight.analysis.outlier.algorithm.AlgorithmActor.AlgorithmContext
 import spotlight.analysis.outlier.algorithm.CommonAnalyzer
 import CommonAnalyzer.WrappingContext
 import spotlight.model.outlier.Outliers
-import spotlight.model.timeseries.{ControlBoundary, PointT, TimeSeriesBase}
+import spotlight.model.timeseries._
 
 
 /**
@@ -80,23 +79,22 @@ class SimpleMovingAverageAnalyzer( override val router: ActorRef ) extends Commo
         points = taverages,
         context = ctx,
         evaluateOutlier = (p: PointT, c: Context) => {
-          val (ts, v) = p
           val mean = c.movingStatistics.getMean
           val stddev = c.movingStatistics.getStandardDeviation
           log.debug(
             "Stddev from simple moving Average N[{}]: mean[{}]\tstdev[{}]\ttolerance[{}]",
             c.movingStatistics.getN, mean, stddev, tol
           )
+
           val control = ControlBoundary.fromExpectedAndDistance(
-            timestamp = ts.toLong,
+            timestamp = p.timestamp.toLong,
             expected = mean,
             distance = tol * stddev
           )
-          ( control isOutlier v, control )
+          ( control isOutlier p.value, control )
         },
-        update = (c: Context, pt: PointT) => {
-          val (_, v) = pt
-          c.movingStatistics addValue v
+        update = (c: Context, p: PointT) => {
+          c.movingStatistics addValue p.value
           c
         }
       )

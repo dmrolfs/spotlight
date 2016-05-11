@@ -10,7 +10,6 @@ import peds.commons._
 trait TimeSeriesBase {
   def topic: Topic
   def points: Seq[DataPoint]
-  def pointsAsPairs: Seq[PointT] = points.map{ dp => (dp.timestamp.getMillis.toDouble, dp.value) }
   def size: Int
   def start: Option[joda.DateTime]
   def end: Option[joda.DateTime]

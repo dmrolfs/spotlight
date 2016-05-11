@@ -129,7 +129,7 @@ class SkylineGrubbsSpec extends SkylineBaseSpec {
       )
 
       val series2 = spike( full )( 0 )
-      val history2 = historyWith( Option(history1.recordLastDataPoints(series.points)), series2 )
+      val history2 = historyWith( Option(history1 recordLastPoints series.points), series2 )
 
       analyzer.receive( DetectUsing(algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "grubbs again" ) {
@@ -168,8 +168,8 @@ class SkylineGrubbsSpec extends SkylineBaseSpec {
         val s = TimeSeries( topic, Seq( DataPoint(dt, v) ) )
         val h = {
           previous
-          .map { case (ps, ph) => s.points.foldLeft( ph recordLastDataPoints ps.points ) { (acc, p) => acc :+ p } }
-          .getOrElse { HistoricalStatistics.fromActivePoints( DataPoint.toDoublePoints(s.points), false ) }
+          .map { case (ps, ph) => s.points.foldLeft( ph recordLastPoints ps.points ) { (acc, p) => acc :+ p } }
+          .getOrElse { HistoricalStatistics.fromActivePoints( s.points, false ) }
         }
         analyzer receive detectUsing( s, h )
 
@@ -236,7 +236,7 @@ class SkylineGrubbsSpec extends SkylineBaseSpec {
         valueWiggle = (0.0, 10)
       )
       val series2 = spike( full2, 100 )( 0 )
-      val history2 = historyWith( Option(history1.recordLastDataPoints(series.points)), series2 )
+      val history2 = historyWith( Option(history1 recordLastPoints series.points), series2 )
       val tailAverages2 = tailAverage(
         data = fillDataFromHistory(series2.points, history2),
         lastPoints = history2.lastPoints.map{ p => DataPoint( new joda.DateTime(p(0).toLong), p(1) ) }

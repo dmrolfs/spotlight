@@ -5,15 +5,14 @@ import akka.actor.{ActorRef, Props}
 
 import scalaz._
 import Scalaz._
-import scalaz.Kleisli.ask
-import peds.commons.{KOp, TryV, Valid}
+import peds.commons.{KOp, Valid}
 import peds.commons.util._
 import spotlight.analysis.outlier.Moment
 import spotlight.analysis.outlier.algorithm.AlgorithmActor.AlgorithmContext
 import spotlight.analysis.outlier.algorithm.CommonAnalyzer
 import CommonAnalyzer.WrappingContext
 import spotlight.model.outlier.Outliers
-import spotlight.model.timeseries.{ControlBoundary, PointT, TimeSeriesBase}
+import spotlight.model.timeseries._
 
 
 /**
@@ -53,8 +52,8 @@ class ExponentialMovingAverageAnalyzer(
     makeStatistics( c ) map { moment => Context( underlying = c, moment = moment ) }
   }
 
-  def makeStatistics( context: AlgorithmContext ): Valid[Moment] = {
-    Moment.withAlpha( id = context.historyKey.toString, alpha = 0.05 )
+  def makeStatistics( ctx: AlgorithmContext ): Valid[Moment] = {
+    Moment.withAlpha( id = ctx.historyKey.toString, alpha = 0.05 )
   }
 
 
@@ -66,34 +65,43 @@ class ExponentialMovingAverageAnalyzer(
     */
   override val findOutliers: KOp[AlgorithmContext, (Outliers, AlgorithmContext)] = {
     val outliers = for {
-      context <- toConcreteContextK <=< ask[TryV, AlgorithmContext]
-      tolerance <- tolerance <=< ask[TryV, AlgorithmContext]
+      ctx <- toConcreteContextK
+      tolerance <- tolerance
     } yield {
       val tol = tolerance getOrElse 3D
 
       collectOutlierPoints(
-        points = context.source.pointsAsPairs,
-        context = context,
-        evaluateOutlier = (p: PointT, ctx: Context) => {
-          ctx.moment.statistics map { stats =>
-            val (ts, v) = p
-            log.debug( "pt:[{}] - Stddev from exponential moving Average: mean[{}]\tstdev[{}]\ttolerance[{}]", (ts.toLong, v), stats.ewma, stats.ewmsd, tol )
+        points = ctx.source.points,
+        context = ctx,
+        evaluateOutlier = (pt: PointT, c: Context) => {
+          c.moment.statistics map { stats =>
+            log.debug(
+              "pt:[{}] - Stddev from exponential moving Average: mean[{}]\tstdev[{}]\ttolerance[{}]",
+              (pt.timestamp.toLong, pt.value),
+              stats.ewma,
+              stats.ewmsd,
+              tol
+            )
             //            math.abs( v - stats.ewma ) > ( tol * stats.ewmsd )
             val control = ControlBoundary.fromExpectedAndDistance(
-              timestamp = ts.toLong,
+              timestamp = pt.timestamp.toLong,
               expected = stats.ewma,
               distance = math.abs( tol * stats.ewmsd )
             )
 
-            ( control.isOutlier(v), control )
+            ( control isOutlier pt.value, control )
           } getOrElse {
-            ( false, ControlBoundary.empty(p._1.toLong) )
+            ( false, ControlBoundary.empty(pt.timestamp.toLong) )
           }
         },
-        update = (ctx: Context, pt: PointT) => {
-          val (ts, v) = pt
-          log.debug( "stddevFromMovingAverage: adding point ({}, {}) to historical momentAt: [{}]", ts.toLong, v, context.moment.statistics )
-          ctx.copy( moment = ctx.moment :+ v )
+        update = (c: Context, pt: PointT) => {
+          log.debug(
+            "stddevFromMovingAverage: adding point ({}, {}) to historical momentAt: [{}]",
+            pt.timestamp.toLong,
+            pt.value,
+            c.moment.statistics
+          )
+          c.copy( moment = c.moment :+ pt.value )
         }
       )
     }

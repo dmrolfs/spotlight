@@ -10,7 +10,7 @@ import spotlight.analysis.outlier.algorithm.AlgorithmActor
 import spotlight.analysis.outlier.algorithm.density.DBSCANAnalyzer.Clusters
 import spotlight.analysis.outlier.{DetectUsing, HistoricalStatistics}
 import spotlight.model.outlier.{NoOutliers, Outliers, SeriesOutliers}
-import spotlight.model.timeseries.{DataPoint, TimeSeries}
+import spotlight.model.timeseries._
 
 
 
@@ -31,16 +31,18 @@ class SeriesCentroidDensityAnalyzer( override val router: ActorRef ) extends DBS
     def centroidDistances( points: Seq[DoublePoint], history: HistoricalStatistics ): Seq[DoublePoint] = {
       val h = if ( history.N > 0 ) history else HistoricalStatistics.fromActivePoints( points, false )
       val mean = h.mean( 1 )
-      val distFromCentroid = points map { _.getPoint } map { case Array(x, y) => new DoublePoint( Array(x, y - mean) ) }
+      val distFromCentroid = points map { dp => ( dp.timestamp, dp.value - mean ).toDoublePoint }
       log.debug( "points             : [{}]", points.mkString(",") )
       log.debug( "dists from centroid: [{}]", distFromCentroid.mkString(",") )
       distFromCentroid
     }
 
     Kleisli[TryV, DetectUsing, AlgorithmContext] { d =>
-      val points: TryV[Seq[DoublePoint]] = d.payload.source match {
-        case s: TimeSeries => centroidDistances( DataPoint.toDoublePoints(s.points), d.history ).right
-        case x => -\/( new UnsupportedOperationException( s"cannot extract test context from [${x.getClass}]" ) )
+      val points = {
+        d.payload.source match {
+          case s: TimeSeries => centroidDistances( s.points.toDoublePoints, d.history ).right
+          case x => -\/( new UnsupportedOperationException( s"cannot extract test context from [${x.getClass}]" ) )
+        }
       }
 
       points map { pts => AlgorithmContext( message = d, data = pts ) }
@@ -53,11 +55,11 @@ class SeriesCentroidDensityAnalyzer( override val router: ActorRef ) extends DBS
       val centroidOutliers: Set[Long] = {
         context.data
         .filter { isOutlier }
-        .map { _.getPoint.apply(0).toLong }
+        .map { _.timestamp.toLong }
         .toSet
       }
 
-      val outliers = context.source.points filter { dp => centroidOutliers.contains( dp.getPoint.apply(0).toLong ) }
+      val outliers = context.source.points filter { dp => centroidOutliers contains dp.timestamp.getMillis }
       val tsTag = ClassTag[TimeSeries]( classOf[TimeSeries] )
       context.source match {
         case tsTag( src ) if outliers.nonEmpty => {

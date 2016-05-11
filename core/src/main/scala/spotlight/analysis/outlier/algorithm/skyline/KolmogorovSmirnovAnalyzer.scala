@@ -18,7 +18,7 @@ import spotlight.analysis.outlier.algorithm.CommonAnalyzer
 import CommonAnalyzer.WrappingContext
 import spotlight.analysis.outlier.algorithm.skyline.adf.AugmentedDickeyFuller
 import spotlight.model.outlier.Outliers
-import spotlight.model.timeseries.{ControlBoundary, DataPoint, TimeSeriesBase}
+import spotlight.model.timeseries._
 
 
 /**
@@ -101,24 +101,26 @@ class KolmogorovSmirnovAnalyzer( override val router: ActorRef ) extends CommonA
   */
   override val findOutliers: KOp[AlgorithmContext, (Outliers, AlgorithmContext)] = {
     def isDistributionUnlikeReference( tol: Double ): KOp[Context, Boolean] = {
-      kleisli[TryV, Context, Boolean] { implicit context =>
-        val reference = context.referenceSeries.map{ _.value }.toArray
-        log.debug( "reference-history[{}] = [{}]", context.referenceHistory.size, context.referenceHistory.mkString(",") )
-        log.debug( "reference-offset = [{}]", context.referenceOffset )
-        log.debug( "reference-interval = [{}]", context.referenceInterval )
+      kleisli[TryV, Context, Boolean] { implicit ctx =>
+        val reference = ctx.referenceSeries.map{ _.value }.toArray
+        log.debug( "reference-history[{}] = [{}]", ctx.referenceHistory.size, ctx.referenceHistory.mkString(",") )
+        log.debug( "reference-offset = [{}]", ctx.referenceOffset )
+        log.debug( "reference-interval = [{}]", ctx.referenceInterval )
         log.debug( "reference-series[{}] = [{}]", reference.size, reference.mkString(",") )
-        log.debug( "CURRENT[{}] = [{}]", context.data.size, context.data )
-        val current = context.data.map{ _.getPoint }.map{ case Array(_, v) => v }.toArray
-        distributionUnlikeReference( current, reference )
+        log.debug( "CURRENT[{}] = [{}]", ctx.data.size, ctx.data )
+        val current = ctx.data map { _.value }
+        distributionUnlikeReference( current.toArray, reference )
       }
     }
 
-    val outliers = for {
-      context <- ask[TryV, AlgorithmContext]
-      tolerance <- tolerance <=< ask[TryV, AlgorithmContext]
-      unlike <- isDistributionUnlikeReference( tolerance getOrElse 3D ) <=< toConcreteContextK <=< ask[TryV, AlgorithmContext]
-    } yield {
-      if ( unlike ) ( context.source.points, context ) else ( Seq.empty[DataPoint], context )
+    val outliers = {
+      for {
+        ctx <- ask[TryV, AlgorithmContext]
+        tolerance <- tolerance
+        unlike <- isDistributionUnlikeReference( tolerance getOrElse 3D ) <=< toConcreteContextK
+      } yield {
+        if ( unlike ) ( ctx.source.points, ctx ) else ( Seq.empty[DataPoint], ctx )
+      }
     }
 
     makeOutliersK( algorithm, outliers )

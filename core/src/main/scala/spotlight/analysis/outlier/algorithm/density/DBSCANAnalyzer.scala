@@ -23,6 +23,7 @@ object DBSCANAnalyzer {
 }
 
 trait DBSCANAnalyzer extends AlgorithmActor {
+  import DBSCANAnalyzer.Clusters
   import AlgorithmActor._
 
   val trainingLogger = LoggerFactory getLogger "Training"
@@ -51,7 +52,7 @@ trait DBSCANAnalyzer extends AlgorithmActor {
     }
   }
 
-  def findOutliers: KOp[(AlgorithmContext, Seq[Cluster[DoublePoint]]), Outliers]
+  def findOutliers: KOp[(AlgorithmContext, Clusters), Outliers]
 
 
   val minDensityConnectedPoints: KOp[Config, Int] = {
@@ -72,7 +73,7 @@ trait DBSCANAnalyzer extends AlgorithmActor {
       config <- messageConfig
       historyMean <- historyMean
       historyStdDev <- historyStandardDeviation
-      tol <- kleisli[TryV, AlgorithmContext, Option[Double]] { _.tolerance }
+      tol <- tolerance
     } yield ( context, config, historyMean, historyStdDev, tol )
 
     epsContext flatMapK { case (ctx, config, hsm, hsd, tol) =>
@@ -104,14 +105,15 @@ trait DBSCANAnalyzer extends AlgorithmActor {
     }
   }
 
-  val cluster: KOp[AlgorithmContext, (AlgorithmContext, Seq[Cluster[DoublePoint]])] = {
+  val cluster: KOp[AlgorithmContext, (AlgorithmContext, Clusters)] = {
     for {
       ctx <- ask[TryV, AlgorithmContext]
-      data = ctx.data
       e <- eps
       minDensityPts <- minDensityConnectedPoints <=< messageConfig
-      distance <- kleisli[TryV, AlgorithmContext, DistanceMeasure] {_.distanceMeasure }
+      distance <- kleisli[TryV, AlgorithmContext, DistanceMeasure] { _.distanceMeasure }
     } yield {
+      val data = ctx.data
+
       log.debug( "cluster [{}]: eps = [{}]", ctx.message.topic, e )
       log.debug( "cluster: minDensityConnectedPoints = [{}]", minDensityPts )
       log.debug( "cluster: distanceMeasure = [{}]", distance )
@@ -133,7 +135,7 @@ trait DBSCANAnalyzer extends AlgorithmActor {
     }
   }
 
-  def makeOutlierTest( clusters: Seq[Cluster[DoublePoint]] ): DoublePoint => Boolean = {
+  def makeOutlierTest( clusters: Clusters ): DoublePoint => Boolean = {
     import scala.collection.JavaConverters._
 
     if ( clusters.isEmpty ) (pt: DoublePoint) => { false }

@@ -6,6 +6,7 @@ import akka.event.EventStream
 import akka.testkit._
 import com.github.nscala_time.time.OrderingImplicits._
 import com.typesafe.config.ConfigFactory
+import org.apache.commons.math3.ml.clustering.DoublePoint
 import org.apache.commons.math3.ml.distance.EuclideanDistance
 import org.apache.commons.math3.random.RandomDataGenerator
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
@@ -72,16 +73,12 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
     }
 
     def makeDensityExpectedHistory(points: Seq[DataPoint], start: Option[DescriptiveStatistics], last: Option[DataPoint] ): DescriptiveStatistics = {
-//      val initial = start getOrElse { Moment.withAlpha( "expected", 0.05 ).toOption.get }
       val initial = start getOrElse { new DescriptiveStatistics( CommonAnalyzer.ApproximateDayWindow ) }
-//      val last = initialH.lastPoints.lastOption map { new DoublePoint( _ ) }
-      val dps = DataPoint toDoublePoints points
-      val basis = last map { l => dps.zip( DataPoint.toDoublePoint(l) +: dps ) } getOrElse { (dps drop 1).zip( dps ) }
+      val dps = points.toDoublePoints
+      val basis = last map { l => dps.zip( l.toDoublePoint +: dps ) } getOrElse { (dps drop 1).zip( dps ) }
       basis.foldLeft( initial ) { case (s, (c, p)) =>
-        val ts = c.getPoint.head
-        s.addValue( new EuclideanDistance().compute( p.getPoint, c.getPoint ) )
+        s.addValue( new EuclideanDistance().compute( p, c ) )
         s
-//        s :+ new EuclideanDistance().compute( p.getPoint, c.getPoint )
       }
     }
 
@@ -118,9 +115,9 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
 
     def historyWith( prior: Option[HistoricalStatistics], series: TimeSeries ): HistoricalStatistics = {
       prior map { h =>
-        series.points.foldLeft( h ){ (history, dp) => history :+ dp.getPoint }
+        series.points.foldLeft( h ){ _ :+ _ }
       } getOrElse {
-        HistoricalStatistics.fromActivePoints( DataPoint.toDoublePoints(series.points), false )
+        HistoricalStatistics.fromActivePoints( series.points, false )
       }
     }
 
@@ -296,8 +293,8 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
         val s = TimeSeries( topic, Seq( DataPoint(dt, v) ) )
         val h = {
           previous
-          .map { case (ps, ph) => s.points.foldLeft( ph recordLastDataPoints ps.points ) { (acc, p) => acc :+ p } }
-          .getOrElse { HistoricalStatistics.fromActivePoints( DataPoint.toDoublePoints(s.points), false ) }
+          .map { case (ps, ph) => s.points.foldLeft( ph recordLastPoints ps.points ) { (acc, p) => acc :+ p } }
+          .getOrElse { HistoricalStatistics.fromActivePoints( s.points, false ) }
         }
         analyzer receive detectUsing( s, h )
 
@@ -411,7 +408,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       val analyzer = TestActorRef[SeriesDensityAnalyzer]( SeriesDensityAnalyzer.props( router.ref ) )
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
 
-      val detectHistoryA = HistoricalStatistics.fromActivePoints( DataPoint.toDoublePoints(pointsA), false )
+      val detectHistoryA = HistoricalStatistics.fromActivePoints( pointsA, false )
       val msgA = detectUsing(
         message = OutlierDetectionMessage( TimeSeries(topic = metric, points = pointsA), plan ).toOption.get,
         history = detectHistoryA
@@ -428,13 +425,13 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       )
 
       detectHistoryA.N mustBe (pointsA.size)
-      val detectHistoryARecorded = detectHistoryA.recordLastDataPoints( pointsA )
+      val detectHistoryARecorded = detectHistoryA recordLastPoints pointsA
       detectHistoryARecorded.N mustBe (pointsA.size)
-      val detectHistoryAB = DataPoint.toDoublePoints( pointsB ).foldLeft( detectHistoryARecorded ){ (h, dp) => h :+ dp.getPoint }
+      val detectHistoryAB = pointsB.foldLeft( detectHistoryARecorded ){ (h, dp) => h :+ dp }
       detectHistoryAB.N mustBe (pointsA.size + pointsB.size )
       val detectHistoryABLast: Seq[PointA] = detectHistoryAB.lastPoints
       val pointsALast: Seq[PointA] = {
-        pointsA.drop( pointsA.size - PointsForLast ).map{ dp => Array(dp.timestamp.getMillis.toDouble, dp.value) }.toList
+        pointsA.drop( pointsA.size - PointsForLast ).map{ _.toPointA }.toList
       }
       detectHistoryABLast.size mustBe pointsALast.size
       detectHistoryABLast.zip(pointsALast).foreach{ case (f, b) => f mustBe b }

@@ -13,7 +13,7 @@ import spotlight.analysis.outlier.algorithm.AlgorithmActor.AlgorithmContext
 import spotlight.analysis.outlier.algorithm.CommonAnalyzer
 import CommonAnalyzer.WrappingContext
 import spotlight.model.outlier.Outliers
-import spotlight.model.timeseries.{ControlBoundary, PointT}
+import spotlight.model.timeseries._
 
 
 /**
@@ -41,7 +41,7 @@ class GrubbsAnalyzer( override val router: ActorRef ) extends CommonAnalyzer[Com
     * A timeseries is anomalous if the Z score is greater than the Grubb's score.
     */
   override val findOutliers: KOp[AlgorithmContext, (Outliers, AlgorithmContext)] = {
-    def dataThreshold( data: Seq[PointT] ) = kleisli[TryV, AlgorithmContext, Double] { context =>
+    def dataThreshold( data: Seq[PointT] ) = kleisli[TryV, AlgorithmContext, Double] { ctx =>
       val Alpha = 0.05  //todo drive from context's algoConfig
       val degreesOfFreedom = math.max( data.size - 2, 1 ) //todo: not a great idea but for now avoiding error if size <= 2
       \/ fromTryCatchNonFatal {
@@ -52,16 +52,16 @@ class GrubbsAnalyzer( override val router: ActorRef ) extends CommonAnalyzer[Com
     // background: http://www.itl.nist.gov/div898/handbook/eda/section3/eda35h1.htm
     // background: http://graphpad.com/support/faqid/1598/
     val outliers = for {
-      context <- toConcreteContextK
+      ctx <- toConcreteContextK
       data <- fillDataFromHistory()
       taverages <- tailAverage( data )
       threshold <- dataThreshold( taverages )
-      tolerance <- tolerance <=< ask[TryV, AlgorithmContext]
+      tolerance <- tolerance
     } yield {
       val tol = tolerance getOrElse 3D
 
-      val data = taverages.map{ case (_, v) => v }.toArray
-      val stats = new DescriptiveStatistics( data )
+      val data = taverages map { _.value }
+      val stats = new DescriptiveStatistics( data.toArray )
       val stddev = stats.getStandardDeviation
       val mean = stats.getMean
       // zscore calculation considered in control expected and distance formula
@@ -77,18 +77,17 @@ class GrubbsAnalyzer( override val router: ActorRef ) extends CommonAnalyzer[Com
 
       collectOutlierPoints(
         points = taverages,
-        context = context,
-        evaluateOutlier = (p: PointT, ctx: Context) => {
-          val (ts, v) = p
+        context = ctx,
+        evaluateOutlier = (p: PointT, c: Context) => {
           val control = ControlBoundary.fromExpectedAndDistance(
-            timestamp = ts.toLong,
+            timestamp = p.timestamp.toLong,
             expected = mean,
             distance = tol * grubbsScore * stddev
           )
 
-          ( control isOutlier v, control )
+          ( control isOutlier p.value, control )
         },
-        update = (ctx: Context, pt: PointT) => {ctx }
+        update = (c: Context, p: PointT) => { c }
       )
     }
 

@@ -2,7 +2,6 @@ package spotlight.analysis.outlier.algorithm
 
 import scala.annotation.tailrec
 import scala.reflect.ClassTag
-import akka.event.LoggingReceive
 
 import scalaz.Kleisli.kleisli
 import scalaz.Scalaz._
@@ -146,24 +145,21 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
 
   def tailAverage( data: Seq[DoublePoint], tailLength: Int = 3 ): KOp[AlgorithmContext, Seq[PointT]] = {
     kleisli[TryV, AlgorithmContext, Seq[PointT]] { ctx =>
-      val values = data map { _.getPoint.apply( 1 ) }
+      val values = data map { _.value }
       val lastPos: Int = {
         data.headOption
-        .map { h =>
-          val Array( dts, _ ) = h.getPoint
-          ctx.history.lastPoints indexWhere { p: PointA => p(0 ) == dts }
-        }
+        .map { h => ctx.history.lastPoints indexWhere { _.timestamp == h.timestamp } }
         .getOrElse { ctx.history.lastPoints.size }
       }
 
-      val last: Seq[Double] = ctx.history.lastPoints.drop( lastPos - tailLength + 1 ) map { case Array(_, v) => v }
+      val last = ctx.history.lastPoints.drop( lastPos - tailLength + 1 ) map { _.value }
       log.debug( "tail-average: last=[{}]", last.mkString(",") )
 
       data
-      .map{ _.getPoint.apply( 0 ) }
+      .map { _.timestamp }
       .zipWithIndex
       .map { case (ts, i) =>
-        val pointsToAverage: Seq[Double] = {
+        val pointsToAverage = {
           if ( i < tailLength ) {
             val all = last ++ values.take( i + 1 )
             all.drop( all.size - tailLength )
@@ -176,7 +172,7 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
       }
       .map { case (ts, pts) =>
         log.debug( "points to tail average ({}, [{}]) = {}", ts.toLong, pts.mkString(","), pts.sum / pts.size )
-        (ts, pts.sum / pts.size)
+        ( ts, pts.sum / pts.size )
       }
       .right
     }
@@ -187,24 +183,24 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
   type EvaluateOutlier[CTX <: AlgorithmContext] = (PointT, CTX) => (Boolean, ControlBoundary)
 
   def collectOutlierPoints[CTX <: AlgorithmContext](
-                                                     points: Seq[PointT],
-                                                     context: CTX,
-                                                     evaluateOutlier: EvaluateOutlier[CTX],
-                                                     update: UpdateContext[CTX]
+    points: Seq[PointT],
+    context: CTX,
+    evaluateOutlier: EvaluateOutlier[CTX],
+    update: UpdateContext[CTX]
   ): (Seq[DataPoint], AlgorithmContext) = {
-    @tailrec def loop(pts: List[PointT], ctx: CTX, acc: Seq[DataPoint] ): (Seq[DataPoint], AlgorithmContext) = {
+    @tailrec def loop( pts: List[PointT], ctx: CTX, acc: Seq[DataPoint] ): (Seq[DataPoint], AlgorithmContext) = {
       ctx.cast[WrappingContext] foreach { setScopedContext }
 
       pts match {
         case Nil => ( acc, ctx )
 
         case pt :: tail => {
-          val ts = new joda.DateTime( pt._1.toLong  )
+          val timestamp = pt.timestamp.toLong
           val (isOutlier, control) = evaluateOutlier( pt, ctx )
           val updatedAcc = {
             if ( isOutlier ) {
               ctx.source.points
-              .find { _.timestamp.getMillis == ts.getMillis }
+              .find { _.timestamp.getMillis == timestamp }
               .map { original => acc :+ original }
               .getOrElse { acc }
             } else {

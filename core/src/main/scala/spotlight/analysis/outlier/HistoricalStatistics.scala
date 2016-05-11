@@ -5,7 +5,7 @@ import java.io.Serializable
 import org.apache.commons.math3.linear.RealMatrix
 import org.apache.commons.math3.ml.clustering.DoublePoint
 import org.apache.commons.math3.stat.descriptive.MultivariateSummaryStatistics
-import spotlight.model.timeseries.{DataPoint, PointA}
+import spotlight.model.timeseries._
 
 
 /**
@@ -14,10 +14,6 @@ import spotlight.model.timeseries.{DataPoint, PointA}
 trait HistoricalStatistics extends Serializable {
   def :+( point: PointA ): HistoricalStatistics
   def recordLastPoints( points: Seq[PointA] ): HistoricalStatistics
-  def recordLastDataPoints( datapoints: Seq[DataPoint] ): HistoricalStatistics = {
-    val points = DataPoint.toDoublePoints( datapoints ).map{ _.getPoint }
-    recordLastPoints( points )
-  }
 
   def covariance: RealMatrix
   def dimension: Int
@@ -42,7 +38,7 @@ object HistoricalStatistics {
   }
 
   def fromActivePoints( points: Seq[DoublePoint], isCovarianceBiasCorrected: Boolean ): HistoricalStatistics = {
-    points.foldLeft( HistoricalStatistics(k = 2, isCovarianceBiasCorrected) ) { (h, p) => h :+ p.getPoint }
+    points.foldLeft( HistoricalStatistics(k = 2, isCovarianceBiasCorrected) ) { (h, p) => h :+ p }
   }
 
 

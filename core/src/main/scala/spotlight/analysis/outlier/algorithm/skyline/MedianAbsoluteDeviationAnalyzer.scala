@@ -13,7 +13,7 @@ import spotlight.analysis.outlier.algorithm.AlgorithmActor.AlgorithmContext
 import spotlight.analysis.outlier.algorithm.CommonAnalyzer
 import CommonAnalyzer.WrappingContext
 import spotlight.model.outlier.Outliers
-import spotlight.model.timeseries.{ControlBoundary, PointT, TimeSeriesBase}
+import spotlight.model.timeseries._
 
 
 /**
@@ -77,39 +77,37 @@ extends CommonAnalyzer[MedianAbsoluteDeviationAnalyzer.Context] {
     */
   override val findOutliers: KOp[AlgorithmContext, (Outliers, AlgorithmContext)] = {
     val outliers = for {
-      context <- toConcreteContextK <=< ask[TryV, AlgorithmContext]
-      tolerance <- tolerance <=< ask[TryV, AlgorithmContext]
+      ctx <- toConcreteContextK
+      tolerance <- tolerance
     } yield {
       val tol = tolerance getOrElse 3D  // skyline source uses 6.0 - admittedly arbitrary?
 
-      def deviation( value: Double, ctx: Context ): Double = {
-        val movingMedian = ctx.movingStatistics getPercentile 50
-        log.debug( "medianAbsoluteDeviation: N:[{}] movingMedian:[{}]", ctx.deviationStatistics.getN, movingMedian )
-        math.abs( value - movingMedian )
+      def deviation( v: Double, c: Context ): Double = {
+        val movingMedian = c.movingStatistics getPercentile 50
+        log.debug( "medianAbsoluteDeviation: N:[{}] movingMedian:[{}]", c.deviationStatistics.getN, movingMedian )
+        math.abs( v - movingMedian )
       }
 
       collectOutlierPoints(
-        points = context.source.pointsAsPairs,
-        context = context,
-        evaluateOutlier = (p: PointT, ctx: Context) => {
-          val (ts, v) = p
+        points = ctx.source.points,
+        context = ctx,
+        evaluateOutlier = (p: PointT, c: Context) => {
           val control = ControlBoundary.fromExpectedAndDistance(
-            timestamp = ts.toLong,
-            expected = ctx.movingStatistics.getPercentile( 50 ),
-            distance = tol * ctx.deviationStatistics.getPercentile( 50 )
+            timestamp = p.timestamp.toLong,
+            expected = c.movingStatistics.getPercentile( 50 ),
+            distance = tol * c.deviationStatistics.getPercentile( 50 )
           )
-          ( control isOutlier v, control )
+          ( control isOutlier p.value, control )
 //          val d = deviation( v, ctx )
 //          val deviationMedian = ctx.deviationStatistics getPercentile 50
 //          log.debug( "medianAbsoluteDeviation: N:[{}] deviation:[{}] deviationMedian:[{}]", ctx.deviationStatistics.getN, d, deviationMedian )
 //          d > ( tol * deviationMedian )
         },
-        update = (ctx: Context, pt: PointT) => {
-          val (_, v) = pt
-          ctx.movingStatistics addValue v
-          ctx.deviationStatistics addValue math.abs( v - ctx.movingStatistics.getPercentile(50) )
+        update = (c: Context, p: PointT) => {
+          c.movingStatistics addValue p.value
+          c.deviationStatistics addValue math.abs( p.value - c.movingStatistics.getPercentile(50) )
 //          ctx.deviationStatistics addValue deviation( v, ctx )
-          ctx
+          c
         }
       )
     }

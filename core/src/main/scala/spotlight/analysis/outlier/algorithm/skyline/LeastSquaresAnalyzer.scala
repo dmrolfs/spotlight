@@ -14,7 +14,7 @@ import spotlight.analysis.outlier.algorithm.AlgorithmActor.AlgorithmContext
 import spotlight.analysis.outlier.algorithm.CommonAnalyzer
 import CommonAnalyzer.WrappingContext
 import spotlight.model.outlier.Outliers
-import spotlight.model.timeseries.{ControlBoundary, PointT, TimeSeriesBase}
+import spotlight.model.timeseries._
 
 
 /**
@@ -69,21 +69,21 @@ class LeastSquaresAnalyzer( override val router: ActorRef ) extends CommonAnalyz
 
     override val findOutliers: KOp[AlgorithmContext, (Outliers, AlgorithmContext)] = {
     val outliers = for {
-      context <- toConcreteContextK <=< ask[TryV, AlgorithmContext]
-      tolerance <- tolerance <=< ask[TryV, AlgorithmContext]
+      ctx <- toConcreteContextK
+      tolerance <- tolerance
     } yield {
       val tol = tolerance getOrElse 3D
 
-      val allByTimestamp = Map( groupWithLast( context.source.pointsAsPairs, context ):_* )
+      val allByTimestamp = Map( groupWithLast( ctx.source.points, ctx ):_* )
 
       //todo: this approach seems very wrong and not working out.
       collectOutlierPoints(
-        points = context.source.pointsAsPairs,
-        context = context,
-        evaluateOutlier = (p: PointT, ctx: Context) => {
+        points = ctx.source.points,
+        context = ctx,
+        evaluateOutlier = (p: PointT, cx: Context) => {
           val (ts, v) = p
           val result = \/ fromTryCatchNonFatal {
-            ctx.regression.regress.getParameterEstimates
+            cx.regression.regress.getParameterEstimates
           } map { case Array(c, m) =>
             val projected = m * ts + c
             log.debug( "least squares projected:[{}] values:[{}]", projected, allByTimestamp(ts).mkString(",") )
@@ -106,19 +106,19 @@ class LeastSquaresAnalyzer( override val router: ActorRef ) extends CommonAnalyz
           log.debug( "least squares [{}] = {}", p, result )
           result getOrElse ( false, ControlBoundary.empty(ts.toLong) )
         },
-        update = (ctx: Context, pt: PointT) => {
-          val (ts, v) = pt
+        update = (c: Context, p: PointT) => {
+          val (ts, v) = p
           ctx.regression.addObservation( Array(ts), v )
-          log.debug( "after update [{}] regression-adj r sq=[{}]", (pt._1.toLong, pt._2), \/.fromTryCatchNonFatal(ctx.regression.regress.getAdjustedRSquared) )
-          log.debug( "after update [{}] regression-error of sum squared=[{}]", (pt._1.toLong, pt._2), \/.fromTryCatchNonFatal(ctx.regression.regress.getErrorSumSquares) )
-          log.debug( "after update [{}] regression-mean sq error=[{}]", (pt._1.toLong, pt._2), \/.fromTryCatchNonFatal(ctx.regression.regress.getMeanSquareError) )
-          log.debug( "after update [{}] regression-N=[{}]", (pt._1.toLong, pt._2), \/.fromTryCatchNonFatal(ctx.regression.regress.getN) )
-          log.debug( "after update [{}] regression-# of params=[{}]", (pt._1.toLong, pt._2), \/.fromTryCatchNonFatal(ctx.regression.regress.getNumberOfParameters) )
-          log.debug( "after update [{}] regression-regression sum squares=[{}]", (pt._1.toLong, pt._2), \/.fromTryCatchNonFatal(ctx.regression.regress.getRegressionSumSquares) )
-          log.debug( "after update [{}] regression-r squared=[{}]", (pt._1.toLong, pt._2), \/.fromTryCatchNonFatal(ctx.regression.regress.getRSquared) )
-          log.debug( "after update [{}] regression-std error of estimates=[{}]", (pt._1.toLong, pt._2), \/.fromTryCatchNonFatal(ctx.regression.regress.getStdErrorOfEstimates.mkString(",")) )
-          log.debug( "after update [{}] regression-total sum squared=[{}]", (pt._1.toLong, pt._2), \/.fromTryCatchNonFatal(ctx.regression.regress.getTotalSumSquares) )
-          log.debug( "after update [{}] regression-has intercept=[{}]", (pt._1.toLong, pt._2), \/.fromTryCatchNonFatal(ctx.regression.regress.hasIntercept) )
+          log.debug( "after update [{}] regression-adj r sq=[{}]", (ts.toLong, v), \/.fromTryCatchNonFatal(ctx.regression.regress.getAdjustedRSquared) )
+          log.debug( "after update [{}] regression-error of sum squared=[{}]", (ts.toLong, v), \/.fromTryCatchNonFatal(ctx.regression.regress.getErrorSumSquares) )
+          log.debug( "after update [{}] regression-mean sq error=[{}]", (ts.toLong, v), \/.fromTryCatchNonFatal(ctx.regression.regress.getMeanSquareError) )
+          log.debug( "after update [{}] regression-N=[{}]", (ts.toLong, v), \/.fromTryCatchNonFatal(ctx.regression.regress.getN) )
+          log.debug( "after update [{}] regression-# of params=[{}]", (ts.toLong, v), \/.fromTryCatchNonFatal(ctx.regression.regress.getNumberOfParameters) )
+          log.debug( "after update [{}] regression-regression sum squares=[{}]", (ts.toLong, v), \/.fromTryCatchNonFatal(ctx.regression.regress.getRegressionSumSquares) )
+          log.debug( "after update [{}] regression-r squared=[{}]", (ts.toLong, v), \/.fromTryCatchNonFatal(ctx.regression.regress.getRSquared) )
+          log.debug( "after update [{}] regression-std error of estimates=[{}]", (ts.toLong, v), \/.fromTryCatchNonFatal(ctx.regression.regress.getStdErrorOfEstimates.mkString(",")) )
+          log.debug( "after update [{}] regression-total sum squared=[{}]", (ts.toLong, v), \/.fromTryCatchNonFatal(ctx.regression.regress.getTotalSumSquares) )
+          log.debug( "after update [{}] regression-has intercept=[{}]", (ts.toLong, v), \/.fromTryCatchNonFatal(ctx.regression.regress.hasIntercept) )
           ctx
         }
       )
@@ -128,15 +128,15 @@ class LeastSquaresAnalyzer( override val router: ActorRef ) extends CommonAnalyz
   }
 
   //todo: DRY wrt tailaverage logic?
-  def groupWithLast( points: Seq[(Double, Double)], context: Context ): Seq[(Double, Seq[Double])] = {
-    val data = points.map{ _._2 }
-    val last = context.history.lastPoints.drop( context.history.lastPoints.size - 2 ) map { case Array(_, v) => v }
+  def groupWithLast( points: Seq[(Double, Double)], ctx: Context ): Seq[(Double, Seq[Double])] = {
+    val data = points map { _.value }
+    val last = ctx.history.lastPoints.drop( ctx.history.lastPoints.size - 2 ) map { _.value }
     log.debug( "groupWithLast: last=[{}]", last.mkString(",") )
 
     val TailLength = 3
 
     points
-    .map { _._1 }
+    .map { _.timestamp }
     .zipWithIndex
     .map { case (ts, i) =>
       val groups = if ( i < TailLength ) {

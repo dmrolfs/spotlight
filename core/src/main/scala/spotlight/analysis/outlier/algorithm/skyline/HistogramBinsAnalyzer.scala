@@ -5,13 +5,12 @@ import akka.actor.{ActorRef, Props}
 
 import scalaz._
 import Scalaz._
-import scalaz.Kleisli.ask
-import peds.commons.{KOp, TryV, Valid}
+import peds.commons.{KOp, Valid}
 import spotlight.analysis.outlier.algorithm.AlgorithmActor.AlgorithmContext
 import spotlight.analysis.outlier.algorithm.CommonAnalyzer
 import CommonAnalyzer.WrappingContext
 import spotlight.model.outlier.Outliers
-import spotlight.model.timeseries.{ControlBoundary, PointT}
+import spotlight.model.timeseries._
 
 
 /**
@@ -25,7 +24,7 @@ object HistogramBinsAnalyzer {
   //todo rewrite because it's not working. Consider http://stackoverflow.com/questions/10786465/how-to-generate-bins-for-histogram-using-apache-math-3-0-in-java
   final case class Histogram private[skyline]( bins: IndexedSeq[Bin], binSize: Double, min: Double, max: Double ) {
     def binFor( p: PointT ): Option[Bin] = bins.lift( binIndexFor( p ) )
-    def binIndexFor( p: PointT ): Int = ( ( p._2 - min ) / binSize ).toInt
+    def binIndexFor( p: PointT ): Int = ( ( p.value - min ) / binSize ).toInt
   }
 
   final case class Bin private[skyline](
@@ -70,25 +69,25 @@ class HistogramBinsAnalyzer( override val router: ActorRef ) extends CommonAnaly
 
       //todo: not sure why skyline creates a histogram from raw data then compares 3-pt average against histogram
       // easy case of 3-pt avg falling into a 0-size bin
-      val data = ctx.data.map{ _.getPoint }.map{ case Array(ts, v) => (ts, v) }
-      val h = histogram( data )()
+      val h = histogram( ctx.data )()
 
       collectOutlierPoints(
         points = taverages,
         context = ctx,
-        evaluateOutlier = (p: PointT, ctx: Context) => {
-          val (ts, v) = p
-          val isOutlier = h.binFor( p )
-          .map { bin =>
-            log.debug( "histogram-bins: identified bin[{}] :: size:{} < {}: [{}]", h.binIndexFor(p), bin.size, minimumBinSize, bin )
-            bin.size < minimumBinSize
+        evaluateOutlier = (p: PointT, c: Context) => {
+          val isOutlier = {
+            h.binFor( p )
+            .map { bin =>
+              log.debug( "histogram-bins: identified bin[{}] :: size:{} < {}: [{}]", h.binIndexFor(p), bin.size, minimumBinSize, bin )
+              bin.size < minimumBinSize
+            }
+            .getOrElse { p.value < h.min }
           }
-          .getOrElse { v < h.min }
 
           //todo: outlier based more on frequency than past some threshold, so does control apply?
-          ( isOutlier, ControlBoundary.empty(ts.toLong) )
+          ( isOutlier, ControlBoundary.empty(p.timestamp.toLong) )
         },
-        update = (ctx: Context, pt: PointT) => {ctx }
+        update = (c: Context, p: PointT) => { c }
       )
     }
 
@@ -99,11 +98,11 @@ class HistogramBinsAnalyzer( override val router: ActorRef ) extends CommonAnaly
     data: Seq[(Double, Double)]
   )(
     numBins: Int = 15,
-    min: Double = data.map{ _._2 }.min,
-    max: Double = data.map{ _._2 }.max
+    min: Double = data.map{ _.value }.min,
+    max: Double = data.map{ _.value }.max
   ): Histogram = {
-    val binSize = ( max - min ) / ( numBins + 1).toDouble
-    val binData = data groupBy { case (_, v) => ( ( v - min ) / binSize ).toInt }
+    val binSize = ( max - min ) / ( numBins + 1 ).toDouble
+    val binData = data groupBy { d => ( ( d.value - min ) / binSize ).toInt }
     val bins = ( 0 to numBins ) map { i =>
       val binPoints = binData.get( i ) map { pts => Map( pts:_* ) }
 
@@ -118,7 +117,7 @@ class HistogramBinsAnalyzer( override val router: ActorRef ) extends CommonAnaly
       "histogram bins = [{}]",
       bins
       .zipWithIndex
-      .map{ bi => (bi._2, bi._1.lowerBoundInclusive, bi._1.upperBoundExclusive, bi._1.points.size) }.mkString(",")
+      .map { bi => (bi._2, bi._1.lowerBoundInclusive, bi._1.upperBoundExclusive, bi._1.points.size) }.mkString(",")
     )
 
     Histogram( bins, binSize, min, max )

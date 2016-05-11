@@ -76,7 +76,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
         valueWiggle = (1.0, 1.0)
       )
       val series2 = spike( full2 )( 0 )
-      val history2 = historyWith( Option(history1.recordLastDataPoints(series.points)), series2 )
+      val history2 = historyWith( Option(history1 recordLastPoints series.points), series2 )
 
       analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "median absolute deviation again" ) {
@@ -125,7 +125,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
       )
 
       val series2 = spike( full )( 0 )
-      val history2 = historyWith( Option(history1.recordLastDataPoints(series.points)), series2 )
+      val history2 = historyWith( Option(history1 recordLastPoints series.points), series2 )
 
       analyzer.receive( DetectUsing(algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "mean subtraction cumulation again" ) {
@@ -179,7 +179,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
       )
 
       val series2 = spike( full )( 0 )
-      val history2 = historyWith( Option(history1.recordLastDataPoints(series.points)), series2 )
+      val history2 = historyWith( Option(history1 recordLastPoints series.points), series2 )
 
       analyzer.receive( DetectUsing(algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "least squares again" ) {
@@ -234,7 +234,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
       )
 
       val series2 = spike( full )( 0 )
-      val history2 = historyWith( Option(history1.recordLastDataPoints(series.points)), series2 )
+      val history2 = historyWith( Option(history1 recordLastPoints series.points), series2 )
 
       analyzer.receive( DetectUsing(algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "histogram bins again" ) {
@@ -287,7 +287,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
       )
 
       val series2 = spike( next1, 1000 )()
-      val history2 = historyWith( Option(history1.recordLastDataPoints(series.points)), series2 )
+      val history2 = historyWith( Option(history1 recordLastPoints series.points), series2 )
 
       analyzer.receive( DetectUsing(algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "ks-test II" ) {
@@ -308,7 +308,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
       )
 
       val series3 = spike( next3 )( 0 )
-      val history3 = historyWith( Option(history1.recordLastDataPoints(series.points)), series3 )
+      val history3 = historyWith( Option(history1 recordLastPoints series.points), series3 )
 
       analyzer.receive( DetectUsing(algoS, aggregator.ref, DetectOutliersInSeries(series3, plan), history3, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "ks-test III" ) {
