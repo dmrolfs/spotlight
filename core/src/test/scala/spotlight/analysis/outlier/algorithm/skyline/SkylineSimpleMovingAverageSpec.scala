@@ -141,11 +141,15 @@ class SkylineSimpleMovingAverageSpec extends SkylineBaseSpec {
 
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
       val history1 = historyWith( None, series )
+      val lastPoints1 = history1.lastPoints.map{ p => DataPoint( new joda.DateTime(p(0).toLong), p(1) ) }
       analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series, plan), history1, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "sma control" ) {
         case m @ SeriesOutliers(alg, source, plan, outliers, actual) => {
           actual.keySet mustBe Set( algoS )
-          val expected = calculateControlBoundaries( tailAverage(series.points), 3 )
+          val expected = calculateControlBoundaries(
+            points = tailAverage( data = series.points, lastPoints = lastPoints1 ),
+            factor = 3.0
+          )
           actual( algoS ).zip( expected ).zipWithIndex foreach  { case ((a, e), i) => (i, a) mustBe (i, e) }
         }
       }
@@ -158,16 +162,16 @@ class SkylineSimpleMovingAverageSpec extends SkylineBaseSpec {
       )
       val series2 = spike( full2, 100 )( 0 )
       val history2 = historyWith( Option(history1.recordLastDataPoints(series.points)), series2 )
-
+      val lastPoints2 = history2.lastPoints.map{ p => DataPoint( new joda.DateTime(p(0).toLong), p(1) ) }
       analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "sma control again" ) {
         case m @ SeriesOutliers(alg, source, plan, outliers, actual) => {
           actual.keySet mustBe Set( algoS )
 
           val expected = calculateControlBoundaries(
-             points = tailAverage(series2.points, series.points),
+             points = tailAverage( data = series2.points, lastPoints = lastPoints2 ),
              factor = 3,
-             lastPoints = tailAverage(series.points)
+             lastPoints = tailAverage( data = series.points, lastPoints = lastPoints1 )
            )
           actual( algoS ).zip( expected ).zipWithIndex foreach { case ((a, e), i) =>
             (i, a) mustBe (i,e)

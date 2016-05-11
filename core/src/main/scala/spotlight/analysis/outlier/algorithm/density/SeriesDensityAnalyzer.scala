@@ -127,7 +127,7 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
   val cluster: KOp[AlgorithmContext, (Clusters, AlgorithmContext)] = {
     for {
       ctx <- toConcreteContextK
-      data <- fillData
+      data <- fillDataFromHistory()
       e <- eps <=< toConcreteContextK
       distance <- distanceMeasure
       minPoints <- minDensityPoints
@@ -148,22 +148,6 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
       }
 
       ( clustersD valueOr { _ => Seq.empty[Cluster[DoublePoint]] }, ctx )
-    }
-  }
-
-  val fillData: KOp[AlgorithmContext, Seq[DoublePoint]] = {
-    for {
-      ctx <- ask[TryV, AlgorithmContext]
-    } yield {
-      val minPoints = HistoricalStatistics.LastN
-      val original = ctx.data
-      if ( minPoints < original.size ) original
-      else {
-        val inHistory = ctx.history.lastPoints.size
-        val needed = minPoints + 1 - original.size
-        val past = ctx.history.lastPoints.drop( inHistory - needed ).map { pt => new DoublePoint( pt ) }
-        past ++ original
-      }
     }
   }
 

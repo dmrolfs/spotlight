@@ -70,22 +70,22 @@ class SimpleMovingAverageAnalyzer( override val router: ActorRef ) extends Commo
     */
   override val findOutliers: KOp[AlgorithmContext, (Outliers, AlgorithmContext)] = {
     val outliers = for {
-      context <- toConcreteContextK <=< ask[TryV, AlgorithmContext]
-      tolerance <- tolerance <=< ask[TryV, AlgorithmContext]
-      taverages <- tailAverage <=< ask[TryV, AlgorithmContext]
+      ctx <- toConcreteContextK
+      tolerance <- tolerance
+      taverages <- tailAverage( ctx.data )
     } yield {
       val tol = tolerance getOrElse 3D
 
       collectOutlierPoints(
         points = taverages,
-        context = context,
-        evaluateOutlier = (p: Point2D, ctx: Context) => {
+        context = ctx,
+        evaluateOutlier = (p: Point2D, c: Context) => {
           val (ts, v) = p
-          val mean = ctx.movingStatistics.getMean
-          val stddev = ctx.movingStatistics.getStandardDeviation
+          val mean = c.movingStatistics.getMean
+          val stddev = c.movingStatistics.getStandardDeviation
           log.debug(
             "Stddev from simple moving Average N[{}]: mean[{}]\tstdev[{}]\ttolerance[{}]",
-            ctx.movingStatistics.getN, mean, stddev, tol
+            c.movingStatistics.getN, mean, stddev, tol
           )
           val control = ControlBoundary.fromExpectedAndDistance(
             timestamp = ts.toLong,
@@ -93,12 +93,11 @@ class SimpleMovingAverageAnalyzer( override val router: ActorRef ) extends Commo
             distance = tol * stddev
           )
           ( control isOutlier v, control )
-//          math.abs( v - mean ) > ( tol * stddev)
         },
-        update = (ctx: Context, pt: Point2D) => {
+        update = (c: Context, pt: Point2D) => {
           val (_, v) = pt
-          ctx.movingStatistics addValue v
-          ctx
+          c.movingStatistics addValue v
+          c
         }
       )
     }

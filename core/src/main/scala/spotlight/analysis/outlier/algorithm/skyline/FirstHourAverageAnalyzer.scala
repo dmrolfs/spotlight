@@ -109,7 +109,7 @@ class FirstHourAverageAnalyzer( override val router: ActorRef ) extends CommonAn
     val outliers = for {
       ctx <- contextWithFirstHourStats
       tolerance <- tolerance
-      taverages <- tailAverage
+      taverages <- tailAverage( ctx.data )
     } yield {
       val tol = tolerance getOrElse 3D
 

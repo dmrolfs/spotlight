@@ -53,7 +53,8 @@ class GrubbsAnalyzer( override val router: ActorRef ) extends CommonAnalyzer[Com
     // background: http://graphpad.com/support/faqid/1598/
     val outliers = for {
       context <- toConcreteContextK
-      taverages <- tailAverage
+      data <- fillDataFromHistory()
+      taverages <- tailAverage( data )
       threshold <- dataThreshold( taverages )
       tolerance <- tolerance <=< ask[TryV, AlgorithmContext]
     } yield {
