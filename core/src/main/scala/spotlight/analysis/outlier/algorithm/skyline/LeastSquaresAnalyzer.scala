@@ -87,14 +87,9 @@ class LeastSquaresAnalyzer( override val router: ActorRef ) extends CommonAnalyz
             cx.regression.regress.getParameterEstimates
           } map { case Array(c, m) =>
             val projected = m * ts + c
-            log.debug( "least squares projected:[{}] values:[{}]", projected, allByTimestamp(ts).mkString(",") )
             val errors = allByTimestamp( ts ) map { _ - projected }
             val errorsStddev = new DescriptiveStatistics( errors.toArray ).getStandardDeviation
             val meanError = errors.sum / errors.size
-            log.debug( "least squares error[{}] errorStdDev[{}] t[{}]", errors.mkString(","), errorsStddev, meanError )
-            log.debug( "least squares 1 avg error > tolerance: {} > {} = {}", math.abs(meanError), errorsStddev * tol, ( math.abs(meanError) > errorsStddev * tol ) )
-            log.debug( "least squares 2 non-zero errors stddev: {} != {} = {}", math.round( errorsStddev ), 0D, ( math.round( errorsStddev ) != 0D ) )
-            log.debug( "least squares 3 non-zero avg error: {} != {} = {}", math.round( meanError ), 0D, ( math.round( meanError ) != 0D ) )
 
             val threshold = ThresholdBoundary.fromExpectedAndDistance(
               timestamp = ts.toLong,
@@ -108,33 +103,26 @@ class LeastSquaresAnalyzer( override val router: ActorRef ) extends CommonAnalyz
               ( math.round( meanError ) != 0 )
             }
 
-            logDebug( cx.plan, cx.source, p.toDataPoint, meanError, errors, errorsStddev, threshold, isOutlier )
+//            logDebug( cx.plan, cx.source, p.toDataPoint, meanError, errors, errorsStddev, threshold, isOutlier )
 
             ( isOutlier, threshold )
           }
+
+//          logDebug( cx, result, ctx.source.points.map{ _.timestamp }.contains(p.dateTime) )
 
           log.debug( "least squares [{}] = {}", p, result )
           result getOrElse ( false, ThresholdBoundary.empty( ts.toLong ) )
         },
         update = (c: Context, p: PointT) => {
           val (ts, v) = p
-          ctx.regression.addObservation( Array(ts), v )
-          log.debug( "after update [{}] regression-adj r sq=[{}]", (ts.toLong, v), \/.fromTryCatchNonFatal(ctx.regression.regress.getAdjustedRSquared) )
-          log.debug( "after update [{}] regression-error of sum squared=[{}]", (ts.toLong, v), \/.fromTryCatchNonFatal(ctx.regression.regress.getErrorSumSquares) )
-          log.debug( "after update [{}] regression-mean sq error=[{}]", (ts.toLong, v), \/.fromTryCatchNonFatal(ctx.regression.regress.getMeanSquareError) )
-          log.debug( "after update [{}] regression-N=[{}]", (ts.toLong, v), \/.fromTryCatchNonFatal(ctx.regression.regress.getN) )
-          log.debug( "after update [{}] regression-# of params=[{}]", (ts.toLong, v), \/.fromTryCatchNonFatal(ctx.regression.regress.getNumberOfParameters) )
-          log.debug( "after update [{}] regression-regression sum squares=[{}]", (ts.toLong, v), \/.fromTryCatchNonFatal(ctx.regression.regress.getRegressionSumSquares) )
-          log.debug( "after update [{}] regression-r squared=[{}]", (ts.toLong, v), \/.fromTryCatchNonFatal(ctx.regression.regress.getRSquared) )
-          log.debug( "after update [{}] regression-std error of estimates=[{}]", (ts.toLong, v), \/.fromTryCatchNonFatal(ctx.regression.regress.getStdErrorOfEstimates.mkString(",")) )
-          log.debug( "after update [{}] regression-total sum squared=[{}]", (ts.toLong, v), \/.fromTryCatchNonFatal(ctx.regression.regress.getTotalSumSquares) )
-          log.debug( "after update [{}] regression-has intercept=[{}]", (ts.toLong, v), \/.fromTryCatchNonFatal(ctx.regression.regress.hasIntercept) )
-          ctx
+          c.regression.addObservation( Array(ts), v )
+//          logDebug( c, p )
+          c
         }
       )
     }
 
-    makeOutliersK( algorithm, outliers )
+    makeOutliersK( outliers )
   }
 
   //todo: DRY wrt tailaverage logic?
@@ -161,37 +149,77 @@ class LeastSquaresAnalyzer( override val router: ActorRef ) extends CommonAnalyz
   }
 
 
-  private def logDebug(
-    plan: spotlight.model.outlier.OutlierPlan,
-    source: TimeSeriesBase,
-    pt: DataPoint,
-    meanError: Double,
-    errors: Seq[Double],
-    stddevError: Double,
-    threshold: ThresholdBoundary,
-    isOutlier: Boolean
-  ): Unit = {
-    val WatchedTopic = "prod.em.authz-proxy.1.proxy.p95"
-    def acknowledge( t: Topic ): Boolean = t.name == WatchedTopic
-
-    if ( acknowledge(source.topic) ) {
-      import org.slf4j.LoggerFactory
-      import com.typesafe.scalalogging.Logger
-
-      val debugLogger = Logger( LoggerFactory getLogger "Debug" )
-
-      debugLogger.info(
-        """
-          |LEASTSQUARES:[{}] point:[{}] is-outlier:[{}] source:[{}]:
-          |    LEASTSQUARES: mean-error:[{}] stddev-error: [{}] errors:[{}]
-          |    LEASTSQUARES: threshold: [{}]
-        """.stripMargin,
-        plan.name + ":" + WatchedTopic, pt, isOutlier.toString, source.points.mkString(","),
-        meanError.toString, stddevError.toString, errors.mkString(","),
-        threshold
-      )
-    }
-  }
+//  private def logDebug( ctx: Context, p: PointT ): Unit = {
+//    val WatchedTopic = "prod.em.authz-proxy.1.proxy.p95"
+//    def acknowledge( t: Topic ): Boolean = t.name == WatchedTopic
+//
+//    if ( acknowledge(ctx.source.topic) ) {
+//      import org.slf4j.LoggerFactory
+//      import com.typesafe.scalalogging.Logger
+//
+//      val debugLogger = Logger( LoggerFactory getLogger "Debug" )
+//
+//      debugLogger.info(
+//        """
+//          |LEASTSQUARES:PT-UPDATE: [{}] algorithm:[{}] source:[{}] ctx-threshold:[{}]
+//        """.stripMargin,
+//        ctx.plan.name + ":" + WatchedTopic, algorithm, ctx.source.points.mkString(","), ctx.thresholdBoundaries
+//      )
+//    }
+//  }
+//
+//  private def logDebug( ctx: Context, result: \/[Throwable, (Boolean, ThresholdBoundary)], isAssessed: Boolean ): Unit = {
+//    val WatchedTopic = "prod.em.authz-proxy.1.proxy.p95"
+//    def acknowledge( t: Topic ): Boolean = t.name == WatchedTopic
+//
+//    if ( acknowledge(ctx.source.topic) ) {
+//      import org.slf4j.LoggerFactory
+//      import com.typesafe.scalalogging.Logger
+//
+//      val debugLogger = Logger( LoggerFactory getLogger "Debug" )
+//
+//      debugLogger.info(
+//        """
+//          |LEASTSQUARES:PT-RESULT: [{}] algorithm:[{}] is-assessed:[{}] source:[{}] result:[{}]
+//          |    LEASTSQUARES:PT-RESULT: threshold:[{}]
+//        """.stripMargin,
+//        ctx.plan.name + ":" + WatchedTopic, algorithm, isAssessed.toString, ctx.source.points.mkString(","), result,
+//        ctx.thresholdBoundaries
+//      )
+//    }
+//  }
+//
+//  private def logDebug(
+//    plan: spotlight.model.outlier.OutlierPlan,
+//    source: TimeSeriesBase,
+//    pt: DataPoint,
+//    meanError: Double,
+//    errors: Seq[Double],
+//    stddevError: Double,
+//    threshold: ThresholdBoundary,
+//    isOutlier: Boolean
+//  ): Unit = {
+//    val WatchedTopic = "prod.em.authz-proxy.1.proxy.p95"
+//    def acknowledge( t: Topic ): Boolean = t.name == WatchedTopic
+//
+//    if ( acknowledge(source.topic) ) {
+//      import org.slf4j.LoggerFactory
+//      import com.typesafe.scalalogging.Logger
+//
+//      val debugLogger = Logger( LoggerFactory getLogger "Debug" )
+//
+//      debugLogger.info(
+//        """
+//          |LEASTSQUARES:[{}] point:[{}] is-outlier:[{}] source:[{}]:
+//          |    LEASTSQUARES: mean-error:[{}] stddev-error: [{}] errors:[{}]
+//          |    LEASTSQUARES: threshold: [{}]
+//        """.stripMargin,
+//        plan.name + ":" + WatchedTopic, pt, isOutlier.toString, source.points.mkString(","),
+//        meanError.toString, stddevError.toString, errors.mkString(","),
+//        threshold
+//      )
+//    }
+//  }
 }
 
 // alternative where regression is found for immediate series only

@@ -85,7 +85,10 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
 
   override def detect: Receive = {
     case msg @ DetectUsing( algo, aggregator, payload: DetectOutliersInSeries, history, algorithmConfig ) => {
-      val toOutliers = kleisli[TryV, (Outliers, AlgorithmContext), Outliers] { case (o, _) => o.right }
+      val toOutliers = kleisli[TryV, (Outliers, AlgorithmContext), Outliers] { case (o, _) =>
+//        logOutlierToDebug( o )
+        o.right
+      }
 
       val start = System.currentTimeMillis()
       ( algorithmContext >=> findOutliers >=> toOutliers ).run( msg ) match {
@@ -233,7 +236,6 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
   }
 
   def makeOutliersK(
-    algorithm: Symbol,
     outliers: KOp[AlgorithmContext, (Seq[DataPoint], AlgorithmContext)]
   ): KOp[AlgorithmContext, (Outliers, AlgorithmContext)] = {
     for {
@@ -250,11 +252,32 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
         plan = originalContext.plan,
         source = originalContext.source,
         outliers = outliers,
-                          thresholdBoundaries = Map( algorithm -> resultingContext.thresholdBoundaries )
+        thresholdBoundaries = Map( algorithm -> resultingContext.thresholdBoundaries )
       )
       .disjunction
       .leftMap { _.head }
     }
   }
 
+
+  private def logOutlierToDebug( o: Outliers ): Unit = {
+    val WatchedTopic = "prod.em.authz-proxy.1.proxy.p95"
+    def acknowledge( t: Topic ): Boolean = t.name == WatchedTopic
+
+    if ( acknowledge(o.source.topic) ) {
+      import org.slf4j.LoggerFactory
+      import com.typesafe.scalalogging.Logger
+
+      val debugLogger = Logger( LoggerFactory getLogger "Debug" )
+
+      debugLogger.info(
+        """
+          |OUTLIER:[{}] [{}] original points: [{}]
+          |    OUTLIER Thresholds:[{}]
+        """.stripMargin,
+        o.plan.name + ":" + WatchedTopic, o.source.points.size.toString, o.hasAnomalies.toString,
+        o.thresholdBoundaries.map{ case (a, t) => a.name + ":" + t.mkString("[",", ","]") }.mkString( "\n\tOUTLIER: {", "\n", "\n\tOUTLIER: }" )
+      )
+    }
+  }
 }
