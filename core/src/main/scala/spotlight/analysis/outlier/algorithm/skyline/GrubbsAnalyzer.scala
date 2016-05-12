@@ -41,7 +41,7 @@ class GrubbsAnalyzer( override val router: ActorRef ) extends CommonAnalyzer[Com
     * A timeseries is anomalous if the Z score is greater than the Grubb's score.
     */
   override val findOutliers: KOp[AlgorithmContext, (Outliers, AlgorithmContext)] = {
-    def dataThreshold( data: Seq[PointT] ) = kleisli[TryV, AlgorithmContext, Double] { ctx =>
+    def criticalValue( data: Seq[PointT] ) = kleisli[TryV, AlgorithmContext, Double] { ctx =>
       val Alpha = 0.05  //todo drive from context's algoConfig
       val degreesOfFreedom = math.max( data.size - 2, 1 ) //todo: not a great idea but for now avoiding error if size <= 2
       \/ fromTryCatchNonFatal {
@@ -56,7 +56,7 @@ class GrubbsAnalyzer( override val router: ActorRef ) extends CommonAnalyzer[Com
       filled <- fillDataFromHistory()
       taverages <- tailAverage( ctx.data )
       filledAverages <- tailAverage( filled )
-      threshold <- dataThreshold( filledAverages )
+      cv <- criticalValue( filledAverages )
       tolerance <- tolerance
     } yield {
       val tol = tolerance getOrElse 3D
@@ -65,11 +65,11 @@ class GrubbsAnalyzer( override val router: ActorRef ) extends CommonAnalyzer[Com
       val stats = new DescriptiveStatistics( statsData.toArray )
       val mean = stats.getMean
       val stddev = stats.getStandardDeviation
-      // zscore calculation considered in control expected and distance formula
+      // zscore calculation considered in threshold expected and distance formula
 //      val zScores = taverages map { case (ts, v) => ( ts, math.abs(v - mean) / stddev ) }
 //      log.debug( "Skyline[Grubbs]: mean:[{}] stddev:[{}] zScores:[{}]", mean, stddev, zScores.mkString(",") )
 
-      val thresholdSquared = math.pow( threshold, 2 )
+      val thresholdSquared = math.pow( cv, 2 )
       log.debug( "Skyline[Grubbs]: threshold^2:[{}]", thresholdSquared )
       val grubbsScore = {
         ((statsData.size - 1) / math.sqrt(statsData.size)) * math.sqrt( thresholdSquared / (statsData.size - 2 + thresholdSquared) )
@@ -80,15 +80,15 @@ class GrubbsAnalyzer( override val router: ActorRef ) extends CommonAnalyzer[Com
         points = taverages,
         analysisContext = ctx,
         evaluateOutlier = (p: PointT, c: Context) => {
-          val control = ControlBoundary.fromExpectedAndDistance(
+          val threshold = ThresholdBoundary.fromExpectedAndDistance(
             timestamp = p.timestamp.toLong,
             expected = mean,
             distance = tol * grubbsScore * stddev
           )
 
-          logDebug( ctx.plan, ctx.source, taverages, statsData, grubbsScore, stats, threshold, tol, control.isOutlier(p.value), control )
+          logDebug( ctx.plan, ctx.source, filledAverages, taverages, grubbsScore, stats, cv, tol, threshold.isOutlier(p.value), threshold )
 
-          ( control isOutlier p.value, control )
+          ( threshold isOutlier p.value, threshold )
         },
         update = (c: Context, p: PointT) => { c }
       )
@@ -100,14 +100,14 @@ class GrubbsAnalyzer( override val router: ActorRef ) extends CommonAnalyzer[Com
   private def logDebug(
     plan: spotlight.model.outlier.OutlierPlan,
     source: TimeSeriesBase,
-    filled: Seq[org.apache.commons.math3.ml.clustering.DoublePoint],
-    data: Seq[Double],
+    statsData: Seq[PointT],
+    assessed: Seq[PointT],
     grubbsScore: Double,
     stats: DescriptiveStatistics,
-    threshold: Double,
+    thresholdV: Double,
     tolerance: Double,
     isOutlier: Boolean,
-    control: ControlBoundary
+    threshold: ThresholdBoundary
   ): Unit = {
     val WatchedTopic = "prod.em.authz-proxy.1.proxy.p95"
     def acknowledge( t: Topic ): Boolean = t.name == WatchedTopic
@@ -121,14 +121,14 @@ class GrubbsAnalyzer( override val router: ActorRef ) extends CommonAnalyzer[Com
       debugLogger.info(
         """
           |GRUBBS:[{}] [{}] original points & [{}] filled points:
-          |    GRUBBS: data:[{}] filled: [{}]
+          |    GRUBBS: assessed-values:[{}]
           |    GRUBBS: grubbsScore:[{}] mean:[{}] stddev:[{}] threshold:[{}] tolerance:[{}]
-          |    GRUBBS: outlier:[{}] control: [{}]
+          |    GRUBBS: outlier:[{}] threshold: [{}]
         """.stripMargin,
-        plan.name + ":" + WatchedTopic, source.points.size.toString, filled.size.toString,
-        data.mkString(","), filled.mkString(","),
-        grubbsScore.toString, stats.getMean.toString, stats.getStandardDeviation.toString, threshold.toString, tolerance.toString,
-        isOutlier.toString, control
+        plan.name + ":" + WatchedTopic, source.points.size.toString, statsData.size.toString,
+        assessed.mkString(","),
+        grubbsScore.toString, stats.getMean.toString, stats.getStandardDeviation.toString, thresholdV.toString, tolerance.toString,
+        isOutlier.toString, threshold
       )
     }
   }

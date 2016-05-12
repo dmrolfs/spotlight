@@ -533,7 +533,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
 //      }
     }
 
-    "create controls during detect analysis" in { f: Fixture =>
+    "create threshold during detect analysis" in { f: Fixture =>
       import f._
       val analyzer = TestActorRef[SeriesDensityAnalyzer]( SeriesDensityAnalyzer.props(router.ref) )
       val series = TimeSeries( "series", points )
@@ -545,7 +545,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
            |${algoS.name}.seedEps: 1.0
            |${algoS.name}.minDensityConnectedPoints: 3
            |${algoS.name}.distance: Euclidean
-           |${algoS.name}.publish-controls: yes
+           |${algoS.name}.publish-threshold: yes
         """.stripMargin
       )
 
@@ -676,39 +676,39 @@ object SeriesDensityAnalyzerSpec {
   val expectedControls = {
     Map(
       'dbscanSeries ->  Seq(
-        ControlBoundary( new joda.DateTime(441), Some(4.561020454283958), Some(6.901121606999746), Some(9.241222759715534) ),
-        ControlBoundary( new joda.DateTime(442), Some(5.001020446680885), Some(7.341121607251624), Some(9.681222767822364) ),
-        ControlBoundary( new joda.DateTime(443), Some(6.701020416176415), Some(9.041121606980441), Some(11.381222797784467) ),
-        ControlBoundary( new joda.DateTime(444), Some(9.601020363752442), Some(11.94112160559595), Some(14.281222847439457) ),
-        ControlBoundary( new joda.DateTime(445), Some(12.401020316178887), Some(14.741121604078307), Some(17.081222891977728) ),
-        ControlBoundary( new joda.DateTime(446), Some(14.301020286379911), Some(16.641121602934252), Some(18.981222919488594) ),
-        ControlBoundary( new joda.DateTime(447), Some(13.50102029866888), Some(15.841121604108707), Some(18.181222909548534) ),
-        ControlBoundary( new joda.DateTime(448), Some(9.601020363752443), Some(11.941121605092246), Some(14.281222846432048) ),
-        ControlBoundary( new joda.DateTime(449), Some(7.301020405229818), Some(9.641121605794186), Some(11.981222806358556) ),
-        ControlBoundary( new joda.DateTime(450), Some(5.901020430684881), Some(8.241121606738828), Some(10.581222782792775) ),
-        ControlBoundary( new joda.DateTime(451), Some(3.6810204688308397), Some(6.0211216072992375), Some(8.361222745767636) ),
-        ControlBoundary( new joda.DateTime(452), Some(3.4610204722912554), Some(5.80112160745571), Some(8.141222742620165) ),
-        ControlBoundary( new joda.DateTime(453),Some(3.681020468830839), Some(6.021121607384459), Some(8.361222745938079) ),
-        ControlBoundary( new joda.DateTime(454),Some(2.6010204849255207), Some(4.941121607780923), Some(7.281222730636326) ),
-        ControlBoundary( new joda.DateTime(455), Some(2.201020490220107), Some(4.54112160800231), Some(6.8812227257845135) ),
-        ControlBoundary( new joda.DateTime(456), Some(2.401020487624715), Some(4.7411216079626115), Some(7.081222728300508) ),
-        ControlBoundary( new joda.DateTime(457),Some(2.811020481986834), Some(5.151121607792507), Some(7.49122273359818) ),
-        ControlBoundary( new joda.DateTime(458), Some(3.2410204756664327), Some(5.581121607519147), Some(7.921222739371862) ),
-        ControlBoundary( new joda.DateTime(459), Some(3.2410204756664327), Some(5.581121607574689), Some(7.921222739482944) ),
-        ControlBoundary( new joda.DateTime(460), Some(2.201020490220107), Some(4.541121608043156), Some(6.881222725866205) ),
-        ControlBoundary( new joda.DateTime(461), Some(2.6010204849255207), Some(4.941121607780923), Some(7.281222730636326) ),
-        ControlBoundary( new joda.DateTime(462), Some(2.201020490220107), Some(4.541121607972484), Some(6.881222725724862) ),
-        ControlBoundary( new joda.DateTime(463), Some(2.201020490220107), Some(4.54112160800231), Some(6.8812227257845135) ),
-        ControlBoundary( new joda.DateTime(464), Some(2.401020487624715), Some(4.7411216079626115), Some(7.081222728300508) ),
-        ControlBoundary( new joda.DateTime(465), Some(2.8110204819868336), Some(5.151121607991389), Some(7.491222733995944) ),
-        ControlBoundary( new joda.DateTime(466), Some(3.901020465292792), Some(6.241121607519583), Some(8.581222749746374) ),
-        ControlBoundary( new joda.DateTime(467), Some(5.001020446680886), Some(7.341121608310925), Some(9.681222769940966) ),
-        ControlBoundary( new joda.DateTime(468), Some(9.301020369072278), Some(11.64112160653513), Some(13.981222843997982) ),
-        ControlBoundary( new joda.DateTime(469), Some(13.901020292477257), Some(16.241121605250854), Some(18.58122291802445) ),
-        ControlBoundary( new joda.DateTime(470), Some(20.301020514045767), Some(22.641121602796463), Some(24.98122269154716) ),
-        ControlBoundary( new joda.DateTime(471), Some(26.601020514045256), Some(28.941121601667728), Some(31.2812226892902) ),
-        ControlBoundary( new joda.DateTime(472), Some(17.101020514046052), Some(19.44112160252131), Some(21.781222690996568) ),
-        ControlBoundary( new joda.DateTime(473), Some(19.201020514045865), Some(21.541121606784742), Some(23.88122269952362) )
+                             ThresholdBoundary( new joda.DateTime(441 ), Some(4.561020454283958 ), Some(6.901121606999746 ), Some(9.241222759715534 ) ),
+                             ThresholdBoundary( new joda.DateTime(442 ), Some(5.001020446680885 ), Some(7.341121607251624 ), Some(9.681222767822364 ) ),
+                             ThresholdBoundary( new joda.DateTime(443 ), Some(6.701020416176415 ), Some(9.041121606980441 ), Some(11.381222797784467 ) ),
+                             ThresholdBoundary( new joda.DateTime(444 ), Some(9.601020363752442 ), Some(11.94112160559595 ), Some(14.281222847439457 ) ),
+                             ThresholdBoundary( new joda.DateTime(445 ), Some(12.401020316178887 ), Some(14.741121604078307 ), Some(17.081222891977728 ) ),
+                             ThresholdBoundary( new joda.DateTime(446 ), Some(14.301020286379911 ), Some(16.641121602934252 ), Some(18.981222919488594 ) ),
+                             ThresholdBoundary( new joda.DateTime(447 ), Some(13.50102029866888 ), Some(15.841121604108707 ), Some(18.181222909548534 ) ),
+                             ThresholdBoundary( new joda.DateTime(448 ), Some(9.601020363752443 ), Some(11.941121605092246 ), Some(14.281222846432048 ) ),
+                             ThresholdBoundary( new joda.DateTime(449 ), Some(7.301020405229818 ), Some(9.641121605794186 ), Some(11.981222806358556 ) ),
+                             ThresholdBoundary( new joda.DateTime(450 ), Some(5.901020430684881 ), Some(8.241121606738828 ), Some(10.581222782792775 ) ),
+                             ThresholdBoundary( new joda.DateTime(451 ), Some(3.6810204688308397 ), Some(6.0211216072992375 ), Some(8.361222745767636 ) ),
+                             ThresholdBoundary( new joda.DateTime(452 ), Some(3.4610204722912554 ), Some(5.80112160745571 ), Some(8.141222742620165 ) ),
+                             ThresholdBoundary( new joda.DateTime(453 ), Some(3.681020468830839 ), Some(6.021121607384459 ), Some(8.361222745938079 ) ),
+                             ThresholdBoundary( new joda.DateTime(454 ), Some(2.6010204849255207 ), Some(4.941121607780923 ), Some(7.281222730636326 ) ),
+                             ThresholdBoundary( new joda.DateTime(455 ), Some(2.201020490220107 ), Some(4.54112160800231 ), Some(6.8812227257845135 ) ),
+                             ThresholdBoundary( new joda.DateTime(456 ), Some(2.401020487624715 ), Some(4.7411216079626115 ), Some(7.081222728300508 ) ),
+                             ThresholdBoundary( new joda.DateTime(457 ), Some(2.811020481986834 ), Some(5.151121607792507 ), Some(7.49122273359818 ) ),
+                             ThresholdBoundary( new joda.DateTime(458 ), Some(3.2410204756664327 ), Some(5.581121607519147 ), Some(7.921222739371862 ) ),
+                             ThresholdBoundary( new joda.DateTime(459 ), Some(3.2410204756664327 ), Some(5.581121607574689 ), Some(7.921222739482944 ) ),
+                             ThresholdBoundary( new joda.DateTime(460 ), Some(2.201020490220107 ), Some(4.541121608043156 ), Some(6.881222725866205 ) ),
+                             ThresholdBoundary( new joda.DateTime(461 ), Some(2.6010204849255207 ), Some(4.941121607780923 ), Some(7.281222730636326 ) ),
+                             ThresholdBoundary( new joda.DateTime(462 ), Some(2.201020490220107 ), Some(4.541121607972484 ), Some(6.881222725724862 ) ),
+                             ThresholdBoundary( new joda.DateTime(463 ), Some(2.201020490220107 ), Some(4.54112160800231 ), Some(6.8812227257845135 ) ),
+                             ThresholdBoundary( new joda.DateTime(464 ), Some(2.401020487624715 ), Some(4.7411216079626115 ), Some(7.081222728300508 ) ),
+                             ThresholdBoundary( new joda.DateTime(465 ), Some(2.8110204819868336 ), Some(5.151121607991389 ), Some(7.491222733995944 ) ),
+                             ThresholdBoundary( new joda.DateTime(466 ), Some(3.901020465292792 ), Some(6.241121607519583 ), Some(8.581222749746374 ) ),
+                             ThresholdBoundary( new joda.DateTime(467 ), Some(5.001020446680886 ), Some(7.341121608310925 ), Some(9.681222769940966 ) ),
+                             ThresholdBoundary( new joda.DateTime(468 ), Some(9.301020369072278 ), Some(11.64112160653513 ), Some(13.981222843997982 ) ),
+                             ThresholdBoundary( new joda.DateTime(469 ), Some(13.901020292477257 ), Some(16.241121605250854 ), Some(18.58122291802445 ) ),
+                             ThresholdBoundary( new joda.DateTime(470 ), Some(20.301020514045767 ), Some(22.641121602796463 ), Some(24.98122269154716 ) ),
+                             ThresholdBoundary( new joda.DateTime(471 ), Some(26.601020514045256 ), Some(28.941121601667728 ), Some(31.2812226892902 ) ),
+                             ThresholdBoundary( new joda.DateTime(472 ), Some(17.101020514046052 ), Some(19.44112160252131 ), Some(21.781222690996568 ) ),
+                             ThresholdBoundary( new joda.DateTime(473 ), Some(19.201020514045865 ), Some(21.541121606784742 ), Some(23.88122269952362 ) )
       )
     )
   }

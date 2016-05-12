@@ -11,7 +11,7 @@ import org.joda.{ time => joda }
 import com.github.nscala_time.time.JodaImplicits._
 import spotlight.analysis.outlier.{DetectOutliersInSeries, DetectUsing, DetectionAlgorithmRouter}
 import spotlight.model.outlier.{OutlierPlan, SeriesOutliers, NoOutliers}
-import spotlight.model.timeseries.{ControlBoundary, DataPoint}
+import spotlight.model.timeseries.{ThresholdBoundary, DataPoint}
 
 
 /**
@@ -53,20 +53,20 @@ class SkylineFirstHourAverageSpec extends SkylineBaseSpec {
       points: Seq[DataPoint],
       tolerance: Double,
       lastPoints: Seq[DataPoint] = Seq.empty[DataPoint]
-    ): Seq[ControlBoundary] = {
+    ): Seq[ThresholdBoundary] = {
       val effective = ( lastPoints ++ points ).filter{ p => FirstHourAverageAnalyzer.Context.FirstHour.contains(p.timestamp) }
       val stats = new DescriptiveStatistics( effective.map{ _.value }.toArray )
-      logger.debug( "expected control stats=[{}]", stats)
+      logger.debug( "expected threshold stats=[{}]", stats)
       points.map { p =>
-        ControlBoundary.fromExpectedAndDistance(
+        ThresholdBoundary.fromExpectedAndDistance(
           timestamp = p.timestamp,
           expected = stats.getMean,
           distance = tolerance * stats.getStandardDeviation
-        )
+                                                 )
       }
     }
 
-    def compareControls( index: Int, actual: ControlBoundary, expected: ControlBoundary ): Unit = {
+    def compareControls(index: Int, actual: ThresholdBoundary, expected: ThresholdBoundary ): Unit = {
       (index, actual.timestamp) mustBe (index, expected.timestamp)
       (index, actual.floor.isDefined) mustBe (index, expected.floor.isDefined)
       (index, actual.expected.isDefined) mustBe (index, expected.expected.isDefined)
@@ -205,7 +205,7 @@ class SkylineFirstHourAverageSpec extends SkylineBaseSpec {
 
     "find outliers beyond first hour" in { f: Fixture => pending }
 
-    "provide full control boundaries" taggedAs (WIP) in { f: Fixture =>
+    "provide full threshold boundaries" taggedAs (WIP) in { f: Fixture =>
       import f._
       val analyzer = TestActorRef[FirstHourAverageAnalyzer]( FirstHourAverageAnalyzer.props( router.ref ) )
       val firstHour = FirstHourAverageAnalyzer.Context.FirstHour
@@ -226,7 +226,7 @@ class SkylineFirstHourAverageSpec extends SkylineBaseSpec {
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
       val history1 = historyWith( None, series )
       analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series, plan), history1, algProps ) )
-      aggregator.expectMsgPF( 2.seconds.dilated, "first-hour control" ) {
+      aggregator.expectMsgPF( 2.seconds.dilated, "first-hour threshold" ) {
         case m@SeriesOutliers( alg, source, plan, outliers, actual ) => {
           actual.keySet mustBe Set( algoS )
           val expected = calculateControlBoundaries( series.points, 3 )
@@ -245,7 +245,7 @@ class SkylineFirstHourAverageSpec extends SkylineBaseSpec {
       val history2 = historyWith( Option(history1 recordLastPoints series.points), series2 )
 
       analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
-      aggregator.expectMsgPF( 2.seconds.dilated, "first-hour control again" ) {
+      aggregator.expectMsgPF( 2.seconds.dilated, "first-hour threshold again" ) {
         case m @ SeriesOutliers(alg, source, plan, outliers, actual) => {
           actual.keySet mustBe Set( algoS )
 
@@ -258,7 +258,7 @@ class SkylineFirstHourAverageSpec extends SkylineBaseSpec {
           logger.error( "expected controls = [{}]", expected.mkString("\n", ", \n", "\n") )
           actual( algoS ).zip( expected ).zipWithIndex foreach { case ((a, e), i) => compareControls( i, a, e ) }
 
-//          control( algoS ).zip( expectedControls ) foreach { case (a, e) =>
+//          threshold( algoS ).zip( expectedControls ) foreach { case (a, e) =>
 //            a.timestamp mustBe e.timestamp
 //            a.floor.get mustBe (e.floor.get +- 0.005)
 //            a.expected.get mustBe (e.expected.get +- 0.005)

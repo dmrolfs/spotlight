@@ -220,11 +220,11 @@ with ActorLogging {
     }
     _score += key -> s
     outlierLogger.debug(
-      "\t\toutlier-rate[{}] = [{}%] [{} (count, points)] [control-data:[{}]]",
+      "\t\toutlier-rate[{}] = [{}%] [{} (count, points)] [threshold-data:[{}]]",
       s"${os.plan.name}:${os.topic}",
       (s._1.toDouble / s._2.toDouble).toString,
       (s._1.toString, s._2.toString),
-      os.algorithmControlBoundaries
+      os.thresholdBoundaries
     )
   }
 }

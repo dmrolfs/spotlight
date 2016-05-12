@@ -38,7 +38,7 @@ object CommonAnalyzer {
     override def messageConfig: Config = underlying.messageConfig
     override def distanceMeasure: TryV[DistanceMeasure] = underlying.distanceMeasure
     override def tolerance: TryV[Option[Double]] = underlying.tolerance
-    override def controlBoundaries: Seq[ControlBoundary] = underlying.controlBoundaries
+    override def thresholdBoundaries: Seq[ThresholdBoundary] = underlying.thresholdBoundaries
   }
 
 
@@ -51,8 +51,8 @@ object CommonAnalyzer {
       copy( underlying = updated )
     }
 
-    override def addControlBoundary( control: ControlBoundary ): That = {
-      copy( underlying = underlying.addControlBoundary(control) )
+    override def addThresholdBoundary(threshold: ThresholdBoundary ): That = {
+      copy( underlying = underlying.addThresholdBoundary( threshold ) )
     }
 
     override def toString: String = s"""${getClass.safeSimpleName}()"""
@@ -107,7 +107,7 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
             algorithms = Set(algorithm),
             source = payload.source,
             plan = payload.plan,
-            algorithmControlBoundaries = Map.empty[Symbol, Seq[ControlBoundary]]
+                                   thresholdBoundaries = Map.empty[Symbol, Seq[ThresholdBoundary]]
           )
         }
       }
@@ -180,7 +180,7 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
 
 
   type UpdateContext[CTX <: AlgorithmContext] = (CTX, PointT) => CTX
-  type EvaluateOutlier[CTX <: AlgorithmContext] = (PointT, CTX) => (Boolean, ControlBoundary)
+  type EvaluateOutlier[CTX <: AlgorithmContext] = (PointT, CTX) => (Boolean, ThresholdBoundary)
 
   def collectOutlierPoints[CTX <: AlgorithmContext](
     points: Seq[PointT],
@@ -199,28 +199,28 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
 
         case pt :: tail => {
           val timestamp = pt.timestamp
-          val (isOutlier, control) = evaluateOutlier( pt, ctx )
+          val (isOutlier, threshold) = evaluateOutlier( pt, ctx )
 
           val (updatedAcc, updatedContext) = {
             ctx.data
             .find { _.timestamp == timestamp }
             .map { original =>
               val uacc = if ( isOutlier ) acc :+ original.toDataPoint else acc
-              val uctx = update( ctx.addControlBoundary( control ).asInstanceOf[CTX], pt )
+              val uctx = update( ctx.addThresholdBoundary( threshold ).asInstanceOf[CTX], pt )
               ( uacc, uctx )
             }
             .getOrElse {
-              //todo since pt is not in ctx.data do not add control boundary to context but update is okay as long as permanent
+              //todo since pt is not in ctx.data do not add threshold boundary to context but update is okay as long as permanent
               // histories are not modified for past points
               ( acc, update(ctx, pt) )
             }
           }
 
           log.debug(
-            "LOOP-{}[{}]: control:[{}] acc:[{}]",
+            "LOOP-{}[{}]: threshold:[{}] acc:[{}]",
             if ( isOutlier ) "HIT" else "MISS",
             (pt._1.toLong, pt._2),
-            control,
+            threshold,
             updatedAcc.size
           )
 
@@ -250,7 +250,7 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
         plan = originalContext.plan,
         source = originalContext.source,
         outliers = outliers,
-        algorithmControlBoundaries = Map( algorithm -> resultingContext.controlBoundaries )
+                          thresholdBoundaries = Map( algorithm -> resultingContext.thresholdBoundaries )
       )
       .disjunction
       .leftMap { _.head }

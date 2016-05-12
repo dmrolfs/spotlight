@@ -102,14 +102,14 @@ object AlgorithmActor {
     def historyKey: HistoryKey
     def history: HistoricalStatistics
     def source: TimeSeriesBase
-    def controlBoundaries: Seq[ControlBoundary]
+    def thresholdBoundaries: Seq[ThresholdBoundary]
     def messageConfig: Config
     def distanceMeasure: TryV[DistanceMeasure]
     def tolerance: TryV[Option[Double]]
 
     type That <: AlgorithmContext
     def withSource( newSource: TimeSeriesBase ): That
-    def addControlBoundary( control: ControlBoundary ): That
+    def addThresholdBoundary(control: ThresholdBoundary ): That
   }
 
   object AlgorithmContext extends LazyLogging {
@@ -122,7 +122,7 @@ object AlgorithmActor {
       override val message: DetectUsing,
       override val source: TimeSeriesBase,
       override val data: Seq[DoublePoint],
-      override val controlBoundaries: Seq[ControlBoundary] = Seq.empty[ControlBoundary]
+      override val thresholdBoundaries: Seq[ThresholdBoundary] = Seq.empty[ThresholdBoundary]
     ) extends AlgorithmContext {
       override val algorithm: Symbol = message.algorithm
       override val topic: Topic = message.topic
@@ -168,7 +168,9 @@ object AlgorithmActor {
 
       override type That = SimpleAlgorithmContext
       override def withSource( newSource: TimeSeriesBase ): That = copy( source = newSource )
-      override def addControlBoundary( control: ControlBoundary ): That = copy( controlBoundaries = controlBoundaries :+ control )
+      override def addThresholdBoundary(threshold: ThresholdBoundary ): That = {
+        copy( thresholdBoundaries = thresholdBoundaries :+ threshold )
+      }
     }
   }
 

@@ -5,10 +5,9 @@ import akka.actor.{ActorRef, Props}
 
 import scalaz._
 import Scalaz._
-import scalaz.Kleisli.ask
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import org.apache.commons.math3.stat.regression.MillerUpdatingRegression
-import peds.commons.{KOp, TryV, Valid}
+import peds.commons.{KOp, Valid}
 import peds.commons.util._
 import spotlight.analysis.outlier.algorithm.AlgorithmActor.AlgorithmContext
 import spotlight.analysis.outlier.algorithm.CommonAnalyzer
@@ -38,7 +37,9 @@ object LeastSquaresAnalyzer {
       copy( underlying = updated )
     }
 
-    override def addControlBoundary( control: ControlBoundary ): That = copy(underlying = underlying.addControlBoundary(control))
+    override def addThresholdBoundary( threshold: ThresholdBoundary ): That = {
+      copy( underlying = underlying.addThresholdBoundary( threshold ) )
+    }
 
     override def toString: String = s"""${getClass.safeSimpleName}(regression:[${regression}])"""
   }
@@ -67,7 +68,7 @@ class LeastSquaresAnalyzer( override val router: ActorRef ) extends CommonAnalyz
     * on a projected least squares model is greater than three sigma.
     */
 
-    override val findOutliers: KOp[AlgorithmContext, (Outliers, AlgorithmContext)] = {
+  override val findOutliers: KOp[AlgorithmContext, (Outliers, AlgorithmContext)] = {
     val outliers = for {
       ctx <- toConcreteContextK
       tolerance <- tolerance
@@ -89,22 +90,31 @@ class LeastSquaresAnalyzer( override val router: ActorRef ) extends CommonAnalyz
             log.debug( "least squares projected:[{}] values:[{}]", projected, allByTimestamp(ts).mkString(",") )
             val errors = allByTimestamp( ts ) map { _ - projected }
             val errorsStddev = new DescriptiveStatistics( errors.toArray ).getStandardDeviation
-            val t = errors.sum / errors.size
-            log.debug( "least squares error[{}] errorStdDev[{}] t[{}]", errors.mkString(","), errorsStddev, t )
-            log.debug( "least squares 1 avg error > tolerance: {} > {} = {}", math.abs(t), errorsStddev * tol, ( math.abs(t) > errorsStddev * tol ) )
+            val meanError = errors.sum / errors.size
+            log.debug( "least squares error[{}] errorStdDev[{}] t[{}]", errors.mkString(","), errorsStddev, meanError )
+            log.debug( "least squares 1 avg error > tolerance: {} > {} = {}", math.abs(meanError), errorsStddev * tol, ( math.abs(meanError) > errorsStddev * tol ) )
             log.debug( "least squares 2 non-zero errors stddev: {} != {} = {}", math.round( errorsStddev ), 0D, ( math.round( errorsStddev ) != 0D ) )
-            log.debug( "least squares 3 non-zero avg error: {} != {} = {}", math.round( t ), 0D, ( math.round( t ) != 0D ) )
-            val control = ControlBoundary.fromExpectedAndDistance(
+            log.debug( "least squares 3 non-zero avg error: {} != {} = {}", math.round( meanError ), 0D, ( math.round( meanError ) != 0D ) )
+
+            val threshold = ThresholdBoundary.fromExpectedAndDistance(
               timestamp = ts.toLong,
-              expected = v + t,
+              expected = v + meanError,
               distance = math.abs( tol * errorsStddev )
             )
-            val isOutlier = ( math.abs(t) > errorsStddev * tol ) && ( math.round( errorsStddev ) != 0D ) && ( math.round( t ) != 0 )
-            ( isOutlier, control )
+
+            val isOutlier = {
+              ( math.abs(meanError) > errorsStddev * tol ) &&
+              ( math.round( errorsStddev ) != 0D ) &&
+              ( math.round( meanError ) != 0 )
+            }
+
+            logDebug( cx.plan, cx.source, p.toDataPoint, meanError, errors, errorsStddev, threshold, isOutlier )
+
+            ( isOutlier, threshold )
           }
 
           log.debug( "least squares [{}] = {}", p, result )
-          result getOrElse ( false, ControlBoundary.empty(ts.toLong) )
+          result getOrElse ( false, ThresholdBoundary.empty( ts.toLong ) )
         },
         update = (c: Context, p: PointT) => {
           val (ts, v) = p
@@ -147,6 +157,39 @@ class LeastSquaresAnalyzer( override val router: ActorRef ) extends CommonAnalyz
       }
 
       ( ts, groups )
+    }
+  }
+
+
+  private def logDebug(
+    plan: spotlight.model.outlier.OutlierPlan,
+    source: TimeSeriesBase,
+    pt: DataPoint,
+    meanError: Double,
+    errors: Seq[Double],
+    stddevError: Double,
+    threshold: ThresholdBoundary,
+    isOutlier: Boolean
+  ): Unit = {
+    val WatchedTopic = "prod.em.authz-proxy.1.proxy.p95"
+    def acknowledge( t: Topic ): Boolean = t.name == WatchedTopic
+
+    if ( acknowledge(source.topic) ) {
+      import org.slf4j.LoggerFactory
+      import com.typesafe.scalalogging.Logger
+
+      val debugLogger = Logger( LoggerFactory getLogger "Debug" )
+
+      debugLogger.info(
+        """
+          |LEASTSQUARES:[{}] point:[{}] is-outlier:[{}] source:[{}]:
+          |    LEASTSQUARES: mean-error:[{}] stddev-error: [{}] errors:[{}]
+          |    LEASTSQUARES: threshold: [{}]
+        """.stripMargin,
+        plan.name + ":" + WatchedTopic, pt, isOutlier.toString, source.points.mkString(","),
+        meanError.toString, stddevError.toString, errors.mkString(","),
+        threshold
+      )
     }
   }
 }

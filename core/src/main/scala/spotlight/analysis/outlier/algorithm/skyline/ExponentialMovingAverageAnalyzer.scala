@@ -33,7 +33,9 @@ object ExponentialMovingAverageAnalyzer {
       copy( underlying = updated )
     }
 
-    override def addControlBoundary( control: ControlBoundary ): That = copy(underlying = underlying.addControlBoundary(control))
+    override def addThresholdBoundary(threshold: ThresholdBoundary ): That = {
+      copy( underlying = underlying.addThresholdBoundary( threshold ) )
+    }
 
     override def toString: String = s"""${getClass.safeSimpleName}(momentAt:[${moment}])"""
   }
@@ -83,15 +85,15 @@ class ExponentialMovingAverageAnalyzer(
               tol
             )
             //            math.abs( v - stats.ewma ) > ( tol * stats.ewmsd )
-            val control = ControlBoundary.fromExpectedAndDistance(
+            val threshold = ThresholdBoundary.fromExpectedAndDistance(
               timestamp = pt.timestamp.toLong,
               expected = stats.ewma,
               distance = math.abs( tol * stats.ewmsd )
             )
 
-            ( control isOutlier pt.value, control )
+            ( threshold isOutlier pt.value, threshold )
           } getOrElse {
-            ( false, ControlBoundary.empty(pt.timestamp.toLong) )
+            ( false, ThresholdBoundary.empty( pt.timestamp.toLong ) )
           }
         },
         update = (c: Context, pt: PointT) => {

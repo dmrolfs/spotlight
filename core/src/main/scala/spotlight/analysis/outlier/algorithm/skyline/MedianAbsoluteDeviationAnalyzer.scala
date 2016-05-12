@@ -37,7 +37,9 @@ object MedianAbsoluteDeviationAnalyzer {
       copy( underlying = updated )
     }
 
-    override def addControlBoundary( control: ControlBoundary ): That = copy(underlying = underlying.addControlBoundary(control))
+    override def addThresholdBoundary( threshold: ThresholdBoundary ): That = {
+      copy( underlying = underlying.addThresholdBoundary( threshold ) )
+    }
 
     override def toString: String = {
       s"""${getClass.safeSimpleName}(moving-stats:[${movingStatistics}] deviation-stats:[${deviationStatistics}])"""
@@ -92,12 +94,13 @@ extends CommonAnalyzer[MedianAbsoluteDeviationAnalyzer.Context] {
         points = ctx.source.points,
         analysisContext = ctx,
         evaluateOutlier = (p: PointT, c: Context) => {
-          val control = ControlBoundary.fromExpectedAndDistance(
+          val threshold = ThresholdBoundary.fromExpectedAndDistance(
             timestamp = p.timestamp.toLong,
             expected = c.movingStatistics.getPercentile( 50 ),
             distance = tol * c.deviationStatistics.getPercentile( 50 )
           )
-          ( control isOutlier p.value, control )
+
+          ( threshold isOutlier p.value, threshold )
 //          val d = deviation( v, ctx )
 //          val deviationMedian = ctx.deviationStatistics getPercentile 50
 //          log.debug( "medianAbsoluteDeviation: N:[{}] deviation:[{}] deviationMedian:[{}]", ctx.deviationStatistics.getN, d, deviationMedian )

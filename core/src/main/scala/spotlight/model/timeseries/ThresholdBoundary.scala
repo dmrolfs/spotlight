@@ -6,12 +6,12 @@ import org.joda.{time => joda}
 /**
   * Created by rolfsd on 3/17/16.
   */
-object ControlBoundary {
-  def fromExpectedAndDistance( timestamp: Long, expected: Double, distance: Double ): ControlBoundary = {
+object ThresholdBoundary {
+  def fromExpectedAndDistance( timestamp: Long, expected: Double, distance: Double ): ThresholdBoundary = {
     fromExpectedAndDistance( new joda.DateTime(timestamp), expected, distance )
   }
 
-  def fromExpectedAndDistance( timestamp: joda.DateTime, expected: Double, distance: Double ): ControlBoundary = {
+  def fromExpectedAndDistance( timestamp: joda.DateTime, expected: Double, distance: Double ): ThresholdBoundary = {
     val checkedExpected = if ( expected.isNaN ) None else Some( expected )
 
     val checked = for {
@@ -19,7 +19,7 @@ object ControlBoundary {
       d <- if ( distance.isNaN ) None else Some( math.abs(distance) )
     } yield ( e - d, e + d )
 
-    ControlBoundary(
+    ThresholdBoundary(
       timestamp = timestamp,
       floor = checked map { _._1 },
       expected = checkedExpected,
@@ -27,14 +27,14 @@ object ControlBoundary {
     )
   }
 
-  def empty( timestamp: Long ): ControlBoundary = empty( new joda.DateTime(timestamp) )
+  def empty( timestamp: Long ): ThresholdBoundary = empty( new joda.DateTime( timestamp ) )
 
-  def empty( timestamp: joda.DateTime ): ControlBoundary = {
-    ControlBoundary( timestamp = timestamp, floor = None, expected = None, ceiling = None )
+  def empty( timestamp: joda.DateTime ): ThresholdBoundary = {
+    ThresholdBoundary( timestamp = timestamp, floor = None, expected = None, ceiling = None )
   }
 }
 
-case class ControlBoundary(
+case class ThresholdBoundary(
   timestamp: joda.DateTime,
   floor: Option[Double] = None,
   expected: Option[Double] = None,
@@ -47,5 +47,5 @@ case class ControlBoundary(
     equalOrAboveFloor && equalOrBelowCeiling
   }
 
-  override def toString: String = s"ControlBoundary( ${timestamp}[${timestamp.getMillis}] [f:${floor}, e:${expected}, c:${ceiling}] )"
+  override def toString: String = s"ThresholdBoundary( ${timestamp}[${timestamp.getMillis}] [f:${floor}, e:${expected}, c:${ceiling}] )"
 }

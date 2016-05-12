@@ -9,7 +9,7 @@ import org.mockito.Mockito._
 import org.joda.{ time => joda }
 import spotlight.analysis.outlier.{DetectOutliersInSeries, DetectUsing, DetectionAlgorithmRouter}
 import spotlight.model.outlier.{OutlierPlan, SeriesOutliers}
-import spotlight.model.timeseries.{ControlBoundary, DataPoint}
+import spotlight.model.timeseries.{ThresholdBoundary, DataPoint}
 
 import scala.annotation.tailrec
 
@@ -52,8 +52,8 @@ class SkylineSimpleMovingAverageSpec extends SkylineBaseSpec {
       points: Seq[DataPoint],
       factor: Double,
       lastPoints: Seq[DataPoint] = Seq.empty[DataPoint]
-    ): Seq[ControlBoundary] = {
-      @tailrec def loop( pts: List[DataPoint], history: Array[Double], acc: Seq[ControlBoundary] ): Seq[ControlBoundary] = {
+    ): Seq[ThresholdBoundary] = {
+      @tailrec def loop( pts: List[DataPoint], history: Array[Double], acc: Seq[ThresholdBoundary] ): Seq[ThresholdBoundary] = {
         pts match {
           case Nil => acc
 
@@ -61,14 +61,14 @@ class SkylineSimpleMovingAverageSpec extends SkylineBaseSpec {
             val stats = new DescriptiveStatistics( history )
             val mean = stats.getMean
             val stddev = stats.getStandardDeviation
-            val control = ControlBoundary.fromExpectedAndDistance( p.timestamp, expected = mean, distance = math.abs(factor * stddev) )
+            val control = ThresholdBoundary.fromExpectedAndDistance( p.timestamp, expected = mean, distance = math.abs( factor * stddev ) )
             logger.debug( "EXPECTED for point:[{}] Control [{}] = [{}]", (p.timestamp.getMillis, p.value), acc.size.toString, control )
             loop( tail, history :+ p.value, acc :+ control )
           }
         }
       }
 
-      loop( points.toList, lastPoints.map{ _.value }.toArray, Seq.empty[ControlBoundary] )
+      loop( points.toList, lastPoints.map{ _.value }.toArray, Seq.empty[ThresholdBoundary] )
     }
   }
 
@@ -123,7 +123,7 @@ class SkylineSimpleMovingAverageSpec extends SkylineBaseSpec {
       }
     }
 
-    "provide full control boundaries" taggedAs (WIP) in { f: Fixture =>
+    "provide full threshold boundaries" taggedAs (WIP) in { f: Fixture =>
       import f._
       val analyzer = TestActorRef[SimpleMovingAverageAnalyzer]( SimpleMovingAverageAnalyzer.props( router.ref ) )
       val now = joda.DateTime.now
@@ -143,7 +143,7 @@ class SkylineSimpleMovingAverageSpec extends SkylineBaseSpec {
       val history1 = historyWith( None, series )
       val lastPoints1 = history1.lastPoints.map{ p => DataPoint( new joda.DateTime(p(0).toLong), p(1) ) }
       analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series, plan), history1, algProps ) )
-      aggregator.expectMsgPF( 2.seconds.dilated, "sma control" ) {
+      aggregator.expectMsgPF( 2.seconds.dilated, "sma threshold" ) {
         case m @ SeriesOutliers(alg, source, plan, outliers, actual) => {
           actual.keySet mustBe Set( algoS )
           val expected = calculateControlBoundaries(
@@ -164,7 +164,7 @@ class SkylineSimpleMovingAverageSpec extends SkylineBaseSpec {
       val history2 = historyWith( Option(history1 recordLastPoints series.points), series2 )
       val lastPoints2 = history2.lastPoints.map{ p => DataPoint( new joda.DateTime(p(0).toLong), p(1) ) }
       analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
-      aggregator.expectMsgPF( 2.seconds.dilated, "sma control again" ) {
+      aggregator.expectMsgPF( 2.seconds.dilated, "sma threshold again" ) {
         case m @ SeriesOutliers(alg, source, plan, outliers, actual) => {
           actual.keySet mustBe Set( algoS )
 
@@ -177,7 +177,7 @@ class SkylineSimpleMovingAverageSpec extends SkylineBaseSpec {
             (i, a) mustBe (i,e)
           }
 
-//          control( algoS ).zip( expectedControls ) foreach { case (a, e) =>
+//          threshold( algoS ).zip( expectedControls ) foreach { case (a, e) =>
 //            a.timestamp mustBe e.timestamp
 //            a.floor.get mustBe (e.floor.get +- 0.005)
 //            a.expected.get mustBe (e.expected.get +- 0.005)

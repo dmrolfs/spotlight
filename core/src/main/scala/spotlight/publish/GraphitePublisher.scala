@@ -55,8 +55,8 @@ object GraphitePublisher extends LazyLogging {
     def batchSize: Int
     def batchInterval: FiniteDuration = 5.seconds
     def publishingTopic( p: OutlierPlan, t: Topic ): Topic = s"${p.name}.${t}"
-    def publishAlgorithmControlBoundaries( p: OutlierPlan, algorithm: Symbol ): Boolean = {
-      val publishKey = algorithm.name + ".publish-controls"
+    def publishThresholdBoundaries(p: OutlierPlan, algorithm: Symbol ): Boolean = {
+      val publishKey = algorithm.name + ".publish-threshold"
       if ( p.algorithmConfig hasPath publishKey ) p.algorithmConfig getBoolean publishKey else false
     }
   }
@@ -348,23 +348,23 @@ class GraphitePublisher extends DenseOutlierPublisher { outer: GraphitePublisher
     val CeilingLabel: ControlLabel = (algorithm: Symbol) => algorithm.name + ".ceiling."
   }
 
-  def flattenControlPoints( o: Outliers ): Seq[TopicPoint] = {
+  def flattenThresholds(o: Outliers ): Seq[TopicPoint] = {
     import ControlLabeling._
-    def algorithmControlTopic( algorithm: Symbol, labeling: ControlLabel ): Topic = {
+    def thresholdTopic( algorithm: Symbol, labeling: ControlLabel ): Topic = {
       outer.publishingTopic( o.plan, labeling(algorithm) + o.topic )
     }
 
-    o.algorithmControlBoundaries.toSeq flatMap {
-      case (algorithm, controlBoundaries) if outer.publishAlgorithmControlBoundaries( o.plan, algorithm ) => {
-        val floorTopic = algorithmControlTopic( algorithm, FloorLabel )
-        val expectedTopic = algorithmControlTopic( algorithm, ExpectedLabel )
-        val ceilingTopic = algorithmControlTopic( algorithm, CeilingLabel )
-        controlBoundaries flatMap { c =>
+    o.thresholdBoundaries.toSeq flatMap {
+      case (algorithm, thresholds) if outer.publishThresholdBoundaries( o.plan, algorithm ) => {
+        val floorTopic = thresholdTopic( algorithm, FloorLabel )
+        val expectedTopic = thresholdTopic( algorithm, ExpectedLabel )
+        val ceilingTopic = thresholdTopic( algorithm, CeilingLabel )
+        thresholds flatMap { c =>
           Seq( floorTopic, expectedTopic, ceilingTopic )
           .zipAll( Seq.empty[joda.DateTime], Topic(""), c.timestamp ) // tuple topics with c.timestamp
-          .zip( Seq(c.floor, c.expected, c.ceiling) ) // add control values to tuple
+          .zip( Seq(c.floor, c.expected, c.ceiling) ) // add threshold values to tuple
           .map { case ((topic, ts), value) => value map { v => ( topic, ts, v ) } } // make tuple
-          .flatten // trim out unprovided control values
+          .flatten // trim out unprovided threshold values
         }
       }
 
@@ -375,9 +375,9 @@ class GraphitePublisher extends DenseOutlierPublisher { outer: GraphitePublisher
   override def markPoints( o: Outliers ): Seq[TopicPoint] = {
     val dataPoints = super.markPoints( o ) map { case (t, ts, v) => ( outer.publishingTopic(o.plan, t), ts, v ) }
     log.debug( "GraphitePublisher: marked data points: [{}]", dataPoints.mkString(","))
-    val controlPoints = flattenControlPoints( o )
-    log.debug( "GraphitePublisher: control data points: [{}]", controlPoints.mkString(","))
-    dataPoints ++ controlPoints
+    val thresholds = flattenThresholds( o )
+    log.debug( "GraphitePublisher: threshold data points: [{}]", thresholds.mkString(","))
+    dataPoints ++ thresholds
   }
 
   def isConnected: Boolean = socket map { s => s.isConnected && !s.isClosed } getOrElse { false }

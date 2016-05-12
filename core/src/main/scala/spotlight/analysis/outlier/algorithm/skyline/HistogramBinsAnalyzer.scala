@@ -84,8 +84,8 @@ class HistogramBinsAnalyzer( override val router: ActorRef ) extends CommonAnaly
             .getOrElse { p.value < h.min }
           }
 
-          //todo: outlier based more on frequency than past some threshold, so does control apply?
-          ( isOutlier, ControlBoundary.empty(p.timestamp.toLong) )
+          //todo: outlier based more on frequency than past some threshold, so does threshold apply?
+          ( isOutlier, ThresholdBoundary.empty( p.timestamp.toLong ) )
         },
         update = (c: Context, p: PointT) => { c }
       )

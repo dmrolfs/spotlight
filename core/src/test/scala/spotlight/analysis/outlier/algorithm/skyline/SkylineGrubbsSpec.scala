@@ -11,7 +11,7 @@ import org.mockito.Mockito._
 import org.joda.{time => joda}
 import spotlight.analysis.outlier.{DetectOutliersInSeries, DetectUsing, DetectionAlgorithmRouter, HistoricalStatistics, OutlierDetectionMessage}
 import spotlight.model.outlier.{NoOutliers, OutlierPlan, Outliers, SeriesOutliers}
-import spotlight.model.timeseries.{ControlBoundary, DataPoint, TimeSeries}
+import spotlight.model.timeseries.{ThresholdBoundary, DataPoint, TimeSeries}
 
 import scala.annotation.tailrec
 
@@ -73,7 +73,7 @@ class SkylineGrubbsSpec extends SkylineBaseSpec {
       points: Seq[DataPoint],
       tolerance: Double,
       lastPoints: Seq[DataPoint] = Seq.empty[DataPoint]
-    ): Seq[ControlBoundary] = {
+    ): Seq[ThresholdBoundary] = {
       val N = points.size
       val stats = new DescriptiveStatistics( points.map{ _.value }.toArray )
       val mean = stats.getMean
@@ -87,7 +87,7 @@ class SkylineGrubbsSpec extends SkylineBaseSpec {
       val prevTimestamps = lastPoints.map{ _.timestamp }.toSet
       points
       .filter { p => !prevTimestamps.contains(p.timestamp) }
-      .map { case DataPoint(ts, _) => ControlBoundary.fromExpectedAndDistance( ts, mean, tolerance * grubbs * stddev ) }
+      .map { case DataPoint(ts, _) => ThresholdBoundary.fromExpectedAndDistance( ts, mean, tolerance * grubbs * stddev ) }
     }
   }
 
@@ -201,7 +201,7 @@ class SkylineGrubbsSpec extends SkylineBaseSpec {
       loop( 0, 125 )
     }
 
-    "provide full control boundaries" in { f: Fixture =>
+    "provide full threshold boundaries" in { f: Fixture =>
       import f._
       val analyzer = TestActorRef[GrubbsAnalyzer]( GrubbsAnalyzer.props( router.ref ) )
       val now = joda.DateTime.now
@@ -224,7 +224,7 @@ class SkylineGrubbsSpec extends SkylineBaseSpec {
         history1.lastPoints.map{ p => DataPoint( new joda.DateTime(p(0).toLong), p(1) ) }
       )
       analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series, plan), history1, algProps ) )
-      aggregator.expectMsgPF( 2.seconds.dilated, "sma control" ) {
+      aggregator.expectMsgPF( 2.seconds.dilated, "sma threshold" ) {
         case m @ SeriesOutliers(alg, source, plan, outliers, actual) => {
           actual.keySet mustBe Set( algoS )
           val expected = calculateControlBoundaries( points = tailAverages1, tolerance = 1 )
@@ -245,9 +245,9 @@ class SkylineGrubbsSpec extends SkylineBaseSpec {
         lastPoints = history2.lastPoints.map{ p => DataPoint( new joda.DateTime(p(0).toLong), p(1) ) }
       )
       analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
-      aggregator.expectMsgPF( 2.seconds.dilated, "sma control again" ) {
+      aggregator.expectMsgPF( 2.seconds.dilated, "sma threshold again" ) {
         case m: Outliers => {
-          val actual = m.algorithmControlBoundaries
+          val actual = m.thresholdBoundaries
           actual.keySet mustBe Set( algoS )
           val expected = calculateControlBoundaries( points = tailAverages2, tolerance = 1.0, lastPoints = tailAverages1 )
           actual( algoS ).zip( expected ).zipWithIndex foreach { case ((a, e), i) => (i, a) mustBe (i, e) }
@@ -264,7 +264,7 @@ class SkylineGrubbsSpec extends SkylineBaseSpec {
 //            (i, a) mustBe (i,e)
 //          }
 
-//          control( algoS ).zip( expectedControls ) foreach { case (a, e) =>
+//          threshold( algoS ).zip( expectedControls ) foreach { case (a, e) =>
 //            a.timestamp mustBe e.timestamp
 //            a.floor.get mustBe (e.floor.get +- 0.005)
 //            a.expected.get mustBe (e.expected.get +- 0.005)

@@ -11,7 +11,7 @@ import akka.testkit.{TestActorRef, TestProbe}
 import akka.util.ByteString
 import com.typesafe.config.ConfigFactory
 import spotlight.model.outlier.{NoOutliers, OutlierPlan, Outliers, SeriesOutliers}
-import spotlight.model.timeseries.{ControlBoundary, DataPoint, TimeSeries, Topic}
+import spotlight.model.timeseries.{ThresholdBoundary, DataPoint, TimeSeries, Topic}
 import spotlight.protocol.PythonPickleProtocol
 import spotlight.testkit.ParallelAkkaSpec
 import org.joda.{time => joda}
@@ -291,14 +291,14 @@ with MockitoSugar {
 
 
 
-    "write past full batch with control boundaries" taggedAs (WIP) in { f: Fixture =>
+    "write past full batch with threshold boundaries" taggedAs (WIP) in { f: Fixture =>
       import f._
 
       val algos = Set( 'dbscan, 'x, 'y )
-      val algConfig = ConfigFactory.parseString( algos.map{ a => s"${a.name}.publish-controls: yes" }.mkString("\n") )
+      val algConfig = ConfigFactory.parseString( algos.map{ a => s"${a.name}.publish-threshold: yes" }.mkString("\n") )
       when( plan.algorithmConfig ) thenReturn algConfig
 
-      algos foreach { a => plan.algorithmConfig.getBoolean( s"${a.name}.publish-controls" ) mustBe true }
+      algos foreach { a => plan.algorithmConfig.getBoolean( s"${a.name}.publish-threshold" ) mustBe true }
 
 
       val graphite2 = TestActorRef[GraphitePublisher](
@@ -322,14 +322,14 @@ with MockitoSugar {
 
       val controlBoundaries = Map(
         'x -> Seq(
-          ControlBoundary.fromExpectedAndDistance(dp1.timestamp, 1, 0.1),
-          ControlBoundary.fromExpectedAndDistance(dp2.timestamp, 1, 0.25),
-          ControlBoundary.fromExpectedAndDistance(dp3.timestamp, 1, 0.3)
+                   ThresholdBoundary.fromExpectedAndDistance( dp1.timestamp, 1, 0.1 ),
+                   ThresholdBoundary.fromExpectedAndDistance( dp2.timestamp, 1, 0.25 ),
+                   ThresholdBoundary.fromExpectedAndDistance( dp3.timestamp, 1, 0.3 )
         ),
         'y -> Seq(
-          ControlBoundary.fromExpectedAndDistance(dp1.timestamp, 3, 0.3),
-          ControlBoundary.fromExpectedAndDistance(dp2.timestamp, 3, 0.5),
-          ControlBoundary.fromExpectedAndDistance(dp3.timestamp, 3, 0.7)
+                   ThresholdBoundary.fromExpectedAndDistance( dp1.timestamp, 3, 0.3 ),
+                   ThresholdBoundary.fromExpectedAndDistance( dp2.timestamp, 3, 0.5 ),
+                   ThresholdBoundary.fromExpectedAndDistance( dp3.timestamp, 3, 0.7 )
         )
       )
 
@@ -338,7 +338,7 @@ with MockitoSugar {
         source = TimeSeries("foo", Seq(dp1, dp2, dp3)),
         outliers = Seq(dp1),
         plan = plan,
-        algorithmControlBoundaries = controlBoundaries
+                                     thresholdBoundaries = controlBoundaries
       )
 
       graphite2.receive( Publish(outliers) )
