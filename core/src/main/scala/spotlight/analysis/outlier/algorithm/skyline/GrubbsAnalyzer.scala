@@ -53,7 +53,7 @@ class GrubbsAnalyzer( override val router: ActorRef ) extends CommonAnalyzer[Com
     // background: http://graphpad.com/support/faqid/1598/
     val outliers = for {
       ctx <- toConcreteContextK
-      filled <- fillDataFromHistory()
+      filled <- fillDataFromHistory( 6 * 60 ) // pts in last hour
       taverages <- tailAverage( ctx.data )
       filledAverages <- tailAverage( filled )
       cv <- criticalValue( filledAverages )
