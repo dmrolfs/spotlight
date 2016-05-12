@@ -222,7 +222,7 @@ class SeasonalExponentialMovingAverageAnalyzer(
 
       collectOutlierPoints(
         points = ctx.source.points,
-        context = ctx,
+        analysisContext = ctx,
         evaluateOutlier = (p: PointT, c: Context) => {
           c.seasonalModel.momentAt( p.dateTime ).statistics map { stats =>
             log.debug(

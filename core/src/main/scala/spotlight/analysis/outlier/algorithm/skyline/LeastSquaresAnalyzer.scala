@@ -78,8 +78,8 @@ class LeastSquaresAnalyzer( override val router: ActorRef ) extends CommonAnalyz
 
       //todo: this approach seems very wrong and not working out.
       collectOutlierPoints(
-        points = ctx.source.points,
-        context = ctx,
+        points = ctx.data,
+        analysisContext = ctx,
         evaluateOutlier = (p: PointT, cx: Context) => {
           val (ts, v) = p
           val result = \/ fromTryCatchNonFatal {

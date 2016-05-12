@@ -184,10 +184,13 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
 
   def collectOutlierPoints[CTX <: AlgorithmContext](
     points: Seq[PointT],
-    context: CTX,
+    analysisContext: CTX,
     evaluateOutlier: EvaluateOutlier[CTX],
     update: UpdateContext[CTX]
   ): (Seq[DataPoint], AlgorithmContext) = {
+    val currentTimestamps = points.map{ _.timestamp }.toSet
+    @inline def isCurrentPoint( pt: PointT ): Boolean = currentTimestamps contains pt.timestamp
+
     @tailrec def loop( pts: List[PointT], ctx: CTX, acc: Seq[DataPoint] ): (Seq[DataPoint], AlgorithmContext) = {
       ctx.cast[WrappingContext] foreach { setScopedContext }
 
@@ -195,20 +198,23 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
         case Nil => ( acc, ctx )
 
         case pt :: tail => {
-          val timestamp = pt.timestamp.toLong
+          val timestamp = pt.timestamp
           val (isOutlier, control) = evaluateOutlier( pt, ctx )
-          val updatedAcc = {
-            if ( isOutlier ) {
-              ctx.source.points
-              .find { _.timestamp.getMillis == timestamp }
-              .map { original => acc :+ original }
-              .getOrElse { acc }
-            } else {
-              acc
+
+          val (updatedAcc, updatedContext) = {
+            ctx.data
+            .find { _.timestamp == timestamp }
+            .map { original =>
+              val uacc = if ( isOutlier ) acc :+ original.toDataPoint else acc
+              val uctx = update( ctx.addControlBoundary( control ).asInstanceOf[CTX], pt )
+              ( uacc, uctx )
+            }
+            .getOrElse {
+              //todo since pt is not in ctx.data do not add control boundary to context but update is okay as long as permanent
+              // histories are not modified for past points
+              ( acc, update(ctx, pt) )
             }
           }
-
-          val updatedContext = update( ctx.addControlBoundary(control).asInstanceOf[CTX], pt ) //todo: not a fan of this cast.
 
           log.debug(
             "LOOP-{}[{}]: control:[{}] acc:[{}]",
@@ -223,7 +229,7 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
       }
     }
 
-    loop( points.toList, context, Seq.empty[DataPoint] )
+    loop( points.toList, analysisContext, Seq.empty[DataPoint] )
   }
 
   def makeOutliersK(

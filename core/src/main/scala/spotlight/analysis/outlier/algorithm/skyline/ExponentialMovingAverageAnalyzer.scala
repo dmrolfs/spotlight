@@ -72,7 +72,7 @@ class ExponentialMovingAverageAnalyzer(
 
       collectOutlierPoints(
         points = ctx.source.points,
-        context = ctx,
+        analysisContext = ctx,
         evaluateOutlier = (pt: PointT, c: Context) => {
           c.moment.statistics map { stats =>
             log.debug(

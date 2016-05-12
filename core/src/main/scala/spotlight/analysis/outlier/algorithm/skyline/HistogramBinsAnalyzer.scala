@@ -73,7 +73,7 @@ class HistogramBinsAnalyzer( override val router: ActorRef ) extends CommonAnaly
 
       collectOutlierPoints(
         points = taverages,
-        context = ctx,
+        analysisContext = ctx,
         evaluateOutlier = (p: PointT, c: Context) => {
           val isOutlier = {
             h.binFor( p )

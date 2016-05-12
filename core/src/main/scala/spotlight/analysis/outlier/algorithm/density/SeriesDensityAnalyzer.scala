@@ -99,7 +99,7 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
       distance <- distanceMeasure
     } yield {
       if ( !distanceIsValid(distance, ctx.message.history) ) {
-        log.info( "updateDistanceMoment: distance covariance matrix has ZERO DETERMINANT topic:[{}]", ctx.message.topic )
+        log.debug( "updateDistanceMoment: distance covariance matrix has ZERO DETERMINANT topic:[{}]", ctx.message.topic )
         ctx
       } else {
         val distances = contiguousPairs( ctx ) map { case (cur, prev) =>
@@ -196,6 +196,7 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
       (clusters, ctx) = clustersAndContext
     } yield {
       val isOutlier = makeOutlierTest( clusters )
+      // since ctx.data is basis only current points are considered to report as anomalies
       val outlyingTestPoints = ctx.data.filter{ isOutlier }.map{ _.timestamp.toLong }.toSet
       val outliers = ctx.source.points filter { dp => outlyingTestPoints contains dp.timestamp.getMillis }
       ( outliers, ctx )

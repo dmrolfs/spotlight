@@ -105,7 +105,7 @@ class FirstHourAverageAnalyzer( override val router: ActorRef ) extends CommonAn
 
       collectOutlierPoints(
         points = taverages,
-        context = ctx,
+        analysisContext = ctx,
         evaluateOutlier = (p: PointT, c: Context) => {
           val control = ControlBoundary.fromExpectedAndDistance(
             timestamp = p.timestamp.toLong,

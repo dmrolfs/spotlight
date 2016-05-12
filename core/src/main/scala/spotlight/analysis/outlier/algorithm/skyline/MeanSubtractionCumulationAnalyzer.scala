@@ -47,7 +47,7 @@ extends CommonAnalyzer[CommonAnalyzer.SimpleWrappingContext] {
 
       collectOutlierPoints(
         points = ctx.source.points,
-        context = ctx,
+        analysisContext = ctx,
         evaluateOutlier = (p: PointT, c: Context) => {
           val control = ControlBoundary.fromExpectedAndDistance(
             timestamp = p.timestamp.toLong,

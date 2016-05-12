@@ -53,17 +53,18 @@ class GrubbsAnalyzer( override val router: ActorRef ) extends CommonAnalyzer[Com
     // background: http://graphpad.com/support/faqid/1598/
     val outliers = for {
       ctx <- toConcreteContextK
-      data <- fillDataFromHistory()
-      taverages <- tailAverage( data )
-      threshold <- dataThreshold( taverages )
+      filled <- fillDataFromHistory()
+      taverages <- tailAverage( ctx.data )
+      filledAverages <- tailAverage( filled )
+      threshold <- dataThreshold( filledAverages )
       tolerance <- tolerance
     } yield {
       val tol = tolerance getOrElse 3D
 
-      val data = taverages map { _.value }
-      val stats = new DescriptiveStatistics( data.toArray )
-      val stddev = stats.getStandardDeviation
+      val statsData = filledAverages map { _.value }
+      val stats = new DescriptiveStatistics( statsData.toArray )
       val mean = stats.getMean
+      val stddev = stats.getStandardDeviation
       // zscore calculation considered in control expected and distance formula
 //      val zScores = taverages map { case (ts, v) => ( ts, math.abs(v - mean) / stddev ) }
 //      log.debug( "Skyline[Grubbs]: mean:[{}] stddev:[{}] zScores:[{}]", mean, stddev, zScores.mkString(",") )
@@ -71,19 +72,21 @@ class GrubbsAnalyzer( override val router: ActorRef ) extends CommonAnalyzer[Com
       val thresholdSquared = math.pow( threshold, 2 )
       log.debug( "Skyline[Grubbs]: threshold^2:[{}]", thresholdSquared )
       val grubbsScore = {
-        ((data.size - 1) / math.sqrt(data.size)) * math.sqrt( thresholdSquared / (data.size - 2 + thresholdSquared) )
+        ((statsData.size - 1) / math.sqrt(statsData.size)) * math.sqrt( thresholdSquared / (statsData.size - 2 + thresholdSquared) )
       }
       log.debug( "Skyline[Grubbs]: Grubbs Score:[{}] tolerance:[{}]", grubbsScore, tol )
 
       collectOutlierPoints(
         points = taverages,
-        context = ctx,
+        analysisContext = ctx,
         evaluateOutlier = (p: PointT, c: Context) => {
           val control = ControlBoundary.fromExpectedAndDistance(
             timestamp = p.timestamp.toLong,
             expected = mean,
             distance = tol * grubbsScore * stddev
           )
+
+          logDebug( ctx.plan, ctx.source, taverages, statsData, grubbsScore, stats, threshold, tol, control.isOutlier(p.value), control )
 
           ( control isOutlier p.value, control )
         },
@@ -92,5 +95,41 @@ class GrubbsAnalyzer( override val router: ActorRef ) extends CommonAnalyzer[Com
     }
 
     makeOutliersK( algorithm, outliers )
+  }
+
+  private def logDebug(
+    plan: spotlight.model.outlier.OutlierPlan,
+    source: TimeSeriesBase,
+    filled: Seq[org.apache.commons.math3.ml.clustering.DoublePoint],
+    data: Seq[Double],
+    grubbsScore: Double,
+    stats: DescriptiveStatistics,
+    threshold: Double,
+    tolerance: Double,
+    isOutlier: Boolean,
+    control: ControlBoundary
+  ): Unit = {
+    val WatchedTopic = "prod.em.authz-proxy.1.proxy.p95"
+    def acknowledge( t: Topic ): Boolean = t.name == WatchedTopic
+
+    if ( acknowledge(source.topic) ) {
+      import org.slf4j.LoggerFactory
+      import com.typesafe.scalalogging.Logger
+
+      val debugLogger = Logger( LoggerFactory getLogger "Debug" )
+
+      debugLogger.info(
+        """
+          |GRUBBS:[{}] [{}] original points & [{}] filled points:
+          |    GRUBBS: data:[{}] filled: [{}]
+          |    GRUBBS: grubbsScore:[{}] mean:[{}] stddev:[{}] threshold:[{}] tolerance:[{}]
+          |    GRUBBS: outlier:[{}] control: [{}]
+        """.stripMargin,
+        plan.name + ":" + WatchedTopic, source.points.size.toString, filled.size.toString,
+        data.mkString(","), filled.mkString(","),
+        grubbsScore.toString, stats.getMean.toString, stats.getStandardDeviation.toString, threshold.toString, tolerance.toString,
+        isOutlier.toString, control
+      )
+    }
   }
 }

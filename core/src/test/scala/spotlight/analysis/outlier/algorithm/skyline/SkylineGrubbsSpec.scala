@@ -84,7 +84,10 @@ class SkylineGrubbsSpec extends SkylineBaseSpec {
       val thresholdSquared = math.pow( threshold, 2 )
       val grubbs = ((points.size - 1) / math.sqrt(N)) * math.sqrt( thresholdSquared / (N - 2 + thresholdSquared) )
 
-      points map { case DataPoint(ts, _) => ControlBoundary.fromExpectedAndDistance( ts, mean, tolerance * grubbs * stddev ) }
+      val prevTimestamps = lastPoints.map{ _.timestamp }.toSet
+      points
+      .filter { p => !prevTimestamps.contains(p.timestamp) }
+      .map { case DataPoint(ts, _) => ControlBoundary.fromExpectedAndDistance( ts, mean, tolerance * grubbs * stddev ) }
     }
   }
 
@@ -141,7 +144,7 @@ class SkylineGrubbsSpec extends SkylineBaseSpec {
       }
     }
 
-    "detect outlier through series of micro events" in { f: Fixture =>
+    "detect outlier through series of micro events" taggedAs (WIP) in { f: Fixture =>
       import f._
 
       def detectUsing( series: TimeSeries, history: HistoricalStatistics ): DetectUsing = {
@@ -198,7 +201,7 @@ class SkylineGrubbsSpec extends SkylineBaseSpec {
       loop( 0, 125 )
     }
 
-    "provide full control boundaries" taggedAs (WIP) in { f: Fixture =>
+    "provide full control boundaries" in { f: Fixture =>
       import f._
       val analyzer = TestActorRef[GrubbsAnalyzer]( GrubbsAnalyzer.props( router.ref ) )
       val now = joda.DateTime.now
@@ -247,7 +250,7 @@ class SkylineGrubbsSpec extends SkylineBaseSpec {
           val actual = m.algorithmControlBoundaries
           actual.keySet mustBe Set( algoS )
           val expected = calculateControlBoundaries( points = tailAverages2, tolerance = 1.0, lastPoints = tailAverages1 )
-          actual( algoS ).zip( expected ).zipWithIndex foreach { case ((a, e), i) => (i, a) mustBe (i,e) }
+          actual( algoS ).zip( expected ).zipWithIndex foreach { case ((a, e), i) => (i, a) mustBe (i, e) }
         }
 //        case m @ SeriesOutliers(alg, source, plan, outliers, actual) => {
 //          actual.keySet mustBe Set( algoS )

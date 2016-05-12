@@ -77,7 +77,7 @@ class SimpleMovingAverageAnalyzer( override val router: ActorRef ) extends Commo
 
       collectOutlierPoints(
         points = taverages,
-        context = ctx,
+        analysisContext = ctx,
         evaluateOutlier = (p: PointT, c: Context) => {
           val mean = c.movingStatistics.getMean
           val stddev = c.movingStatistics.getStandardDeviation
