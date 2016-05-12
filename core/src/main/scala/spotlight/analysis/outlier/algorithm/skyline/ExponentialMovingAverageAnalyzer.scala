@@ -108,6 +108,6 @@ class ExponentialMovingAverageAnalyzer(
       )
     }
 
-    makeOutliersK( algorithm, outliers )
+    makeOutliersK( outliers )
   }
 }

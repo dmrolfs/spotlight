@@ -103,6 +103,6 @@ class SimpleMovingAverageAnalyzer( override val router: ActorRef ) extends Commo
       )
     }
 
-    makeOutliersK( algorithm, outliers )
+    makeOutliersK( outliers )
   }
 }

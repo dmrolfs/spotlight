@@ -134,6 +134,6 @@ class FirstHourAverageAnalyzer( override val router: ActorRef ) extends CommonAn
       )
     }
 
-    makeOutliersK( algorithm, outliers )
+    makeOutliersK( outliers )
   }
 }

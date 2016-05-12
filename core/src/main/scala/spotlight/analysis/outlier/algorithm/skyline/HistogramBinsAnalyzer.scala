@@ -91,7 +91,7 @@ class HistogramBinsAnalyzer( override val router: ActorRef ) extends CommonAnaly
       )
     }
 
-    makeOutliersK( algorithm, outliers )
+    makeOutliersK( outliers )
   }
 
   def histogram(

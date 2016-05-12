@@ -64,6 +64,6 @@ extends CommonAnalyzer[CommonAnalyzer.SimpleWrappingContext] {
       )
     }
 
-    makeOutliersK( algorithm, outliers )
+    makeOutliersK( outliers )
   }
 }

@@ -115,6 +115,6 @@ extends CommonAnalyzer[MedianAbsoluteDeviationAnalyzer.Context] {
       )
     }
 
-    makeOutliersK( algorithm, outliers )
+    makeOutliersK( outliers )
   }
 }

@@ -260,6 +260,6 @@ class SeasonalExponentialMovingAverageAnalyzer(
       )
     }
 
-    makeOutliersK( algorithm, outliers )
+    makeOutliersK( outliers )
   }
 }

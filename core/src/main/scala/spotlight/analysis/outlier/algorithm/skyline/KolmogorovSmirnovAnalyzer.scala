@@ -125,7 +125,7 @@ class KolmogorovSmirnovAnalyzer( override val router: ActorRef ) extends CommonA
       }
     }
 
-    makeOutliersK( algorithm, outliers )
+    makeOutliersK( outliers )
   }
 
   def distributionUnlikeReference(

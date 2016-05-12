@@ -86,7 +86,7 @@ class GrubbsAnalyzer( override val router: ActorRef ) extends CommonAnalyzer[Com
             distance = tol * grubbsScore * stddev
           )
 
-          logDebug( ctx.plan, ctx.source, filledAverages, taverages, grubbsScore, stats, cv, tol, threshold.isOutlier(p.value), threshold )
+//          logDebug( ctx.plan, ctx.source, filledAverages, taverages, grubbsScore, stats, cv, tol, threshold.isOutlier(p.value), threshold )
 
           ( threshold isOutlier p.value, threshold )
         },
@@ -94,7 +94,7 @@ class GrubbsAnalyzer( override val router: ActorRef ) extends CommonAnalyzer[Com
       )
     }
 
-    makeOutliersK( algorithm, outliers )
+    makeOutliersK( outliers )
   }
 
   private def logDebug(
