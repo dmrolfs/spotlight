@@ -9,7 +9,7 @@ import org.scalatest.mock.MockitoSugar
 import org.mockito.Mockito._
 import com.typesafe.config.ConfigFactory
 import peds.commons.V
-import spotlight.model.timeseries.{ControlBoundary, TimeSeries, TimeSeriesBase, Topic}
+import spotlight.model.timeseries.{ThresholdBoundary, TimeSeries, TimeSeriesBase, Topic}
 import spotlight.testkit.ParallelAkkaSpec
 import peds.commons.log.Trace
 import spotlight.model.outlier._
@@ -27,13 +27,13 @@ class OutlierQuorumAggregatorSpec extends ParallelAkkaSpec with MockitoSugar {
     when( none.plan ) thenReturn defaultPlan
     when( none.topic ) thenReturn Topic( "metric.none" )
     when( none.algorithms ) thenReturn defaultPlan.algorithms.take(1)
-    when( none.algorithmControlBoundaries ) thenReturn Map.empty[Symbol, Seq[ControlBoundary]]
+    when( none.thresholdBoundaries ) thenReturn Map.empty[Symbol, Seq[ThresholdBoundary]]
 
     val some = mock[SeriesOutliers]
     when( some.plan ) thenReturn defaultPlan
     when( some.topic ) thenReturn Topic( "metric.some" )
     when( some.algorithms ) thenReturn defaultPlan.algorithms.take(1)
-    when( some.algorithmControlBoundaries ) thenReturn Map.empty[Symbol, Seq[ControlBoundary]]
+    when( some.thresholdBoundaries ) thenReturn Map.empty[Symbol, Seq[ThresholdBoundary]]
 
     val demoReduce = new ReduceOutliers {
       override def apply( results: OutlierAlgorithmResults, source: TimeSeriesBase, plan: OutlierPlan ): V[ Outliers ] = {
@@ -110,7 +110,7 @@ class OutlierQuorumAggregatorSpec extends ParallelAkkaSpec with MockitoSugar {
         when( outliers.plan ) thenReturn p
         when( outliers.topic ) thenReturn Topic( "metric.specific" )
         when( outliers.algorithms ) thenReturn p.algorithms.take(1)
-        when( outliers.algorithmControlBoundaries ) thenReturn Map.empty[Symbol, Seq[ControlBoundary]]
+        when( outliers.thresholdBoundaries ) thenReturn Map.empty[Symbol, Seq[ThresholdBoundary]]
 
       log.info( "outliers = [{}]", outliers )
       log.info( "outliers.plan = [{}]", outliers.plan )

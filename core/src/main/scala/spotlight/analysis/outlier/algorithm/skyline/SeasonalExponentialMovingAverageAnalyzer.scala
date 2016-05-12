@@ -159,7 +159,7 @@ object SeasonalExponentialMovingAverageAnalyzer {
       copy( underlying = updated )
     }
 
-    override def addControlBoundary( control: ControlBoundary ): That = copy(underlying = underlying.addControlBoundary(control))
+    override def addThresholdBoundary(threshold: ThresholdBoundary ): That = copy( underlying = underlying.addThresholdBoundary( threshold ) )
 
     override def toString: String = s"""${getClass.safeSimpleName}(seasonalModel:[${seasonalModel}])"""
   }
@@ -233,16 +233,16 @@ class SeasonalExponentialMovingAverageAnalyzer(
               tol
             )
 
-            val control = ControlBoundary.fromExpectedAndDistance(
+            val threshold = ThresholdBoundary.fromExpectedAndDistance(
               timestamp = p.timestamp.toLong,
               expected = stats.ewma,
               distance = math.abs( tol * stats.ewmsd )
             )
 
-            ( control isOutlier p.value, control )
+            ( threshold isOutlier p.value, threshold )
             //            math.abs( v - stats.ewma ) > ( tol * stats.ewmsd )
           } getOrElse {
-            ( false, ControlBoundary.empty(p.timestamp.toLong) )
+            ( false, ThresholdBoundary.empty( p.timestamp.toLong ) )
           }
         },
         update = (c: Context, p: PointT) => {
@@ -260,6 +260,6 @@ class SeasonalExponentialMovingAverageAnalyzer(
       )
     }
 
-    makeOutliersK( algorithm, outliers )
+    makeOutliersK( outliers )
   }
 }

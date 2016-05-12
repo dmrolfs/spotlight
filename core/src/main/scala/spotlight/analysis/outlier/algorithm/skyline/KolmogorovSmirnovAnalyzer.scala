@@ -47,7 +47,9 @@ object KolmogorovSmirnovAnalyzer {
       copy( underlying = updated )
     }
 
-    override def addControlBoundary( control: ControlBoundary ): That = copy(underlying = underlying.addControlBoundary(control))
+    override def addThresholdBoundary(threshold: ThresholdBoundary ): That = {
+      copy( underlying = underlying.addThresholdBoundary( threshold ) )
+    }
 
     def referenceSeries: Seq[DataPoint] = {
       referenceInterval map { reference =>
@@ -123,7 +125,7 @@ class KolmogorovSmirnovAnalyzer( override val router: ActorRef ) extends CommonA
       }
     }
 
-    makeOutliersK( algorithm, outliers )
+    makeOutliersK( outliers )
   }
 
   def distributionUnlikeReference(

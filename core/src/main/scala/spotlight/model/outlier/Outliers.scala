@@ -19,7 +19,7 @@ abstract class Outliers extends Equals {
   def anomalySize: Int
   def source: Source
   def plan: OutlierPlan
-  def algorithmControlBoundaries: Map[Symbol, Seq[ControlBoundary]]
+  def thresholdBoundaries: Map[Symbol, Seq[ThresholdBoundary]]
 
   override def hashCode: Int = {
     41 * (
@@ -65,16 +65,16 @@ object Outliers {
     plan: OutlierPlan,
     source: TimeSeriesBase,
     outliers: Seq[DataPoint],
-    algorithmControlBoundaries: Map[Symbol, Seq[ControlBoundary]]
+    thresholdBoundaries: Map[Symbol, Seq[ThresholdBoundary]]
   ): Valid[Outliers] = {
     (
       checkAlgorithms(algorithms, plan)
       |@| checkSeriesSource(source, plan)
       |@| checkOutliers(outliers, source)
-      |@| checkControlBoundaries( algorithms, algorithmControlBoundaries )
-    ) { (a, s, o, c) =>
-      if ( o.isEmpty ) NoOutliers( algorithms = a, source = s, plan = plan, algorithmControlBoundaries = c )
-      else SeriesOutliers( algorithms = a, source = s, plan = plan, outliers = o, algorithmControlBoundaries = c )
+      |@| checkThresholdBoundaries( algorithms, thresholdBoundaries )
+    ) { (a, s, o, t) =>
+      if ( o.isEmpty ) NoOutliers( algorithms = a, source = s, plan = plan, thresholdBoundaries = t )
+      else SeriesOutliers( algorithms = a, source = s, plan = plan, outliers = o, thresholdBoundaries = t )
     }
   }
 
@@ -109,13 +109,13 @@ object Outliers {
     else Validation.failureNel( SourceOutliersMismatchError( notIncluded, source ) )
   }
 
-  def checkControlBoundaries(
+  def checkThresholdBoundaries(
     algorithms: Set[Symbol],
-    algorithmControlBoundaries: Map[Symbol, Seq[ControlBoundary]]
-  ): Valid[Map[Symbol, Seq[ControlBoundary]]] = {
-    val boundaryAlgorithms = algorithmControlBoundaries.keySet
-    if ( boundaryAlgorithms == boundaryAlgorithms.intersect( algorithms ) ) algorithmControlBoundaries.successNel
-    else Validation.failureNel( ControlBoundaryAlgorithmMismatchError(boundaryAlgorithms, algorithms) )
+    thresholdBoundaries: Map[Symbol, Seq[ThresholdBoundary]]
+  ): Valid[Map[Symbol, Seq[ThresholdBoundary]]] = {
+    val boundaryAlgorithms = thresholdBoundaries.keySet
+    if ( boundaryAlgorithms == boundaryAlgorithms.intersect( algorithms ) ) thresholdBoundaries.successNel
+    else Validation.failureNel( ThresholdBoundaryAlgorithmMismatchError( boundaryAlgorithms, algorithms ) )
   }
 
   final case class PlanAlgorithmsMismatchError private[outlier]( algorithms: Set[Symbol], plan: OutlierPlan )
@@ -129,11 +129,11 @@ object Outliers {
   final case class SourceOutliersMismatchError private[outlier]( outliers: Seq[DataPoint], source: TimeSeriesBase )
     extends IllegalArgumentException( s"""cannot create Outliers for outliers[${outliers.mkString(",")}] not included in source [${source}]""" )
 
-  final case class ControlBoundaryAlgorithmMismatchError private[outlier](
+  final case class ThresholdBoundaryAlgorithmMismatchError private[outlier](
     boundaryAlgorithms: Set[Symbol],
     algorithms: Set[Symbol]
   ) extends IllegalArgumentException(
-    s"""control algorithms [${boundaryAlgorithms.mkString(",")}] don't match plan algorithms [${algorithms.mkString(",")}]"""
+    s"""threshold algorithms [${boundaryAlgorithms.mkString(",")}] don't match plan algorithms [${algorithms.mkString(",")}]"""
   )
 }
 
@@ -141,7 +141,7 @@ case class NoOutliers(
   override val algorithms: Set[Symbol],
   override val source: TimeSeriesBase,
   override val plan: OutlierPlan,
-  override val algorithmControlBoundaries: Map[Symbol, Seq[ControlBoundary]] = Map.empty[Symbol, Seq[ControlBoundary]]
+  override val thresholdBoundaries: Map[Symbol, Seq[ThresholdBoundary]] = Map.empty[Symbol, Seq[ThresholdBoundary]]
 ) extends Outliers {
   override type Source = TimeSeriesBase
   override def topic: Topic = source.topic
@@ -157,7 +157,7 @@ case class SeriesOutliers(
   override val source: TimeSeries,
   override val plan: OutlierPlan,
   outliers: Seq[DataPoint],
-  override val algorithmControlBoundaries: Map[Symbol, Seq[ControlBoundary]] = Map.empty[Symbol, Seq[ControlBoundary]]
+  override val thresholdBoundaries: Map[Symbol, Seq[ThresholdBoundary]] = Map.empty[Symbol, Seq[ThresholdBoundary]]
 ) extends Outliers {
   import Outliers._
   private val trace: Trace[_] = Trace[SeriesOutliers]
@@ -230,7 +230,7 @@ case class CohortOutliers(
   override val source: TimeSeriesCohort,
   override val plan: OutlierPlan,
   outliers: Set[TimeSeries],
-  override val algorithmControlBoundaries: Map[Symbol, Seq[ControlBoundary]] = Map.empty[Symbol, Seq[ControlBoundary]]
+  override val thresholdBoundaries: Map[Symbol, Seq[ThresholdBoundary]] = Map.empty[Symbol, Seq[ThresholdBoundary]]
 ) extends Outliers {
   private val trace: Trace[_] = Trace[CohortOutliers]
 

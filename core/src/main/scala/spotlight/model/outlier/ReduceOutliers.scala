@@ -8,7 +8,7 @@ import org.joda.{time => joda}
 import peds.commons.{V, Valid}
 import shapeless.syntax.typeable._
 import spotlight.model.outlier.ReduceOutliers.CorroboratedReduceOutliers.Check
-import spotlight.model.timeseries.{ControlBoundary, DataPoint, TimeSeriesBase, Topic}
+import spotlight.model.timeseries.{ThresholdBoundary, DataPoint, TimeSeriesBase, Topic}
 
 
 trait ReduceOutliers {
@@ -60,11 +60,11 @@ object ReduceOutliers extends LazyLogging {
       plan: OutlierPlan
     ): V[Outliers] = {
       logger.debug(
-        "REDUCE before [{}]:[{}]:\n\t+ outliers: [{}]\n\t+ controls: [{}]",
+        "REDUCE before [{}]:[{}]:\n\t+ outliers: [{}]\n\t+ threshold: [{}]",
         plan.name,
         source.topic,
         results.values.cast[SeriesOutliers].map{_.outliers.mkString( ", " )},
-        results.values.map{_.algorithmControlBoundaries.mkString( ", " ) }
+        results.values.map{_.thresholdBoundaries.mkString( ", " ) }
       )
 
       for {
@@ -83,14 +83,14 @@ object ReduceOutliers extends LazyLogging {
       val corroboratedTimestamps = tally.collect{ case (dp, c) if isCorroborated( plan )( c.size ) => dp }.toSet
       val corroboratedOutliers = source.points filter { dp => corroboratedTimestamps contains dp.timestamp }
 
-      val combinedControls = {
+      val combinedThresholds = {
         Map(
           results.toSeq.map{ case (a, o) =>
-            ( a, o.algorithmControlBoundaries.get( a ).getOrElse{ Seq.empty[ControlBoundary] } )
+            ( a, o.thresholdBoundaries.get( a ).getOrElse{Seq.empty[ThresholdBoundary] } )
           }:_*
         )
       }
-      logger.debug( "REDUCE combined controls: [{}]", combinedControls.mkString(",") )
+      logger.debug( "REDUCE combined threshold: [{}]", combinedThresholds.mkString(",") )
 
       logDebug( results, source, plan, tally, corroboratedTimestamps, corroboratedOutliers )
 
@@ -99,7 +99,7 @@ object ReduceOutliers extends LazyLogging {
         plan = plan,
         source = source,
         outliers = corroboratedOutliers,
-        algorithmControlBoundaries = combinedControls
+                          thresholdBoundaries = combinedThresholds
       )
     }
 

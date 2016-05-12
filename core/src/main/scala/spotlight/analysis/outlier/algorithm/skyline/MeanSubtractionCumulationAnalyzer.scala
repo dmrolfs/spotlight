@@ -49,13 +49,13 @@ extends CommonAnalyzer[CommonAnalyzer.SimpleWrappingContext] {
         points = ctx.source.points,
         analysisContext = ctx,
         evaluateOutlier = (p: PointT, c: Context) => {
-          val control = ControlBoundary.fromExpectedAndDistance(
+          val threshold = ThresholdBoundary.fromExpectedAndDistance(
             timestamp = p.timestamp.toLong,
             expected = c.history.mean( 1 ),
             distance = math.abs( tol * c.history.standardDeviation(1) )
           )
 
-          ( control isOutlier p.value, control )
+          ( threshold isOutlier p.value, threshold )
 //          val cumulativeMean = ctx.history.mean( 1 )
 //          val cumulativeStddev = ctx.history.standardDeviation( 1 )
 //          math.abs( v - cumulativeMean ) > ( tol * cumulativeStddev )
@@ -64,6 +64,6 @@ extends CommonAnalyzer[CommonAnalyzer.SimpleWrappingContext] {
       )
     }
 
-    makeOutliersK( algorithm, outliers )
+    makeOutliersK( outliers )
   }
 }

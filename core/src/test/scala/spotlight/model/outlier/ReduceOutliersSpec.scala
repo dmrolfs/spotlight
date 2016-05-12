@@ -7,7 +7,7 @@ import org.joda.{time => joda}
 import com.github.nscala_time.time.Imports._
 import com.typesafe.scalalogging.LazyLogging
 import peds.commons.log.Trace
-import spotlight.model.timeseries.{ControlBoundary, DataPoint, TimeSeries}
+import spotlight.model.timeseries.{ThresholdBoundary, DataPoint, TimeSeries}
 
 import scalaz._
 import org.mockito.Mockito._
@@ -41,7 +41,7 @@ with LazyLogging {
     when( plan.appliesTo ).thenReturn( all )
 
 
-    def makeOutliers( algorithms: Set[Symbol], outlierIndexes: Seq[Int], controls: Map[Symbol, Seq[ControlBoundary]] ): Outliers = trace.block( s"""makeOutliers( ${outlierIndexes.mkString(",")} )""" ) {
+    def makeOutliers( algorithms: Set[Symbol], outlierIndexes: Seq[Int], controls: Map[Symbol, Seq[ThresholdBoundary]] ): Outliers = trace.block( s"""makeOutliers( ${outlierIndexes.mkString("," )} )""" ) {
       val noOutliers = NoOutliers( Set(algo1), source = series, plan = plan )
 
       val outliers = outlierIndexes map { i => points(i) }
@@ -52,7 +52,7 @@ with LazyLogging {
         plan = plan,
         source = series,
         outliers = outliers,
-        algorithmControlBoundaries = controls
+                                       thresholdBoundaries = controls
       )
 
       logger.debug( "makeOutliers result = [{}]", result )
@@ -61,12 +61,12 @@ with LazyLogging {
 //    val oneOutlier = SeriesOutliers( Set(algo1), source = series, outliers = IndexedSeq(points(0)), plan = plan )
 //    val twoOutliers = SeriesOutliers( Set(algo1), source = series, outliers = IndexedSeq( points(0), points(1) ), plan = plan )
 
-    def correspndingControlBoundaries( algorithms: Set[Symbol], source: TimeSeries ): Map[Symbol, Seq[ControlBoundary]] = {
+    def correspndingControlBoundaries( algorithms: Set[Symbol], source: TimeSeries ): Map[Symbol, Seq[ThresholdBoundary]] = {
       val expected = 5D
 
       val elems = algorithms.toSeq map { a =>
         val boundaries = source.points.zipWithIndex map { case (p, i) =>
-          ControlBoundary( p.timestamp, floor = Some( expected - i ), Some( expected ), ceiling = Some( expected + i ) )
+          ThresholdBoundary( p.timestamp, floor = Some( expected - i ), Some( expected ), ceiling = Some( expected + i ) )
         }
 
         (a, boundaries)
@@ -141,7 +141,7 @@ with LazyLogging {
         import f._
         import ReduceOutliers._
 
-        val noControls = Map.empty[Symbol, Seq[ControlBoundary]]
+        val noControls = Map.empty[Symbol, Seq[ThresholdBoundary]]
         val noOutliers = makeOutliers( Set(algo1), Nil, noControls )
         val reduce = byCorroborationCount( 1 )
         val actual = reduce( results = Map( algo1 -> noOutliers ), series, plan )

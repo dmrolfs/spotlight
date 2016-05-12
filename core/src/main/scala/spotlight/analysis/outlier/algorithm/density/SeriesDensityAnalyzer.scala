@@ -49,7 +49,9 @@ object SeriesDensityAnalyzer {
       copy( underlying = updated )
     }
 
-    override def addControlBoundary( control: ControlBoundary ): That = copy(underlying = underlying.addControlBoundary(control))
+    override def addThresholdBoundary(threshold: ThresholdBoundary ): That = {
+      copy( underlying = underlying.addThresholdBoundary( threshold ) )
+    }
 
     override def toString: String = {
       s"""${getClass.safeSimpleName}(distance-stats:[${distanceStatistics}])"""
@@ -209,15 +211,15 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
     for {
       anomaliesAndContext <- ask[TryV, (Seq[DataPoint], AlgorithmContext)]
       (anomalies, ctx) = anomaliesAndContext
-      cs <- controls <=< toContext
-      ctxWithControls = cs.foldLeft( ctx ){ _ addControlBoundary _ }
-      result <- makeOutliers(anomalies, ctxWithControls) <=< toContext
+      ts <- thresholds <=< toContext
+      ctxWithThresholds = ts.foldLeft( ctx ){ _ addThresholdBoundary _ }
+      result <- makeOutliers(anomalies, ctxWithThresholds) <=< toContext
     } yield {
-      ( result, ctxWithControls )
+      ( result, ctxWithThresholds )
     }
   }
 
-  val controls: KOp[AlgorithmContext, Seq[ControlBoundary]] = {
+  val thresholds: KOp[AlgorithmContext, Seq[ThresholdBoundary]] = {
     for {
       ctx <- toConcreteContextK
       e <- eps <=< toConcreteContextK
@@ -226,7 +228,7 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
     } yield {
       val distanceStatistics = ctx.distanceStatistics
 
-      if ( !shouldCreateControls(ctx) ) Seq.empty[ControlBoundary]
+      if ( !shouldCreateThreshold( ctx ) ) Seq.empty[ThresholdBoundary]
       else {
         val t = tol getOrElse 3.0
         contiguousPairs( ctx ) map { case (p2, p1) => // later point is paired first since primary
@@ -247,7 +249,7 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
             valueSeek( precision = 0.001, maximumSteps = 20, start = expected )( extrapolate("farthest", farthestDistance) )
           }
           log.debug( "actual-value=[{}] expected-value=[{}]  farthest-value=[{}]", p2.value, expected, farthest )
-          val result = ControlBoundary.fromExpectedAndDistance( timestamp = p2.timestamp.toLong, expected = expected, distance = farthest - expected )
+          val result = ThresholdBoundary.fromExpectedAndDistance( timestamp = p2.timestamp.toLong, expected = expected, distance = farthest - expected )
           log.debug(
             "dist-to-expected=[{}] dist-to-floor=[{}] dist-to-ceiling=[{}]",
             result.expected map { e => extrapolate("expected", expectedDistance)( e ) },
@@ -255,7 +257,7 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
             result.ceiling map { c => extrapolate("ceiling", expectedDistance)( c ) }
           )
 
-          log.debug( "pt1[{}] ~> pt2[{}] control:[{}] height:[{}]", p1, p2, result, (farthest - expected) )
+          log.debug( "pt1[{}] ~> pt2[{}] threshold:[{}] height:[{}]", p1, p2, result, (farthest - expected) )
           result
         }
       }
@@ -275,9 +277,9 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
     last map { l => points.zip( l +: points ) } getOrElse { points.drop( 1 ) zip points }
   }
 
-  def shouldCreateControls( ctx: AlgorithmContext ): Boolean = {
-    val PublishControlsPath = s"${algorithm.name}.publish-controls"
-    if ( ctx.messageConfig hasPath PublishControlsPath ) ctx.messageConfig.getBoolean( PublishControlsPath ) else false
+  def shouldCreateThreshold(ctx: AlgorithmContext ): Boolean = {
+    val PublishThresholdPath = s"${algorithm.name}.publish-threshold"
+    if ( ctx.messageConfig hasPath PublishThresholdPath ) ctx.messageConfig.getBoolean( PublishThresholdPath ) else false
   }
 
   def valueSeek( precision: Double, maximumSteps: Int, start: Double )( fn: Double => Double ): Double = {

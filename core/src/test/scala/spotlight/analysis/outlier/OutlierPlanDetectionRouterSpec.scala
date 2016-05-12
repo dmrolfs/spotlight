@@ -23,7 +23,7 @@ import spotlight.analysis.outlier.algorithm.skyline.SimpleMovingAverageAnalyzer
 import spotlight.testkit.ParallelAkkaSpec
 import spotlight.model.outlier._
 import spotlight.model.timeseries.TimeSeriesBase.Merging
-import spotlight.model.timeseries.{ControlBoundary, DataPoint, TimeSeries, Topic}
+import spotlight.model.timeseries.{ThresholdBoundary, DataPoint, TimeSeries, Topic}
 import spotlight.stream.{Configuration, OutlierScoringModel}
 
 import scala.concurrent.{Await, ExecutionContext}
@@ -53,7 +53,7 @@ class OutlierPlanDetectionRouterSpec extends ParallelAkkaSpec with LazyLogging {
                   plan = m.plan,
                   source = m.source,
                   outliers = Seq.empty[DataPoint],
-                  algorithmControlBoundaries = Map.empty[Symbol, Seq[ControlBoundary]]
+                                    thresholdBoundaries = Map.empty[Symbol, Seq[ThresholdBoundary]]
                 ).toOption.get
               )
 

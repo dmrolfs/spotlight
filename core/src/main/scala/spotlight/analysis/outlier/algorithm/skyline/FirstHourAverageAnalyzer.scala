@@ -44,8 +44,8 @@ object FirstHourAverageAnalyzer {
       copy( underlying = updated )
     }
 
-    override def addControlBoundary( control: ControlBoundary ): That = {
-      copy( underlying = underlying.addControlBoundary(control) )
+    override def addThresholdBoundary(threshold: ThresholdBoundary ): That = {
+      copy( underlying = underlying.addThresholdBoundary( threshold ) )
     }
 
     def withPoints( points: Seq[DoublePoint] ): Context = {
@@ -107,7 +107,7 @@ class FirstHourAverageAnalyzer( override val router: ActorRef ) extends CommonAn
         points = taverages,
         analysisContext = ctx,
         evaluateOutlier = (p: PointT, c: Context) => {
-          val control = ControlBoundary.fromExpectedAndDistance(
+          val threshold = ThresholdBoundary.fromExpectedAndDistance(
             timestamp = p.timestamp.toLong,
             expected = c.firstHour.getMean,
             distance = math.abs( tol * c.firstHour.getStandardDeviation )
@@ -121,19 +121,19 @@ class FirstHourAverageAnalyzer( override val router: ActorRef ) extends CommonAn
             tol
           )
           log.debug(
-            "first hour[{}] [{}] is-outlier:{} control = [{}]",
+            "first hour[{}] [{}] is-outlier:{} threshold = [{}]",
             algorithm.name,
             p.value,
-            control.isOutlier(p.value),
-            control
+            threshold.isOutlier(p.value),
+            threshold
           )
 
-          ( control isOutlier p.value, control )
+          ( threshold isOutlier p.value, threshold )
         },
         update = (c: Context, p: PointT) => c
       )
     }
 
-    makeOutliersK( algorithm, outliers )
+    makeOutliersK( outliers )
   }
 }

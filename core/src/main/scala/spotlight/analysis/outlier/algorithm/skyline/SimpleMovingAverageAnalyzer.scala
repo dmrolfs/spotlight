@@ -36,7 +36,9 @@ object SimpleMovingAverageAnalyzer {
       copy( underlying = updated )
     }
 
-    override def addControlBoundary( control: ControlBoundary ): That = copy(underlying = underlying.addControlBoundary(control))
+    override def addThresholdBoundary( threshold: ThresholdBoundary ): That = {
+      copy( underlying = underlying.addThresholdBoundary( threshold ) )
+    }
 
     override def toString: String = {
       s"""${getClass.safeSimpleName}(moving-stats:[${movingStatistics}])"""
@@ -86,12 +88,13 @@ class SimpleMovingAverageAnalyzer( override val router: ActorRef ) extends Commo
             c.movingStatistics.getN, mean, stddev, tol
           )
 
-          val control = ControlBoundary.fromExpectedAndDistance(
+          val threshold = ThresholdBoundary.fromExpectedAndDistance(
             timestamp = p.timestamp.toLong,
             expected = mean,
             distance = tol * stddev
           )
-          ( control isOutlier p.value, control )
+
+          ( threshold isOutlier p.value, threshold )
         },
         update = (c: Context, p: PointT) => {
           c.movingStatistics addValue p.value
@@ -100,6 +103,6 @@ class SimpleMovingAverageAnalyzer( override val router: ActorRef ) extends Commo
       )
     }
 
-    makeOutliersK( algorithm, outliers )
+    makeOutliersK( outliers )
   }
 }
