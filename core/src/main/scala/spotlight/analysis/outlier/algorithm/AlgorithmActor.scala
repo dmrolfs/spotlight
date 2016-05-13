@@ -8,7 +8,7 @@ import Scalaz._
 import scalaz.Kleisli.{ask, kleisli}
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.LazyLogging
-import nl.grons.metrics.scala.Timer
+import nl.grons.metrics.scala.{MetricName, Timer}
 import org.apache.commons.math3.linear.{EigenDecomposition, MatrixUtils}
 import org.apache.commons.math3.ml.distance.{DistanceMeasure, EuclideanDistance}
 import org.apache.commons.math3.ml.clustering.DoublePoint
@@ -26,7 +26,8 @@ trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
   def algorithm: Symbol
   def router: ActorRef
 
-  lazy val algorithmTimer: Timer = metrics.timer( "algorithm", algorithm.name )
+  override lazy val metricBaseName: MetricName = MetricName( "spotlight.analysis.outlier.algorithm" )
+  lazy val algorithmTimer: Timer = metrics timer algorithm.name
 
   override def preStart(): Unit = {
     context watch router

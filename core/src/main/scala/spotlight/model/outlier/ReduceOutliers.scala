@@ -111,6 +111,8 @@ object ReduceOutliers extends LazyLogging {
       corroboratedTimestamps: Set[joda.DateTime],
       corroboratedOutliers: Seq[DataPoint]
     ): Unit = {
+      import com.github.nscala_time.time.Imports._
+
       val WatchedTopic = "prod.em.authz-proxy.1.proxy.p95"
       def acknowledge( t: Topic ): Boolean = t.name == WatchedTopic
 
@@ -130,7 +132,7 @@ object ReduceOutliers extends LazyLogging {
           source.interval.getOrElse(""),
           corroboratedTimestamps.mkString(","),
           corroboratedOutliers.mkString(","),
-          tally.map{ case (ts, as) => s"""${ts}: [${as.mkString(", ")}]""" }.mkString( "\n      REDUCE:  - ", "\n      REDUCE:  - ", "\n")
+          tally.toSeq.sortBy{ case (ts, as) => ts }.map{ case (ts, as) => s"""${ts}: [${as.mkString(", ")}]""" }.mkString( "\n      REDUCE:  - ", "\n      REDUCE:  - ", "\n")
         )
       }
     }

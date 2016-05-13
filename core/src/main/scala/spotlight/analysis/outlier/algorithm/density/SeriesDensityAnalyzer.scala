@@ -3,6 +3,7 @@ package spotlight.analysis.outlier.algorithm.density
 import scala.annotation.tailrec
 import scala.reflect.ClassTag
 import akka.actor.{ActorRef, Props}
+import nl.grons.metrics.scala.Timer
 import org.apache.commons.math3.linear.EigenDecomposition
 
 import scalaz._
@@ -67,6 +68,8 @@ object SeriesDensityAnalyzer {
 class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnalyzer[SeriesDensityAnalyzer.Context] {
   outer: SeriesDensityAnalyzer.HistoryProvider =>
 
+  lazy val clusterTimer: Timer = metrics.timer( algorithm.name, "cluster" )
+
   import SeriesDensityAnalyzer.Context
 
   override implicit val contextClassTag: ClassTag[Context] = ClassTag( classOf[Context] )
@@ -130,7 +133,7 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
   val cluster: KOp[AlgorithmContext, (Clusters, AlgorithmContext)] = {
     for {
       ctx <- toConcreteContextK
-      data <- fillDataFromHistory()
+      data <- fillDataFromHistory( 6 * 5 ) // fill up to 5 minutes @ 1pt / 10s
       e <- eps <=< toConcreteContextK
       distance <- distanceMeasure
       minPoints <- minDensityPoints
@@ -139,13 +142,16 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
       log.debug( "DBSCAN filled orig:[{}] past:[{}] points=[{}]", ctx.data.size, data.size - ctx.data.size, data.mkString(",") )
 //      log.debug( "cluster: context dist-stats=[{}]", ctx.distanceStatistics )
       import scala.collection.JavaConverters._
-      val clustersD = \/ fromTryCatchNonFatal {
-        new DBSCANClusterer[DoublePoint]( e, minPoints, distance ).cluster( data.asJava ).asScala.toSeq
+
+      val clustersD = clusterTimer.time {
+        \/ fromTryCatchNonFatal {
+          new DBSCANClusterer[DoublePoint]( e, minPoints, distance ).cluster( data.asJava ).asScala.toSeq
+        }
       }
 
       if ( log.isDebugEnabled ) {
         val sizeClusters = clustersD map { clusters =>
-          clusters map { c => ( c.getPoints.size, c.getPoints.asScala.mkString("[", ", ", "]")  ) }
+          clusters map { c => ( c.getPoints.size, c.getPoints.asScala.mkString("[", ", ", "]") ) }
         }
         log.debug( "dbscan cluster: clusters = [{}]", sizeClusters map { _.mkString( "\n + [", "; ", "]\n" ) } )
       }
@@ -205,7 +211,7 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
     }
   }
 
-  val toOutliers: KOp[(Seq[DataPoint], AlgorithmContext), (Outliers, AlgorithmContext)] = {
+  val makeOutliers: KOp[(Seq[DataPoint], AlgorithmContext), (Outliers, AlgorithmContext)] = {
     val toContext = kleisli[TryV, (Seq[DataPoint], AlgorithmContext), AlgorithmContext] { case (_, ctx) => ctx.right }
 
     for {
@@ -300,7 +306,7 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
   /**
     */
   override val findOutliers: KOp[AlgorithmContext, (Outliers, AlgorithmContext)] = {
-    updateDistanceMoment >=> cluster >=> filterOutliers >=> toOutliers
+    updateDistanceMoment >=> cluster >=> filterOutliers >=> makeOutliers
   }
 
 }

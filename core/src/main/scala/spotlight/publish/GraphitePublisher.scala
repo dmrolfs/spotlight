@@ -89,7 +89,8 @@ class GraphitePublisher extends DenseOutlierPublisher { outer: GraphitePublisher
   lazy val circuitPendingMeter: Meter = metrics.meter( "circuit", "pending" )
   lazy val circuitClosedMeter: Meter = metrics.meter( "circuit", "closed" )
   lazy val circuitRequestsMeter: Meter = metrics.meter( "circuit", "requests" )
-  lazy val bytesPublishedMeter: Meter = metrics.meter( "bytes-published" )
+  lazy val bytesPublishedMeter: Meter = metrics.meter( "bytes", "published" )
+  lazy val bytesRecoveredMeter: Meter = metrics.meter( "bytes", "recovered" )
   lazy val publishingTimer: Timer = metrics.timer( "publishing" )
   lazy val publishRequestMeter: Meter = metrics.meter( "request", "publish" )
   lazy val sendBatchRequestMeter: Meter = metrics.meter( "request", "sendBatch" )
@@ -272,6 +273,7 @@ class GraphitePublisher extends DenseOutlierPublisher { outer: GraphitePublisher
     }
 
     case Recover( points ) => {
+      bytesRecoveredMeter mark points.size
       waitQueue = points ++: waitQueue
 
       circuitStatus.future() map { status =>

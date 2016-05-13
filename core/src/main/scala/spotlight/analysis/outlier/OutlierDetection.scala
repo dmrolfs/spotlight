@@ -37,33 +37,6 @@ object OutlierDetection extends StrictLogging with Instrumented {
     case _ => Supervision.Stop
   }
 
-//  def detectionFlow(
-//    detector: ActorRef,
-//    maxInDetectionFactor: Double,
-//    maxAllowedWait: FiniteDuration,
-//    plans: Seq[OutlierPlan]
-//  )(
-//    implicit system: ActorSystem,
-//    materializer: Materializer
-//  ): Flow[TimeSeriesBase, Outliers, Unit] = {
-//    Flow[TimeSeriesBase]
-//    .map { ts: TimeSeriesBase =>
-//      plans.to[immutable.Seq]
-//      .collect { case p if p appliesTo ts => OutlierDetectionMessage( ts, plan = p ).disjunction }
-//      .collect { case \/-( m ) => m }
-//    }
-//    .mapConcat[OutlierDetectionMessage] { identity }
-//    .via {
-//      ProcessorAdapter.elasticProcessorFlow[OutlierDetectionMessage, DetectionResult](
-//        maxInDetectionFactor,
-//        label = WatchPoints.DetectionFlow
-//      ) {
-//        case m => detector
-//      }
-//    }
-//    .map { _.outliers }
-//  }
-
 
   object WatchPoints {
     val DetectionFlow: Symbol = Symbol( "detection" )

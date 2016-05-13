@@ -243,8 +243,8 @@
               "hide": false
             },
             {
-              "target": "spotlight.publish.GraphitePublisher.waiting",
-              "hide": true
+              "target": "aliasSub(log(spotlight.publish.GraphitePublisher.bytes.*.m1_rate, 10), '([^.]+\\.){3}([^.]+\\.[^.]+)\\..*', '\\2 - log')",
+              "hide": false
             }
           ],
           "aliasColors": {},
@@ -303,7 +303,7 @@
           },
           "targets": [
             {
-              "target": "aliasByNode(spotlight.publish.GraphitePublisher.bytes-published.m1_rate, 3)",
+              "target": "aliasByNode(spotlight.publish.GraphitePublisher.bytes.published.m1_rate, 3)",
               "hide": false
             }
           ],
@@ -409,7 +409,7 @@
           "points": true,
           "pointradius": 1,
           "bars": false,
-          "stack": true,
+          "stack": false,
           "percentage": false,
           "legend": {
             "show": true,
@@ -437,7 +437,15 @@
               "target": "alias(spotlight.analysis.outlier.OutlierQuorumAggregator.receiveTimer.p95, 'plan.quorum')"
             },
             {
-              "target": "aliasByNode(spotlight.analysis.outlier.algorithm.*.*.algorithm.*.p95, 7)"
+              "target": "aliasByNode(spotlight.analysis.outlier.algorithm.*.*.algorithm.*.p95, 7)",
+              "hide": true
+            },
+            {
+              "target": "aliasByNode(spotlight.analysis.outlier.algorithm.density.SeriesDensityAnalyzer.*.anon.algorithm.dbscanSeries.p95, 9)",
+              "hide": true
+            },
+            {
+              "target": "aliasByNode(spotlight.analysis.outlier.algorithm.*.p95, 4)"
             }
           ],
           "aliasColors": {},
@@ -511,7 +519,68 @@
       "height": "250px",
       "editable": true,
       "collapse": false,
-      "panels": []
+      "panels": [
+        {
+          "title": "Analysis Timers",
+          "error": false,
+          "span": 12,
+          "editable": true,
+          "type": "graph",
+          "id": 8,
+          "datasource": null,
+          "renderer": "flot",
+          "x-axis": true,
+          "y-axis": true,
+          "y_formats": [
+            "short",
+            "short"
+          ],
+          "grid": {
+            "leftMax": null,
+            "rightMax": null,
+            "leftMin": null,
+            "rightMin": null,
+            "threshold1": null,
+            "threshold2": null,
+            "threshold1Color": "rgba(216, 200, 27, 0.27)",
+            "threshold2Color": "rgba(234, 112, 112, 0.22)"
+          },
+          "lines": true,
+          "fill": 1,
+          "linewidth": 1,
+          "points": true,
+          "pointradius": 2,
+          "bars": false,
+          "stack": false,
+          "percentage": false,
+          "legend": {
+            "show": true,
+            "values": true,
+            "min": true,
+            "max": true,
+            "current": true,
+            "total": false,
+            "avg": true,
+            "alignAsTable": true,
+            "rightSide": true,
+            "hideEmpty": true
+          },
+          "nullPointMode": "connected",
+          "steppedLine": false,
+          "tooltip": {
+            "value_type": "individual",
+            "shared": false
+          },
+          "targets": [
+            {
+              "target": "aliasByNode(spotlight.analysis.outlier.*.receiveTimer.p95, 3)"
+            }
+          ],
+          "aliasColors": {},
+          "seriesOverrides": [],
+          "links": []
+        }
+      ]
     }
   ],
   "nav": [
@@ -548,7 +617,7 @@
     }
   ],
   "time": {
-    "from": "now-15m",
+    "from": "now-5m",
     "to": "now"
   },
   "templating": {
