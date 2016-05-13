@@ -73,10 +73,10 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
         .mapConcat { identity }
       )
 
+      val combineByPlan = b.add( Flow[(TimeSeries, OutlierPlan)] .via( batchSeriesByPlan(100000) ) )
+
       val planBuffer = b.add(
-        Flow[(TimeSeries, OutlierPlan)]
-        .buffer( 1000, OverflowStrategy.backpressure).watchFlow( Symbol("plan.buffer") )
-        .via( batchSeriesByPlan(100000) )
+        Flow[(TimeSeries, OutlierPlan)].buffer( 1000, OverflowStrategy.backpressure).watchFlow( Symbol("plan.buffer") )
       )
 
       val plansDetectOutliers = b.add(
@@ -86,8 +86,8 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
         )
       )
 
-      logMetrics ~> blockPriors ~> broadcast ~> passPlanned ~> planConcat ~> planBuffer ~> plansDetectOutliers
-      broadcast ~> passUnrecognized
+      logMetrics ~> blockPriors ~> broadcast ~> passPlanned ~> planConcat ~> combineByPlan ~> planBuffer ~> plansDetectOutliers
+                                   broadcast ~> passUnrecognized
 
       ScoringShape(
         FanOutShape.Ports(
