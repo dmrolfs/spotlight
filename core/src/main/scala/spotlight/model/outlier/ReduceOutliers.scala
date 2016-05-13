@@ -122,17 +122,12 @@ object ReduceOutliers extends LazyLogging {
         debugLogger.info(
           """
             |REDUCE:[{}] outliers[{}] of [{}] total points in [{}] details:
-            |    REDUCE: corroborated timestamps: [{}]
             |    REDUCE: corroborated outlier points: [{}]
             |    REDUCE: tally: [{}]
           """.stripMargin,
-          plan.name + ":" + WatchedTopic,
-          corroboratedOutliers.size.toString,
-          source.points.size.toString,
-          source.interval.getOrElse(""),
-          corroboratedTimestamps.mkString(","),
+          plan.name + ":" + WatchedTopic, corroboratedOutliers.size.toString, source.points.size.toString, source.interval.getOrElse(""),
           corroboratedOutliers.mkString(","),
-          tally.toSeq.sortBy{ case (ts, as) => ts }.map{ case (ts, as) => s"""${ts}: [${as.mkString(", ")}]""" }.mkString( "\n      REDUCE:  - ", "\n      REDUCE:  - ", "\n")
+          if ( tally.nonEmpty ) tally.toSeq.sortBy{ case (ts, as) => ts }.map{ case (ts, as) => s"""${ts}: [${as.mkString(", ")}]""" }.mkString( "\n      REDUCE:  - ", "\n      REDUCE:  - ", "\n") else ""
         )
       }
     }
