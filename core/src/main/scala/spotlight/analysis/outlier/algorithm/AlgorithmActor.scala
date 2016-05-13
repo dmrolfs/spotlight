@@ -73,19 +73,18 @@ trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
   /**
     * Some algorithms require a minimum number of points in order to determine an anomaly. To address this circumstance, these
     * algorithms can use fillDataFromHistory to draw from history the points necessary to create an appropriate group.
-    * @param targetSize of the data grouping
+    * @param minimalSize of the data grouping
     * @return
     */
-  def fillDataFromHistory( targetSize: Int = HistoricalStatistics.LastN ): KOp[AlgorithmContext, Seq[DoublePoint]] = {
+  def fillDataFromHistory( minimalSize: Int = HistoricalStatistics.LastN ): KOp[AlgorithmContext, Seq[DoublePoint]] = {
     for {
       ctx <- ask[TryV, AlgorithmContext]
     } yield {
-      val minPoints = HistoricalStatistics.LastN
       val original = ctx.data
-      if ( minPoints < original.size ) original
+      if ( minimalSize < original.size ) original
       else {
         val inHistory = ctx.history.lastPoints.size
-        val needed = minPoints + 1 - original.size
+        val needed = minimalSize + 1 - original.size
         val past = ctx.history.lastPoints.drop( inHistory - needed )
         past.toDoublePoints ++ original
       }
