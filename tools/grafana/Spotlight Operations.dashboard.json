@@ -245,6 +245,10 @@
             {
               "target": "aliasSub(log(spotlight.publish.GraphitePublisher.bytes.*.m1_rate, 10), '([^.]+\\.){3}([^.]+\\.[^.]+)\\..*', '\\2 - log')",
               "hide": false
+            },
+            {
+              "target": "aliasSub(spotlight.publish.GraphitePublisher.bytes.*.m1_rate, '([^.]+\\.){3}([^.]+\\.[^.]+)\\..*', '\\2 - log')",
+              "hide": true
             }
           ],
           "aliasColors": {},
@@ -446,6 +450,9 @@
             },
             {
               "target": "aliasByNode(spotlight.analysis.outlier.algorithm.*.p95, 4)"
+            },
+            {
+              "target": "aliasByNode(spotlight.analysis.outlier.algorithm.dbscanSeries.cluster.p95, 5)"
             }
           ],
           "aliasColors": {},
@@ -523,7 +530,7 @@
         {
           "title": "Analysis Timers",
           "error": false,
-          "span": 12,
+          "span": 4,
           "editable": true,
           "type": "graph",
           "id": 8,
@@ -549,7 +556,7 @@
           "fill": 1,
           "linewidth": 1,
           "points": true,
-          "pointradius": 2,
+          "pointradius": 1,
           "bars": false,
           "stack": false,
           "percentage": false,
@@ -562,7 +569,7 @@
             "total": false,
             "avg": true,
             "alignAsTable": true,
-            "rightSide": true,
+            "rightSide": false,
             "hideEmpty": true
           },
           "nullPointMode": "connected",
@@ -574,6 +581,126 @@
           "targets": [
             {
               "target": "aliasByNode(spotlight.analysis.outlier.*.receiveTimer.p95, 3)"
+            }
+          ],
+          "aliasColors": {},
+          "seriesOverrides": [],
+          "links": []
+        },
+        {
+          "title": "DBSCAN Timers",
+          "error": false,
+          "span": 4,
+          "editable": true,
+          "type": "graph",
+          "id": 9,
+          "datasource": null,
+          "renderer": "flot",
+          "x-axis": true,
+          "y-axis": true,
+          "y_formats": [
+            "short",
+            "short"
+          ],
+          "grid": {
+            "leftMax": null,
+            "rightMax": null,
+            "leftMin": null,
+            "rightMin": null,
+            "threshold1": null,
+            "threshold2": null,
+            "threshold1Color": "rgba(216, 200, 27, 0.27)",
+            "threshold2Color": "rgba(234, 112, 112, 0.22)"
+          },
+          "lines": true,
+          "fill": 1,
+          "linewidth": 1,
+          "points": true,
+          "pointradius": 1,
+          "bars": false,
+          "stack": false,
+          "percentage": false,
+          "legend": {
+            "show": true,
+            "values": false,
+            "min": false,
+            "max": false,
+            "current": false,
+            "total": false,
+            "avg": false
+          },
+          "nullPointMode": "connected",
+          "steppedLine": false,
+          "tooltip": {
+            "value_type": "cumulative",
+            "shared": false
+          },
+          "targets": [
+            {
+              "target": "spotlight.analysis.outlier.algorithm.dbscanSeries.p95"
+            },
+            {
+              "target": "spotlight.analysis.outlier.algorithm.dbscanSeries.cluster.p95"
+            }
+          ],
+          "aliasColors": {},
+          "seriesOverrides": [],
+          "links": []
+        },
+        {
+          "title": "DBSCAN Batches",
+          "error": false,
+          "span": 4,
+          "editable": true,
+          "type": "graph",
+          "id": 10,
+          "datasource": null,
+          "renderer": "flot",
+          "x-axis": true,
+          "y-axis": true,
+          "y_formats": [
+            "short",
+            "short"
+          ],
+          "grid": {
+            "leftMax": null,
+            "rightMax": null,
+            "leftMin": null,
+            "rightMin": null,
+            "threshold1": null,
+            "threshold2": null,
+            "threshold1Color": "rgba(216, 200, 27, 0.27)",
+            "threshold2Color": "rgba(234, 112, 112, 0.22)"
+          },
+          "lines": true,
+          "fill": 1,
+          "linewidth": 1,
+          "points": true,
+          "pointradius": 1,
+          "bars": false,
+          "stack": false,
+          "percentage": false,
+          "legend": {
+            "show": true,
+            "values": false,
+            "min": false,
+            "max": false,
+            "current": false,
+            "total": false,
+            "avg": false
+          },
+          "nullPointMode": "connected",
+          "steppedLine": false,
+          "tooltip": {
+            "value_type": "cumulative",
+            "shared": false
+          },
+          "targets": [
+            {
+              "target": "aliasByNode(spotlight.analysis.outlier.algorithm.dbscanSeries.source-size.p95, 5)"
+            },
+            {
+              "target": "aliasByNode(spotlight.analysis.outlier.algorithm.dbscanSeries.filled-size.p95, 5)"
             }
           ],
           "aliasColors": {},

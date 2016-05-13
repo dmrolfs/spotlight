@@ -3,7 +3,7 @@ package spotlight.analysis.outlier.algorithm.density
 import scala.annotation.tailrec
 import scala.reflect.ClassTag
 import akka.actor.{ActorRef, Props}
-import nl.grons.metrics.scala.Timer
+import nl.grons.metrics.scala.{Histogram, Timer}
 import org.apache.commons.math3.linear.EigenDecomposition
 
 import scalaz._
@@ -69,6 +69,8 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
   outer: SeriesDensityAnalyzer.HistoryProvider =>
 
   lazy val clusterTimer: Timer = metrics.timer( algorithm.name, "cluster" )
+  lazy val sourceSizeHistogram: Histogram = metrics.histogram( algorithm.name, "source-size" )
+  lazy val filledSizeHistogram: Histogram = metrics.histogram( algorithm.name, "filled-size" )
 
   import SeriesDensityAnalyzer.Context
 
@@ -133,19 +135,22 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
   val cluster: KOp[AlgorithmContext, (Clusters, AlgorithmContext)] = {
     for {
       ctx <- toConcreteContextK
-      data <- fillDataFromHistory( 6 * 5 ) // fill up to 5 minutes @ 1pt / 10s
+      filled <- fillDataFromHistory( 6 * 5 ) // fill up to 5 minutes @ 1pt / 10s
       e <- eps <=< toConcreteContextK
       distance <- distanceMeasure
       minPoints <- minDensityPoints
     } yield {
       log.debug( "DBSCAN eps = [{}]", e )
-      log.debug( "DBSCAN filled orig:[{}] past:[{}] points=[{}]", ctx.data.size, data.size - ctx.data.size, data.mkString(",") )
+      log.debug( "DBSCAN filled orig:[{}] past:[{}] points=[{}]", ctx.data.size, filled.size - ctx.data.size, filled.mkString(",") )
 //      log.debug( "cluster: context dist-stats=[{}]", ctx.distanceStatistics )
       import scala.collection.JavaConverters._
 
+      sourceSizeHistogram += ctx.data.size
+      filledSizeHistogram += filled.size
+
       val clustersD = clusterTimer.time {
         \/ fromTryCatchNonFatal {
-          new DBSCANClusterer[DoublePoint]( e, minPoints, distance ).cluster( data.asJava ).asScala.toSeq
+          new DBSCANClusterer[DoublePoint]( e, minPoints, distance ).cluster( filled.asJava ).asScala.toSeq
         }
       }
 

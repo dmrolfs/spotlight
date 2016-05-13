@@ -3,7 +3,7 @@ import sbt._
 
 object Dependencies {
   object peds {
-    val version = "0.2.5"
+    val version = "0.2.6"
     def module( id: String ) = "com.github.dmrolfs" %% s"peds-$id" % version
     def all = Seq( commons, akka, archetype )
 
@@ -14,7 +14,7 @@ object Dependencies {
   }
 
   object demesne {
-    val version = "1.0.4"
+    val version = "1.0.5"
     def module( id: String ) = "com.github.dmrolfs" %% s"demesne-$id" % version
     val core = module( "core" )
     val testkit = module( "testkit" )
@@ -71,13 +71,14 @@ object Dependencies {
   object metrics {
     val version = "3.1.2"
     def module( id: String ) = "io.dropwizard.metrics" % s"metrics-$id" % "3.1.2"
-    def all = Seq( sigar, core, graphite, metricsScala ) ++ kamon.all
+    def all = Seq( sigar, core, graphite, metricsScala, hdrhistogram ) ++ kamon.all
 
     val sigar = "org.hyperic" % "sigar" % "1.6.4"
 
     val core = module( "core" )
     val graphite = module( "graphite" )
-    val metricsScala = "nl.grons" %% "metrics-scala" % "3.5.2_a2.3"
+    val metricsScala = "nl.grons" %% "metrics-scala" % "3.5.4_a2.3"
+    val hdrhistogram = "org.mpierce.metrics.reservoir" % "hdrhistogram-metrics-reservoir" % "1.1.0"
 
     object kamon {
       val version = "0.5.2"
