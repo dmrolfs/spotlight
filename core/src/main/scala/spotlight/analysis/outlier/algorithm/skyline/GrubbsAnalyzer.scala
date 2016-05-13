@@ -5,13 +5,15 @@ import akka.actor.{ActorRef, Props}
 
 import scalaz._
 import Scalaz._
-import scalaz.Kleisli.{ask, kleisli}
+import scalaz.Kleisli.kleisli
 import org.apache.commons.math3.distribution.TDistribution
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import peds.commons.{KOp, TryV, Valid}
+import peds.commons.util._
 import spotlight.analysis.outlier.algorithm.AlgorithmActor.AlgorithmContext
 import spotlight.analysis.outlier.algorithm.CommonAnalyzer
 import CommonAnalyzer.WrappingContext
+import spotlight.analysis.outlier.HistoricalStatistics
 import spotlight.model.outlier.Outliers
 import spotlight.model.timeseries._
 
@@ -23,57 +25,91 @@ object GrubbsAnalyzer {
   val Algorithm = 'grubbs
 
   def props( router: ActorRef ): Props = Props { new GrubbsAnalyzer( router ) }
+
+
+  final case class Context private[skyline](
+    override val underlying: AlgorithmContext,
+    movingStatistics: DescriptiveStatistics
+  ) extends WrappingContext {
+    override def withUnderlying( ctx: AlgorithmContext ): Valid[WrappingContext] = copy( underlying = ctx ).successNel
+
+    override type That = Context
+    override def withSource( newSource: TimeSeriesBase ): That = {
+      val updated = underlying withSource newSource
+      copy( underlying = updated )
+    }
+
+    override def addThresholdBoundary( threshold: ThresholdBoundary ): That = {
+      copy( underlying = underlying.addThresholdBoundary( threshold ) )
+    }
+
+    override def toString: String = {
+      s"""${getClass.safeSimpleName}(moving-stats:[${movingStatistics}])"""
+    }
+  }
 }
 
-class GrubbsAnalyzer( override val router: ActorRef ) extends CommonAnalyzer[CommonAnalyzer.SimpleWrappingContext] {
-  import CommonAnalyzer.SimpleWrappingContext
+class GrubbsAnalyzer( override val router: ActorRef ) extends CommonAnalyzer[GrubbsAnalyzer.Context] {
+  import GrubbsAnalyzer.Context
 
-  type Context = SimpleWrappingContext
+  type Context = GrubbsAnalyzer.Context
 
   override implicit val contextClassTag: ClassTag[Context] = ClassTag( classOf[Context] )
 
   override def algorithm: Symbol = GrubbsAnalyzer.Algorithm
 
-  override def wrapContext(c: AlgorithmContext ): Valid[WrappingContext] = ( SimpleWrappingContext( c ) ).successNel
+  override def wrapContext( ctx: AlgorithmContext ): Valid[WrappingContext] = {
+    makeStatistics( ctx ) map { movingStats => Context( underlying = ctx, movingStatistics = movingStats ) }
+  }
 
+  def makeStatistics( ctx: AlgorithmContext ): Valid[DescriptiveStatistics] = {
+    new DescriptiveStatistics( HistoricalStatistics.LastN ).successNel
+  }
 
   /**
     * A timeseries is anomalous if the Z score is greater than the Grubb's score.
     */
   override val findOutliers: KOp[AlgorithmContext, (Outliers, AlgorithmContext)] = {
-    def criticalValue( data: Seq[PointT] ) = kleisli[TryV, AlgorithmContext, Double] { ctx =>
-      val Alpha = 0.05  //todo drive from context's algoConfig
-      val degreesOfFreedom = math.max( data.size - 2, 1 ) //todo: not a great idea but for now avoiding error if size <= 2
-      \/ fromTryCatchNonFatal {
-        new TDistribution( degreesOfFreedom ).inverseCumulativeProbability( Alpha / (2D * data.size) )
+    def criticalValue( size: Long ): KOp[AlgorithmContext, Double] = {
+      kleisli[TryV, AlgorithmContext, Double] { ctx =>
+        val Alpha = 0.05  //todo drive from context's algoConfig
+      val degreesOfFreedom = math.max( size - 2, 1 ) //todo: not a great idea but for now avoiding error if size <= 2
+        \/ fromTryCatchNonFatal { new TDistribution( degreesOfFreedom ).inverseCumulativeProbability( Alpha / (2D * size) ) }
       }
+    }
+
+    def updateContextStatistics( ctx: Context, values: Seq[Double] ): Context = {
+      log.debug( "GRUBBS: updateStats: values:[{}]", values.mkString(",") )
+      values.foldLeft( ctx ) { (c, v) => c.movingStatistics addValue v; c }
     }
 
     // background: http://www.itl.nist.gov/div898/handbook/eda/section3/eda35h1.htm
     // background: http://graphpad.com/support/faqid/1598/
     val outliers = for {
-      ctx <- toConcreteContextK
-      filled <- fillDataFromHistory( 6 * 60 ) // pts in last hour
-      taverages <- tailAverage( ctx.data )
-      filledAverages <- tailAverage( filled )
-      cv <- criticalValue( filledAverages )
+      cctx <- toConcreteContextK
+//      filled <- fillDataFromHistory( 6 * 60 ) // pts in last hour
+      taverages <- tailAverage( cctx.data )
+      ctx = updateContextStatistics( cctx, taverages.map{ _.value } )
+//      filledAverages <- tailAverage( filled )
+      size = ctx.movingStatistics.getN
+      cv <- criticalValue( size )
       tolerance <- tolerance
     } yield {
       val tol = tolerance getOrElse 3D
 
-      val statsData = filledAverages map { _.value }
-      val stats = new DescriptiveStatistics( statsData.toArray )
-      val mean = stats.getMean
-      val stddev = stats.getStandardDeviation
+//      val statsData = filledAverages map { _.value }
+//      val stats = new DescriptiveStatistics( statsData.toArray
+
+      val mean = ctx.movingStatistics.getMean
+      val stddev = ctx.movingStatistics.getStandardDeviation
+      log.debug( "Skyline[Grubbs]: stats-N:[{}] group-size:[{}] mean:[{}] stddev:[{}]", ctx.movingStatistics.getN.toString, size.toString, mean.toString, stddev.toString )
       // zscore calculation considered in threshold expected and distance formula
 //      val zScores = taverages map { case (ts, v) => ( ts, math.abs(v - mean) / stddev ) }
 //      log.debug( "Skyline[Grubbs]: mean:[{}] stddev:[{}] zScores:[{}]", mean, stddev, zScores.mkString(",") )
 
       val thresholdSquared = math.pow( cv, 2 )
       log.debug( "Skyline[Grubbs]: threshold^2:[{}]", thresholdSquared )
-      val grubbsScore = {
-        ((statsData.size - 1) / math.sqrt(statsData.size)) * math.sqrt( thresholdSquared / (statsData.size - 2 + thresholdSquared) )
-      }
+      val grubbsScore = ((size - 1) / math.sqrt(size)) * math.sqrt( thresholdSquared / (size - 2 + thresholdSquared) )
       log.debug( "Skyline[Grubbs]: Grubbs Score:[{}] tolerance:[{}]", grubbsScore, tol )
 
       collectOutlierPoints(

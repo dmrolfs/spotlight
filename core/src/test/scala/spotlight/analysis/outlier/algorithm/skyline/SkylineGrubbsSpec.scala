@@ -74,17 +74,22 @@ class SkylineGrubbsSpec extends SkylineBaseSpec {
       tolerance: Double,
       lastPoints: Seq[DataPoint] = Seq.empty[DataPoint]
     ): Seq[ThresholdBoundary] = {
-      val N = points.size
-      val stats = new DescriptiveStatistics( points.map{ _.value }.toArray )
+      val combined = lastPoints.map{ _.value } ++ points.map{ _.value }
+      val N = combined.size
+      val stats = new DescriptiveStatistics( combined.toArray )
       val mean = stats.getMean
       val stddev = stats.getStandardDeviation
+      log.debug( "expected: combined:[{}]", combined.mkString(",") )
+      log.debug( "expected stats-N:[{}] size:[{}] mean:[{}] sttdev:[{}]", stats.getN.toString, N.toString, mean.toString, stddev.toString)
 
       val tdist = new TDistribution( math.max( N - 2, 1 ) )
       val threshold = tdist.inverseCumulativeProbability( 0.05 / (2.0 * N) )
       val thresholdSquared = math.pow( threshold, 2 )
-      val grubbs = ((points.size - 1) / math.sqrt(N)) * math.sqrt( thresholdSquared / (N - 2 + thresholdSquared) )
+      val grubbs = ((N - 1) / math.sqrt(N)) * math.sqrt( thresholdSquared / (N - 2 + thresholdSquared) )
+      log.debug( "expected threshold^2:[{}] grubbs:[{}]", thresholdSquared.toString, grubbs.toString )
 
       val prevTimestamps = lastPoints.map{ _.timestamp }.toSet
+
       points
       .filter { p => !prevTimestamps.contains(p.timestamp) }
       .map { case DataPoint(ts, _) => ThresholdBoundary.fromExpectedAndDistance( ts, mean, tolerance * grubbs * stddev ) }
@@ -144,7 +149,7 @@ class SkylineGrubbsSpec extends SkylineBaseSpec {
       }
     }
 
-    "detect outlier through series of micro events" taggedAs (WIP) in { f: Fixture =>
+    "detect outlier through series of micro events" in { f: Fixture =>
       import f._
 
       def detectUsing( series: TimeSeries, history: HistoricalStatistics ): DetectUsing = {
@@ -201,7 +206,7 @@ class SkylineGrubbsSpec extends SkylineBaseSpec {
       loop( 0, 125 )
     }
 
-    "provide full threshold boundaries" in { f: Fixture =>
+    "provide full threshold boundaries" taggedAs (WIP) in { f: Fixture =>
       import f._
       val analyzer = TestActorRef[GrubbsAnalyzer]( GrubbsAnalyzer.props( router.ref ) )
       val now = joda.DateTime.now
@@ -241,7 +246,7 @@ class SkylineGrubbsSpec extends SkylineBaseSpec {
       val series2 = spike( full2, 100 )( 0 )
       val history2 = historyWith( Option(history1 recordLastPoints series.points), series2 )
       val tailAverages2 = tailAverage(
-        data = fillDataFromHistory(series2.points, history2),
+        data = series2.points,
         lastPoints = history2.lastPoints.map{ p => DataPoint( new joda.DateTime(p(0).toLong), p(1) ) }
       )
       analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
@@ -249,6 +254,7 @@ class SkylineGrubbsSpec extends SkylineBaseSpec {
         case m: Outliers => {
           val actual = m.thresholdBoundaries
           actual.keySet mustBe Set( algoS )
+          log.debug( "expected tailAverages2[{}]:[{}] lastPoints[{}]:[{}]", tailAverages2.size.toString, tailAverages2.map{_.value}.mkString(","), tailAverages1.size.toString, tailAverages1.map{_.value}.mkString(",") )
           val expected = calculateControlBoundaries( points = tailAverages2, tolerance = 1.0, lastPoints = tailAverages1 )
           actual( algoS ).zip( expected ).zipWithIndex foreach { case ((a, e), i) => (i, a) mustBe (i, e) }
         }
