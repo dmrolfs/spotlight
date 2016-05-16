@@ -1,6 +1,6 @@
 import sbt.Keys._
 import sbt._
-import Dependencies._
+//import Dependencies._
 
 import spray.revolver.RevolverPlugin._
 
@@ -41,7 +41,6 @@ object BuildSettings {
 
     // AllenAi Public Resolver
     resolvers += "Typesafe Repository" at "http://repo.typesafe.com/typesafe/releases/",
-    // resolvers += "AllenAI Releases" at "http://utility.allenai.org:8081/nexus/content/repositories/public-releases",
     resolvers += "krasserm at bintray" at "http://dl.bintray.com/krasserm/maven",
     resolvers += "omen-bintray" at "http://dl.bintray.com/omen/maven",
     resolvers += "dnvriend at bintray" at "http://dl.bintray.com/dnvriend/maven",
@@ -51,11 +50,9 @@ object BuildSettings {
     resolvers += "Typesafe releases" at "http://repo.typesafe.com/typesafe/releases",
     resolvers += "eaio releases" at "http://eaio.com/maven2",
     resolvers += "Sonatype OSS Releases"  at "http://oss.sonatype.org/content/repositories/releases/",
-    // resolvers += "Sonatype OSS Snapshots" at "https://oss.sonatype.org/content/repositories/snapshots/",
     resolvers += "Scalaz Bintray Repo" at "http://dl.bintray.com/scalaz/releases",
 //    resolvers += "Numerical Method's Repository" at "http://repo.numericalmethod.com/maven/",  // don't want to use due to $$$
     resolvers += Resolver.sonatypeRepo( "snapshots" ),
-    // resolvers += "Scalaz Bintray Repo" at "http://dl.bintray.com/stew/snapshots",
     resolvers += Classpaths.sbtPluginReleases,
 
     // SLF4J initializes itself upon the first logging call.  Because sbt
@@ -79,13 +76,37 @@ object BuildSettings {
         .invoke( null, "ROOT" )
     ),
     triggeredMessage in ThisBuild := Watched.clearWhenTriggered,
-    cancelable in Global := true,
-  
-    publishTo <<= version { (v: String) =>
-      // val nexus = "http://utility.allenai.org:8081/nexus/content/repositories/"
-      val nexus = "http://utility.allenai.org:8081/nexus/content/repositories/"
-      if ( v.trim.endsWith("SNAPSHOT") ) Some( "snapshots" at nexus + "snapshots" )
-      else Some( "releases" at nexus + "releases" )
-    }
+    cancelable in Global := true
   )
+
+  def doNotPublishSettings = Seq( publish := {} )
+
+  def publishSettings = {
+    if ( (version in ThisBuild).toString.endsWith("-SNAPSHOT") ) {
+      Seq(
+        publishTo := Some("Artifactory Realm" at "http://oss.jfrog.org/artifactory/oss-snapshot-local"),
+        // Only setting the credentials file if it exists (#52)
+        credentials := List(Path.userHome / ".bintray" / ".artifactory").filter(_.exists).map(Credentials(_))
+      )
+    } else {
+      Seq(
+        pomExtra := {
+          <scm>
+            <url>https://github.com</url>
+            <connection>https://github.com/dmrolfs/shapeless-builder.git</connection>
+          </scm>
+          <developers>
+            <developer>
+              <id>dmrolfs</id>
+              <name>Damon Rolfs</name>
+              <url>http://dmrolfs.github.io/</url>
+            </developer>
+          </developers>
+        },
+        publishMavenStyle := true,
+        resolvers += Resolver.url("omen bintray resolver", url("http://dl.bintray.com/omen/maven"))(Resolver.ivyStylePatterns),
+        licenses := ("MIT", url("http://opensource.org/licenses/MIT")) :: Nil // this is required! otherwise Bintray will reject the code
+      )
+    }
+  }
 }

@@ -2,43 +2,27 @@ import Dependencies._
 import sbtassembly.AssemblyPlugin.autoImport.MergeStrategy
 
 
-name := "spotlight-core"
+name := "spotlight-publisher"
 
 description := "lorem ipsum."
 
-libraryDependencies ++=
-  commonDependencies ++
-  metrics.all ++
-  facility.betterFiles.all ++
-//  facility.avro.all ++
-  Seq(
-    //  facility.pureConfig,
-//    akka.streams,
-    facility.math3,
-//    facility.suanshu, // don't want to use due to $$$
-    facility.scopt,
-    demesne.core,
-    facility.parboiled,
-    facility.hadoopClient,
-    facility.pyrolite
-  ) ++ Dependencies.test(
-    akka.streamsTestkit,
-    demesne.testkit,
-    "org.python" % "jython-standalone" % "2.5.3",
-    "com.github.marklister" %% "product-collections" % "1.4.2"
-  )
+baseAvroCodegenSettings // needed for avro Java generation via scavro and avro-tools
 
-libraryDependencies += ( "com.jsuereth" %% "scala-arm" % "2.0.0-M1" )
+sbtavrohugger.SbtAvrohugger.scavroSettings // needed for avro case class wrappers via avrohugger
 
-resolvers += "velvia maven" at "http://dl.bintray.com/velvia/maven"
+avroSchemaFiles := Seq( (sourceDirectory in Compile).value / "avro" / "timeseries.avsc" )
 
-libraryDependencies += "org.velvia" % "msgpack4s_2.11" % "0.5.1"
+showAvroCompilerOutput := true
+
+avroCodeOutputDirectory := (sourceManaged in Compile).value
+
+libraryDependencies ++= facility.avro.all.map{ _ % "provided" }
 
 testOptions in Test += Tests.Argument( "-oDF" )
 
-mainClass in (Compile, run) := Some("spotlight.app.GraphiteSpotlight")
+//assembly <<= (assembly in assembly) dependsOn (compile in Compile)
 
-mainClass in assembly := Some("spotlight.stream.GraphiteModel")
+assemblyOption in assembly := (assemblyOption in assembly).value.copy(includeScala = false)
 
 assemblyJarName in assembly := s"${organizationName.value}-${name.value}-${version.value}.jar"
 
@@ -160,7 +144,7 @@ assemblyMergeStrategy in assembly := {
 //    expose( 22 )
 //  }
 //}
-//
+
 //imageNames in docker := Seq(
 //  ImageName( s"dmrolfs/${name.value}:latest" ), // Sets the latest tag
 //  ImageName(

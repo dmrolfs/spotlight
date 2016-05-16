@@ -111,10 +111,12 @@ object Dependencies {
     val hadoopClient = "org.apache.hadoop" % "hadoop-client" % "2.7.1"
 
     object avro {
-      val version = "1.7.7"
-      def all = Seq( core, mapred )
+      val version = "1.8.0"
+      def all = Seq( core, scavro )
       val core = "org.apache.avro" % "avro" % version
+      val tools = "org.apache.avro" % "avro-tools" % version
       val mapred = "org.apache.avro" % "avro-mapred" % version
+      val scavro = "org.oedura" %% "scavro" % "1.0.1"
     }
 
     object betterFiles {

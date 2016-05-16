@@ -8,14 +8,36 @@ import BuildSettings._
 
 
 object SpotlightBuild extends Build {
-  lazy val core = (project in file("core")).
-                  settings( defaultBuildSettings ).
-                  enablePlugins( DockerPlugin )
 
-  lazy val root = (project in file(".")).
-                  settings( defaultBuildSettings:_* ).
-                  aggregate( core )
+  lazy val root = {
+    ( project in file(".") )
+    .settings( defaultBuildSettings:_* )
+    .aggregate( core, publisher )
+  }
 
+  lazy val publisher = {
+    ( project in file("publisher") )
+    .settings( defaultBuildSettings ++ publishSettings )
+    // .enablePlugins( DockerPlugin )
+  }
+
+//  lazy val subscriber = {
+//    ( project in file("subscriber") )
+//    .settings( defaultBuildSettings ++ publishSettings )
+//    // .enablePlugins( DockerPlugin )
+//  }
+
+  lazy val core = {
+    ( project in file("core") )
+    .settings( defaultBuildSettings ++ publishSettings )
+    // .enablePlugins( DockerPlugin )
+  }
+
+//  lazy val graphite = {
+//    ( project in file("graphite") )
+//    .settings( defaultBuildSettings ++ doNotPublishSettings )
+//    .enablePlugins( DockerPlugin )
+//  }
 //  lazy val root = Project(
 //           id = "spotlight-root",
 //           base = file( "." ),

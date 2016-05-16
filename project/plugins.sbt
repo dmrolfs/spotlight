@@ -29,3 +29,7 @@ addSbtPlugin("net.virtual-void" % "sbt-dependency-graph" % "latest.integration")
 addSbtPlugin("com.sksamuel.sbt-versions" % "sbt-versions" % "0.2.0")
 
 addSbtPlugin("me.lessis" % "bintray-sbt" % "0.3.0")
+
+addSbtPlugin("com.julianpeeters" % "sbt-avrohugger" % "0.9.8")
+
+addSbtPlugin("org.oedura" % "scavro-plugin" % "1.0.1")
