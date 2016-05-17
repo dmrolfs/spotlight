@@ -24,15 +24,14 @@ import peds.commons.log.Trace
 import peds.akka.supervision.OneForOneStrategyFactory
 import peds.akka.metrics.{Instrumented, Reporter}
 import peds.commons.V
-import peds.akka.stream.{ProcessorAdapter, StreamMonitor}
-import spotlight.analysis.outlier.{OutlierDetection, OutlierPlanDetectionRouter}
+import peds.akka.stream.StreamMonitor
+import spotlight.analysis.outlier.OutlierPlanDetectionRouter
 import spotlight.model.outlier._
-import spotlight.model.timeseries.{TimeSeries, TimeSeriesBase, Topic}
+import spotlight.model.timeseries.{TimeSeriesBase, Topic}
 import spotlight.protocol.GraphiteSerializationProtocol
 import spotlight.publish.{GraphitePublisher, LogPublisher}
 import spotlight.stream.{Configuration, OutlierDetectionBootstrap, OutlierScoringModel}
 import spotlight.stream.OutlierDetectionBootstrap.{GetOutlierDetector, GetOutlierPlanDetectionRouter}
-import spotlight.train.{AvroFileTrainingRepositoryInterpreter, LogStatisticsTrainingRepositoryInterpreter, TrainOutlierAnalysis}
 
 
 /**
@@ -178,7 +177,6 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
         val logUnrecognized = b.add(
           OutlierScoringModel.logMetric( Logger( LoggerFactory getLogger "Unrecognized" ), conf.plans )
         )
-        val ingressBroadcast = b.add( Broadcast[TimeSeries](outputPorts = 2, eagerCancel = false) )
         val egressBroadcast = b.add( Broadcast[Outliers](outputPorts = 2, eagerCancel = true) )
 
         //todo remove after working
@@ -188,27 +186,6 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
         val publish = b.add( publishOutliers( context.config.graphiteAddress ) )
         val tcpOut = b.add( Flow[Outliers].map{ _ => ByteString() } )
 
-        val passArchivable = b.add( archiveFilter[TimeSeries]( conf ) )
-
-        import AvroFileTrainingRepositoryInterpreter.LocalhostWritersContextProvider
-        val interpreter = {
-          if ( conf.hasPath("spotlight.training.archival") && conf.getBoolean("spotlight.training.archival") ) {
-            new AvroFileTrainingRepositoryInterpreter()( trainingDispatcher(system) ) with LocalhostWritersContextProvider {
-              override def config: Config = conf
-            }
-          } else {
-            LogStatisticsTrainingRepositoryInterpreter( trainingLogger )( trainingDispatcher(system) )
-          }
-        }
-        val train = b.add(
-          TrainOutlierAnalysis.feedTrainingFlow[TimeSeries](
-            interpreter = interpreter,
-            maxPoints = conf.getInt( "spotlight.training.batch.max-points" ),
-            batchingWindow = FiniteDuration( conf.getDuration("spotlight.training.batch.window", NANOSECONDS), NANOSECONDS )
-          )
-        )
-
-        val termTraining = b.add( Sink.ignore )
         val termUnrecognized = b.add( Sink.ignore )
 
 //framing,intakeBuffer,scoring.planned,plan.router
@@ -221,11 +198,10 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
           Symbol( "publish.buffer" )
         )
 
-                                                 ingressBroadcast ~> passArchivable ~> train ~> termTraining
-        framing ~> intakeBuffer ~> timeSeries ~> ingressBroadcast ~> scoring.in
-                                                                     scoring.out0 ~> egressBroadcast ~> tcpOut
-                                                                                     egressBroadcast ~> publishBuffer ~> publish
-                                                                     scoring.out1 ~> logUnrecognized ~> termUnrecognized
+        framing ~> intakeBuffer ~> timeSeries ~> scoring.in
+                                                 scoring.out0 ~> egressBroadcast ~> tcpOut
+                                                                 egressBroadcast ~> publishBuffer ~> publish
+                                                 scoring.out1 ~> logUnrecognized ~> termUnrecognized
 
         FlowShape( framing.in, tcpOut.out )
       }
@@ -276,7 +252,7 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
       LogPublisher.props
     }
 
-    Sink actorSubscriber[Outliers] props.withDispatcher( "publisher-dispatcher" )
+    Sink.actorSubscriber[Outliers]( props.withDispatcher( "publisher-dispatcher" ) ).named( "graphite" )
   }
 
   def startPlanWatcher( config: Configuration, listeners: Set[ActorRef] )( implicit system: ActorSystem ): Unit = {

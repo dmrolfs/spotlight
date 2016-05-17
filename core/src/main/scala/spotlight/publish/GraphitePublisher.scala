@@ -268,7 +268,7 @@ class GraphitePublisher extends DenseOutlierPublisher { outer: GraphitePublisher
     }
 
     case ActorSubscriberMessage.OnError( ex ) => {
-      log.info( "GraphitePublisher closing on errored stream: [{}]", ex.getMessage )
+      log.error( ex, "GraphitePublisher closing on errored stream: [{}]", ex.getMessage )
       close()
     }
 

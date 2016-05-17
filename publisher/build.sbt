@@ -20,7 +20,8 @@ libraryDependencies ++= facility.avro.all.map{ _ % "provided" }
 
 testOptions in Test += Tests.Argument( "-oDF" )
 
-//assembly <<= (assembly in assembly) dependsOn (compile in Compile)
+
+assembly <<= (assembly dependsOn compile)
 
 assemblyOption in assembly := (assemblyOption in assembly).value.copy(includeScala = false)
 

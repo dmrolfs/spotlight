@@ -20,57 +20,57 @@ libraryDependencies ++=
     demesne.core,
     facility.parboiled,
     facility.hadoopClient,
-    facility.pyrolite
-  ) ++ Dependencies.test(
+    facility.pyrolite,
+    facility.msgpack
+  ) ++ Dependencies.Scope.test(
     akka.streamsTestkit,
     demesne.testkit,
     "org.python" % "jython-standalone" % "2.5.3",
     "com.github.marklister" %% "product-collections" % "1.4.2"
   )
 
-libraryDependencies += ( "com.jsuereth" %% "scala-arm" % "2.0.0-M1" )
-
-resolvers += "velvia maven" at "http://dl.bintray.com/velvia/maven"
-
-libraryDependencies += "org.velvia" % "msgpack4s_2.11" % "0.5.1"
+//libraryDependencies += ( "com.jsuereth" %% "scala-arm" % "2.0.0-M1" )
+//
 
 testOptions in Test += Tests.Argument( "-oDF" )
 
-mainClass in (Compile, run) := Some("spotlight.app.GraphiteSpotlight")
+//mainClass in (Compile, run) := Some("spotlight.app.GraphiteSpotlight")
 
-mainClass in assembly := Some("spotlight.stream.GraphiteModel")
+//mainClass in assembly := Some("spotlight.stream.GraphiteModel")
+
+assemblyOption in assembly := (assemblyOption in assembly).value.copy(includeScala = false, includeDependency = false)
 
 assemblyJarName in assembly := s"${organizationName.value}-${name.value}-${version.value}.jar"
 
-assemblyMergeStrategy in assembly := {
-  case PathList( "org", "hyperic", "sigar", xs @ _* ) => MergeStrategy.last
-  case PathList( "org", "apache", "commons", "beanutils", xs @ _* ) => MergeStrategy.last
-  case PathList( "org", "apache", "commons", "collections", xs @ _* ) => MergeStrategy.last
-  case PathList( "javax", "servlet", xs @ _* ) => MergeStrategy.last
-  case PathList( "org", "apache", "hadoop", "yarn", xs @ _* ) => MergeStrategy.last
-  case PathList( "org", "slf4j", xs @ _* ) => MergeStrategy.first
-  case PathList( "META-INF", "maven", "com.fasterxml.jackson.core", xs @ _* ) => MergeStrategy.discard
-  case PathList( "META-INF", "maven", "commons-logging", xs @ _* ) => MergeStrategy.discard
-  case PathList( "META-INF", "maven", "org.apache.avro", xs @ _* ) => MergeStrategy.discard
-
-  case x if Assembly.isConfigFile(x) => MergeStrategy.concat
-
-  case PathList(ps @ _*) if Assembly.isReadme(ps.last) || Assembly.isLicenseFile(ps.last) => MergeStrategy.rename
-
-  case PathList("META-INF", xs @ _*) => {
-    xs map {_.toLowerCase} match {
-      case ("aop.xml" :: Nil) => MergeStrategy.first
-      case ("manifest.mf" :: Nil) | ("index.list" :: Nil) | ("dependencies" :: Nil) => MergeStrategy.discard
-      case ps @ (x :: xs) if ps.last.endsWith(".sf") || ps.last.endsWith(".dsa") => MergeStrategy.discard
-      case "plexus" :: xs => MergeStrategy.discard
-      case "services" :: xs => MergeStrategy.filterDistinctLines
-      case ("spring.schemas" :: Nil) | ("spring.handlers" :: Nil) => MergeStrategy.filterDistinctLines
-      case x => MergeStrategy.deduplicate
-    }
-  }
-
-  case _ => MergeStrategy.deduplicate
-}
+//assemblyMergeStrategy in assembly := {
+//  case PathList( "org", "hyperic", "sigar", xs @ _* ) => MergeStrategy.last
+//  case PathList( "org", "apache", "commons", "beanutils", xs @ _* ) => MergeStrategy.last
+//  case PathList( "org", "apache", "commons", "collections", xs @ _* ) => MergeStrategy.last
+//  case PathList( "javax", "servlet", xs @ _* ) => MergeStrategy.last
+//  case PathList( "org", "apache", "hadoop", "yarn", xs @ _* ) => MergeStrategy.last
+//  case PathList( "org", "slf4j", xs @ _* ) => MergeStrategy.first
+//  case PathList( "META-INF", "maven", "com.fasterxml.jackson.core", xs @ _* ) => MergeStrategy.discard
+//  case PathList( "META-INF", "maven", "commons-logging", xs @ _* ) => MergeStrategy.discard
+//  case PathList( "META-INF", "maven", "org.apache.avro", xs @ _* ) => MergeStrategy.discard
+//
+//  case x if Assembly.isConfigFile(x) => MergeStrategy.concat
+//
+//  case PathList(ps @ _*) if Assembly.isReadme(ps.last) || Assembly.isLicenseFile(ps.last) => MergeStrategy.rename
+//
+//  case PathList("META-INF", xs @ _*) => {
+//    xs map {_.toLowerCase} match {
+//      case ("aop.xml" :: Nil) => MergeStrategy.first
+//      case ("manifest.mf" :: Nil) | ("index.list" :: Nil) | ("dependencies" :: Nil) => MergeStrategy.discard
+//      case ps @ (x :: xs) if ps.last.endsWith(".sf") || ps.last.endsWith(".dsa") => MergeStrategy.discard
+//      case "plexus" :: xs => MergeStrategy.discard
+//      case "services" :: xs => MergeStrategy.filterDistinctLines
+//      case ("spring.schemas" :: Nil) | ("spring.handlers" :: Nil) => MergeStrategy.filterDistinctLines
+//      case x => MergeStrategy.deduplicate
+//    }
+//  }
+//
+//  case _ => MergeStrategy.deduplicate
+//}
 
 //docker <<= ( docker dependsOn assembly )
 //
