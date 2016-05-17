@@ -63,7 +63,7 @@ object Dependencies {
       val classic = module( "classic" )
     }
 
-    val slf4j = "org.slf4j" % "slf4j-api" % "1.7.13"
+    val slf4j = "org.slf4j" % "slf4j-api" % "1.7.21"
 
     def all = Seq( typesafe, logback.core, logback.classic, slf4j )
   }

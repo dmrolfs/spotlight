@@ -1,5 +1,5 @@
 [Unit]
-Description=Spotlight
+Description=Spotlight Graphite
 After=docker.service
 
 [Service]
