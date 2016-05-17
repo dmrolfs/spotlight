@@ -1,0 +1,22 @@
+{
+  "namespace": "spotlight.api",
+  "name": "TimeSeries",
+  "type": "record",
+  "fields": [
+    { "name": "topic", "type": "string" },
+    {
+      "name": "points",
+      "type": {
+        "type": "array",
+        "items": {
+          "name": "DataPoint",
+          "type": "record",
+          "fields": [
+            { "name": "timestamp", "type": "long" },
+            { "name": "value", "type": "double" }
+          ]
+        }
+      }
+    }
+  ]
+}

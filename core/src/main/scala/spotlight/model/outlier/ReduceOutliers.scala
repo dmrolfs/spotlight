@@ -113,7 +113,7 @@ object ReduceOutliers extends LazyLogging {
     ): Unit = {
       import com.github.nscala_time.time.Imports._
 
-      val WatchedTopic = "prod.em.authz-proxy.1.proxy.p95"
+      val WatchedTopic = "prod-las.em.authz-proxy.1.proxy.p95"
       def acknowledge( t: Topic ): Boolean = t.name == WatchedTopic
 
       if ( acknowledge(source.topic) ) {

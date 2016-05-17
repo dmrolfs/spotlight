@@ -21,7 +21,7 @@ object Dependencies {
   }
 
   object akka {
-    val version = "2.4.4"
+    val version = "2.4.5"
     def module( id: String ) = "com.typesafe.akka" %% s"akka-$id" % version
 
     val actor = module( "actor" )
@@ -63,7 +63,7 @@ object Dependencies {
       val classic = module( "classic" )
     }
 
-    val slf4j = "org.slf4j" % "slf4j-api" % "1.7.13"
+    val slf4j = "org.slf4j" % "slf4j-api" % "1.7.21"
 
     def all = Seq( typesafe, logback.core, logback.classic, slf4j )
   }
@@ -108,13 +108,17 @@ object Dependencies {
 //    val suanshu = "com.numericalmethod" % "suanshu" % "3.4.0" intransitive()  // don't want to use due to $$$
     val scopt = "com.github.scopt" %% "scopt" % "3.3.0"
     val pyrolite = "net.razorvine" % "pyrolite" % "4.10"
+    val msgpack = "org.velvia" % "msgpack4s_2.11" % "0.5.1"
+
     val hadoopClient = "org.apache.hadoop" % "hadoop-client" % "2.7.1"
 
     object avro {
-      val version = "1.7.7"
-      def all = Seq( core, mapred )
+      val version = "1.8.0"
+      def all = Seq( core, scavro )
       val core = "org.apache.avro" % "avro" % version
+      val tools = "org.apache.avro" % "avro-tools" % version
       val mapred = "org.apache.avro" % "avro-mapred" % version
+      val scavro = "org.oedura" %% "scavro" % "1.0.1"
     }
 
     object betterFiles {
@@ -145,11 +149,12 @@ object Dependencies {
     akka.actor,
     akka.stream,
     akka.slf4j,
+    log.logback.classic,
     facility.uuid,
     facility.config,
     facility.shapeless,
     scalaz.core
-  ) ++ test(
+  ) ++ Scope.test(
     akka.testkit,
     quality.scalatest,
     quality.mockito.core
@@ -162,9 +167,11 @@ object Dependencies {
   )
 
 
-  def compile( deps: ModuleID* ): Seq[ModuleID] = deps map ( _ % "compile" )
-  def provided( deps: ModuleID* ): Seq[ModuleID] = deps map ( _ % "provided" )
-  def test( deps: ModuleID* ): Seq[ModuleID] = deps map ( _ % "test" )
-  def runtime( deps: ModuleID* ): Seq[ModuleID] = deps map ( _ % "runtime" )
-  def container( deps: ModuleID* ): Seq[ModuleID] = deps map ( _ % "container" )
+  object Scope {
+    def compile( deps: ModuleID* ): Seq[ModuleID] = deps map ( _ % "compile" )
+    def provided( deps: ModuleID* ): Seq[ModuleID] = deps map ( _ % "provided" )
+    def test( deps: ModuleID* ): Seq[ModuleID] = deps map ( _ % "test" )
+    def runtime( deps: ModuleID* ): Seq[ModuleID] = deps map ( _ % "runtime" )
+    def container( deps: ModuleID* ): Seq[ModuleID] = deps map ( _ % "container" )
+  }
 }

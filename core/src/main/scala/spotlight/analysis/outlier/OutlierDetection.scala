@@ -137,7 +137,7 @@ with ActorLogging {
 
     if ( ActorPath isValidPathElement name ) name
     else {
-      val blunted = name.replaceAll( "[;/?:@&=+$,]", "_" )
+      val blunted = name.replaceAll( """[\]\[;/?:@&=+$,]""", "_" )
       log.warning( "OutlierDetection attempting to dispatch to invalid aggregator name: [{}] blunting to [{}]", name, blunted )
       blunted
     }
