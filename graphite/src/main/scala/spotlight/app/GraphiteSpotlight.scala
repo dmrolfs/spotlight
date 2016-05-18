@@ -210,27 +210,6 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
     }
   }
 
-  def archiveFilter[T <: TimeSeriesBase]( config: Configuration ): Flow[T, T, NotUsed] = {
-    val archiveWhitelist: Set[Regex] = {
-      import scala.collection.JavaConverters._
-      if ( config hasPath "spotlight.training.whitelist" ) {
-        config.getStringList( "spotlight.training.whitelist" ).asScala.toSet map { wl: String => new Regex( wl ) }
-      } else {
-        Set.empty[Regex]
-      }
-    }
-    logger info s"""training archive whitelist: [${archiveWhitelist.mkString(",")}]"""
-
-    val baseline = (ts: T) => { config.plans.exists{ _ appliesTo ts } }
-
-    val isArchivable: T => Boolean = {
-      if ( archiveWhitelist.nonEmpty ) baseline
-      else (ts: T) => { archiveWhitelist.exists( _.findFirstIn( ts.topic.name ).isDefined ) || baseline( ts ) }
-    }
-
-    Flow[T].filter{ isArchivable }
-  }
-
   def publishOutliers( graphiteAddress: Option[InetSocketAddress] ): Sink[Outliers, ActorRef] = {
     val props = graphiteAddress map { address =>
       GraphitePublisher.props {
@@ -316,8 +295,30 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
       "detection-supervisor"
     )
   }
-
-  private val trainingLogger: Logger = Logger( LoggerFactory getLogger "Training" )
-
-  private def trainingDispatcher( system: ActorSystem ): ExecutionContext = system.dispatchers lookup "logger-dispatcher"
 }
+
+
+//  def archiveFilter[T <: TimeSeriesBase]( config: Configuration ): Flow[T, T, NotUsed] = {
+//    val archiveWhitelist: Set[Regex] = {
+//      import scala.collection.JavaConverters._
+//      if ( config hasPath "spotlight.training.whitelist" ) {
+//        config.getStringList( "spotlight.training.whitelist" ).asScala.toSet map { wl: String => new Regex( wl ) }
+//      } else {
+//        Set.empty[Regex]
+//      }
+//    }
+//    logger info s"""training archive whitelist: [${archiveWhitelist.mkString(",")}]"""
+//
+//    val baseline = (ts: T) => { config.plans.exists{ _ appliesTo ts } }
+//
+//    val isArchivable: T => Boolean = {
+//      if ( archiveWhitelist.nonEmpty ) baseline
+//      else (ts: T) => { archiveWhitelist.exists( _.findFirstIn( ts.topic.name ).isDefined ) || baseline( ts ) }
+//    }
+//
+//    Flow[T].filter{ isArchivable }
+//  }
+
+//  private val trainingLogger: Logger = Logger( LoggerFactory getLogger "Training" )
+//
+//  private def trainingDispatcher( system: ActorSystem ): ExecutionContext = system.dispatchers lookup "logger-dispatcher"
