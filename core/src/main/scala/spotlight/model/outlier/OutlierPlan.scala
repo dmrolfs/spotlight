@@ -50,7 +50,7 @@ object OutlierPlan {
 
   type ExtractTopic = PartialFunction[Any, Option[Topic]]
 
-  type Creator = () => V[Seq[OutlierPlan]]
+  type Creator = () => V[Set[OutlierPlan]]
 
   final case class Grouping( limit: Int, window: FiniteDuration )
 

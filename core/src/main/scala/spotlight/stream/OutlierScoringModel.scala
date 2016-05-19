@@ -101,7 +101,7 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
 
   def logMetric(
     destination: Logger,
-    plans: Seq[OutlierPlan]
+    plans: Set[OutlierPlan]
   ): GraphStage[FlowShape[TimeSeries, TimeSeries]] = {
     new GraphStage[FlowShape[TimeSeries, TimeSeries]] {
       val count = new AtomicInteger( 0 )
@@ -127,7 +127,7 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
                       "[{}] Plan for {}: {}",
                       count.incrementAndGet( ).toString,
                       e.topic,
-                      plans.find {_ appliesTo e}.getOrElse( "NONE" )
+                      plans find { _ appliesTo e } getOrElse "NONE"
                     )
                   }
                 }
@@ -148,16 +148,8 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
     }
   }
 
-  def filterPlanned( plans: Seq[OutlierPlan] )( implicit system: ActorSystem ): Flow[TimeSeries, TimeSeries, NotUsed] = {
-    Flow[TimeSeries].filter { ts => !isOutlierReport(ts) && isPlanned( ts, plans ) }
-  }
-
-  def filterUnrecognized( plans: Seq[OutlierPlan] )( implicit system: ActorSystem ): Flow[TimeSeries, TimeSeries, NotUsed] = {
-    Flow[TimeSeries].filter{ ts => !isOutlierReport(ts) }
-  }
-
   def isOutlierReport( ts: TimeSeriesBase ): Boolean = ts.topic.name startsWith OutlierMetricPrefix
-  def isPlanned( ts: TimeSeriesBase, plans: Seq[OutlierPlan] ): Boolean = plans exists { _ appliesTo ts }
+  def isPlanned( ts: TimeSeriesBase, plans: Set[OutlierPlan] ): Boolean = plans exists { _ appliesTo ts }
 
   val debugLogger = Logger( LoggerFactory getLogger "Debug" )
 

@@ -4,7 +4,6 @@ import java.net.{InetAddress, InetSocketAddress}
 import java.time.Duration
 import scala.concurrent.duration._
 import scala.util.matching.Regex
-import scala.collection.immutable
 import scalaz.Scalaz._
 import scalaz._
 import com.typesafe.config._
@@ -27,7 +26,7 @@ trait Configuration extends Config {
   def graphiteAddress: Option[InetSocketAddress]
   def detectionBudget: FiniteDuration
   def maxInDetectionCpuFactor: Double
-  def plans: immutable.Seq[OutlierPlan]
+  def plans: Set[OutlierPlan]
   def planOrigin: ConfigOrigin
   def tcpInboundBufferSize: Int
   def workflowBufferSize: Int
@@ -216,7 +215,7 @@ object Configuration {
       if ( hasPath( path ) ) getDouble( path ) else 1.0
     }
 
-    override val plans: immutable.Seq[OutlierPlan] = makePlans( getConfig( Configuration.Directory.PLAN_PATH ) ) //todo support plan reloading
+    override val plans: Set[OutlierPlan] = makePlans( getConfig( Configuration.Directory.PLAN_PATH ) ) //todo support plan reloading
     override def planOrigin: ConfigOrigin = getConfig( Configuration.Directory.PLAN_PATH ).origin()
     override def workflowBufferSize: Int = getInt( Directory.WORKFLOW_BUFFER_SIZE )
     override def tcpInboundBufferSize: Int = getInt( Directory.TCP_INBOUND_BUFFER_SIZE )
@@ -234,7 +233,7 @@ object Configuration {
     }
 
 
-    private def makePlans( planSpecifications: Config ): immutable.Seq[OutlierPlan] = {
+    private def makePlans( planSpecifications: Config ): Set[OutlierPlan] = {
       import scala.collection.JavaConversions._
 
       val result = planSpecifications.root.collect{ case (n, s: ConfigObject) => (n, s.toConfig) }.toSeq.map {
@@ -311,7 +310,7 @@ object Configuration {
         }
       }
 
-      result.flatten.sorted.to[immutable.Seq]
+      result.flatten.toSet
     }
 
     private def pullCommonPlanFacets( spec: Config ): (FiniteDuration, Set[Symbol]) = {

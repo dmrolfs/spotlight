@@ -46,7 +46,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
       window map { w => OutlierPlan.Grouping( limit = 10000, w ) }
     }
 
-    val plans: Seq[OutlierPlan] = Seq(
+    val plans: Set[OutlierPlan] = Set(
       OutlierPlan.forTopics(
         name = "plan-a",
         timeout = 2.seconds,
