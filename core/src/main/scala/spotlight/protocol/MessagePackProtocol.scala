@@ -13,7 +13,7 @@ import spotlight.model.timeseries.TimeSeries
 case object MessagePackProtocol extends GraphiteSerializationProtocol with LazyLogging {
   override def framingFlow( maximumFrameLength: Int ): Flow[ByteString, ByteString, NotUsed] = ??? //todo implement message pack protocol or remove
 
-  override def toDataPoints( bytes: ByteString ): List[TimeSeries] = {
+  override def toTimeSeries(bytes: ByteString ): List[TimeSeries] = {
     import org.velvia.MsgPack
     import org.json4s._
     import org.json4s.jackson.JsonMethods._

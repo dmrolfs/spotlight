@@ -572,11 +572,11 @@
             "rightSide": false,
             "hideEmpty": true
           },
-          "nullPointMode": "connected",
+          "nullPointMode": "null",
           "steppedLine": false,
           "tooltip": {
             "value_type": "individual",
-            "shared": false
+            "shared": true
           },
           "targets": [
             {
@@ -629,11 +629,11 @@
             "total": false,
             "avg": false
           },
-          "nullPointMode": "connected",
+          "nullPointMode": "null",
           "steppedLine": false,
           "tooltip": {
-            "value_type": "cumulative",
-            "shared": false
+            "value_type": "individual",
+            "shared": true
           },
           "targets": [
             {
@@ -689,11 +689,11 @@
             "total": false,
             "avg": false
           },
-          "nullPointMode": "connected",
+          "nullPointMode": "null",
           "steppedLine": false,
           "tooltip": {
             "value_type": "cumulative",
-            "shared": false
+            "shared": true
           },
           "targets": [
             {
@@ -744,7 +744,7 @@
     }
   ],
   "time": {
-    "from": "now-5m",
+    "from": "now-15m",
     "to": "now"
   },
   "templating": {
@@ -753,7 +753,7 @@
   "annotations": {
     "list": []
   },
-  "refresh": "5s",
+  "refresh": "10s",
   "version": 6,
   "hideAllLegends": false
 }

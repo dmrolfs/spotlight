@@ -6,37 +6,13 @@ name := "spotlight-graphite"
 
 description := "lorem ipsum."
 
-libraryDependencies ++=
-  commonDependencies ++
-//  metrics.all ++
-//  facility.betterFiles.all ++
-  Seq(
-//    facility.math3,
-//    facility.scopt,
-//    demesne.core,
-//    facility.parboiled,
-//    facility.hadoopClient,
-//    facility.pyrolite
-  ) ++ Dependencies.Scope.test(
-//    akka.streamsTestkit,
-//    demesne.testkit,
-//    "org.python" % "jython-standalone" % "2.5.3",
-//    "com.github.marklister" %% "product-collections" % "1.4.2"
-  )
+libraryDependencies ++= commonDependencies
 
-//libraryDependencies += ( "com.jsuereth" %% "scala-arm" % "2.0.0-M1" )
-
-//resolvers += "velvia maven" at "http://dl.bintray.com/velvia/maven"
-//
-//libraryDependencies += "org.velvia" % "msgpack4s_2.11" % "0.5.1"
-//
 testOptions in Test += Tests.Argument( "-oDF" )
 
 mainClass in (Compile, run) := Some("spotlight.app.GraphiteSpotlight")
 
-mainClass in assembly := Some("spotlight.stream.GraphiteModel")
-
-//assemblyOption in assembly := (assemblyOption in assembly).value.copy(includeScala = false)
+mainClass in assembly := Some("spotlight.stream.GraphiteSpotlight")
 
 assemblyJarName in assembly := s"${organizationName.value}-${name.value}-${version.value}.jar"
 

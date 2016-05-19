@@ -95,7 +95,7 @@ class GraphitePublisher extends DenseOutlierPublisher { outer: GraphitePublisher
   lazy val publishRequestMeter: Meter = metrics.meter( "request", "publish" )
   lazy val sendBatchRequestMeter: Meter = metrics.meter( "request", "sendBatch" )
 
-  val publishDispatcher: MessageDispatcher = context.system.dispatchers.lookup( "publish-dispatcher" )
+  val publishDispatcher: MessageDispatcher = context.system.dispatchers lookup "publishing-dispatcher"
 
   val circuitStatus: Agent[BreakerStatus] = Agent[BreakerStatus]( BreakerClosed )( publishDispatcher )
 

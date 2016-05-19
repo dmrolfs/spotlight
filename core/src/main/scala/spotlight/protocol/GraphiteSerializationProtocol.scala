@@ -33,11 +33,11 @@ object GraphiteSerializationProtocol extends LazyLogging {
 
 trait GraphiteSerializationProtocol {
   def framingFlow( maximumFrameLength: Int ): Flow[ByteString, ByteString, NotUsed]
-  def toDataPoints( bytes: ByteString ): List[TimeSeries]
+  def toTimeSeries( bytes: ByteString ): List[TimeSeries]
 
   def unmarshalTimeSeriesData: Flow[ByteString, TimeSeries, NotUsed] = {
     Flow[ByteString]
-    .mapConcat { toDataPoints }
+    .mapConcat { toTimeSeries }
     .withAttributes( ActorAttributes.supervisionStrategy(GraphiteSerializationProtocol.decider) )
   }
 }

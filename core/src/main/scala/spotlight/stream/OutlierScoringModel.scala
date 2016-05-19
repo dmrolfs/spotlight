@@ -149,16 +149,15 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
   }
 
   def filterPlanned( plans: Seq[OutlierPlan] )( implicit system: ActorSystem ): Flow[TimeSeries, TimeSeries, NotUsed] = {
-    Flow[TimeSeries]
-    .filter { ts => !isOutlierReport(ts) && isPlanned( ts, plans ) }
+    Flow[TimeSeries].filter { ts => !isOutlierReport(ts) && isPlanned( ts, plans ) }
   }
 
   def filterUnrecognized( plans: Seq[OutlierPlan] )( implicit system: ActorSystem ): Flow[TimeSeries, TimeSeries, NotUsed] = {
     Flow[TimeSeries].filter{ ts => !isOutlierReport(ts) }
   }
 
-  def isOutlierReport( ts: TimeSeriesBase ): Boolean = ts.topic.name.startsWith( OutlierMetricPrefix )
-  def isPlanned( ts: TimeSeriesBase, plans: Seq[OutlierPlan] ): Boolean = plans.exists{ _ appliesTo ts }
+  def isOutlierReport( ts: TimeSeriesBase ): Boolean = ts.topic.name startsWith OutlierMetricPrefix
+  def isPlanned( ts: TimeSeriesBase, plans: Seq[OutlierPlan] ): Boolean = plans exists { _ appliesTo ts }
 
   val debugLogger = Logger( LoggerFactory getLogger "Debug" )
 

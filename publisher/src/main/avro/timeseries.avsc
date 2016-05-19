@@ -1,5 +1,5 @@
 {
-  "namespace": "spotlight.api",
+  "namespace": "spotlight.publisher",
   "name": "TimeSeries",
   "type": "record",
   "fields": [

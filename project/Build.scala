@@ -1,9 +1,6 @@
 import sbt.Keys._
 import sbt._
-import sbtassembly._
 import sbtdocker.DockerPlugin
-import spray.revolver.RevolverPlugin._
-
 import BuildSettings._
 
 

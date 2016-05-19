@@ -115,7 +115,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
       val now = joda.DateTime.now
       val dp = makeDataPoints( points, start = now ).take( 5 )
       val expected = List( TimeSeries( "foobar", dp ) )
-      val actual = protocol.toDataPoints( pickledWithDefaultTopic(dp) )
+      val actual = protocol.toTimeSeries( pickledWithDefaultTopic( dp ) )
       actual mustBe expected
     }
 
@@ -126,7 +126,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
       val expected = TimeSeries( "foobar", dp )
 
       val flowUnderTest = protocol.unmarshalTimeSeriesData
-      //      val flowUnderTest = Flow[ByteString].mapConcat( PythonPickleProtocol.toDataPoints )
+      //      val flowUnderTest = Flow[ByteString].mapConcat( PythonPickleProtocol.toTimeSeries )
       val future = Source( List(pickledWithDefaultTopic(dp)) ).via( flowUnderTest ).runWith( Sink.head )
       val result = Await.result( future, 200.millis.dilated )
       result mustBe expected

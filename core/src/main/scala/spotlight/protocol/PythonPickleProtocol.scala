@@ -73,7 +73,7 @@ class PythonPickleProtocol extends GraphiteSerializationProtocol with LazyLoggin
 
   case class Metric( topic: Topic, timestamp: joda.DateTime, value: Double )
 
-  override def toDataPoints( bytes: ByteString ): List[TimeSeries] = {
+  override def toTimeSeries( bytes: ByteString ): List[TimeSeries] = {
     import scala.collection.convert.wrapAll._
     import net.razorvine.pickle.Unpickler
 
