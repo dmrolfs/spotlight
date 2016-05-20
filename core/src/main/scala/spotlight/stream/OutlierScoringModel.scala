@@ -67,7 +67,7 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
         Flow[TimeSeries].filter{ !isPlanned( _, config.plans ) }.via( watchUnrecognized )
       )
 
-      val planConcat = b.add(
+      val zipConcatWithPlans = b.add(
         Flow[TimeSeries]
         .map { ts => config.plans collect { case p if p appliesTo ts => (ts, p) } }
         .mapConcat { identity }
@@ -75,24 +75,24 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
 
       val combineByPlan = b.add( Flow[(TimeSeries, OutlierPlan)] .via( batchSeriesByPlan(100000) ) )
 
-      val planBuffer = b.add(
-        Flow[(TimeSeries, OutlierPlan)].buffer( 1000, OverflowStrategy.backpressure).watchFlow( Symbol("plan.buffer") )
+      val buffer = b.add(
+        Flow[(TimeSeries, OutlierPlan)].buffer( 1000, OverflowStrategy.backpressure ).watchFlow( Symbol("plan.buffer") )
       )
 
-      val plansDetectOutliers = b.add(
+      val detect = b.add(
         OutlierPlanDetectionRouter.elasticPlanDetectionRouterFlow(
           planDetectorRouterRef = planRouterRef,
           maxInDetectionCpuFactor = config.maxInDetectionCpuFactor
         )
       )
 
-      logMetrics ~> blockPriors ~> broadcast ~> passPlanned ~> planConcat ~> combineByPlan ~> planBuffer ~> plansDetectOutliers
+      logMetrics ~> blockPriors ~> broadcast ~> passPlanned ~> zipConcatWithPlans ~> combineByPlan ~> buffer ~> detect
                                    broadcast ~> passUnrecognized
 
       ScoringShape(
         FanOutShape.Ports(
           inlet = logMetrics.in,
-          outlets = scala.collection.immutable.Seq( plansDetectOutliers.out, passUnrecognized.out )
+          outlets = scala.collection.immutable.Seq( detect.out, passUnrecognized.out )
         )
       )
     }

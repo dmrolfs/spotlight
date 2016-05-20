@@ -12,7 +12,7 @@ import nl.grons.metrics.scala.Meter
 
 import scalaz.\/-
 import peds.akka.metrics.InstrumentedActor
-import peds.akka.stream.{ProcessorAdapter, StreamEgress, StreamIngress, StreamMonitor}
+import peds.akka.stream.{MaxInFlightProcessorAdapter, StreamEgress, StreamIngress, StreamMonitor}
 import spotlight.analysis.outlier.OutlierDetection.DetectionResult
 import spotlight.model.outlier.{OutlierPlan, Outliers}
 import spotlight.model.timeseries.{TimeSeries, TimeSeriesBase}
@@ -47,9 +47,9 @@ object OutlierPlanDetectionRouter extends LazyLogging {
     implicit system: ActorSystem,
     materializer: Materializer
   ): Flow[(TimeSeries, OutlierPlan), Outliers, NotUsed] = {
-    ProcessorAdapter.elasticProcessorFlow[(TimeSeries, OutlierPlan), Outliers](
-      maxInDetectionCpuFactor,
-      label = WatchPoints.PlanRouter
+    MaxInFlightProcessorAdapter.elasticProcessorFlow[(TimeSeries, OutlierPlan), Outliers](
+      name = WatchPoints.PlanRouter.name,
+      maxInDetectionCpuFactor
     ) {
       case m => planDetectorRouterRef
     }
@@ -224,9 +224,9 @@ class OutlierPlanDetectionRouter extends Actor with InstrumentedActor with Actor
     .map { ts => OutlierDetectionMessage( ts, plan ).disjunction }
     .collect { case \/-( m ) => m }
     .via {
-      ProcessorAdapter.elasticProcessorFlow[OutlierDetectionMessage, DetectionResult](
-        outer.maxInDetectionCpuFactor,
-        label
+      MaxInFlightProcessorAdapter.elasticProcessorFlow[OutlierDetectionMessage, DetectionResult](
+        label.name,
+        outer.maxInDetectionCpuFactor
       ) {
         case m => outer.detector
       }

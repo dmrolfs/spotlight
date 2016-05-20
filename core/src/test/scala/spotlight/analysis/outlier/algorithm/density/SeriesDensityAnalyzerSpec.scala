@@ -320,7 +320,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
         if ( left == 0 ) () else loop( i + 1, left - 1, Some( (s, h) ) )
       }
 
-      loop( 0, 20 )
+      loop( 0, 30 )
 //      val s1 = TimeSeries( topic, Seq( DataPoint(start, 1.0) ) )
 //      val h1 = HistoricalStatistics.fromActivePoints( DataPoint.toDoublePoints(s1.points).toArray, false )
 //      analyzer receive detectUsing( s1, h1 )

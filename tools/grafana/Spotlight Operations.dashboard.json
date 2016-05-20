@@ -59,11 +59,11 @@
             "alignAsTable": true,
             "rightSide": true
           },
-          "nullPointMode": "connected",
+          "nullPointMode": "null",
           "steppedLine": true,
           "tooltip": {
             "value_type": "cumulative",
-            "shared": false
+            "shared": true
           },
           "targets": [
             {
@@ -138,11 +138,11 @@
             "alignAsTable": true,
             "rightSide": true
           },
-          "nullPointMode": "connected",
+          "nullPointMode": "null",
           "steppedLine": false,
           "tooltip": {
             "value_type": "cumulative",
-            "shared": false
+            "shared": true
           },
           "targets": [
             {
@@ -216,11 +216,11 @@
             "alignAsTable": true,
             "rightSide": false
           },
-          "nullPointMode": "connected",
+          "nullPointMode": "null",
           "steppedLine": false,
           "tooltip": {
             "value_type": "cumulative",
-            "shared": false
+            "shared": true
           },
           "targets": [
             {
@@ -572,11 +572,11 @@
             "rightSide": false,
             "hideEmpty": true
           },
-          "nullPointMode": "connected",
+          "nullPointMode": "null",
           "steppedLine": false,
           "tooltip": {
             "value_type": "individual",
-            "shared": false
+            "shared": true
           },
           "targets": [
             {
@@ -629,18 +629,21 @@
             "total": false,
             "avg": false
           },
-          "nullPointMode": "connected",
+          "nullPointMode": "null",
           "steppedLine": false,
           "tooltip": {
-            "value_type": "cumulative",
-            "shared": false
+            "value_type": "individual",
+            "shared": true
           },
           "targets": [
             {
-              "target": "spotlight.analysis.outlier.algorithm.dbscanSeries.p95"
+              "target": "aliasByNode(spotlight.analysis.outlier.algorithm.dbscanSeries.p95, 4)"
             },
             {
-              "target": "spotlight.analysis.outlier.algorithm.dbscanSeries.cluster.p95"
+              "target": "aliasByNode(spotlight.analysis.outlier.algorithm.dbscanSeries.cluster.p95, 5)"
+            },
+            {
+              "target": "alias(derivative(spotlight.analysis.outlier.algorithm.dbscanSeries.cluster.p95), 'cluster - derivative')"
             }
           ],
           "aliasColors": {},
@@ -689,11 +692,11 @@
             "total": false,
             "avg": false
           },
-          "nullPointMode": "connected",
+          "nullPointMode": "null",
           "steppedLine": false,
           "tooltip": {
             "value_type": "cumulative",
-            "shared": false
+            "shared": true
           },
           "targets": [
             {
@@ -744,8 +747,9 @@
     }
   ],
   "time": {
-    "from": "now-5m",
-    "to": "now"
+    "from": "now-24h",
+    "to": "now",
+    "now": true
   },
   "templating": {
     "list": []
@@ -753,7 +757,7 @@
   "annotations": {
     "list": []
   },
-  "refresh": "5s",
+  "refresh": "1m",
   "version": 6,
   "hideAllLegends": false
 }
