@@ -74,6 +74,7 @@ class FirstHourAverageAnalyzer( override val router: ActorRef ) extends CommonAn
   override def algorithm: Symbol = FirstHourAverageAnalyzer.Algorithm
 
   override def wrapContext(c: AlgorithmContext ): Valid[WrappingContext] = {
+//todo: bad recreating summary stats for each pt!!!  need to retain and build incrementally (is this the case in other algos?)
     makeFirstHourStatistics( c ) map { firstHour => Context( underlying = c, firstHour = firstHour ) }
   }
 
