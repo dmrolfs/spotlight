@@ -61,7 +61,7 @@ object OutlierPlanDetectionRouter extends LazyLogging {
   }
 
 
-  final case class Key private[outlier]( planId: OutlierPlan.TID, subscriber: ActorRef ) extends Equals {
+  final case class Key private[outlier]( planId: OutlierPlan#TID, subscriber: ActorRef ) extends Equals {
     override def canEqual( rhs : Any ): Boolean = rhs.isInstanceOf[Key]
 
     override def hashCode(): Int = {

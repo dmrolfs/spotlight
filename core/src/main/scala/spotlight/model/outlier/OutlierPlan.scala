@@ -2,9 +2,10 @@ package spotlight.model.outlier
 
 import scala.concurrent.duration._
 import scala.util.matching.Regex
-import com.typesafe.config.{ Config, ConfigFactory, ConfigOrigin }
+import com.typesafe.config.{Config, ConfigFactory, ConfigOrigin}
+import peds.archetype.domain.model.core.{Entity, EntityCompanion}
 import peds.commons._
-import peds.commons.identifier.{ ShortUUID, TaggedID }
+import peds.commons.identifier.{ShortUUID, TaggedID}
 import peds.commons.util._
 import spotlight.model.timeseries.Topic
 
@@ -12,9 +13,10 @@ import spotlight.model.timeseries.Topic
 /**
  * Created by rolfsd on 10/4/15.
  */
-sealed trait OutlierPlan extends Equals {
-  def id: OutlierPlan.TID
-  def name: String
+sealed trait OutlierPlan extends Entity with Equals {
+  override type ID = ShortUUID
+  override def idClass: Class[_] = classOf[ShortUUID]
+
   def appliesTo: OutlierPlan.AppliesTo
   def algorithms: Set[Symbol]
   def grouping: Option[OutlierPlan.Grouping]
@@ -45,7 +47,51 @@ sealed trait OutlierPlan extends Equals {
   private[outlier] def typeOrder: Int
 }
 
-object OutlierPlan {
+object OutlierPlan extends EntityCompanion[OutlierPlan] {
+  import shapeless._
+
+  override def nextId(): OutlierPlan#TID = ShortUUID()
+  override val idTag: Symbol = 'outlierPlan
+  override implicit def tag( id: OutlierPlan#ID ): OutlierPlan#TID = TaggedID( idTag, id )
+
+  override val idLens: Lens[OutlierPlan, OutlierPlan#TID] = new Lens[OutlierPlan, OutlierPlan#TID] {
+    override def get( p: OutlierPlan ): OutlierPlan#TID = p.id
+    override def set( p: OutlierPlan )( id: OutlierPlan#TID ): OutlierPlan = {
+      SimpleOutlierPlan(
+        id = id,
+        name = p.name,
+        appliesTo = p.appliesTo,
+        algorithms = p.algorithms,
+        grouping = p.grouping,
+        timeout = p.timeout,
+        isQuorum = p.isQuorum,
+        reduce = p.reduce,
+        algorithmConfig = p.algorithmConfig,
+        origin = p.origin,
+        typeOrder = p.typeOrder
+      )
+    }
+  }
+
+  override val nameLens: Lens[OutlierPlan, String] = new Lens[OutlierPlan, String] {
+    override def get( p: OutlierPlan ): String = p.name
+    override def set( p: OutlierPlan )( name: String ): OutlierPlan = {
+      SimpleOutlierPlan(
+        id = p.id,
+        name = name,
+        appliesTo = p.appliesTo,
+        algorithms = p.algorithms,
+        grouping = p.grouping,
+        timeout = p.timeout,
+        isQuorum = p.isQuorum,
+        reduce = p.reduce,
+        algorithmConfig = p.algorithmConfig,
+        origin = p.origin,
+        typeOrder = p.typeOrder
+      )
+    }
+  }
+
   val AlgorithmConfig: String = "algorithm-config"
 
   type ExtractTopic = PartialFunction[Any, Option[Topic]]
@@ -220,15 +266,8 @@ object OutlierPlan {
   }
 
 
-  type ID = ShortUUID
-  type TID = TaggedID[ID]
-  val idTag: Symbol = 'plan
-  def nextId: TID = ShortUUID()
-  implicit def tag( id: ID ): TID = TaggedID( idTag, id )
-
-
   final case class SimpleOutlierPlan private[outlier] (
-    override val id: TID,
+    override val id: OutlierPlan#TID,
     override val name: String,
     override val appliesTo: OutlierPlan.AppliesTo,
     override val algorithms: Set[Symbol],
