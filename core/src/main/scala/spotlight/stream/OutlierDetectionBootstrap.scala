@@ -137,13 +137,21 @@ class OutlierDetectionBootstrap(
     case _: ActorKilledException => Stop
 
     case ex: InvalidActorNameException => {
-      log.warning( "{} restarting on caught invalid actor name: [{}]", getClass.safeSimpleName, ex)
+      log.error(
+        "{} restarting on caught invalid actor name: [{}]",
+        classOf[OutlierDetectionBootstrap].safeSimpleName,
+        ex
+      )
       failuresMeter.mark()
       Restart
     }
 
     case ex: Exception => {
-      log.warning( "{} restarting on caught exception from child: [{}]", getClass.safeSimpleName, ex )
+      log.error(
+        "{} restarting on caught exception from child: [{}]",
+        classOf[OutlierDetectionBootstrap].safeSimpleName,
+        ex
+      )
       failuresMeter.mark()
       Restart
     }
