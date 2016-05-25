@@ -2,7 +2,7 @@ package spotlight.analysis.outlier
 
 import scala.concurrent.{Await, Future, TimeoutException}
 import scala.concurrent.duration._
-import akka.actor.{ActorRef, Props}
+import akka.actor.Props
 import akka.persistence.RecoveryCompleted
 import com.typesafe.config.{Config, ConfigFactory, ConfigObject}
 import shapeless._
@@ -129,7 +129,7 @@ object Catalog extends EntityCompanion[Catalog] {
   case class PlanRemoved( override val sourceId: Catalog#TID, planId: OutlierPlan#TID ) extends Event with CatalogProtocol
 
 
-  object CatalogAggregateRoot {
+  object AggregateRoot {
     val builderFactory: EntityAggregateModule.BuilderFactory[CatalogState] = EntityAggregateModule.builderFor[CatalogState]
 
     val module: EntityAggregateModule[CatalogState] = {
@@ -232,7 +232,15 @@ object Catalog extends EntityCompanion[Catalog] {
         }
       }
 
-      override def active: Receive = catalog //super.active orElse catalog
+      //todo dmr WORK HERE
+      val plan: Receive = {
+        case e: OutlierPlan.PlanChanged => throw new IllegalStateException( "TBD handle: "+e )
+        case e: OutlierPlan.Added => throw new IllegalStateException( "TBD handle: "+e )
+        case e: OutlierPlan.Disabled => throw new IllegalStateException( "TBD handle: "+e )
+        case e: OutlierPlan.Enabled => throw new IllegalStateException( "TBD handle: "+e )
+      }
+
+      override def active: Receive = catalog orElse super.active //orElse catalog
 
       private def makePlans( planSpecifications: Config, budget: FiniteDuration ): Set[OutlierPlan] = {
         import scala.collection.JavaConversions._
