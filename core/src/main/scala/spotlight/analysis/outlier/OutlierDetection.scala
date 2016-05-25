@@ -125,20 +125,26 @@ with ActorLogging {
     }
   }
 
-  val fullExtractId: OutlierPlan.ExtractTopic = OutlierDetection.extractOutlierDetectionTopic orElse { case _ => None }
+  val fullExtractTopic: OutlierPlan.ExtractTopic = OutlierDetection.extractOutlierDetectionTopic orElse { case _ => None }
 
   def aggregatorNameForMessage( m: OutlierDetectionMessage, p: OutlierPlan ): String = {
-    val extractedId = fullExtractId( m ) getOrElse {
+    val extractedTopic = fullExtractTopic( m ) getOrElse {
       log.warning( "OutlierDetection failed to extract ID from message:[{}] and plan:[{}]", m, p )
       "__UNKNOWN_ID__"
     }
 
-    val name = s"""quorum-${p.name}-${extractedId}-${ShortUUID()}"""
+    val uuid = ShortUUID()
+    val name = s"""quorum-${p.name}-${extractedTopic.toString}-${uuid.toString}"""
 
     if ( ActorPath isValidPathElement name ) name
     else {
-      val blunted = name.replaceAll( """[\]\[;/?:@&=+$,]""", "_" )
-      log.warning( "OutlierDetection attempting to dispatch to invalid aggregator name: [{}] blunting to [{}]", name, blunted )
+      val blunted = name.replaceAll( """[\.\[\];/?:@&=+$,]""", "_" )
+      log.warning( "OutlierDetection attempting to dispatch to invalid aggregator" )
+      log.warning(
+        " + (plan-name, extractedTopic, uuid):[{}]  name:{}  blunting to:{}", (p.name, extractedTopic.toString, uuid.toString)
+      )
+      log.warning( " + attempted name:{}", name )
+      log.warning( " + blunted name:{}", blunted )
       blunted
     }
   }
