@@ -2,7 +2,12 @@ package spotlight.model.outlier
 
 import scala.concurrent.duration._
 import scala.util.matching.Regex
+import akka.actor.Props
 import com.typesafe.config.{Config, ConfigFactory, ConfigOrigin}
+import demesne.{AggregateRootType, DomainModel}
+import demesne.module.EntityAggregateModule
+import demesne.register.StackableRegisterBusPublisher
+import peds.akka.publish.{EventPublisher, StackableStreamPublisher}
 import peds.archetype.domain.model.core.{Entity, EntityCompanion}
 import peds.commons._
 import peds.commons.identifier.{ShortUUID, TaggedID}
@@ -17,6 +22,7 @@ sealed trait OutlierPlan extends Entity with Equals {
   override type ID = ShortUUID
   override def idClass: Class[_] = classOf[ShortUUID]
 
+  override def slug: String = name
   def appliesTo: OutlierPlan.AppliesTo
   def algorithms: Set[Symbol]
   def grouping: Option[OutlierPlan.Grouping]
@@ -25,6 +31,7 @@ sealed trait OutlierPlan extends Entity with Equals {
   def reduce: ReduceOutliers
   def algorithmConfig: Config
   def summary: String
+  def isActive: Boolean
 
   override def hashCode: Int = 41 + id.##
 
@@ -51,7 +58,7 @@ object OutlierPlan extends EntityCompanion[OutlierPlan] {
   import shapeless._
 
   override def nextId(): OutlierPlan#TID = ShortUUID()
-  override val idTag: Symbol = 'outlierPlan
+  override val idTag: Symbol = 'plan
   override implicit def tag( id: OutlierPlan#ID ): OutlierPlan#TID = TaggedID( idTag, id )
 
   override val idLens: Lens[OutlierPlan, OutlierPlan#TID] = new Lens[OutlierPlan, OutlierPlan#TID] {
@@ -68,7 +75,8 @@ object OutlierPlan extends EntityCompanion[OutlierPlan] {
         reduce = p.reduce,
         algorithmConfig = p.algorithmConfig,
         origin = p.origin,
-        typeOrder = p.typeOrder
+        typeOrder = p.typeOrder,
+        isActive = p.isActive
       )
     }
   }
@@ -87,10 +95,32 @@ object OutlierPlan extends EntityCompanion[OutlierPlan] {
         reduce = p.reduce,
         algorithmConfig = p.algorithmConfig,
         origin = p.origin,
-        typeOrder = p.typeOrder
+        typeOrder = p.typeOrder,
+        isActive = p.isActive
       )
     }
   }
+
+  val isActiveLens: Lens[OutlierPlan, Boolean] = new Lens[OutlierPlan, Boolean] {
+    override def get( p: OutlierPlan ): Boolean = p.isActive
+    override def set( p: OutlierPlan )( a: Boolean ): OutlierPlan = {
+      SimpleOutlierPlan(
+        id = p.id,
+        name = p.name,
+        appliesTo = p.appliesTo,
+        algorithms = p.algorithms,
+        grouping = p.grouping,
+        timeout = p.timeout,
+        isQuorum = p.isQuorum,
+        reduce = p.reduce,
+        algorithmConfig = p.algorithmConfig,
+        origin = p.origin,
+        typeOrder = p.typeOrder,
+        isActive = a
+      )
+    }
+  }
+
 
   val AlgorithmConfig: String = "algorithm-config"
 
@@ -277,7 +307,8 @@ object OutlierPlan extends EntityCompanion[OutlierPlan] {
     override val reduce: ReduceOutliers,
     override val algorithmConfig: Config,
     override private[outlier] val origin: ConfigOrigin,
-    override private[outlier] val typeOrder: Int
+    override private[outlier] val typeOrder: Int,
+    override val isActive: Boolean = true
   ) extends OutlierPlan {
     override val summary: String = getClass.safeSimpleName + s"""(${name} ${appliesTo.toString})"""
 
@@ -289,6 +320,55 @@ object OutlierPlan extends EntityCompanion[OutlierPlan] {
         s"""algorithms:[${algorithms.mkString(",")}], timeout:[${timeout.toCoarsest}], """ +
         s"""grouping:[${grouping}], algorithm-config:[${algorithmConfig.root}]""" +
         ")"
+    }
+  }
+
+
+  object AggregateRoot {
+    val module: EntityAggregateModule[OutlierPlan] = {
+      val b = EntityAggregateModule.builderFor[OutlierPlan].make
+      import b.P.{ Tag => BTag, Props => BProps, _ }
+
+      b
+      .builder
+      .set( BTag, OutlierPlan.idTag )
+      .set( BProps, OutlierPlanActor.props(_, _) )
+      .set( IdLens, idLens )
+      .set( NameLens, nameLens )
+      .set( IsActiveLens, Some(isActiveLens) )
+      .build()
+    }
+
+
+    object Protocol extends module.Protocol {
+      sealed trait PlanProtocol
+      //todo add plan change commands
+      //todo reify algorithm
+      //      case class AddAlgorithm( override val targetId: OutlierPlan#TID, algorithm: Symbol ) extends Command with PlanProtocol
+      case object GetSummary extends PlanProtocol
+      case class Summary( sourceId: OutlierPlan#TID, plan: OutlierPlan ) extends PlanProtocol
+
+      case class PlanChanged( override val sourceId: OutlierPlan#TID, plan: OutlierPlan ) extends Event with PlanProtocol
+    }
+
+    object OutlierPlanActor {
+      def props( model: DomainModel, meta: AggregateRootType ): Props = {
+        Props( new OutlierPlanActor( model, meta ) with StackableStreamPublisher with StackableRegisterBusPublisher )
+      }
+    }
+
+    class OutlierPlanActor( override val model: DomainModel, override val meta: AggregateRootType )
+    extends module.EntityAggregateActor { publisher: EventPublisher =>
+      import Protocol._
+
+      override var state: OutlierPlan = _
+
+      //todo add plan modification
+      val plan: Receive = {
+        case GetSummary => sender() ! Summary( state.id, state )
+      }
+
+      override def active: Receive = plan orElse super.active
     }
   }
 
@@ -342,161 +422,3 @@ object OutlierPlan extends EntityCompanion[OutlierPlan] {
     }
   }
 }
-
-
-
-//case class OutlierPlan(
-//  name: String,
-//  algorithms: Set[Symbol],
-//  timeout: FiniteDuration,
-//  isQuorum: IsQuorum,
-//  reduce: ReduceOutliers,
-//  algorithmProperties: Map[String, Any] = Map()
-//) {
-//  override def toString: String = s"${getClass.safeSimpleName}($name)"
-//}
-//
-//object OutlierPlan {
-//  val nameLens: Lens[OutlierPlan, String] = lens[OutlierPlan] >> 'name
-//  val algorithmsLens: Lens[OutlierPlan, Set[Symbol]] = lens[OutlierPlan] >> 'algorithms
-//  val timeoutLens: Lens[OutlierPlan, FiniteDuration] = lens[OutlierPlan] >> 'timeout
-//  val isQuorumLens: Lens[OutlierPlan, IsQuorum] = lens[OutlierPlan] >> 'isQuorum
-//  val reduceLens: Lens[OutlierPlan, ReduceOutliers] = lens[OutlierPlan] >> 'reduce
-//  val algorithmPropertiesLens: Lens[OutlierPlan, Map[String, Any]] = lens[OutlierPlan] >> 'algorithmProperties
-//}
-
-
-//trait OutlierPlan extends Entity {
-//  override type ID = ShortUUID
-//  override def idClass: Class[_] = classOf[ShortUUID]
-//
-//  def algorithms: Set[String]
-//  def algorithmProperties: Map[String, Any]
-//  def timeout: FiniteDuration
-//  def isQuorum: IsQuorum
-//  def reduce: ReduceOutliers
-//}
-//
-//object OutlierPlan extends EntityCompanion[OutlierPlan] {
-//  override def idTag: Symbol = 'outlierPlan
-//  override def nextId: OutlierPlan#TID = ShortUUID()
-//  override implicit def tag( id: OutlierPlan#ID ): OutlierPlan#TID = TaggedID( idTag, id )
-//
-//  def apply(
-//    id: OutlierPlan#TID,
-//    name: String,
-//    slug: String,
-//    algorithms: Set[String],
-//    timeout: FiniteDuration,
-//    isQuorum: IsQuorum,
-//    reduce: ReduceOutliers,
-//    algorithmProperties: Map[String, Any] = Map()
-//  ): V[OutlierPlan] = {
-//    ( checkId(id) |@| checkAlgorithms(algorithms) ) { (i, a) =>
-//      SimpleOutlierPlan(
-//        id = i,
-//        name = name,
-//        slug = slug,
-//        algorithms = a,
-//        timeout = timeout,
-//        isQuorum = isQuorum,
-//        reduce = reduce,
-//        algorithmProperties = algorithmProperties
-//      )
-//    }
-//  }
-//
-//  private def checkId( id: OutlierPlan#TID ): V[OutlierPlan#TID] = {
-//    if ( id.tag != idTag ) InvalidIdError( id ).failureNel
-//    else id.successNel
-//  }
-//
-//  private def checkAlgorithms( algorithms: Set[String] ): V[Set[String]] = {
-//    if ( algorithms.isEmpty ) InvalidAlgorithmError( algorithms ).failureNel
-//    else algorithms.successNel
-//  }
-//
-//
-//  override def idLens: Lens[OutlierPlan, OutlierPlan#TID] = new Lens[OutlierPlan, OutlierPlan#TID] {
-//    override def get( p: OutlierPlan ): OutlierPlan#TID = p.id
-//    override def set( p: OutlierPlan )( i: OutlierPlan#TID ): OutlierPlan = {
-//      OutlierPlan(
-//        id = i,
-//        name = p.name,
-//        slug = p.slug,
-//        algorithms = p.algorithms,
-//        timeout = p.timeout,
-//        isQuorum = p.isQuorum,
-//        reduce = p.reduce,
-//        algorithmProperties = p.algorithmProperties
-//      ) valueOr { exs => throw exs.head }
-//    }
-//  }
-//
-//  override def nameLens: Lens[OutlierPlan, String] = new Lens[OutlierPlan, String] {
-//    override def get( p: OutlierPlan ): String = p.name
-//    override def set( p: OutlierPlan)( n: String ): OutlierPlan = {
-//      OutlierPlan(
-//        id = p.id,
-//        name = n,
-//        slug = p.slug,
-//        algorithms = p.algorithms,
-//        timeout = p.timeout,
-//        isQuorum = p.isQuorum,
-//        reduce = p.reduce,
-//        algorithmProperties = p.algorithmProperties
-//      ) valueOr { exs => throw exs.head }
-//    }
-//  }
-//
-//  def slugLens: Lens[OutlierPlan, String] = new Lens[OutlierPlan, String] {
-//    override def get( p: OutlierPlan ): String = p.slug
-//    override def set( p: OutlierPlan)( s: String ): OutlierPlan = {
-//      OutlierPlan(
-//        id = p.id,
-//        name = p.name,
-//        slug = s,
-//        algorithms = p.algorithms,
-//        timeout = p.timeout,
-//        isQuorum = p.isQuorum,
-//        reduce = p.reduce,
-//        algorithmProperties = p.algorithmProperties
-//      ) valueOr { exs => throw exs.head }
-//    }
-//  }
-//
-//
-//  final case class SimpleOutlierPlan private[outlier](
-//    override val id: OutlierPlan#TID,
-//    override val name: String,
-//    override val slug: String,
-//    override val algorithms: Set[String],
-//    override val timeout: FiniteDuration,
-//    override val isQuorum: IsQuorum,
-//    override val reduce: ReduceOutliers,
-//    override val algorithmProperties: Map[String, Any] = Map()
-//  ) extends OutlierPlan with Equals {
-//    override def canEqual( rhs: Any ): Boolean = rhs.isInstanceOf[SimpleOutlierPlan]
-//
-//    override def equals( rhs: Any ): Boolean = rhs match {
-//      case that: SimpleOutlierPlan => {
-//        if ( this eq that ) true
-//        else {
-//          ( that.## == this.## ) &&
-//          ( that canEqual this ) &&
-//          ( this.id == that.id )
-//        }
-//      }
-//
-//      case _ => false
-//    }
-//
-//    override def hashCode: Int = {
-//      41 * (
-//        41 + id.##
-//      )
-//    }
-//
-//    override def toString: String = s"${getClass.safeSimpleName}($name)"
-//  }
-//}

@@ -1,20 +1,22 @@
 package spotlight.analysis.outlier
 
-import scala.concurrent.{Await, Future, TimeoutException}
+import scala.concurrent.{Await, ExecutionContext, Future, TimeoutException}
 import scala.concurrent.duration._
+import scala.util.matching.Regex
 import akka.actor.Props
+import akka.pattern.ask
 import akka.persistence.RecoveryCompleted
+import akka.util.Timeout
 import com.typesafe.config.{Config, ConfigFactory, ConfigObject}
 import shapeless._
-import demesne.{AggregateRootModule, AggregateRootType, DomainModel}
+import demesne.{AggregateRootType, DomainModel}
 import demesne.module.EntityAggregateModule
+import demesne.register.StackableRegisterBusPublisher
 import peds.akka.publish.{EventPublisher, StackableStreamPublisher}
 import peds.archetype.domain.model.core.{Entity, EntityCompanion}
 import peds.commons.identifier.{ShortUUID, TaggedID}
 import spotlight.model.outlier.{IsQuorum, OutlierPlan, ReduceOutliers}
 import spotlight.model.timeseries.Topic
-
-import scala.util.matching.Regex
 
 
 /**
@@ -105,7 +107,36 @@ object Catalog extends EntityCompanion[Catalog] {
     }
   }
 
-   case class CatalogState (
+  val analysisPlansLens: Lens[Catalog, Map[String, OutlierPlan#TID]] = new Lens[Catalog, Map[String, OutlierPlan#TID]] {
+    override def get( c: Catalog ): Map[String, OutlierPlan#TID] = c.analysisPlans
+    override def set( c: Catalog )( ps: Map[String, OutlierPlan#TID] ): Catalog = {
+      CatalogState(
+        id = c.id,
+        name = c.name,
+        slug = c.slug,
+        configuration = c.configuration,
+        analysisPlans = ps,
+        isActive = c.isActive
+      )
+    }
+  }
+
+  val configurationLens: Lens[Catalog, Config] = new Lens[Catalog, Config] {
+    override def get( c: Catalog ): Config = c.configuration
+    override def set( c: Catalog )( config: Config ): Catalog = {
+      CatalogState(
+        id = c.id,
+        name = c.name,
+        slug = c.slug,
+        configuration = config,
+        analysisPlans = c.analysisPlans,
+        isActive = c.isActive
+      )
+    }
+  }
+
+
+  final case class CatalogState private[Catalog](
     override val id: Catalog#TID,
     override val name: String,
     override val slug: String,
@@ -115,58 +146,76 @@ object Catalog extends EntityCompanion[Catalog] {
   ) extends Catalog
 
 
-  type Command = AggregateRootModule.Command[Catalog#ID]
-  type Event = AggregateRootModule.Event[Catalog#ID]
-
-  sealed trait CatalogProtocol
-  case class GetPlansForTopic( targetId: Catalog#TID, topic: Topic ) extends CatalogProtocol
-  case class CatalogedPlans( sourceId: Catalog#TID, plans: Set[OutlierPlan] ) extends CatalogProtocol
-
-  case class AddPlan( override val targetId: Catalog#TID, planId: OutlierPlan#TID ) extends Command with CatalogProtocol
-  case class RemovePlan( override val targetId: Catalog#TID, planId: OutlierPlan#TID ) extends Command with CatalogProtocol
-
-  case class PlanAdded( override val sourceId: Catalog#TID, planId: OutlierPlan#TID ) extends Event with CatalogProtocol
-  case class PlanRemoved( override val sourceId: Catalog#TID, planId: OutlierPlan#TID ) extends Event with CatalogProtocol
-
 
   object AggregateRoot {
-    val builderFactory: EntityAggregateModule.BuilderFactory[CatalogState] = EntityAggregateModule.builderFor[CatalogState]
-
-    val module: EntityAggregateModule[CatalogState] = {
-      val b = builderFactory.make
+    val module: EntityAggregateModule[Catalog] = {
+      val b = EntityAggregateModule.builderFor[Catalog].make
       import b.P.{ Tag => BTag, Props => BProps, _ }
 
       b
       .builder
       .set( BTag, Catalog.idTag )
       .set( BProps, CatalogActor.props(_, _) )
-      .set( IdLens, lens[CatalogState] >> 'id )
-      .set( NameLens, lens[CatalogState] >> 'name )
-      .set( SlugLens, Some(lens[CatalogState] >> 'slug) )
-      .set( IsActiveLens, Some(lens[CatalogState] >> 'isActive) )
+      .set( IdLens, idLens )
+      .set( NameLens, nameLens )
+      .set( SlugLens, Some(slugLens) )
+      .set( IsActiveLens, Some(isActiveLens) )
       .build()
     }
 
+    object Protocol extends module.Protocol {
+      sealed trait CatalogProtocol
+      case class GetPlansForTopic( targetId: Catalog#TID, topic: Topic ) extends CatalogProtocol
+      case class CatalogedPlans( sourceId: Catalog#TID, plans: Set[OutlierPlan] ) extends CatalogProtocol
+
+      case class AddPlan(
+        override val targetId: Catalog#TID,
+        planId: OutlierPlan#TID,
+        name: String
+      ) extends Command with CatalogProtocol
+
+      case class RemovePlan(
+        override val targetId: Catalog#TID,
+        planId: OutlierPlan#TID,
+        name: String
+      ) extends Command with CatalogProtocol
+
+      case class PlanAdded(
+        override val sourceId: Catalog#TID,
+        planId: OutlierPlan#TID,
+        name: String
+      ) extends Event with CatalogProtocol
+
+      case class PlanRemoved(
+        override val sourceId: Catalog#TID,
+        planId: OutlierPlan#TID,
+        name: String
+      ) extends Event with CatalogProtocol
+    }
 
     object CatalogActor {
       def props( model: DomainModel, meta: AggregateRootType ): Props = {
-        Props( new CatalogActor( model, meta ) with StackableStreamPublisher )
+        Props( new CatalogActor( model, meta ) with StackableStreamPublisher with StackableRegisterBusPublisher )
       }
     }
 
     class CatalogActor( override val model: DomainModel, override val meta: AggregateRootType )
     extends module.EntityAggregateActor { publisher: EventPublisher =>
-      override var state: CatalogState = _
+      import OutlierPlan.AggregateRoot.{ Protocol => PlanProtocol }
+
+      override var state: Catalog = _
 
       var plansCache: Map[String, OutlierPlan] = Map.empty[String, OutlierPlan]
 
 
       override def preStart(): Unit = {
         super.preStart( )
-        context.system.eventStream.subscribe( self, classOf[OutlierPlan.PlanChanged] )
-        context.system.eventStream.subscribe( self, classOf[OutlierPlan.Added] )
-        context.system.eventStream.subscribe( self, classOf[OutlierPlan.Disabled] )
-        context.system.eventStream.subscribe( self, classOf[OutlierPlan.Enabled] )
+
+        import OutlierPlan.AggregateRoot.{ Protocol => PlanProtocol }
+        context.system.eventStream.subscribe( self, classOf[PlanProtocol.PlanChanged] )
+        context.system.eventStream.subscribe( self, classOf[PlanProtocol.Entity.Added] )
+        context.system.eventStream.subscribe( self, classOf[PlanProtocol.Entity.Disabled] )
+        context.system.eventStream.subscribe( self, classOf[PlanProtocol.Entity.Enabled] )
       }
 
       override def receiveRecover: Receive = {
@@ -174,6 +223,8 @@ object Catalog extends EntityCompanion[Catalog] {
           val config = ConfigFactory.load()
           val configPlans: Set[OutlierPlan] = makePlans( config.getConfig(ConfigPaths.DETECTION_PLANS), detectionBudget(config) )
           val (oldPlans, newPlans) = configPlans partition { state.analysisPlans contains _.name }
+          implicit val ec = context.system.dispatcher
+          implicit val timeout = Timeout( 5.seconds )
 
           val plans = for {
             existing <- loadExistingCacheElements( oldPlans )
@@ -189,42 +240,59 @@ object Catalog extends EntityCompanion[Catalog] {
       }
 
 
-      def loadExistingCacheElements( plans: Set[OutlierPlan] ): Future[Map[String, OutlierPlan]] = {
+      def loadExistingCacheElements(
+        plans: Set[OutlierPlan]
+      )(
+        implicit ec: ExecutionContext,
+        to: Timeout
+      ): Future[Map[String, OutlierPlan]] = {
         val queries = {
           plans.toSeq
           .map { p =>
-//                          Future { ( p.name, p) }
-            val planRef = model.aggregateOf( OutlierPlan.module.aggregateRootType, p.id )
-            val planSummary = ( planRef ? OutlierPlan.GetSummary ).mapTo[OutlierPlan.Summary].plan
-            ( p.name, planSummary )
+            val planRef = model.aggregateOf( OutlierPlan.AggregateRoot.module.aggregateRootType, p.id )
+
+            ( planRef ? PlanProtocol.GetSummary )
+            .mapTo[PlanProtocol.Summary]
+            .map { summary => ( p.name, summary.plan ) }
           }
         }
 
         Future.sequence( queries ) map { qs => Map( qs:_* ) }
       }
 
-      def makeNewCacheElements( plans: Set[OutlierPlan] ): Future[Map[String, OutlierPlan]] = {
+      def makeNewCacheElements(
+        plans: Set[OutlierPlan]
+      )(
+        implicit ec: ExecutionContext,
+        to: Timeout
+      ): Future[Map[String, OutlierPlan]] = {
         val queries = {
           plans.toSeq
           .map { p =>
-            val planRef = model.aggregateOf( OutlierPlan.module.aggregateRootType, p.id )
-            val planSummary = ( planRef ? OutlierPlan.module.Add( p ) ).mapTo[OutlierPlan.module.Added].info
-            ( p.name, planSummary )
+            val planRef = model.aggregateOf( OutlierPlan.AggregateRoot.module.aggregateRootType, p.id )
+
+            ( planRef ? PlanProtocol.Entity.Add( p ) )
+            .mapTo[PlanProtocol.Entity.Added]
+            .map { evt => ( p.name, evt.info ) }
           }
         }
+
+        Future.sequence( queries ) map { qs => Map( qs:_* ) }
       }
 
       //todo upon add watch plan actor for changes and incorporate them in to cache
       //todo the cache is what is sent out in reply to GetPlansForXYZ
 
+      import Protocol._
+
       override val acceptance: Acceptance = entityAcceptance orElse {
-        case (PlanAdded(_, pid), s) => s.copy( analysisPlans = s.analysisPlans + pid )
-        case (PlanRemoved(_, pid), s) => s.copy( analysisPlans = s.analysisPlans - pid )
+        case (PlanAdded(_, pid, name), s) => analysisPlansLens.modify( s ){ _ + (name -> pid) }
+        case (PlanRemoved(_, _, name), s) => analysisPlansLens.modify( s ){ _ - name }
       }
 
       val catalog: Receive = {
-        case AddPlan( id, pid ) => persist( PlanAdded(id, pid) ) { event => acceptAndPublish( event ) }
-        case RemovePlan( id, pid ) => persist( PlanRemoved(id, pid) ) { event => acceptAndPublish( event ) }
+        case AddPlan( id, pid, name ) => persist( PlanAdded(id, pid, name) ) { event => acceptAndPublish( event ) }
+        case RemovePlan( id, pid, name ) => persist( PlanRemoved(id, pid, name) ) { event => acceptAndPublish( event ) }
 
         case GetPlansForTopic( _, topic ) => {
           val ps = plansCache collect { case (_, p) if p appliesTo topic => p }
@@ -234,10 +302,10 @@ object Catalog extends EntityCompanion[Catalog] {
 
       //todo dmr WORK HERE
       val plan: Receive = {
-        case e: OutlierPlan.PlanChanged => throw new IllegalStateException( "TBD handle: "+e )
-        case e: OutlierPlan.Added => throw new IllegalStateException( "TBD handle: "+e )
-        case e: OutlierPlan.Disabled => throw new IllegalStateException( "TBD handle: "+e )
-        case e: OutlierPlan.Enabled => throw new IllegalStateException( "TBD handle: "+e )
+        case e: PlanProtocol.PlanChanged => throw new IllegalStateException( "TBD handle: "+e )
+        case e: PlanProtocol.Entity.Added => throw new IllegalStateException( "TBD handle: "+e )
+        case e: PlanProtocol.Entity.Disabled => throw new IllegalStateException( "TBD handle: "+e )
+        case e: PlanProtocol.Entity.Enabled => throw new IllegalStateException( "TBD handle: "+e )
       }
 
       override def active: Receive = catalog orElse super.active //orElse catalog
