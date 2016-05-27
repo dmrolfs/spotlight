@@ -2,12 +2,7 @@ package spotlight.model.outlier
 
 import scala.concurrent.duration._
 import scala.util.matching.Regex
-import akka.actor.Props
 import com.typesafe.config.{Config, ConfigFactory, ConfigOrigin}
-import demesne.{AggregateRootType, DomainModel}
-import demesne.module.EntityAggregateModule
-import demesne.register.StackableRegisterBusPublisher
-import peds.akka.publish.{EventPublisher, StackableStreamPublisher}
 import peds.archetype.domain.model.core.{Entity, EntityCompanion}
 import peds.commons._
 import peds.commons.identifier.{ShortUUID, TaggedID}
@@ -320,55 +315,6 @@ object OutlierPlan extends EntityCompanion[OutlierPlan] {
         s"""algorithms:[${algorithms.mkString(",")}], timeout:[${timeout.toCoarsest}], """ +
         s"""grouping:[${grouping}], algorithm-config:[${algorithmConfig.root}]""" +
         ")"
-    }
-  }
-
-
-  object AggregateRoot {
-    val module: EntityAggregateModule[OutlierPlan] = {
-      val b = EntityAggregateModule.builderFor[OutlierPlan].make
-      import b.P.{ Tag => BTag, Props => BProps, _ }
-
-      b
-      .builder
-      .set( BTag, OutlierPlan.idTag )
-      .set( BProps, OutlierPlanActor.props(_, _) )
-      .set( IdLens, idLens )
-      .set( NameLens, nameLens )
-      .set( IsActiveLens, Some(isActiveLens) )
-      .build()
-    }
-
-
-    object Protocol extends module.Protocol {
-      sealed trait PlanProtocol
-      //todo add plan change commands
-      //todo reify algorithm
-      //      case class AddAlgorithm( override val targetId: OutlierPlan#TID, algorithm: Symbol ) extends Command with PlanProtocol
-      case object GetSummary extends PlanProtocol
-      case class Summary( sourceId: OutlierPlan#TID, plan: OutlierPlan ) extends PlanProtocol
-
-      case class PlanChanged( override val sourceId: OutlierPlan#TID, plan: OutlierPlan ) extends Event with PlanProtocol
-    }
-
-    object OutlierPlanActor {
-      def props( model: DomainModel, meta: AggregateRootType ): Props = {
-        Props( new OutlierPlanActor( model, meta ) with StackableStreamPublisher with StackableRegisterBusPublisher )
-      }
-    }
-
-    class OutlierPlanActor( override val model: DomainModel, override val meta: AggregateRootType )
-    extends module.EntityAggregateActor { publisher: EventPublisher =>
-      import Protocol._
-
-      override var state: OutlierPlan = _
-
-      //todo add plan modification
-      val plan: Receive = {
-        case GetSummary => sender() ! Summary( state.id, state )
-      }
-
-      override def active: Receive = plan orElse super.active
     }
   }
 

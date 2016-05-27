@@ -201,7 +201,8 @@ object Catalog extends EntityCompanion[Catalog] {
 
     class CatalogActor( override val model: DomainModel, override val meta: AggregateRootType )
     extends module.EntityAggregateActor { publisher: EventPublisher =>
-      import OutlierPlan.AggregateRoot.{ Protocol => PlanProtocol }
+      import AnalysisPlanModule.AggregateRoot.{ Protocol => PlanProtocol }
+      import AnalysisPlanModule.AggregateRoot.{ module => PlanModule }
 
       override var state: Catalog = _
 
@@ -210,8 +211,6 @@ object Catalog extends EntityCompanion[Catalog] {
 
       override def preStart(): Unit = {
         super.preStart( )
-
-        import OutlierPlan.AggregateRoot.{ Protocol => PlanProtocol }
         context.system.eventStream.subscribe( self, classOf[PlanProtocol.PlanChanged] )
         context.system.eventStream.subscribe( self, classOf[PlanProtocol.Entity.Added] )
         context.system.eventStream.subscribe( self, classOf[PlanProtocol.Entity.Disabled] )
@@ -249,7 +248,7 @@ object Catalog extends EntityCompanion[Catalog] {
         val queries = {
           plans.toSeq
           .map { p =>
-            val planRef = model.aggregateOf( OutlierPlan.AggregateRoot.module.aggregateRootType, p.id )
+            val planRef = model.aggregateOf( PlanModule.aggregateRootType, p.id )
 
             ( planRef ? PlanProtocol.GetSummary )
             .mapTo[PlanProtocol.Summary]
@@ -269,7 +268,7 @@ object Catalog extends EntityCompanion[Catalog] {
         val queries = {
           plans.toSeq
           .map { p =>
-            val planRef = model.aggregateOf( OutlierPlan.AggregateRoot.module.aggregateRootType, p.id )
+            val planRef = model.aggregateOf( PlanModule.aggregateRootType, p.id )
 
             ( planRef ? PlanProtocol.Entity.Add( p ) )
             .mapTo[PlanProtocol.Entity.Added]
