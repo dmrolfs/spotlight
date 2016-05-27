@@ -42,6 +42,9 @@ object CommonAnalyzer {
   }
 
 
+  val DefaultTailAverageLength: Int = 1
+
+
   final case class SimpleWrappingContext private[algorithm]( override val underlying: AlgorithmContext ) extends WrappingContext {
     override def withUnderlying( ctx: AlgorithmContext ): Valid[WrappingContext] = copy( underlying = ctx ).successNel
 
@@ -146,7 +149,10 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
 
   def toConcreteContextK: KOp[AlgorithmContext, C] = kleisli { toConcreteContext }
 
-  def tailAverage( data: Seq[DoublePoint], tailLength: Int = 3 ): KOp[AlgorithmContext, Seq[PointT]] = {
+  def tailAverage(
+    data: Seq[DoublePoint],
+    tailLength: Int = CommonAnalyzer.DefaultTailAverageLength
+  ): KOp[AlgorithmContext, Seq[PointT]] = {
     kleisli[TryV, AlgorithmContext, Seq[PointT]] { ctx =>
       val values = data map { _.value }
       val lastPos: Int = {

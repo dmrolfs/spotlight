@@ -117,7 +117,7 @@ class OutlierPlanDetectionRouter extends Actor with InstrumentedActor with Actor
 
   val workflowSupervision: Supervision.Decider = {
     case ex => {
-      log.error( ex, "Error caught by Supervisor" )
+      log.error( ex, "Error caught by outlier plan supervisor" )
       planStreamFailureMeter.mark( )
       Supervision.Restart
     }

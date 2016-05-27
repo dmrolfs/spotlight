@@ -21,9 +21,8 @@ object DetectionAlgorithmRouter {
 
 class DetectionAlgorithmRouter extends Actor with InstrumentedActor with ActorLogging {
   import DetectionAlgorithmRouter._
-  var routingTable: Map[Symbol, ActorRef] = Map()
 
-  override val supervisorStrategy: SupervisorStrategy = SupervisorStrategy.defaultStrategy
+  var routingTable: Map[Symbol, ActorRef] = Map.empty[Symbol, ActorRef]
 
   val registration: Receive = {
     case RegisterDetectionAlgorithm( algorithm, handler ) => {

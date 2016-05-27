@@ -29,12 +29,14 @@ object OutlierDetection extends StrictLogging with Instrumented {
 
   val decider: Supervision.Decider = {
     case ex: AskTimeoutException => {
-      logger error s"Detection stage timed out on [${ex.getMessage}]"
+      logger.error( "Detection stage timed out", ex )
       timeoutMeter.mark()
       Supervision.Resume
     }
 
-    case _ => Supervision.Stop
+    case _ => {
+      Supervision.Stop
+    }
   }
 
 
