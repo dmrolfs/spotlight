@@ -132,31 +132,36 @@ class OutlierDetectionBootstrap(
   }
 
   override val supervisorStrategy: SupervisorStrategy = makeStrategy( maxNrRetries, withinTimeRange ) {
-    case _: ActorInitializationException => Stop
+    case ex: ActorInitializationException => {
+      log.error( ex, "{} stopping actor on caught initialization error", classOf[OutlierDetectionBootstrap].safeSimpleName )
+      Stop
+    }
 
-    case _: ActorKilledException => Stop
+    case ex: ActorKilledException => {
+      log.error(
+        ex,
+        "{} stopping killed actor on caught actor killed exception",
+        classOf[OutlierDetectionBootstrap].safeSimpleName
+      )
+      Stop
+    }
 
     case ex: InvalidActorNameException => {
-      log.error(
-        "{} restarting on caught invalid actor name: [{}]",
-        classOf[OutlierDetectionBootstrap].safeSimpleName,
-        ex
-      )
+      log.error( ex, "{} restarting on caught invalid actor name", classOf[OutlierDetectionBootstrap].safeSimpleName )
       failuresMeter.mark()
       Restart
     }
 
     case ex: Exception => {
-      log.error(
-        "{} restarting on caught exception from child: [{}]",
-        classOf[OutlierDetectionBootstrap].safeSimpleName,
-        ex
-      )
+      log.error( ex,  "{} restarting on caught exception from child", classOf[OutlierDetectionBootstrap].safeSimpleName )
       failuresMeter.mark()
       Restart
     }
 
-    case _ => Escalate
+    case ex => {
+      log.error( ex,  "{} restarting on unknown error from child", classOf[OutlierDetectionBootstrap].safeSimpleName )
+      Escalate
+    }
   }
 
   override def receive: Receive = around( LoggingReceive{ super.receive } )

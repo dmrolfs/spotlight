@@ -144,7 +144,7 @@ class SkylineFirstHourAverageSpec extends SkylineBaseSpec {
           alg mustBe Set( algoS )
           source mustBe series2
           m.hasAnomalies mustBe true
-          outliers.size mustBe 3
+          outliers.size mustBe 2 //3
           outliers mustBe series2.points.take(3)
         }
       }

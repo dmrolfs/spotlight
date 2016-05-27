@@ -26,6 +26,7 @@ object FirstHourAverageAnalyzer {
 
   def props( router: ActorRef ): Props = Props { new FirstHourAverageAnalyzer( router ) }
 
+  val DebugTopic = Topic( "prod-las.em.authz-proxy.1.proxy.p95" )
 
   object Context {
     import com.github.nscala_time.time.Imports._
@@ -51,9 +52,14 @@ object FirstHourAverageAnalyzer {
     def withPoints( points: Seq[DoublePoint] ): Context = {
       val firstHourPoints = points collect { case p if Context.FirstHour contains p.timestamp.toLong => p.value }
       if ( firstHourPoints.nonEmpty ) {
-        logger.debug( s"""adding values to first hour: [${firstHourPoints.mkString(",")}]"""  )
+        if ( underlying.source.topic == DebugTopic ) {
+          logger.info( "context: first-hour:[{}] context source points: [{}]", Context.FirstHour, source.points.mkString(",") )
+          logger.info( s"""context: adding values to first hour: [${firstHourPoints.mkString(",")}]"""  )
+        }
         val updated = firstHourPoints.foldLeft( firstHour.copy ) { (s, v) => s.addValue( v ); s }
-        logger.debug( s"updated first-hour stats: mean=[${updated.getMean}] stddev=[${updated.getStandardDeviation}]" )
+        if ( underlying.source.topic == DebugTopic ) {
+          logger.info( s"context: updated first-hour stats: mean=[${updated.getMean}] stddev=[${updated.getStandardDeviation}]" )
+        }
         copy( firstHour = updated )
       } else {
         this
@@ -86,10 +92,7 @@ class FirstHourAverageAnalyzer( override val router: ActorRef ) extends CommonAn
     firstHourStats.successNel
   }
 
-  val contextWithFirstHourStats: KOp[AlgorithmContext, Context] = toConcreteContextK map { c =>
-    log.debug( "first-hour:[{}] context source points: [{}]", Context.FirstHour, c.source.points.mkString(",") )
-    c withPoints c.source.points
-  }
+  val contextWithFirstHourStats: KOp[AlgorithmContext, Context] = toConcreteContextK map { c => c withPoints c.source.points }
 
   /**
     * Calcuate the simple average over one hour, FULL_DURATION seconds ago.
@@ -114,20 +117,22 @@ class FirstHourAverageAnalyzer( override val router: ActorRef ) extends CommonAn
             distance = math.abs( tol * c.firstHour.getStandardDeviation )
           )
 
-          log.debug(
-            "first hour[{}] mean[{}] stdev[{}] tolerance[{}]",
-            c.firstHour.getN,
-            c.firstHour.getMean,
-            c.firstHour.getStandardDeviation,
-            tol
-          )
-          log.debug(
-            "first hour[{}] [{}] is-outlier:{} threshold = [{}]",
-            algorithm.name,
-            p.value,
-            threshold.isOutlier(p.value),
-            threshold
-          )
+          if ( c.source.topic == DebugTopic ) {
+            log.info(
+              "find: first hour[{}] mean[{}] stdev[{}] tolerance[{}]",
+              c.firstHour.getN,
+              c.firstHour.getMean,
+              c.firstHour.getStandardDeviation,
+              tol
+            )
+            log.info(
+              "find: first hour[{}] [{}] is-outlier:{} threshold = [{}]",
+              algorithm.name,
+              p.value,
+              threshold.isOutlier(p.value),
+              threshold
+            )
+          }
 
           ( threshold isOutlier p.value, threshold )
         },

@@ -6,10 +6,11 @@ import akka.testkit._
 import com.typesafe.config.ConfigFactory
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import org.mockito.Mockito._
-import org.joda.{ time => joda }
+import org.joda.{time => joda}
+import spotlight.analysis.outlier.algorithm.CommonAnalyzer
 import spotlight.analysis.outlier.{DetectOutliersInSeries, DetectUsing, DetectionAlgorithmRouter}
 import spotlight.model.outlier.{OutlierPlan, SeriesOutliers}
-import spotlight.model.timeseries.{ThresholdBoundary, DataPoint}
+import spotlight.model.timeseries.{DataPoint, ThresholdBoundary}
 
 import scala.annotation.tailrec
 
@@ -29,7 +30,7 @@ class SkylineSimpleMovingAverageSpec extends SkylineBaseSpec {
     when( plan.algorithms ).thenReturn( Set(algoS) )
 
     def tailAverageData( data: Seq[DataPoint], last: Seq[DataPoint] = Seq.empty[DataPoint] ): Seq[DataPoint] = {
-      val TailLength = 3
+      val TailLength = CommonAnalyzer.DefaultTailAverageLength
       val lastPoints = last.drop( last.size - TailLength + 1 ) map { _.value }
       data.map { _.timestamp }
       .zipWithIndex
