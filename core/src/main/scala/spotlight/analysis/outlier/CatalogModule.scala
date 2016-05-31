@@ -169,25 +169,25 @@ object Catalog extends EntityCompanion[Catalog] {
       case class CatalogedPlans( sourceId: Catalog#TID, plans: Set[OutlierPlan] ) extends CatalogProtocol
 
       case class AddPlan(
-        override val targetId: Catalog#TID,
+        override val targetId: AddPlan#TID,
         planId: OutlierPlan#TID,
         name: String
       ) extends Command with CatalogProtocol
 
       case class RemovePlan(
-        override val targetId: Catalog#TID,
+        override val targetId: RemovePlan#TID,
         planId: OutlierPlan#TID,
         name: String
       ) extends Command with CatalogProtocol
 
       case class PlanAdded(
-        override val sourceId: Catalog#TID,
+        override val sourceId: PlanAdded#TID,
         planId: OutlierPlan#TID,
         name: String
       ) extends Event with CatalogProtocol
 
       case class PlanRemoved(
-        override val sourceId: Catalog#TID,
+        override val sourceId: PlanRemoved#TID,
         planId: OutlierPlan#TID,
         name: String
       ) extends Event with CatalogProtocol
@@ -211,7 +211,7 @@ object Catalog extends EntityCompanion[Catalog] {
 
       override def preStart(): Unit = {
         super.preStart( )
-        context.system.eventStream.subscribe( self, classOf[PlanProtocol.PlanChanged] )
+//        context.system.eventStream.subscribe( self, classOf[PlanProtocol.PlanChanged] )
         context.system.eventStream.subscribe( self, classOf[PlanProtocol.Entity.Added] )
         context.system.eventStream.subscribe( self, classOf[PlanProtocol.Entity.Disabled] )
         context.system.eventStream.subscribe( self, classOf[PlanProtocol.Entity.Enabled] )
@@ -301,7 +301,7 @@ object Catalog extends EntityCompanion[Catalog] {
 
       //todo dmr WORK HERE
       val plan: Receive = {
-        case e: PlanProtocol.PlanChanged => throw new IllegalStateException( "TBD handle: "+e )
+//        case e: PlanProtocol.PlanChanged => throw new IllegalStateException( "TBD handle: "+e )
         case e: PlanProtocol.Entity.Added => throw new IllegalStateException( "TBD handle: "+e )
         case e: PlanProtocol.Entity.Disabled => throw new IllegalStateException( "TBD handle: "+e )
         case e: PlanProtocol.Entity.Enabled => throw new IllegalStateException( "TBD handle: "+e )

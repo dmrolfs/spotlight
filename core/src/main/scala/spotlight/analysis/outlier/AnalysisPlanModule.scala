@@ -2,12 +2,13 @@ package spotlight.analysis.outlier
 
 import akka.actor.{ActorRef, Props}
 import akka.event.LoggingReceive
-import akka.persistence.RecoveryCompleted
+import com.typesafe.config.Config
 import demesne.{AggregateRootType, DomainModel}
 import demesne.module.EntityAggregateModule
 import demesne.register.StackableRegisterBusPublisher
 import peds.akka.publish.{EventPublisher, StackableStreamPublisher}
-import spotlight.model.outlier.OutlierPlan
+import spotlight.model.outlier.{IsQuorum, OutlierPlan, ReduceOutliers}
+import spotlight.model.timeseries.Topic
 
 
 /**
@@ -37,7 +38,29 @@ object AnalysisPlanModule {
       case object GetSummary extends PlanProtocol
       case class Summary( sourceId: OutlierPlan#TID, plan: OutlierPlan ) extends PlanProtocol
 
-      case class PlanChanged( override val sourceId: OutlierPlan#TID, plan: OutlierPlan ) extends Event with PlanProtocol
+      case class ApplyTo( override val targetId: ApplyTo#TID, appliesTo: OutlierPlan.AppliesTo ) extends Command with PlanProtocol
+
+      case class UseAlgorithms( override val targetId: UseAlgorithms#TID, algorithms: Set[Symbol], algorithmConfig: Config )
+        extends Command with PlanProtocol
+
+      case class ResolveVia( override val targetId: ResolveVia#TID, isQuorum: IsQuorum, reduce: ReduceOutliers )
+        extends Command with PlanProtocol
+
+
+      case class ScopeChanged( override val sourceId: ScopeChanged#TID, appliesTo: OutlierPlan.AppliesTo )
+        extends Event with PlanProtocol
+
+      case class AlgorithmsChanged(
+        override val sourceId: AlgorithmsChanged#TID,
+        algorithms: Set[Symbol],
+        algorithmConfig: Config
+      ) extends Event with PlanProtocol
+
+      case class AnalysisResolutionChanged(
+        override val sourceId: AnalysisResolutionChanged#TID,
+        isQuorum: IsQuorum,
+        reduce: ReduceOutliers
+      ) extends Event with PlanProtocol
     }
 
 
@@ -48,53 +71,71 @@ object AnalysisPlanModule {
     }
 
     class OutlierPlanActor( override val model: DomainModel, override val meta: AggregateRootType )
-      extends module.EntityAggregateActor { publisher: EventPublisher =>
+    extends module.EntityAggregateActor { publisher: EventPublisher =>
       import Protocol._
 
       override var state: OutlierPlan = _
 
-      override def receiveRecover: Receive = {
-        case RecoveryCompleted => {
+      var scopeProxies: Map[Topic, ActorRef] = Map.empty[Topic, ActorRef]
 
+      def proxyFor( topic: Topic ): ActorRef = {
+        scopeProxies
+        .get( topic )
+        .getOrElse {
+          val scope = OutlierPlan.Scope( plan = state, topic )
+          val proxy = context.actorOf(
+            AnalysisScopeProxy.props(
+              scope = scope,
+              plan = state,
+              model = model,
+              highWatermark = 10 * Runtime.getRuntime.availableProcessors(),
+              bufferSize = 1000
+            ),
+            name = "analysis-scope-proxy-"+scope.toString
+          )
+          scopeProxies += topic -> proxy
+          proxy
         }
       }
 
-      case class Workers( detector: ActorRef, router: ActorRef, algorithms: Set[ActorRef] )
-      def makePlanWorkers(): Workers = {
-        def makeRouter(): ActorRef = {
-          context.actorOf(
-            DetectionAlgorithmRouter.props.withDispatcher( "outlier-detection-dispatcher" ),
-            s"router-${state.name}"
+      override def acceptance: Acceptance = entityAcceptance orElse {
+        case (e: ScopeChanged, s) => {
+          //todo: cast for expediency. my ideal is to define a Lens in the OutlierPlan trait; minor solace is this module is in the same package
+          s.asInstanceOf[OutlierPlan.SimpleOutlierPlan].copy( appliesTo = e.appliesTo )
+        }
+
+        case (e: AlgorithmsChanged, s) => {
+          //todo: cast for expediency. my ideal is to define a Lens in the OutlierPlan trait; minor solace is this module is in the same package
+          s.asInstanceOf[OutlierPlan.SimpleOutlierPlan].copy(
+            algorithms = e.algorithms,
+            algorithmConfig = e.algorithmConfig
           )
         }
 
-        def makeAlgorithms( routerRef: ActorRef ): Set[ActorRef] = {
-
-        }
-
-        def makeDetector( routerRef: ActorRef ): ActorRef = {
-
-        }
-      }
-
-
-      override val quiescent: Receive = {
-        case Protocol.Entity.Add( plan ) => {
-          persist( Protocol.Entity.Added(plan) ) { e =>
-            acceptAndPublish( e )
-            context become LoggingReceive { around( active ) }
-          }
-WORK HERE to makePlanWorkers in right spot (in or out of persist block)
+        case (e: AnalysisResolutionChanged, s) =>{
+          //todo: cast for expediency. my ideal is to define a Lens in the OutlierPlan trait; minor solace is this module is in the same package
+          s.asInstanceOf[OutlierPlan.SimpleOutlierPlan].copy(
+            isQuorum = e.isQuorum,
+            reduce = e.reduce
+          )
         }
       }
-                                                                                                                            .quiescent
 
-      //todo add plan modification
-      val plan: Receive = {
+      val planEntity: Receive = {
         case GetSummary => sender() ! Summary( state.id, state )
+
+        case ApplyTo( id, appliesTo ) => persist( ScopeChanged(id, appliesTo) ) { e => acceptAndPublish( e ) }
+
+        case UseAlgorithms( id, algorithms, config ) => {
+          persist( AlgorithmsChanged(id, algorithms, config) ) { e => acceptAndPublish( e ) }
+        }
+
+        case ResolveVia( id, isQuorum, reduce ) => {
+          persist( AnalysisResolutionChanged(id, isQuorum, reduce) ) { e => acceptAndPublish( e ) }
+        }
       }
 
-      override def active: Receive = plan orElse super.active
+      override val active: Receive = super.active orElse planEntity
     }
   }
 }
