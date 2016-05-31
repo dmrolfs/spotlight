@@ -6,7 +6,6 @@ import akka.event.EventStream
 import akka.testkit._
 import com.github.nscala_time.time.OrderingImplicits._
 import com.typesafe.config.ConfigFactory
-import org.apache.commons.math3.ml.clustering.DoublePoint
 import org.apache.commons.math3.ml.distance.EuclideanDistance
 import org.apache.commons.math3.random.RandomDataGenerator
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
@@ -459,12 +458,12 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       analyzerB.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
 
       val densityExpectedB_A = makeDensityExpectedHistory( pointsA, None, None )
-      analyzerB.underlyingActor._scopedContexts.get( HistoryKey(plan, metric) ) mustBe None
+      analyzerB.underlyingActor._scopedContexts.get( OutlierPlan.Scope(plan, metric) ) mustBe None
       analyzerB receive msgA
       aggregator.expectMsgPF( 2.seconds.dilated, "default-foo-A" ) {
         case m: SeriesOutliers => {
           assertDescriptiveStats(
-            analyzerB.underlyingActor._scopedContexts( HistoryKey(plan, metric) ).asInstanceOf[SeriesDensityAnalyzer.Context].distanceStatistics,
+            analyzerB.underlyingActor._scopedContexts( OutlierPlan.Scope(plan, metric) ).asInstanceOf[SeriesDensityAnalyzer.Context].distanceStatistics,
             densityExpectedB_A
           )
           m.topic mustBe metric
@@ -479,7 +478,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       aggregator.expectMsgPF( 2.seconds.dilated, "default-foo-AB" ){
         case m: NoOutliers => {
           assertDescriptiveStats(
-            analyzerB.underlyingActor._scopedContexts( HistoryKey(plan, metric) ).asInstanceOf[SeriesDensityAnalyzer.Context].distanceStatistics,
+            analyzerB.underlyingActor._scopedContexts( OutlierPlan.Scope(plan, metric) ).asInstanceOf[SeriesDensityAnalyzer.Context].distanceStatistics,
             densityExpectedB_AB
           )
           m.topic mustBe metric

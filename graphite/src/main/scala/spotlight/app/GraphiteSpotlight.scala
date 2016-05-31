@@ -289,6 +289,7 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
           override def detectionBudget: FiniteDuration = config.detectionBudget
           override def bufferSize: Int = config.workflowBufferSize
           override def maxInDetectionCpuFactor: Double = config.maxInDetectionCpuFactor
+          override def plans: Set[OutlierPlan] = config.plans
           override def configuration: Config = config
         }
       ),

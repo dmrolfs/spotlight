@@ -175,9 +175,9 @@ with ActorLogging {
 
 
   //todo store/hydrate
-  var _history: Map[HistoryKey, HistoricalStatistics] = Map.empty[HistoryKey, HistoricalStatistics]
+  var _history: Map[OutlierPlan.Scope, HistoricalStatistics] = Map.empty[OutlierPlan.Scope, HistoricalStatistics]
   def updateHistory( data: TimeSeriesBase, plan: OutlierPlan ): HistoricalStatistics = {
-    val key = HistoryKey( plan, data.topic )
+    val key = OutlierPlan.Scope( plan, data.topic )
 
     val initialHistory = _history get key getOrElse { HistoricalStatistics( 2, false ) }
     val sentHistory = data.points.foldLeft( initialHistory ) { (h, dp) => h :+ dp }

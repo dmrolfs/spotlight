@@ -216,7 +216,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
         .map { ts =>
           myPlans collect { case p if p appliesTo ts =>
             logger.debug( "plan [{}] applies to ts [{}]", p.name, ts.topic )
-            (ts, p)
+            (ts, OutlierPlan.Scope(p, ts.topic))
           }
         }
         .mapConcat { identity }
@@ -242,7 +242,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
       val (pub, sub) = {
         TestSource.probe[TimeSeries]
         .via( flowUnderTest )
-        .toMat( TestSink.probe[(TimeSeries, OutlierPlan)] )( Keep.both )
+        .toMat( TestSink.probe[(TimeSeries, OutlierPlan.Scope)] )( Keep.both )
         .run()
       }
 
@@ -273,7 +273,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
         .map { ts =>
           myPlans collect { case p if p appliesTo ts =>
             logger.debug( "plan [{}] applies to ts [{}]", p.name, ts.topic )
-            (ts, p)
+            (ts, OutlierPlan.Scope(p, ts.topic))
           }
         }
         .mapConcat { identity }
@@ -299,7 +299,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
       val (pub, sub) = {
         TestSource.probe[TimeSeries]
         .via( flowUnderTest )
-        .toMat( TestSink.probe[(TimeSeries, OutlierPlan)] )( Keep.both )
+        .toMat( TestSink.probe[(TimeSeries, OutlierPlan.Scope)] )( Keep.both )
         .run()
       }
 
@@ -353,10 +353,11 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
       val detector = system.actorOf( OutlierDetection.props( routerRef = routerRef ), "detectOutliers" )
       val planRouter = system.actorOf(
         OutlierPlanDetectionRouter.props(
-          _detectorRef = detector,
-          _detectionBudget = 2.minutes,
-          _bufferSize = 1000,
-          _maxInDetectionCpuFactor = 1
+          detectorRef = detector,
+          detectionBudget = 2.minutes,
+          bufferSize = 1000,
+          maxInDetectionCpuFactor = 1,
+          plans = Set( defaultPlan )
         ),
         "planRouter"
       )
@@ -386,7 +387,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
 
       val flowUnderTest = {
         Flow[TimeSeries]
-        .map{ ts => (ts, defaultPlan) }
+        .map{ ts => (ts, OutlierPlan.Scope(defaultPlan, ts.topic)) }
         .via( graphiteFlow )
         .via( detectFlow )
       }

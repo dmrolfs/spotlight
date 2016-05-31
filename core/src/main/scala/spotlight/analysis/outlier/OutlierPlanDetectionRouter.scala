@@ -24,18 +24,25 @@ import spotlight.model.timeseries.TimeSeriesBase.Merging
   */
 object OutlierPlanDetectionRouter extends LazyLogging {
   def props(
-    _detectorRef: ActorRef,
-    _detectionBudget: FiniteDuration,
-    _bufferSize: Int,
-    _maxInDetectionCpuFactor: Double
+    detectorRef: ActorRef,
+    plans: Set[OutlierPlan],
+    detectionBudget: FiniteDuration,
+    bufferSize: Int,
+    maxInDetectionCpuFactor: Double
   ): Props = {
+    val dref = detectorRef
+    val ps = plans
+    val budget = detectionBudget
+    val buffer = bufferSize
+    val cpuFactor = maxInDetectionCpuFactor
     Props(
       //todo change to vals where possible?
       new OutlierPlanDetectionRouter with ConfigurationProvider {
-        override def detector: ActorRef = _detectorRef
-        override def detectionBudget: FiniteDuration = _detectionBudget
-        override def bufferSize: Int = _bufferSize
-        override def maxInDetectionCpuFactor: Double = _maxInDetectionCpuFactor
+        override val detector: ActorRef = dref
+        override val plans: Set[OutlierPlan] = ps
+        override val detectionBudget: FiniteDuration = budget
+        override val bufferSize: Int = buffer
+        override val maxInDetectionCpuFactor: Double = cpuFactor
       }
     )
   }
@@ -46,8 +53,8 @@ object OutlierPlanDetectionRouter extends LazyLogging {
   )(
     implicit system: ActorSystem,
     materializer: Materializer
-  ): Flow[(TimeSeries, OutlierPlan), Outliers, NotUsed] = {
-    MaxInFlightProcessorAdapter.elasticProcessorFlow[(TimeSeries, OutlierPlan), Outliers](
+  ): Flow[(TimeSeries, OutlierPlan.Scope), Outliers, NotUsed] = {
+    MaxInFlightProcessorAdapter.elasticProcessorFlow[(TimeSeries, OutlierPlan.Scope), Outliers](
       name = WatchPoints.PlanRouter.name,
       maxInDetectionCpuFactor
     ) {
@@ -90,6 +97,7 @@ object OutlierPlanDetectionRouter extends LazyLogging {
   final case class PlanStream private[outlier]( ingressRef: ActorRef, graph: RunnableGraph[NotUsed] )
 
   trait ConfigurationProvider {
+    def plans: Set[OutlierPlan]
     def detector: ActorRef
     def maxInDetectionCpuFactor: Double
     def detectionBudget: FiniteDuration
@@ -127,10 +135,16 @@ class OutlierPlanDetectionRouter extends Actor with InstrumentedActor with Actor
   implicit val materializer = ActorMaterializer( ActorMaterializerSettings( system ) withSupervisionStrategy workflowSupervision )
 
   val route: Receive = {
-    case (ts: TimeSeries, p: OutlierPlan) => {
-      val subscriber = sender()
-      streamIngressFor( p, subscriber ) forward ts
+    case (ts: TimeSeries, p: OutlierPlan) if outer.plans( p ) => streamIngressFor( p, sender() ) forward ts
+    case (ts: TimeSeries, s: OutlierPlan.Scope) if outer.plans.exists{ _.id == s.planId } => {
+      log.error( "RECEIVED SCOPE:[{}] for series:[{}]", s, ts )
+      outer.plans.find{ _.id == s.planId } foreach { p =>
+        log.error( "PASSING ALONG to PLAN STREAM:[{}] for series:[{}]", p, ts )
+        streamIngressFor( p, sender() ) forward ts
+      }
     }
+
+    case (ts, scope: OutlierPlan.Scope) => log.error( "UNKNOWN SCOPE:{} scope-id:[{}] ref-plan-ids:[{}]", scope, scope.planId, outer.plans.map{ _.id }.mkString(",") )
   }
 
 

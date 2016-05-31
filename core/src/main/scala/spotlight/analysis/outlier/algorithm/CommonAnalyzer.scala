@@ -32,7 +32,7 @@ object CommonAnalyzer {
     override def algorithm: Symbol = underlying.algorithm
     override def topic: Topic = underlying.topic
     override def plan: OutlierPlan = underlying.plan
-    override def historyKey: HistoryKey = underlying.historyKey
+    override def historyKey: OutlierPlan.Scope = underlying.historyKey
     override def history: HistoricalStatistics = underlying.history
     override def source: TimeSeriesBase = underlying.source
     override def messageConfig: Config = underlying.messageConfig
@@ -123,7 +123,7 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
   def findOutliers: KOp[AlgorithmContext, (Outliers, AlgorithmContext)]
 
   //todo dmr place into Agent for use & concurrency *across* actor instances?
-  var _scopedContexts: Map[HistoryKey, WrappingContext] = Map.empty[HistoryKey, WrappingContext]
+  var _scopedContexts: Map[OutlierPlan.Scope, WrappingContext] = Map.empty[OutlierPlan.Scope, WrappingContext]
 
   def setScopedContext( c: WrappingContext ): Unit = {_scopedContexts += c.historyKey -> c }
   def wrapContext(c: AlgorithmContext ): Valid[WrappingContext]

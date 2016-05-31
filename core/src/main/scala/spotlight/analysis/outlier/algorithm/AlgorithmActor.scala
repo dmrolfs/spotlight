@@ -38,6 +38,20 @@ trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
   override def receive: Receive = LoggingReceive{ around( quiescent ) }
 
   def quiescent: Receive = {
+    case Register( scopeId, routerRef ) => {
+      import scala.concurrent.duration._
+      import akka.pattern.{ ask, pipe }
+
+      implicit val timeout = akka.util.Timeout( 15.seconds )
+      implicit val ec = context.dispatcher
+
+      val resp = ( routerRef ? DetectionAlgorithmRouter.RegisterDetectionAlgorithm( algorithm, self ) )
+      val registered = resp map { case DetectionAlgorithmRouter.AlgorithmRegistered( a ) if a == algorithm =>
+        Registered( scopeId )
+      }
+      registered pipeTo sender()
+    }
+
     case DetectionAlgorithmRouter.AlgorithmRegistered( a ) if a == algorithm => {
       log.info( "registration confirmed for [{}] @ [{}] with {}", algorithm.name, self.path, sender().path )
       context become LoggingReceive{ around( detect ) }
@@ -93,13 +107,18 @@ trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
 }
 
 object AlgorithmActor {
+  sealed trait AlgorithmProtocol
+  case class Register( scopeId: OutlierPlan.Scope#TID, routerRef: ActorRef ) extends AlgorithmProtocol
+  case class Registered( scopeId: OutlierPlan.Scope#TID ) extends AlgorithmProtocol
+
+
   trait AlgorithmContext {
     def message: DetectUsing
     def data: Seq[DoublePoint]
     def algorithm: Symbol
     def topic: Topic
     def plan: OutlierPlan
-    def historyKey: HistoryKey
+    def historyKey: OutlierPlan.Scope
     def history: HistoricalStatistics
     def source: TimeSeriesBase
     def thresholdBoundaries: Seq[ThresholdBoundary]
@@ -127,7 +146,7 @@ object AlgorithmActor {
       override val algorithm: Symbol = message.algorithm
       override val topic: Topic = message.topic
       override def plan: OutlierPlan = message.plan
-      override val historyKey: HistoryKey = HistoryKey( plan, topic )
+      override val historyKey: OutlierPlan.Scope = OutlierPlan.Scope( plan, topic )
       override def history: HistoricalStatistics = message.history
       override def messageConfig: Config = message.properties
 

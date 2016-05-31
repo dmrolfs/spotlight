@@ -16,6 +16,7 @@ import spotlight.analysis.outlier.algorithm.density.{CohortDensityAnalyzer, Seri
 import spotlight.analysis.outlier.algorithm.skyline._
 import spotlight.analysis.outlier.algorithm.density.SeriesDensityAnalyzer
 import spotlight.analysis.outlier.{DetectionAlgorithmRouter, OutlierDetection, OutlierPlanDetectionRouter}
+import spotlight.model.outlier.OutlierPlan
 import spotlight.protocol.GraphiteSerializationProtocol
 
 
@@ -42,11 +43,12 @@ object OutlierDetectionBootstrap {
     def detectionBudget: FiniteDuration
     def bufferSize: Int
     def maxInDetectionCpuFactor: Double
-//    def makePlans: OutlierPlan.Creator
+    def plans: Set[OutlierPlan]
     def configuration: Config
 
     def makePlanDetectionRouter(
       detector: ActorRef,
+      plans: Set[OutlierPlan],
       detectionBudget: FiniteDuration,
       bufferSize: Int,
       maxInDetectionCpuFactor: Double
@@ -63,7 +65,7 @@ object OutlierDetectionBootstrap {
 
       ctx.actorOf(
         OutlierPlanDetectionRouter
-        .props( detector, detectionBudget, bufferSize, maxInDetectionCpuFactor )
+        .props( detector, plans, detectionBudget, bufferSize, maxInDetectionCpuFactor )
         .withDispatcher( "plan-router-dispatcher" ),
         "plan-detection-router"
       )
@@ -123,6 +125,7 @@ class OutlierDetectionBootstrap(
     detectorRef = makeOutlierDetector( routerRef )
     planRouterRef = makePlanDetectionRouter(
       detector = detectorRef,
+      plans = outer.plans,
       detectionBudget = outer.detectionBudget,
       bufferSize = outer.bufferSize,
       maxInDetectionCpuFactor = outer.maxInDetectionCpuFactor

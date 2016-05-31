@@ -52,6 +52,35 @@ sealed trait OutlierPlan extends Entity with Equals {
 object OutlierPlan extends EntityCompanion[OutlierPlan] {
   import shapeless._
 
+  case class Scope( plan: String, topic: Topic, planId: OutlierPlan#TID ) extends Entity {
+    override type ID = Scope
+    override def idClass: Class[_] = classOf[Scope]
+    override val id: TID = Scope tag this
+    override def name: String = toString
+    override val toString: String = plan +":"+ topic
+  }
+
+  object Scope {
+    def apply( plan: OutlierPlan, topic: Topic ): Scope = Scope( plan = plan.name, topic = topic, planId = plan.id )
+
+    val idTag: Symbol = 'scope
+    implicit def tag( id: Scope ): TaggedID[Scope] = TaggedID( idTag, id )
+
+    val idLens: Lens[Scope, Scope#TID] = new Lens[Scope, Scope#TID] {
+      override def get( s: Scope ): Scope#TID = s.id
+      override def set( s: Scope )( id: Scope#TID ): Scope = s
+    }
+
+    val nameLens: Lens[Scope, String] = new Lens[Scope, String] {
+      override def get( s: Scope ): String = s.name
+      override def set( s: Scope )( n: String ): Scope = {
+        val Array(p, t) = n split ':'
+        s.copy( plan = p, topic = t )
+      }
+    }
+  }
+
+
   override def nextId(): OutlierPlan#TID = ShortUUID()
   override val idTag: Symbol = 'plan
   override implicit def tag( id: OutlierPlan#ID ): OutlierPlan#TID = TaggedID( idTag, id )

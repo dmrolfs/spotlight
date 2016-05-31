@@ -60,6 +60,7 @@ class OutlierDetectionWorkflowSpec extends ParallelAkkaSpec with MockitoSugar wi
         override def detectionBudget: FiniteDuration = 3.seconds
         override def bufferSize: Int = 1000
         override def maxInDetectionCpuFactor: Double = 1.0
+        override def plans: Set[OutlierPlan] = Set.empty[OutlierPlan]
 
         override def makeAlgorithmRouter()(implicit context: ActorContext): ActorRef = planRouter.ref
         override def makeOutlierDetector(rateLimiter: ActorRef)(implicit context: ActorContext): ActorRef = detector.ref
@@ -69,6 +70,7 @@ class OutlierDetectionWorkflowSpec extends ParallelAkkaSpec with MockitoSugar wi
 
         override def makePlanDetectionRouter(
           detector: ActorRef,
+          plans: Set[OutlierPlan],
           detectionBudget: FiniteDuration,
           bufferSize: Int,
           maxInDetectionCpuFactor: Double

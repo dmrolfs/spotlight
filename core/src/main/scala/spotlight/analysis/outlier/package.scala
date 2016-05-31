@@ -69,10 +69,6 @@ package object outlier {
   }
 
 
-  case class HistoryKey( plan: OutlierPlan, topic: Topic ) {
-    override val toString: String = s"${plan.name}:${topic}"
-  }
-
   case class MomentBinKey( dayOfWeek: DayOfWeek, hourOfDay: Int ) {
     def id: String = s"${dayOfWeek.label}:${hourOfDay}"
   }
