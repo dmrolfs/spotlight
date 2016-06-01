@@ -9,9 +9,10 @@ import org.apache.commons.math3.random.{RandomDataGenerator, RandomGenerator}
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import org.mockito.Mockito._
 import org.joda.{time => joda}
+import spotlight.analysis.outlier.algorithm.CommonAnalyzer
 import spotlight.analysis.outlier.{DetectOutliersInSeries, DetectUsing, DetectionAlgorithmRouter, HistoricalStatistics, OutlierDetectionMessage}
 import spotlight.model.outlier.{NoOutliers, OutlierPlan, Outliers, SeriesOutliers}
-import spotlight.model.timeseries.{ThresholdBoundary, DataPoint, TimeSeries}
+import spotlight.model.timeseries.{DataPoint, ThresholdBoundary, TimeSeries}
 
 import scala.annotation.tailrec
 
@@ -50,7 +51,7 @@ class SkylineGrubbsSpec extends SkylineBaseSpec {
     }
 
     def tailAverageData( data: Seq[DataPoint], last: Seq[DataPoint] = Seq.empty[DataPoint] ): Seq[DataPoint] = {
-      val TailLength = 3
+      val TailLength = CommonAnalyzer.DefaultTailAverageLength
       val lastPoints = last.drop( last.size - TailLength + 1 ) map { _.value }
       data.map { _.timestamp }
       .zipWithIndex
@@ -100,7 +101,7 @@ class SkylineGrubbsSpec extends SkylineBaseSpec {
 
 
   "GrubbsAnalyzer" should {
-    "find outliers via Grubbs Test" in { f: Fixture =>
+    "find outliers via Grubbs Test" taggedAs (WIP) in { f: Fixture =>
       import f._
       // helpful online grubbs calculator: http://graphpad.com/quickcalcs/Grubbs1.cfm
 
@@ -141,11 +142,21 @@ class SkylineGrubbsSpec extends SkylineBaseSpec {
 
       analyzer.receive( DetectUsing(algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "grubbs again" ) {
-        case m @ NoOutliers(alg, source, plan, control) => {
+//tailaverage: 1
+        case m @ SeriesOutliers(alg, source, plan, outliers, control) => {
           alg mustBe Set( algoS )
           source mustBe series2
-          m.hasAnomalies mustBe false
+          m.hasAnomalies mustBe true
+          outliers.size mustBe 1
+          outliers mustBe Seq( series2.points.head )
         }
+
+//tailaverage: 3
+//        case m @ NoOutliers(alg, source, plan, control) => {
+//          alg mustBe Set( algoS )
+//          source mustBe series2
+//          m.hasAnomalies mustBe false
+//        }
       }
     }
 
@@ -206,7 +217,7 @@ class SkylineGrubbsSpec extends SkylineBaseSpec {
       loop( 0, 125 )
     }
 
-    "provide full threshold boundaries" taggedAs (WIP) in { f: Fixture =>
+    "provide full threshold boundaries" in { f: Fixture =>
       import f._
       val analyzer = TestActorRef[GrubbsAnalyzer]( GrubbsAnalyzer.props( router.ref ) )
       val now = joda.DateTime.now

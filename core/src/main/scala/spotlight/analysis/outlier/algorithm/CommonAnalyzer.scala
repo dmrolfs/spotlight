@@ -214,6 +214,7 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
             ctx.data
             .find { _.timestamp == timestamp }
             .map { original =>
+              log.debug( "PT:[{}] ORIGINAL:[{}]", pt, original )
               val uacc = if ( isOutlier ) acc :+ original.toDataPoint else acc
               val uctx = update( ctx.addThresholdBoundary( threshold ).asInstanceOf[CTX], pt )
               ( uacc, uctx )
@@ -221,6 +222,7 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
             .getOrElse {
               //todo since pt is not in ctx.data do not add threshold boundary to context but update is okay as long as permanent
               // histories are not modified for past points
+              log.debug( "NOT ORIGINAL PT:[{}]", pt )
               ( acc, update(ctx, pt) )
             }
           }

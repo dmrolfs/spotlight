@@ -77,11 +77,11 @@ class SkylineSimpleMovingAverageSpec extends SkylineBaseSpec {
 
 
   "SimpleMovingAverageAnalyzer" should {
-    "find outliers deviating stddev from simple moving average" in { f: Fixture =>
+    "find outliers deviating stddev from simple moving average" taggedAs (WIP) in { f: Fixture =>
       import f._
       val analyzer = TestActorRef[SimpleMovingAverageAnalyzer]( SimpleMovingAverageAnalyzer.props( router.ref ) )
       val full = makeDataPoints(
-        values = immutable.IndexedSeq.fill( 1000 )( 1.0 ),
+        values = immutable.IndexedSeq.fill( 20 )( 1.0 ),
         timeWiggle = (0.97, 1.03),
         valueWiggle = (1.0, 1.0)
       )
@@ -105,7 +105,7 @@ class SkylineSimpleMovingAverageSpec extends SkylineBaseSpec {
       }
 
       val full2 = makeDataPoints(
-        values = immutable.IndexedSeq.fill( 1000 )( 1.0 ),
+        values = immutable.IndexedSeq.fill( 20 )( 1.0 ),
         timeWiggle = (0.97, 1.03),
         valueWiggle = (1.0, 1.0)
       )
@@ -118,13 +118,17 @@ class SkylineSimpleMovingAverageSpec extends SkylineBaseSpec {
           alg mustBe Set( algoS )
           source mustBe series2
           m.hasAnomalies mustBe true
-          outliers.size mustBe 3
-          outliers mustBe series2.points.take(3)
+//tail-average: 1 elem
+          outliers.size mustBe 1
+          outliers mustBe series2.points.take(1)
+//tail-average: 3 elems
+//          outliers.size mustBe 3
+//          outliers mustBe series2.points.take(3)
         }
       }
     }
 
-    "provide full threshold boundaries" taggedAs (WIP) in { f: Fixture =>
+    "provide full threshold boundaries" in { f: Fixture =>
       import f._
       val analyzer = TestActorRef[SimpleMovingAverageAnalyzer]( SimpleMovingAverageAnalyzer.props( router.ref ) )
       val now = joda.DateTime.now

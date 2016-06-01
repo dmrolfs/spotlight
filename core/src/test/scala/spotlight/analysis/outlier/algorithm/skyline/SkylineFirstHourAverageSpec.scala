@@ -7,11 +7,12 @@ import akka.testkit._
 import com.typesafe.config.ConfigFactory
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import org.mockito.Mockito._
-import org.joda.{ time => joda }
+import org.joda.{time => joda}
 import com.github.nscala_time.time.JodaImplicits._
+import spotlight.analysis.outlier.algorithm.CommonAnalyzer
 import spotlight.analysis.outlier.{DetectOutliersInSeries, DetectUsing, DetectionAlgorithmRouter}
-import spotlight.model.outlier.{OutlierPlan, SeriesOutliers, NoOutliers}
-import spotlight.model.timeseries.{ThresholdBoundary, DataPoint}
+import spotlight.model.outlier.{NoOutliers, OutlierPlan, SeriesOutliers}
+import spotlight.model.timeseries.{DataPoint, ThresholdBoundary}
 
 
 /**
@@ -30,7 +31,7 @@ class SkylineFirstHourAverageSpec extends SkylineBaseSpec {
     when( plan.algorithms ).thenReturn( Set(algoS) )
 
     def tailAverageData( data: Seq[DataPoint], last: Seq[DataPoint] = Seq.empty[DataPoint] ): Seq[DataPoint] = {
-      val TailLength = 3
+      val TailLength = CommonAnalyzer.DefaultTailAverageLength
       val lastPoints = last.drop( last.size - TailLength + 1 ) map { _.value }
       data.map { _.timestamp }
       .zipWithIndex
@@ -145,12 +146,12 @@ class SkylineFirstHourAverageSpec extends SkylineBaseSpec {
           source mustBe series2
           m.hasAnomalies mustBe true
           outliers.size mustBe 2 //3
-          outliers mustBe series2.points.take(3)
+          outliers mustBe Seq( series2.points.head, series2.points.last )
         }
       }
     }
 
-    "find outliers over 2 first hour messages" in { f: Fixture =>
+    "find outliers over 2 first hour messages" taggedAs (WIP) in { f: Fixture =>
       import f._
       val analyzer = TestActorRef[FirstHourAverageAnalyzer]( FirstHourAverageAnalyzer.props(router.ref) )
       val firstHour = FirstHourAverageAnalyzer.Context.FirstHour
@@ -172,10 +173,12 @@ class SkylineFirstHourAverageSpec extends SkylineBaseSpec {
       val history1 = historyWith( None, series )
       analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series, plan), history1, algProps ) )
       aggregator.expectMsgPF( 2.seconds.dilated, "first hour" ) {
-        case m @ NoOutliers(alg, source, plan, control) => {
+        case m @ SeriesOutliers(alg, source, plan, outliers, control) => {
           alg mustBe Set( algoS )
           source mustBe series
-          m.hasAnomalies mustBe false
+          m.hasAnomalies mustBe true
+          outliers.size mustBe 1
+          outliers mustBe Seq( series.points.last )
         }
       }
 
@@ -197,15 +200,15 @@ class SkylineFirstHourAverageSpec extends SkylineBaseSpec {
           alg mustBe Set( algoS )
           source mustBe series2
           m.hasAnomalies mustBe true
-          outliers.size mustBe 2
-          outliers mustBe series2.points.take(2)
+          outliers.size mustBe 1
+          outliers mustBe series2.points.take(1)
         }
       }
     }
 
     "find outliers beyond first hour" in { f: Fixture => pending }
 
-    "provide full threshold boundaries" taggedAs (WIP) in { f: Fixture =>
+    "provide full threshold boundaries" in { f: Fixture =>
       import f._
       val analyzer = TestActorRef[FirstHourAverageAnalyzer]( FirstHourAverageAnalyzer.props( router.ref ) )
       val firstHour = FirstHourAverageAnalyzer.Context.FirstHour

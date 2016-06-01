@@ -12,6 +12,7 @@ import org.mockito.Mockito._
 import org.scalatest.Tag
 import org.scalatest.mock.MockitoSugar
 import peds.commons.V
+import spotlight.analysis.outlier.algorithm.CommonAnalyzer
 
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Future}
@@ -88,7 +89,11 @@ abstract class SkylineBaseSpec extends ParallelAkkaSpec with MockitoSugar with L
       }
     }
 
-    def tailAverage( data: Seq[DataPoint], lastPoints: Seq[DataPoint], tailLength: Int = 3 ): Seq[DataPoint] = {
+    def tailAverage(
+      data: Seq[DataPoint],
+      lastPoints: Seq[DataPoint],
+      tailLength: Int = CommonAnalyzer.DefaultTailAverageLength
+    ): Seq[DataPoint] = {
       val values = data map { _.value }
       val lastPos: Int = {
         data.headOption
