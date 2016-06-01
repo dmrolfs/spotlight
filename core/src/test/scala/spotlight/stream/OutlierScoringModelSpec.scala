@@ -45,12 +45,6 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
     val protocol = new PythonPickleProtocol
     val stringFlow: Flow[ByteString, ByteString, NotUsed] = Flow[ByteString].via( protocol.framingFlow() )
 
-    trait TestConfigurationProvider extends OutlierDetection.ConfigurationProvider {
-//      override def makePlans: Creator = () => { fixture.plans.right }
-//      override def invalidateCaches(): Unit = { }
-//      override def refreshInterval: FiniteDuration = 5.minutes
-    }
-
     val configurationReloader = Configuration.reloader( Array.empty[String] )()()
 
     val algo = SeriesDensityAnalyzer.Algorithm
@@ -202,7 +196,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
     }
 
 
-    "batch series by plan passthru without merging with demand" taggedAs (WIP) in { f: Fixture =>
+    "batch series by plan passthru without merging with demand" in { f: Fixture =>
       import f._
       import OutlierScoringModelSpec._
 
@@ -231,9 +225,9 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
       val pts1 = makeDataPoints( values = Seq.fill( 9 )( 1.0 ) )
       val ts1 = spike( pts1 )( pts1.size - 1 )
       val pts2 = makeDataPoints(
-                                 values = Seq.fill( 9 )( 1.0 ),
-                                 start = pts1.last.timestamp.plusSeconds( 1 )
-                               )
+        values = Seq.fill( 9 )( 1.0 ),
+        start = pts1.last.timestamp.plusSeconds( 1 )
+      )
       val ts2 = spike( pts2 )( pts2.size - 1 )
       val expectedTs = implicitly[Merging[TimeSeries]].merge( ts1, ts2 ).toOption.get
 
@@ -253,10 +247,10 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
 
       data foreach { ps.sendNext }
 
-      sub.expectNext() mustBe (ts1, p1)
-      sub.expectNext() mustBe (ts1, p2)
-      sub.expectNext() mustBe (ts2, p1)
-      sub.expectNext() mustBe (ts2, p2)
+      sub.expectNext() mustBe (ts1, OutlierPlan.Scope(p1, ts1.topic))
+      sub.expectNext() mustBe (ts1, OutlierPlan.Scope(p2, ts1.topic))
+      sub.expectNext() mustBe (ts2, OutlierPlan.Scope(p1, ts2.topic))
+      sub.expectNext() mustBe (ts2, OutlierPlan.Scope(p2, ts2.topic))
     }
 
     "batch series by plan with merging if backpressured" taggedAs (WIP) in { f: Fixture =>
@@ -310,8 +304,8 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
 
       ss.request( 2 ) // request after sendNext creates backpressure
 
-      sub.expectNext() mustBe (expectedTs, p1)
-      sub.expectNext() mustBe (expectedTs, p2)
+      sub.expectNext() mustBe (expectedTs, OutlierPlan.Scope(p1, expectedTs.topic))
+      sub.expectNext() mustBe (expectedTs, OutlierPlan.Scope(p2, expectedTs.topic))
     }
 
     "detect Outliers" in { f: Fixture =>
