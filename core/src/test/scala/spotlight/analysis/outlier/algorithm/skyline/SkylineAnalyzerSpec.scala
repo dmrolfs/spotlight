@@ -199,10 +199,12 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
       pending
     }
 
-    "find outliers via histogram bins Test" in { f: Fixture =>
+    "find outliers via histogram bins Test" taggedAs (WIP) in { f: Fixture =>
       import f._
+      val now = joda.DateTime.now
       val full: Seq[DataPoint] = makeDataPoints(
-        values = IndexedSeq.fill( 20 )( 1.0 ).to[scala.collection.immutable.IndexedSeq],
+        values = IndexedSeq.fill( 10 )( 1.0 ).to[scala.collection.immutable.IndexedSeq],
+        start = now,
         timeWiggle = (0.98, 1.02),
         valueWiggle = (0.98, 1.02)
       )
@@ -228,12 +230,13 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
 
 
       val full2: Seq[DataPoint] = makeDataPoints(
-        values = IndexedSeq.fill( 20 )( 1.0 ).to[scala.collection.immutable.IndexedSeq],
+        values = IndexedSeq.fill( 10 )( 1.0 ).to[scala.collection.immutable.IndexedSeq],
+        start = full.last.timestamp.plusSeconds(1),
         timeWiggle = (0.98, 1.02),
         valueWiggle = (0.98, 1.02)
       )
 
-      val series2 = spike( full )( 0 )
+      val series2 = spike( full2 )( 0 )
       val history2 = historyWith( Option(history1 recordLastPoints series.points), series2 )
 
       analyzer.receive( DetectUsing(algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
@@ -242,8 +245,8 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
           alg mustBe Set( algoS )
           source mustBe series2
           m.hasAnomalies mustBe true
-          outliers.size mustBe 3
-          outliers mustBe series2.points.take(3)
+          outliers.size mustBe 1
+          outliers mustBe series2.points.take(1)
         }
       }
     }
