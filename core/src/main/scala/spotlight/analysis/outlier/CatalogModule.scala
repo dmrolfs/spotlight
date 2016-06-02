@@ -294,12 +294,11 @@ object Catalog extends EntityCompanion[Catalog] {
 
       val workflow: Receive = {
         case ts: TimeSeries => {
+          // forwarding to retain publisher sender
           for {
             p <- plansCache.values if p appliesTo ts
-          } {
-            // forwarding to retain publisher sender
-            model.aggregateOf( PlanModule.aggregateRootType, p.id ) forward ts
-          }
+            pref = model.aggregateOf( PlanModule.aggregateRootType, p.id )
+          } { pref forward ts }
         }
       }
 

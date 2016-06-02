@@ -125,7 +125,7 @@ object AnalysisPlanModule {
 
       val workflow: Receive = {
         // forward to retain publisher sender
-        case ts: TimeSeries => proxyFor( ts.topic ) forward ( ts, OutlierPlan.Scope(plan = state, topic = ts.topic) )
+        case ts: TimeSeries => proxyFor( ts.topic ) forward (ts, OutlierPlan.Scope(plan = state, topic = ts.topic))
       }
 
       val planEntity: Receive = {
