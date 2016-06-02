@@ -184,8 +184,10 @@ class AnalysisScopeProxy extends Actor with InstrumentedActor with ActorLogging 
         .map { rt =>
           implicit val timeout = akka.util.Timeout( 15.seconds )
           val aref = outer.model.aggregateOf( rt, outer.scope.id )
-          val reg = ( aref ? AlgorithmActor.Register( outer.scope.id, routerRef ) ).mapTo[AlgorithmActor.Registered]
-          reg map { _ => aref }
+
+          ( aref ? AlgorithmActor.Register(outer.scope.id, routerRef) )
+          .mapTo[AlgorithmActor.Registered]
+          .map { _ => aref }
         }
       }
 
