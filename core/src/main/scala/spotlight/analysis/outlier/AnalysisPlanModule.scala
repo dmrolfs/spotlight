@@ -8,7 +8,7 @@ import demesne.module.EntityAggregateModule
 import demesne.register.StackableRegisterBusPublisher
 import peds.akka.publish.{EventPublisher, StackableStreamPublisher}
 import spotlight.model.outlier.{IsQuorum, OutlierPlan, ReduceOutliers}
-import spotlight.model.timeseries.Topic
+import spotlight.model.timeseries.{TimeSeries, Topic}
 
 
 /**
@@ -32,11 +32,11 @@ object AnalysisPlanModule {
 
     object Protocol extends module.Protocol {
       sealed trait PlanProtocol
-      //todo add plan change commands
+      //todo add info change commands
       //todo reify algorithm
       //      case class AddAlgorithm( override val targetId: OutlierPlan#TID, algorithm: Symbol ) extends Command with PlanProtocol
-      case object GetSummary extends PlanProtocol
-      case class Summary( sourceId: OutlierPlan#TID, plan: OutlierPlan ) extends PlanProtocol
+      case object GetInfo extends PlanProtocol
+      case class PlanInfo(sourceId: OutlierPlan#TID, info: OutlierPlan ) extends PlanProtocol
 
       case class ApplyTo( override val targetId: ApplyTo#TID, appliesTo: OutlierPlan.AppliesTo ) extends Command with PlanProtocol
 
@@ -121,8 +121,15 @@ object AnalysisPlanModule {
         }
       }
 
+      override def active: Receive = workflow orElse planEntity orElse super.active
+
+      val workflow: Receive = {
+        // forward to retain publisher sender
+        case ts: TimeSeries => proxyFor( ts.topic ) forward ( ts, OutlierPlan.Scope(plan = state, topic = ts.topic) )
+      }
+
       val planEntity: Receive = {
-        case GetSummary => sender() ! Summary( state.id, state )
+        case GetInfo => sender( ) ! PlanInfo( state.id, state )
 
         case ApplyTo( id, appliesTo ) => persist( ScopeChanged(id, appliesTo) ) { e => acceptAndPublish( e ) }
 
@@ -134,8 +141,6 @@ object AnalysisPlanModule {
           persist( AnalysisResolutionChanged(id, isQuorum, reduce) ) { e => acceptAndPublish( e ) }
         }
       }
-
-      override val active: Receive = super.active orElse planEntity
     }
   }
 }

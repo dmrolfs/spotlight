@@ -4,7 +4,7 @@ import scala.concurrent.{Await, ExecutionContext, Future, TimeoutException}
 import scala.concurrent.duration._
 import scala.util.matching.Regex
 import akka.actor.Props
-import akka.pattern.ask
+import akka.pattern.{ask, pipe}
 import akka.persistence.RecoveryCompleted
 import akka.util.Timeout
 import com.typesafe.config.{Config, ConfigFactory, ConfigObject}
@@ -16,7 +16,8 @@ import peds.akka.publish.{EventPublisher, StackableStreamPublisher}
 import peds.archetype.domain.model.core.{Entity, EntityCompanion}
 import peds.commons.identifier.{ShortUUID, TaggedID}
 import spotlight.model.outlier.{IsQuorum, OutlierPlan, ReduceOutliers}
-import spotlight.model.timeseries.Topic
+import spotlight.model.timeseries.{TimeSeries, Topic}
+import spotlight.analysis.outlier.AnalysisPlanModule.AggregateRoot.{Protocol => PlanProtocol, module => PlanModule}
 
 
 /**
@@ -136,6 +137,18 @@ object Catalog extends EntityCompanion[Catalog] {
   }
 
 
+  case class PlanSummary( id: OutlierPlan#TID, name: String, appliesTo: OutlierPlan.AppliesTo )
+  object PlanSummary {
+    def apply( info: OutlierPlan ): PlanSummary = {
+      PlanSummary( id = info.id, name = info.name, appliesTo = info.appliesTo )
+    }
+
+    def apply( summary: PlanProtocol.PlanInfo ): PlanSummary = {
+      PlanSummary( id = summary.sourceId, name = summary.info.name, appliesTo = summary.info.appliesTo )
+    }
+  }
+
+
   final case class CatalogState private[Catalog](
     override val id: Catalog#TID,
     override val name: String,
@@ -166,32 +179,29 @@ object Catalog extends EntityCompanion[Catalog] {
     object Protocol extends module.Protocol {
       sealed trait CatalogProtocol
       case class GetPlansForTopic( targetId: Catalog#TID, topic: Topic ) extends CatalogProtocol
-      case class CatalogedPlans( sourceId: Catalog#TID, plans: Set[OutlierPlan] ) extends CatalogProtocol
+      case class CatalogedPlans( sourceId: Catalog#TID, plans: Set[PlanSummary] ) extends CatalogProtocol
 
-      case class AddPlan(
-        override val targetId: AddPlan#TID,
-        planId: OutlierPlan#TID,
-        name: String
-      ) extends Command with CatalogProtocol
+      case class AddPlan( override val targetId: AddPlan#TID, summary: PlanSummary ) extends Command with CatalogProtocol
 
       case class RemovePlan(
         override val targetId: RemovePlan#TID,
         planId: OutlierPlan#TID,
-        name: String
+        planName: String
       ) extends Command with CatalogProtocol
 
       case class PlanAdded(
         override val sourceId: PlanAdded#TID,
         planId: OutlierPlan#TID,
-        name: String
+        planName: String
       ) extends Event with CatalogProtocol
 
       case class PlanRemoved(
         override val sourceId: PlanRemoved#TID,
         planId: OutlierPlan#TID,
-        name: String
+        planName: String
       ) extends Event with CatalogProtocol
     }
+
 
     object CatalogActor {
       def props( model: DomainModel, meta: AggregateRootType ): Props = {
@@ -201,20 +211,18 @@ object Catalog extends EntityCompanion[Catalog] {
 
     class CatalogActor( override val model: DomainModel, override val meta: AggregateRootType )
     extends module.EntityAggregateActor { publisher: EventPublisher =>
-      import AnalysisPlanModule.AggregateRoot.{ Protocol => PlanProtocol }
-      import AnalysisPlanModule.AggregateRoot.{ module => PlanModule }
-
       override var state: Catalog = _
 
-      var plansCache: Map[String, OutlierPlan] = Map.empty[String, OutlierPlan]
+      var plansCache: Map[String, PlanSummary] = Map.empty[String, PlanSummary]
+
+      val actorEc = context.system.dispatcher
+      val defaultTimeout = Timeout( 30.seconds )
 
 
       override def preStart(): Unit = {
         super.preStart( )
-//        context.system.eventStream.subscribe( self, classOf[PlanProtocol.PlanChanged] )
-        context.system.eventStream.subscribe( self, classOf[PlanProtocol.Entity.Added] )
-        context.system.eventStream.subscribe( self, classOf[PlanProtocol.Entity.Disabled] )
-        context.system.eventStream.subscribe( self, classOf[PlanProtocol.Entity.Enabled] )
+        context.system.eventStream.subscribe( self, classOf[PlanProtocol.Entity.EntityMessage] )
+        context.system.eventStream.subscribe( self, classOf[PlanProtocol.PlanProtocol] )
       }
 
       override def receiveRecover: Receive = {
@@ -222,8 +230,9 @@ object Catalog extends EntityCompanion[Catalog] {
           val config = ConfigFactory.load()
           val configPlans: Set[OutlierPlan] = makePlans( config.getConfig(ConfigPaths.DETECTION_PLANS), detectionBudget(config) )
           val (oldPlans, newPlans) = configPlans partition { state.analysisPlans contains _.name }
-          implicit val ec = context.system.dispatcher
-          implicit val timeout = Timeout( 5.seconds )
+
+          implicit val ec = actorEc
+          implicit val to = defaultTimeout
 
           val plans = for {
             existing <- loadExistingCacheElements( oldPlans )
@@ -238,24 +247,13 @@ object Catalog extends EntityCompanion[Catalog] {
         }
       }
 
-
       def loadExistingCacheElements(
         plans: Set[OutlierPlan]
       )(
         implicit ec: ExecutionContext,
         to: Timeout
-      ): Future[Map[String, OutlierPlan]] = {
-        val queries = {
-          plans.toSeq
-          .map { p =>
-            val planRef = model.aggregateOf( PlanModule.aggregateRootType, p.id )
-
-            ( planRef ? PlanProtocol.GetSummary )
-            .mapTo[PlanProtocol.Summary]
-            .map { summary => ( p.name, summary.plan ) }
-          }
-        }
-
+      ): Future[Map[String, PlanSummary]] = {
+        val queries = plans.toSeq.map { p => loadPlan( p.id ) }
         Future.sequence( queries ) map { qs => Map( qs:_* ) }
       }
 
@@ -264,22 +262,24 @@ object Catalog extends EntityCompanion[Catalog] {
       )(
         implicit ec: ExecutionContext,
         to: Timeout
-      ): Future[Map[String, OutlierPlan]] = {
-        val queries = {
-          plans.toSeq
-          .map { p =>
-            val planRef = model.aggregateOf( PlanModule.aggregateRootType, p.id )
-
-            ( planRef ? PlanProtocol.Entity.Add( p ) )
-            .mapTo[PlanProtocol.Entity.Added]
-            .map { evt => ( p.name, evt.info ) }
-          }
+      ): Future[Map[String, PlanSummary]] = {
+        val queries = plans.toSeq.map { p =>
+          val planRef = model.aggregateOf( PlanModule.aggregateRootType, p.id )
+          planRef ! PlanProtocol.Entity.Add( p )
+          loadPlan( p.id )
         }
-
         Future.sequence( queries ) map { qs => Map( qs:_* ) }
       }
 
-      //todo upon add watch plan actor for changes and incorporate them in to cache
+      def loadPlan( planId: OutlierPlan#TID )( implicit ec: ExecutionContext, to: Timeout ): Future[(String, PlanSummary)] = {
+        val planRef = model.aggregateOf( PlanModule.aggregateRootType, planId )
+        ( planRef ? PlanProtocol.GetInfo )
+        .mapTo[PlanProtocol.PlanInfo]
+        .map { summary => ( summary.info.name, PlanSummary( summary ) ) }
+      }
+
+
+      //todo upon add watch info actor for changes and incorporate them in to cache
       //todo the cache is what is sent out in reply to GetPlansForXYZ
 
       import Protocol._
@@ -289,9 +289,24 @@ object Catalog extends EntityCompanion[Catalog] {
         case (PlanRemoved(_, _, name), s) => analysisPlansLens.modify( s ){ _ - name }
       }
 
+
+      override def active: Receive = workflow orElse catalog orElse plans orElse super.active
+
+      val workflow: Receive = {
+        case ts: TimeSeries => {
+          for {
+            p <- plansCache.values if p appliesTo ts
+          } {
+            // forwarding to retain publisher sender
+            model.aggregateOf( PlanModule.aggregateRootType, p.id ) forward ts
+          }
+        }
+      }
+
       val catalog: Receive = {
-        case AddPlan( id, pid, name ) => persist( PlanAdded(id, pid, name) ) { event => acceptAndPublish( event ) }
-        case RemovePlan( id, pid, name ) => persist( PlanRemoved(id, pid, name) ) { event => acceptAndPublish( event ) }
+        case AddPlan( _, summary ) => persistAddedPlan( summary )
+
+        case RemovePlan( _, pid, name ) if state.analysisPlans.contains( name ) => persistRemovedPlan( name )
 
         case GetPlansForTopic( _, topic ) => {
           val ps = plansCache collect { case (_, p) if p appliesTo topic => p }
@@ -299,15 +314,56 @@ object Catalog extends EntityCompanion[Catalog] {
         }
       }
 
-      //todo dmr WORK HERE
-      val plan: Receive = {
-//        case e: PlanProtocol.PlanChanged => throw new IllegalStateException( "TBD handle: "+e )
-        case e: PlanProtocol.Entity.Added => throw new IllegalStateException( "TBD handle: "+e )
-        case e: PlanProtocol.Entity.Disabled => throw new IllegalStateException( "TBD handle: "+e )
-        case e: PlanProtocol.Entity.Enabled => throw new IllegalStateException( "TBD handle: "+e )
+      val plans: Receive = {
+        case e: PlanProtocol.Entity.Added => persistAddedPlan( PlanSummary(e.info) )
+
+        case e: PlanProtocol.Entity.Enabled => {
+          implicit val ec = actorEc
+          implicit val to = defaultTimeout
+
+          fetchPlanInfo( e.sourceId )
+          .map { i => AddPlan( targetId = state.id, summary = PlanSummary(i.info) ) }
+          .pipeTo( self )
+        }
+
+        case e: PlanProtocol.Entity.Disabled => persistRemovedPlan( e.slug )
+
+        case e: PlanProtocol.Entity.Renamed => {
+          implicit val ec = actorEc
+          implicit val to = defaultTimeout
+
+          persistRemovedPlan( e.oldName )
+
+          fetchPlanInfo( e.sourceId )
+          .map { i => AddPlan( targetId = state.id, summary = PlanSummary(i.info) ) }
+          .pipeTo( self )
+        }
       }
 
-      override def active: Receive = catalog orElse super.active //orElse catalog
+
+      def fetchPlanInfo( id: PlanModule.TID )( implicit ec: ExecutionContext, to: Timeout ): Future[PlanProtocol.PlanInfo] = {
+        val planRef = model.aggregateOf( PlanModule.aggregateRootType, id )
+        ( planRef ? PlanProtocol.GetInfo )
+        .mapTo[PlanProtocol.PlanInfo]
+      }
+
+
+      def persistAddedPlan( summary: PlanSummary ): Unit = {
+          persist( PlanAdded(state.id, summary.id, summary.name) ) { event =>
+            plansCache += ( summary.name -> summary )
+            acceptAndPublish( event )
+          }
+        }
+
+      def persistRemovedPlan( name: String ): Unit = {
+        state.analysisPlans.get( name ) foreach { pid =>
+          persist( PlanRemoved(state.id, pid, name) ) { event =>
+            acceptAndPublish( event )
+            plansCache -= name
+          }
+        }
+      }
+
 
       private def makePlans( planSpecifications: Config, budget: FiniteDuration ): Set[OutlierPlan] = {
         import scala.collection.JavaConversions._
@@ -340,7 +396,7 @@ object Catalog extends EntityCompanion[Catalog] {
             val algorithms = planAlgorithms( spec )
 
             if ( spec.hasPath(IS_DEFAULT) && spec.getBoolean(IS_DEFAULT) ) {
-              log.info( "topic[{}] default plan origin:[{}] line:[{}]", name, spec.origin, spec.origin.lineNumber )
+              log.info( "topic[{}] default info origin:[{}] line:[{}]", name, spec.origin, spec.origin.lineNumber )
 
               Some(
                 OutlierPlan.default(
@@ -355,7 +411,7 @@ object Catalog extends EntityCompanion[Catalog] {
               )
             } else if ( spec hasPath TOPICS ) {
               import scala.collection.JavaConverters._
-              log.info( "topic:[{}] topic plan origin:[{}] line:[{}]", name, spec.origin, spec.origin.lineNumber )
+              log.info( "topic:[{}] topic info origin:[{}] line:[{}]", name, spec.origin, spec.origin.lineNumber )
 
               Some(
                 OutlierPlan.forTopics(
@@ -371,7 +427,7 @@ object Catalog extends EntityCompanion[Catalog] {
                 )
               )
             } else if ( spec hasPath REGEX ) {
-              log.info( "topic:[{}] regex plan origin:[{}] line:[{}]", name, spec.origin, spec.origin.lineNumber )
+              log.info( "topic:[{}] regex info origin:[{}] line:[{}]", name, spec.origin, spec.origin.lineNumber )
               Some(
                 OutlierPlan.forRegex(
                   name = name,

@@ -93,7 +93,7 @@ class AnalysisScopeProxy extends Actor with InstrumentedActor with ActorLogging 
   var workers: Workers = scala.concurrent.Await.result( makeTopicWorkers(outer.scope.topic)(context.dispatcher), 15.seconds )
 
   case class PlanStream private( ingressRef: ActorRef, graph: RunnableGraph[NotUsed] )
-  var stream: Option[PlanStream] = None
+  var streams: Map[ActorRef, PlanStream] = Map.empty[ActorRef, PlanStream]
 
 
   val streamSupervision: Supervision.Decider = {
@@ -109,20 +109,21 @@ class AnalysisScopeProxy extends Actor with InstrumentedActor with ActorLogging 
     ActorMaterializer( ActorMaterializerSettings(system) withSupervisionStrategy streamSupervision )
   }
 
-  override def receive: Receive = LoggingReceive {
-    case (ts: TimeSeries, p: OutlierPlan) if Scope(p, ts.topic) == outer.scope => {
-      streamIngressFor( sender() ) forward ts
-    }
-  }
+  override def receive: Receive = LoggingReceive { around( workflow ) }
 
+  val workflow: Receive = {
+    case (ts: TimeSeries, s: OutlierPlan.Scope) if s == outer.scope => streamIngressFor( sender() ) forward ts
+    case (ts: TimeSeries, p: OutlierPlan) if Scope(p, ts.topic) == outer.scope => streamIngressFor( sender() ) forward ts
+  }
 
   def streamIngressFor( subscriber: ActorRef )( implicit system: ActorSystem, materializer: Materializer ): ActorRef = {
     val ingress = {
-      outer.stream
+      streams
+      .get( subscriber )
       .map { _.ingressRef }
       .getOrElse {
-        val ps = makePlanStream( outer.plan, outer.workers, subscriber )
-        outer.stream = Option( ps )
+        val ps = makePlanStream( subscriber )
+        streams += ( subscriber -> ps )
         ps.ingressRef
       }
     }
@@ -210,15 +211,13 @@ class AnalysisScopeProxy extends Actor with InstrumentedActor with ActorLogging 
   }
 
   def makePlanStream(
-    p: OutlierPlan,
-    w: Workers,
     subscriber: ActorRef
   )(
     implicit tsMerging: Merging[TimeSeries],
     system: ActorSystem,
     materializer: Materializer
   ): PlanStream = {
-    log.info( "OutlierPlanDetectionRouter making new flow for plan:subscriber: [{} : {}]", p.name, subscriber )
+    log.info( "OutlierPlanDetectionRouter making new flow for plan-scope:subscriber: [{} : {}]", outer.scope, subscriber )
 
     val (ingressRef, ingress) = {
       Source
@@ -231,9 +230,9 @@ class AnalysisScopeProxy extends Actor with InstrumentedActor with ActorLogging 
       import GraphDSL.Implicits._
 
       val ingressPublisher = b.add( Source fromPublisher ingress )
-      val batch = p.grouping map { g => b.add( batchSeries( g ) ) }
+      val batch = outer.plan.grouping map { g => b.add( batchSeries( g ) ) }
       val buffer = b.add( Flow[TimeSeriesBase].buffer(outer.bufferSize, OverflowStrategy.backpressure) )
-      val detect = b.add( detectionFlow( p, w ) )
+      val detect = b.add( detectionFlow( outer.plan, outer.workers ) )
       val egressSubscriber = b.add( Sink.actorSubscriber[Outliers]( StreamEgress.props(subscriber, high = 50) ) )
 
       if ( batch.isDefined ) {
@@ -245,7 +244,7 @@ class AnalysisScopeProxy extends Actor with InstrumentedActor with ActorLogging 
       ClosedShape
     }
 
-    val runnable = RunnableGraph.fromGraph( graph ).named( s"plan-detection-${p.name}-${subscriber.path}" )
+    val runnable = RunnableGraph.fromGraph( graph ).named( s"plan-detection-${outer.scope}-${subscriber.path}" )
     runnable.run()
     PlanStream( ingressRef, runnable )
   }
