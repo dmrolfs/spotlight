@@ -36,7 +36,7 @@ object AnalysisPlanModule {
       //todo reify algorithm
       //      case class AddAlgorithm( override val targetId: OutlierPlan#TID, algorithm: Symbol ) extends Command with PlanProtocol
       case object GetInfo extends PlanProtocol
-      case class PlanInfo(sourceId: OutlierPlan#TID, info: OutlierPlan ) extends PlanProtocol
+      case class PlanInfo( sourceId: module.TID, info: OutlierPlan ) extends PlanProtocol
 
       case class ApplyTo( override val targetId: ApplyTo#TID, appliesTo: OutlierPlan.AppliesTo ) extends Command with PlanProtocol
 
@@ -65,12 +65,12 @@ object AnalysisPlanModule {
 
 
     object OutlierPlanActor {
-      def props( model: DomainModel, meta: AggregateRootType ): Props = {
-        Props( new OutlierPlanActor( model, meta ) with StackableStreamPublisher with StackableRegisterBusPublisher )
+      def props( model: DomainModel, rootType: AggregateRootType ): Props = {
+        Props( new OutlierPlanActor( model, rootType ) with StackableStreamPublisher with StackableRegisterBusPublisher )
       }
     }
 
-    class OutlierPlanActor( override val model: DomainModel, override val meta: AggregateRootType )
+    class OutlierPlanActor( override val model: DomainModel, override val rootType: AggregateRootType )
     extends module.EntityAggregateActor { publisher: EventPublisher =>
       import Protocol._
 

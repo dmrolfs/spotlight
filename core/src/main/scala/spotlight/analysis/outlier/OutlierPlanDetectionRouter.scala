@@ -22,6 +22,7 @@ import spotlight.model.timeseries.TimeSeriesBase.Merging
 /**
   * Created by rolfsd on 4/19/16.
   */
+//todo remove?
 object OutlierPlanDetectionRouter extends LazyLogging {
   def props(
     detectorRef: ActorRef,

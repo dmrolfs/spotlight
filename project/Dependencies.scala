@@ -3,7 +3,7 @@ import sbt._
 
 object Dependencies {
   object peds {
-    val version = "0.2.7"
+    val version = "0.2.6"
     def module( id: String ) = "com.github.dmrolfs" %% s"peds-$id" % version
     def all = Seq( commons, akka, archetype )
 
@@ -21,7 +21,7 @@ object Dependencies {
   }
 
   object akka {
-    val version = "2.4.5"
+    val version = "2.4.7"
     def module( id: String ) = "com.typesafe.akka" %% s"akka-$id" % version
     val all = Seq( actor, stream, agent, cluster, clusterSharding, contrib, persistence, remote, slf4j )
 

@@ -2,6 +2,7 @@ package spotlight.analysis.outlier
 
 import scala.concurrent.{Await, ExecutionContext, Future, TimeoutException}
 import scala.concurrent.duration._
+import scala.reflect.ClassTag
 import scala.util.matching.Regex
 import akka.actor.Props
 import akka.pattern.{ask, pipe}
@@ -25,7 +26,8 @@ import spotlight.analysis.outlier.AnalysisPlanModule.AggregateRoot.{Protocol => 
   */
 trait Catalog extends Entity {
   override type ID = ShortUUID
-  override def idClass: Class[_] = classOf[ShortUUID]
+  override def evId: ClassTag[ShortUUID] = ClassTag( classOf[ShortUUID] )
+
   def isActive: Boolean
   def analysisPlans: Map[String, OutlierPlan#TID]
   def configuration: Config
@@ -181,22 +183,22 @@ object Catalog extends EntityCompanion[Catalog] {
       case class GetPlansForTopic( targetId: Catalog#TID, topic: Topic ) extends CatalogProtocol
       case class CatalogedPlans( sourceId: Catalog#TID, plans: Set[PlanSummary] ) extends CatalogProtocol
 
-      case class AddPlan( override val targetId: AddPlan#TID, summary: PlanSummary ) extends Command with CatalogProtocol
+      case class AddPlan( override val targetId: Catalog#TID, summary: PlanSummary ) extends Command with CatalogProtocol
 
       case class RemovePlan(
-        override val targetId: RemovePlan#TID,
+        override val targetId: Catalog#TID,
         planId: OutlierPlan#TID,
         planName: String
       ) extends Command with CatalogProtocol
 
       case class PlanAdded(
-        override val sourceId: PlanAdded#TID,
+        override val sourceId: Catalog#TID,
         planId: OutlierPlan#TID,
         planName: String
       ) extends Event with CatalogProtocol
 
       case class PlanRemoved(
-        override val sourceId: PlanRemoved#TID,
+        override val sourceId: Catalog#TID,
         planId: OutlierPlan#TID,
         planName: String
       ) extends Event with CatalogProtocol
@@ -204,18 +206,18 @@ object Catalog extends EntityCompanion[Catalog] {
 
 
     object CatalogActor {
-      def props( model: DomainModel, meta: AggregateRootType ): Props = {
-        Props( new CatalogActor( model, meta ) with StackableStreamPublisher with StackableRegisterBusPublisher )
+      def props( model: DomainModel, rootType: AggregateRootType ): Props = {
+        Props( new CatalogActor( model, rootType ) with StackableStreamPublisher with StackableRegisterBusPublisher )
       }
     }
 
-    class CatalogActor( override val model: DomainModel, override val meta: AggregateRootType )
+    class CatalogActor( override val model: DomainModel, override val rootType: AggregateRootType )
     extends module.EntityAggregateActor { publisher: EventPublisher =>
       override var state: Catalog = _
 
       var plansCache: Map[String, PlanSummary] = Map.empty[String, PlanSummary]
 
-      val actorEc = context.system.dispatcher
+      val actorDispatcher = context.system.dispatcher
       val defaultTimeout = Timeout( 30.seconds )
 
 
@@ -231,7 +233,7 @@ object Catalog extends EntityCompanion[Catalog] {
           val configPlans: Set[OutlierPlan] = makePlans( config.getConfig(ConfigPaths.DETECTION_PLANS), detectionBudget(config) )
           val (oldPlans, newPlans) = configPlans partition { state.analysisPlans contains _.name }
 
-          implicit val ec = actorEc
+          implicit val ec = actorDispatcher
           implicit val to = defaultTimeout
 
           val plans = for {
@@ -264,7 +266,7 @@ object Catalog extends EntityCompanion[Catalog] {
         to: Timeout
       ): Future[Map[String, PlanSummary]] = {
         val queries = plans.toSeq.map { p =>
-          val planRef = model.aggregateOf( PlanModule.aggregateRootType, p.id )
+          val planRef = model.aggregateOf( PlanModule.rootType, p.id )
           planRef ! PlanProtocol.Entity.Add( p )
           loadPlan( p.id )
         }
@@ -272,7 +274,7 @@ object Catalog extends EntityCompanion[Catalog] {
       }
 
       def loadPlan( planId: OutlierPlan#TID )( implicit ec: ExecutionContext, to: Timeout ): Future[(String, PlanSummary)] = {
-        val planRef = model.aggregateOf( PlanModule.aggregateRootType, planId )
+        val planRef = model.aggregateOf( PlanModule.rootType, planId )
         ( planRef ? PlanProtocol.GetInfo )
         .mapTo[PlanProtocol.PlanInfo]
         .map { summary => ( summary.info.name, PlanSummary( summary ) ) }
@@ -297,7 +299,7 @@ object Catalog extends EntityCompanion[Catalog] {
           // forwarding to retain publisher sender
           for {
             p <- plansCache.values if p appliesTo ts
-            pref = model.aggregateOf( PlanModule.aggregateRootType, p.id )
+            pref = model.aggregateOf( PlanModule.rootType, p.id )
           } { pref forward ts }
         }
       }
@@ -317,7 +319,7 @@ object Catalog extends EntityCompanion[Catalog] {
         case e: PlanProtocol.Entity.Added => persistAddedPlan( PlanSummary(e.info) )
 
         case e: PlanProtocol.Entity.Enabled => {
-          implicit val ec = actorEc
+          implicit val ec = actorDispatcher
           implicit val to = defaultTimeout
 
           fetchPlanInfo( e.sourceId )
@@ -328,7 +330,7 @@ object Catalog extends EntityCompanion[Catalog] {
         case e: PlanProtocol.Entity.Disabled => persistRemovedPlan( e.slug )
 
         case e: PlanProtocol.Entity.Renamed => {
-          implicit val ec = actorEc
+          implicit val ec = actorDispatcher
           implicit val to = defaultTimeout
 
           persistRemovedPlan( e.oldName )
@@ -341,7 +343,7 @@ object Catalog extends EntityCompanion[Catalog] {
 
 
       def fetchPlanInfo( id: PlanModule.TID )( implicit ec: ExecutionContext, to: Timeout ): Future[PlanProtocol.PlanInfo] = {
-        val planRef = model.aggregateOf( PlanModule.aggregateRootType, id )
+        val planRef = model.aggregateOf( PlanModule.rootType, id )
         ( planRef ? PlanProtocol.GetInfo )
         .mapTo[PlanProtocol.PlanInfo]
       }

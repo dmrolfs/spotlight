@@ -15,13 +15,13 @@ import peds.akka.metrics.InstrumentedActor
 import peds.akka.stream._
 import peds.commons.util._
 import spotlight.analysis.outlier.OutlierDetection.DetectionResult
-import spotlight.analysis.outlier.algorithm.AlgorithmActor
+import spotlight.analysis.outlier.algorithm.AlgorithmModule
 import spotlight.analysis.outlier.algorithm.density.{CohortDensityAnalyzer, SeriesCentroidDensityAnalyzer, SeriesDensityAnalyzer}
 import spotlight.analysis.outlier.algorithm.skyline._
 import spotlight.model.outlier.OutlierPlan.Scope
 import spotlight.model.outlier.{OutlierPlan, Outliers}
 import spotlight.model.timeseries.TimeSeriesBase.Merging
-import spotlight.model.timeseries.{TimeSeries, TimeSeriesBase, Topic}
+import spotlight.model.timeseries.{TimeSeries, Topic}
 
 
 /**
@@ -178,15 +178,16 @@ class AnalysisScopeProxy extends Actor with InstrumentedActor with ActorLogging 
     }
 
     def makeAlgorithms( routerRef: ActorRef ): Future[Set[ActorRef]] = {
-      val algs = outer.plan.algorithms
-      .flatMap { a =>
-        outer.rootTypeFor( a )
-        .map { rt =>
-          implicit val timeout = akka.util.Timeout( 15.seconds )
+      val algs = {
+        for {
+          a <- outer.plan.algorithms
+          rt <- outer.rootTypeFor( a )
+        } yield {
           val aref = outer.model.aggregateOf( rt, outer.scope.id )
-
-          ( aref ? AlgorithmActor.Register(outer.scope.id, routerRef) )
-          .mapTo[AlgorithmActor.Registered]
+          aref ! AlgorithmModule.Protocol.Add( outer.scope.id )
+          implicit val timeout = akka.util.Timeout( 15.seconds )
+          ( aref ? AlgorithmModule.Protocol.Register( outer.scope.id, routerRef ) )
+          .mapTo[AlgorithmModule.Protocol.Registered]
           .map { _ => aref }
         }
       }
