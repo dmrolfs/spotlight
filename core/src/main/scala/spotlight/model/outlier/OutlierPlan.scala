@@ -4,7 +4,7 @@ import scala.concurrent.duration._
 import scala.reflect.ClassTag
 import scala.util.matching.Regex
 import com.typesafe.config.{Config, ConfigFactory, ConfigOrigin}
-import peds.archetype.domain.model.core.{Entity, EntityCompanion}
+import peds.archetype.domain.model.core.{Entity, EntityCompanion, Identifying}
 import peds.commons._
 import peds.commons.identifier.{ShortUUID, TaggedID}
 import peds.commons.util._
@@ -79,6 +79,11 @@ object OutlierPlan extends EntityCompanion[OutlierPlan] {
         val Array(p, t) = n split ':'
         s.copy( plan = p, topic = t )
       }
+    }
+
+    implicit val scopeIdentifying: Identifying[Scope] = new Identifying[Scope] {
+      import scalaz.syntax.either._
+      override def nextId: TryV[Scope] = Identifying.NotDefinedForId[Scope]( "nextId" ).left
     }
   }
 

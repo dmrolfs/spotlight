@@ -11,6 +11,7 @@ import com.typesafe.scalalogging.LazyLogging
 import nl.grons.metrics.scala.Meter
 
 import scalaz.\/-
+import peds.akka.envelope._
 import peds.akka.metrics.InstrumentedActor
 import peds.akka.stream.{MaxInFlightProcessorAdapter, StreamEgress, StreamIngress, StreamMonitor}
 import spotlight.analysis.outlier.OutlierDetection.DetectionResult
@@ -136,16 +137,18 @@ class OutlierPlanDetectionRouter extends Actor with InstrumentedActor with Actor
   implicit val materializer = ActorMaterializer( ActorMaterializerSettings( system ) withSupervisionStrategy workflowSupervision )
 
   val route: Receive = {
-    case (ts: TimeSeries, p: OutlierPlan) if outer.plans( p ) => streamIngressFor( p, sender() ) forward ts
+    case (ts: TimeSeries, p: OutlierPlan) if outer.plans( p ) => streamIngressFor( p, sender() ) forwardEnvelope  ts
     case (ts: TimeSeries, s: OutlierPlan.Scope) if outer.plans.exists{ _.id == s.planId } => {
       log.error( "RECEIVED SCOPE:[{}] for series:[{}]", s, ts )
       outer.plans.find{ _.id == s.planId } foreach { p =>
         log.error( "PASSING ALONG to PLAN STREAM:[{}] for series:[{}]", p, ts )
-        streamIngressFor( p, sender() ) forward ts
+        streamIngressFor( p, sender() ) forwardEnvelope ts
       }
     }
 
-    case (ts, scope: OutlierPlan.Scope) => log.error( "UNKNOWN SCOPE:{} scope-id:[{}] ref-plan-ids:[{}]", scope, scope.planId, outer.plans.map{ _.id }.mkString(",") )
+    case (ts, scope: OutlierPlan.Scope) => {
+      log.error( "UNKNOWN SCOPE:{} scope-id:[{}] ref-plan-ids:[{}]", scope, scope.planId, outer.plans.map{ _.id }.mkString(",") )
+    }
   }
 
 

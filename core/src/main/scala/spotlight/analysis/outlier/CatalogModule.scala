@@ -5,7 +5,6 @@ import scala.concurrent.duration._
 import scala.reflect.ClassTag
 import scala.util.matching.Regex
 import akka.actor.Props
-import akka.pattern.{ask, pipe}
 import akka.persistence.RecoveryCompleted
 import akka.util.Timeout
 import com.typesafe.config.{Config, ConfigFactory, ConfigObject}
@@ -14,6 +13,8 @@ import demesne.{AggregateRootType, DomainModel}
 import demesne.module.EntityAggregateModule
 import demesne.register.StackableRegisterBusPublisher
 import peds.akka.publish.{EventPublisher, StackableStreamPublisher}
+import peds.akka.envelope._
+import peds.akka.envelope.pattern.{ask, pipe}
 import peds.archetype.domain.model.core.{Entity, EntityCompanion}
 import peds.commons.identifier.{ShortUUID, TaggedID}
 import spotlight.model.outlier.{IsQuorum, OutlierPlan, ReduceOutliers}
@@ -274,10 +275,7 @@ object Catalog extends EntityCompanion[Catalog] {
       }
 
       def loadPlan( planId: OutlierPlan#TID )( implicit ec: ExecutionContext, to: Timeout ): Future[(String, PlanSummary)] = {
-        val planRef = model.aggregateOf( PlanModule.rootType, planId )
-        ( planRef ? PlanProtocol.GetInfo )
-        .mapTo[PlanProtocol.PlanInfo]
-        .map { summary => ( summary.info.name, PlanSummary( summary ) ) }
+        fetchPlanInfo( planId ) map { summary => ( summary.info.name, PlanSummary(summary) ) }
       }
 
 
@@ -300,7 +298,7 @@ object Catalog extends EntityCompanion[Catalog] {
           for {
             p <- plansCache.values if p appliesTo ts
             pref = model.aggregateOf( PlanModule.rootType, p.id )
-          } { pref forward ts }
+          } { pref forwardEnvelope ts }
         }
       }
 
@@ -311,7 +309,7 @@ object Catalog extends EntityCompanion[Catalog] {
 
         case GetPlansForTopic( _, topic ) => {
           val ps = plansCache collect { case (_, p) if p appliesTo topic => p }
-          sender() ! CatalogedPlans( sourceId = state.id, plans = ps.toSet )
+          sender() !+ CatalogedPlans( sourceId = state.id, plans = ps.toSet )
         }
       }
 
@@ -324,7 +322,7 @@ object Catalog extends EntityCompanion[Catalog] {
 
           fetchPlanInfo( e.sourceId )
           .map { i => AddPlan( targetId = state.id, summary = PlanSummary(i.info) ) }
-          .pipeTo( self )
+          .pipeEnvelopeTo( self )
         }
 
         case e: PlanProtocol.Entity.Disabled => persistRemovedPlan( e.slug )
@@ -337,14 +335,14 @@ object Catalog extends EntityCompanion[Catalog] {
 
           fetchPlanInfo( e.sourceId )
           .map { i => AddPlan( targetId = state.id, summary = PlanSummary(i.info) ) }
-          .pipeTo( self )
+          .pipeEnvelopeTo( self )
         }
       }
 
 
       def fetchPlanInfo( id: PlanModule.TID )( implicit ec: ExecutionContext, to: Timeout ): Future[PlanProtocol.PlanInfo] = {
         val planRef = model.aggregateOf( PlanModule.rootType, id )
-        ( planRef ? PlanProtocol.GetInfo )
+        ( planRef ?+ PlanProtocol.GetInfo )
         .mapTo[PlanProtocol.PlanInfo]
       }
 

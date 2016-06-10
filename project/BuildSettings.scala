@@ -51,6 +51,7 @@ object BuildSettings {
     resolvers += "eaio releases" at "http://eaio.com/maven2",
     resolvers += "Sonatype OSS Releases"  at "http://oss.sonatype.org/content/repositories/releases/",
     resolvers += "Scalaz Bintray Repo" at "http://dl.bintray.com/scalaz/releases",
+    resolvers += "velvia maven" at "http://dl.bintray.com/velvia/maven",
 //    resolvers += "Numerical Method's Repository" at "http://repo.numericalmethod.com/maven/",  // don't want to use due to $$$
     resolvers += Resolver.sonatypeRepo( "snapshots" ),
     resolvers += Classpaths.sbtPluginReleases,

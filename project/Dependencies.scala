@@ -3,7 +3,7 @@ import sbt._
 
 object Dependencies {
   object peds {
-    val version = "0.2.6"
+    val version = "0.2.6-SNAPSHOT"
     def module( id: String ) = "com.github.dmrolfs" %% s"peds-$id" % version
     def all = Seq( commons, akka, archetype )
 
@@ -14,7 +14,7 @@ object Dependencies {
   }
 
   object demesne {
-    val version = "1.0.5"
+    val version = "1.0.5-SNAPSHOT"
     def module( id: String ) = "com.github.dmrolfs" %% s"demesne-$id" % version
     val core = module( "core" )
     val testkit = module( "testkit" )
@@ -100,7 +100,7 @@ object Dependencies {
     val uuid = "com.eaio.uuid" % "uuid" % "3.4"
     val config = "com.typesafe" % "config" % "1.3.0"
 //    val pureConfig = "com.github.melrief" %% "pureconfig" % "0.1.5"
-    val shapeless = "com.chuusai" %% "shapeless" % "2.3.0"
+    val shapeless = "com.chuusai" %% "shapeless" % "2.3.1"
     val parboiled = "org.parboiled" %% "parboiled" % "2.1.0"
     val inflector = "org.atteo" % "evo-inflector" % "1.2.1"
     val squants = "com.squants"  %% "squants"  % "0.5.3"
@@ -109,7 +109,7 @@ object Dependencies {
 //    val suanshu = "com.numericalmethod" % "suanshu" % "3.4.0" intransitive()  // don't want to use due to $$$
     val scopt = "com.github.scopt" %% "scopt" % "3.3.0"
     val pyrolite = "net.razorvine" % "pyrolite" % "4.10"
-    val msgpack = "org.velvia" % "msgpack4s_2.11" % "0.5.1"
+    val msgpack = "org.velvia" % "msgpack4s_2.11" % "0.5.2"
 
     val hadoopClient = "org.apache.hadoop" % "hadoop-client" % "2.7.1"
 

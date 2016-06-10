@@ -1,12 +1,9 @@
 package spotlight.analysis.outlier
 
 import java.util.concurrent.atomic.AtomicInteger
-
 import akka.NotUsed
-
 import scala.concurrent.duration._
-import akka.actor.{ActorRef, ActorSystem, Props}
-import akka.stream.{Materializer, OverflowStrategy}
+import akka.actor.{ActorRef, Props}
 import akka.stream.scaladsl._
 import akka.stream.testkit.scaladsl.{TestSink, TestSource}
 import akka.testkit.TestActor.AutoPilot
@@ -22,11 +19,8 @@ import spotlight.analysis.outlier.OutlierDetection.DetectionResult
 import spotlight.analysis.outlier.algorithm.skyline.SimpleMovingAverageAnalyzer
 import spotlight.testkit.ParallelAkkaSpec
 import spotlight.model.outlier._
-import spotlight.model.timeseries.TimeSeriesBase.Merging
-import spotlight.model.timeseries.{ThresholdBoundary, DataPoint, TimeSeries, Topic}
-import spotlight.stream.{Configuration, OutlierScoringModel}
-
-import scala.concurrent.{Await, ExecutionContext}
+import spotlight.model.timeseries.{ThresholdBoundary, DataPoint, TimeSeries}
+import spotlight.stream.{OutlierScoringModel}
 
 
 /**
@@ -36,7 +30,9 @@ class OutlierPlanDetectionRouterSpec extends ParallelAkkaSpec with LazyLogging {
   import OutlierPlanDetectionRouterSpec._
 
   class Fixture extends AkkaFixture { fixture =>
-    def status[T]( label: String ): Flow[T, T, NotUsed] = Flow[T].map { e => logger info s"\n$label:${e.toString}"; e }
+    def status[T]( label: String ): Flow[T, T, NotUsed] = {
+      Flow[T].map { e => logger info s"\n$label:${e.toString}"; e }
+    }
 
     val algo = SimpleMovingAverageAnalyzer.Algorithm
 

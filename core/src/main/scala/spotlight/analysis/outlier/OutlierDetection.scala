@@ -1,5 +1,7 @@
 package spotlight.analysis.outlier
 
+import java.net.URI
+
 import scala.concurrent.ExecutionContext
 import akka.actor.{Actor, ActorLogging, ActorPath, ActorRef, Props}
 import akka.event.LoggingReceive
@@ -9,6 +11,7 @@ import com.codahale.metrics.{Metric, MetricFilter}
 import org.slf4j.LoggerFactory
 import com.typesafe.scalalogging.{Logger, StrictLogging}
 import nl.grons.metrics.scala.{Meter, MetricName, Timer}
+import peds.akka.envelope._
 import peds.akka.metrics.{Instrumented, InstrumentedActor}
 import peds.commons.identifier.ShortUUID
 import peds.commons.log.Trace
@@ -140,7 +143,8 @@ with ActorLogging {
 
     if ( ActorPath isValidPathElement name ) name
     else {
-      val blunted = name.replaceAll( """[\.\[\];/?:@&=+$,]""", "_" )
+      val blunted = new URI( "akka.tcp", name, null ).getSchemeSpecificPart
+//      val blunted = name.replaceAll( """[\\\.\[\];/?:@&=+$,]""", "_" )
       log.warning( "OutlierDetection attempting to dispatch to invalid aggregator" )
       log.warning(
         " + (plan-name, extractedTopic, uuid):[{}]  name:{}  blunting to:{}", (p.name, extractedTopic.toString, uuid.toString)
@@ -167,7 +171,7 @@ with ActorLogging {
         )
       }
 
-      router ! detect
+      router !+ detect
     }
 
     aggregator

@@ -1,11 +1,11 @@
 package spotlight.analysis.outlier
 
 import akka.actor.{ActorRef, Props}
-import akka.event.LoggingReceive
 import com.typesafe.config.Config
 import demesne.{AggregateRootType, DomainModel}
 import demesne.module.EntityAggregateModule
 import demesne.register.StackableRegisterBusPublisher
+import peds.akka.envelope._
 import peds.akka.publish.{EventPublisher, StackableStreamPublisher}
 import spotlight.model.outlier.{IsQuorum, OutlierPlan, ReduceOutliers}
 import spotlight.model.timeseries.{TimeSeries, Topic}
@@ -125,11 +125,11 @@ object AnalysisPlanModule {
 
       val workflow: Receive = {
         // forward to retain publisher sender
-        case ts: TimeSeries => proxyFor( ts.topic ) forward (ts, OutlierPlan.Scope(plan = state, topic = ts.topic))
+        case ts: TimeSeries => proxyFor( ts.topic ) forwardEnvelope (ts, OutlierPlan.Scope(plan = state, topic = ts.topic))
       }
 
       val planEntity: Receive = {
-        case GetInfo => sender( ) ! PlanInfo( state.id, state )
+        case GetInfo => sender( ) !+ PlanInfo( state.id, state )
 
         case ApplyTo( id, appliesTo ) => persist( ScopeChanged(id, appliesTo) ) { e => acceptAndPublish( e ) }
 

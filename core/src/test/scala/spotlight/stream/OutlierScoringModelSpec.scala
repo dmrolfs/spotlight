@@ -40,8 +40,6 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
   import OutlierScoringModelSpec._
 
   class Fixture extends AkkaFixture { fixture =>
-    def status[T]( label: String ): Flow[T, T, NotUsed] = Flow[T].map { e => logger info s"\n$label:${e.toString}"; e }
-
     val protocol = new PythonPickleProtocol
     val stringFlow: Flow[ByteString, ByteString, NotUsed] = Flow[ByteString].via( protocol.framingFlow() )
 

@@ -1,7 +1,7 @@
 package spotlight.analysis
 
+import scala.reflect.ClassTag
 import akka.actor.ActorRef
-
 import scalaz._
 import Scalaz._
 import com.typesafe.config.{Config, ConfigFactory}
@@ -19,6 +19,7 @@ package object outlier {
   sealed trait OutlierDetectionMessage {
     def topic: Topic
     type Source <: TimeSeriesBase
+    def evSource: ClassTag[Source]
     def source: Source
     def plan: OutlierPlan
   }
@@ -128,6 +129,7 @@ package object outlier {
   ) extends OutlierDetectionMessage {
     override def topic: Topic = source.topic
     override type Source = TimeSeries
+    override def evSource: ClassTag[TimeSeries] = ClassTag( classOf[TimeSeries] )
   }
 
   final case class DetectOutliersInCohort private[outlier](
@@ -136,6 +138,7 @@ package object outlier {
   ) extends OutlierDetectionMessage {
     override def topic: Topic = source.topic
     override type Source = TimeSeriesCohort
+    override def evSource: ClassTag[TimeSeriesCohort] = ClassTag( classOf[TimeSeriesCohort] )
   }
 
 
@@ -148,6 +151,8 @@ package object outlier {
   ) extends OutlierDetectionMessage {
     override def topic: Topic = payload.topic
     override type Source = payload.Source
+    override def evSource: ClassTag[Source] = payload.evSource
+
     override def source: Source = payload.source
     override val plan: OutlierPlan = payload.plan
   }
@@ -159,6 +164,7 @@ package object outlier {
   ) extends OutlierDetectionMessage {
     override def topic: Topic = request.topic
     override type Source = request.Source
+    override def evSource: ClassTag[Source] = request.evSource
     override def source: Source = request.source
     override def plan: OutlierPlan = request.plan
   }

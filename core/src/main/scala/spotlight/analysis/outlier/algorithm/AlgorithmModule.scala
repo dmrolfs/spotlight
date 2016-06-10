@@ -4,6 +4,7 @@ import scala.annotation.tailrec
 import scala.reflect.ClassTag
 import akka.actor.{ActorPath, ActorRef, Props}
 import akka.event.LoggingReceive
+import com.typesafe.scalalogging.LazyLogging
 
 import scalaz._
 import Scalaz._
@@ -11,15 +12,16 @@ import scalaz.Kleisli.{ask, kleisli}
 import shapeless.Lens
 import org.apache.commons.math3.ml.clustering.DoublePoint
 import nl.grons.metrics.scala.{MetricName, Timer}
+import peds.akka.envelope._
 import peds.akka.metrics.InstrumentedActor
-import peds.akka.publish.{EventPublisher, SilentPublisher}
+import peds.akka.publish.{EventPublisher, StackableStreamPublisher}
 import peds.archetype.domain.model.core.Entity
 import peds.commons.{KOp, TryV}
 import peds.commons.log.Trace
 import demesne._
 import peds.commons.identifier.TaggedID
+import spotlight.analysis.outlier._
 import spotlight.analysis.outlier.algorithm.AlgorithmModule.ModuleProvider
-import spotlight.analysis.outlier.{DetectOutliersInSeries, DetectUsing, DetectionAlgorithmRouter, HistoricalStatistics, UnrecognizedPayload}
 import spotlight.model.outlier.{NoOutliers, OutlierPlan, Outliers}
 import spotlight.model.timeseries._
 
@@ -58,13 +60,19 @@ object AlgorithmModule {
   }
 
 
+  /**
+    *  approximate number of points in a one day window size @ 1 pt per 10s
+    */
+  val ApproximateDayWindow: Int = 6 * 60 * 24
+
+
   //todo: ClusterProvider???
   trait ModuleProvider {
-    def maximumNrClusterNodes: Int
+    def maximumNrClusterNodes: Int = 6
   }
 }
 
-trait AlgorithmModule
+abstract class AlgorithmModule
 extends AggregateRootModule[AlgorithmModule.ID]
 with InitializeAggregateRootClusterSharding { module: ModuleProvider =>
   override val trace = Trace[AlgorithmModule]
@@ -81,24 +89,81 @@ with InitializeAggregateRootClusterSharding { module: ModuleProvider =>
   override val aggregateIdTag: Symbol = algorithm.label
 
   trait Algorithm {
-    val label: Symbol = algorithm.label
-    def prepareContext( algorithmContext: Context ): Context = identity( algorithmContext )
+    def label: Symbol
     def prepareData( algorithmContext: Context ): TryV[Seq[DoublePoint]]
-    def step( point: PointT )( implicit algorithmContext: Context ): (Boolean, ThresholdBoundary)
-    def updateStateAfterStep( state: State, point: PointT ): State
+    def step( point: PointT )( implicit state: State, algorithmContext: Context ): (Boolean, ThresholdBoundary)
+//todo: updateStateAfterStep redundant given State.History updateHistory and lens
+//    def updateStateAfterStep( state: State, point: PointT ): State
+
+    def prepareContext( algorithmContext: Context ): Context = identity( algorithmContext )
   }
 
 
   type Context <: AlgorithmContext
   def makeContext( message: DetectUsing ): Context
 
-  trait AlgorithmContext {
+  trait AlgorithmContext extends LazyLogging {
     def message: DetectUsing
-    def data: Seq[DoublePoint]
+
     def plan: OutlierPlan = message.payload.plan
-    //    def historyKey: OutlierPlan.Scope = OutlierPlan.Scope( plan, topic )
+
+    def history: HistoricalStatistics
+
     def source: TimeSeriesBase = message.source
-//    def messageConfig: Config = message.properties //should configure into specific AlgoConfig via Add
+
+    def data: Seq[DoublePoint]
+
+    def fillData( minimalSize: Int = HistoricalStatistics.LastN ): (Seq[DoublePoint]) => Seq[DoublePoint] = { original =>
+      if ( minimalSize <= original.size ) original
+      else {
+        val historicalSize = history.lastPoints.size
+        val needed = minimalSize + 1 - original.size
+        val historical = history.lastPoints.drop( historicalSize - needed )
+        historical.toDoublePoints ++ original
+      }
+    }
+
+    def tailAverage(
+      tailLength: Int = AlgorithmContext.DefaultTailAverageLength
+    ): (Seq[DoublePoint]) => Seq[DoublePoint] = { points =>
+      val values = points map { _.value }
+      val lastPos = {
+        points.headOption
+        .map { h => history.lastPoints indexWhere { _.timestamp == h.timestamp } }
+        .getOrElse { history.lastPoints.size }
+      }
+
+      val last = history.lastPoints.drop( lastPos - tailLength + 1 ) map { _.value }
+      logger.debug( "tail-average: last[{}]", last.mkString(",") )
+
+      points
+      .map { _.timestamp }
+      .zipWithIndex
+      .map { case (ts, i) =>
+        val pointsToAverage = {
+          if ( i < tailLength ) {
+            val all = last ++ values.take( i + 1 )
+            all.drop( all.size - tailLength )
+          } else {
+            values.slice( i - tailLength + 1, i + 1 )
+          }
+        }
+
+        ( ts, pointsToAverage )
+      }
+      .map { case (ts, pts) =>
+        val average = pts.sum / pts.size
+        logger.debug( "points to tail average ({}, [{}]) = {}", ts.toLong.toString, pts.mkString(","), average.toString )
+        ( ts, average ).toDoublePoint
+      }
+    }
+
+    //    def historyKey: OutlierPlan.Scope = OutlierPlan.Scope( plan, topic )
+    //    def messageConfig: Config = message.properties //should configure into specific AlgoConfig via Add
+  }
+
+  object AlgorithmContext {
+    val DefaultTailAverageLength: Int = 1
   }
 
 
@@ -108,11 +173,9 @@ with InitializeAggregateRootClusterSharding { module: ModuleProvider =>
   trait AnalysisState extends Entity {
     override type ID = module.ID
     override def evId: ClassTag[ID] = ClassTag( classOf[ID] )
-    def scope: OutlierPlan.Scope // this could (and should) be ID but need to change demesne to allow other ID types for Entity
+    def scope: OutlierPlan.Scope = id
     def algorithm: Symbol = Symbol(name)
     def topic: Topic = scope.topic
-
-    def history: HistoricalStatistics
 
     def thresholds: Seq[ThresholdBoundary]
     def addThreshold( threshold: ThresholdBoundary ): State
@@ -133,15 +196,15 @@ with InitializeAggregateRootClusterSharding { module: ModuleProvider =>
   trait AnalysisStateCompanion {
     def zero( id: State#TID ): State
 
-    type StateHistory
-    def updateHistory( history: StateHistory, event: AnalysisState.Advanced ): StateHistory
-    def historyLens: Lens[State, StateHistory]
+    type History
+    def updateHistory( history: History, event: AnalysisState.Advanced ): History
+    def historyLens: Lens[State, History]
   }
 
 
   object AlgorithmActor {
     def props( model: DomainModel, rootType: AggregateRootType ): Props = {
-      Props( new AlgorithmActor( model, rootType ) with SilentPublisher )
+      Props( new AlgorithmActor( model, rootType ) with StackableStreamPublisher )
     }
   }
 
@@ -170,19 +233,19 @@ with InitializeAggregateRootClusterSharding { module: ModuleProvider =>
 
     val quiescent: Receive = {
       case Add(id) => persist( Added(id) ) { event =>
-        accept( event )
+        acceptAndPublish( event )
         context become LoggingReceive { around( ready() ) }
       }
     }
 
     def ready( driver: Option[ActorRef] = None ): Receive = {
       case Register( id, router ) if id == state.id => {
-        router ! DetectionAlgorithmRouter.RegisterDetectionAlgorithm( algorithm.label, self )
+        router !+ DetectionAlgorithmRouter.RegisterDetectionAlgorithm( algorithm.label, self )
         context become LoggingReceive { around( ready( Some(sender()) ) ) }
       }
 
       case DetectionAlgorithmRouter.AlgorithmRegistered( a ) if driver.isDefined => {
-        driver foreach { _ ! Registered(state.id) }
+        driver foreach { _ !+ Registered(state.id) }
         context become LoggingReceive { around( active ) }
       }
 
@@ -198,7 +261,7 @@ with InitializeAggregateRootClusterSharding { module: ModuleProvider =>
           case \/-( r ) => {
             log.debug( "sending detect result to aggregator[{}]: [{}]", aggregator.path, r )
             algorithmTimer.update( System.currentTimeMillis() - start, scala.concurrent.duration.MILLISECONDS )
-            aggregator ! r
+            aggregator !+ r
           }
 
           case -\/( ex ) => {
@@ -210,7 +273,7 @@ with InitializeAggregateRootClusterSharding { module: ModuleProvider =>
               payload.source.interval
             )
             // don't let aggregator time out just due to error in algorithm
-            aggregator ! NoOutliers(
+            aggregator !+ NoOutliers(
               algorithms = Set(algorithm.label),
               source = payload.source,
               plan = payload.plan,
@@ -232,7 +295,7 @@ with InitializeAggregateRootClusterSharding { module: ModuleProvider =>
 
         case m: DetectUsing => {
           log.error( "algorithm [{}] does not recognize requested payload: [{}]", algorithm, m )
-          m.aggregator ! UnrecognizedPayload( algorithm.label, m )
+          m.aggregator !+ UnrecognizedPayload( algorithm.label, m )
         }
 
         case m => super.unhandled( m )
@@ -261,8 +324,9 @@ with InitializeAggregateRootClusterSharding { module: ModuleProvider =>
 
         @tailrec def loop(
           pts: List[DoublePoint],
-          loopState: State,
           acc: Seq[AnalysisState.Advanced]
+        )(
+          implicit loopState: State
         ): immutable.Seq[AnalysisState.Advanced] = {
           pts match {
             case Nil => acc.to[immutable.Seq]
@@ -297,12 +361,12 @@ with InitializeAggregateRootClusterSharding { module: ModuleProvider =>
                 }
               }
 
-              loop( tail, updatedState, updatedAcc )
+              loop( tail, updatedAcc )( updatedState )
             }
           }
         }
 
-        val events = loop( points.toList, state, Seq.empty[AnalysisState.Advanced] )
+        val events = loop( points.toList, Seq.empty[AnalysisState.Advanced] )( state )
         persistAllAsync[AnalysisState.Advanced]( events ){ accept }
         events.right
       }

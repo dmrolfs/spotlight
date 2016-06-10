@@ -2,7 +2,7 @@ package spotlight.analysis.outlier
 
 import akka.actor._
 import akka.event.LoggingReceive
-import nl.grons.metrics.scala.MetricName
+import peds.akka.envelope._
 import peds.akka.metrics.InstrumentedActor
 
 
@@ -27,12 +27,12 @@ class DetectionAlgorithmRouter extends Actor with InstrumentedActor with ActorLo
   val registration: Receive = {
     case RegisterDetectionAlgorithm( algorithm, handler ) => {
       routingTable += ( algorithm -> handler )
-      sender() ! AlgorithmRegistered( algorithm )
+      sender() !+ AlgorithmRegistered( algorithm )
     }
   }
 
   val routing: Receive = {
-    case m: DetectUsing if routingTable contains m.algorithm => routingTable( m.algorithm ) forward m
+    case m: DetectUsing if routingTable contains m.algorithm => routingTable( m.algorithm ) forwardEnvelope m
   }
 
   override val receive: Receive = LoggingReceive{ around( registration orElse routing ) }

@@ -7,12 +7,12 @@ import scalaz.{-\/, \/-}
 import com.typesafe.scalalogging.Logger
 import org.slf4j.LoggerFactory
 import nl.grons.metrics.scala.{Meter, MetricName, Timer}
+import peds.akka.envelope._
 import peds.akka.metrics.InstrumentedActor
 import peds.commons.log.Trace
 import spotlight.analysis.outlier.OutlierQuorumAggregator.ConfigurationProvider
 import spotlight.model.outlier._
 import spotlight.model.timeseries.{TimeSeriesBase, Topic}
-
 
 
 object OutlierQuorumAggregator {
@@ -132,7 +132,7 @@ extends Actor with InstrumentedActor with ActorLogging { outer: ConfigurationPro
 
     plan.reduce( fulfilled, source, plan ) match {
       case \/-( o ) => {
-        context.parent ! o
+        context.parent !+ o
         logTally( o, fulfilled )
       }
 

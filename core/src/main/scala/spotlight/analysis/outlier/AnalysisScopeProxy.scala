@@ -5,12 +5,13 @@ import scala.concurrent.duration._
 import akka.NotUsed
 import akka.actor._
 import akka.actor.SupervisorStrategy.{Escalate, Restart, Stop}
-import akka.pattern.ask
 import akka.event.LoggingReceive
 import akka.stream._
 import akka.stream.scaladsl.{Flow, GraphDSL, Keep, RunnableGraph, Sink, Source}
 import demesne.{AggregateRootType, DomainModel}
 import nl.grons.metrics.scala.{Meter, MetricName, Timer}
+import peds.akka.envelope._
+import peds.akka.envelope.pattern.ask
 import peds.akka.metrics.InstrumentedActor
 import peds.akka.stream._
 import peds.commons.util._
@@ -81,8 +82,11 @@ object AnalysisScopeProxy {
   }
 }
 
-class AnalysisScopeProxy extends Actor with InstrumentedActor with ActorLogging { outer: AnalysisScopeProxy.Provider =>
-  import OutlierPlan.Scope
+class AnalysisScopeProxy
+extends Actor
+with EnvelopingActor
+with InstrumentedActor
+with ActorLogging { outer: AnalysisScopeProxy.Provider =>
 
   override lazy val metricBaseName: MetricName = MetricName( classOf[AnalysisScopeProxy] )
   val receiveTimer: Timer = metrics.timer( "receive" )
@@ -112,8 +116,8 @@ class AnalysisScopeProxy extends Actor with InstrumentedActor with ActorLogging 
   override def receive: Receive = LoggingReceive { around( workflow ) }
 
   val workflow: Receive = {
-    case (ts: TimeSeries, s: OutlierPlan.Scope) if s == outer.scope => streamIngressFor( sender() ) forward ts
-    case (ts: TimeSeries, p: OutlierPlan) if Scope(p, ts.topic) == outer.scope => streamIngressFor( sender() ) forward ts
+    case (ts: TimeSeries, s: OutlierPlan.Scope) if s == outer.scope => streamIngressFor( sender() ) forwardEnvelope ts
+    case (ts: TimeSeries, p: OutlierPlan) if Scope(p, ts.topic) == outer.scope => streamIngressFor( sender() ) forwardEnvelope ts
   }
 
   def streamIngressFor( subscriber: ActorRef )( implicit system: ActorSystem, materializer: Materializer ): ActorRef = {
@@ -184,9 +188,9 @@ class AnalysisScopeProxy extends Actor with InstrumentedActor with ActorLogging 
           rt <- outer.rootTypeFor( a )
         } yield {
           val aref = outer.model.aggregateOf( rt, outer.scope.id )
-          aref ! AlgorithmModule.Protocol.Add( outer.scope.id )
+          aref !+ AlgorithmModule.Protocol.Add( outer.scope.id )
           implicit val timeout = akka.util.Timeout( 15.seconds )
-          ( aref ? AlgorithmModule.Protocol.Register( outer.scope.id, routerRef ) )
+          ( aref ?+ AlgorithmModule.Protocol.Register( outer.scope.id, routerRef ) )
           .mapTo[AlgorithmModule.Protocol.Registered]
           .map { _ => aref }
         }
