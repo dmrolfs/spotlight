@@ -61,6 +61,7 @@ with InitializeAggregateRootClusterSharding {
     override val tolerance: Double = 3.0,
     override val thresholds: Seq[ThresholdBoundary] = Seq.empty[ThresholdBoundary]
   ) extends AnalysisState {
+    override def canEqual( that: Any ): Boolean = that.isInstanceOf[State]
     override def addThreshold( threshold: ThresholdBoundary ): State = copy( thresholds = thresholds :+ threshold )
   }
 

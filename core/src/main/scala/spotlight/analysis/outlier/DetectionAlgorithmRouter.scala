@@ -19,7 +19,7 @@ object DetectionAlgorithmRouter {
   def props: Props = Props( new DetectionAlgorithmRouter )
 }
 
-class DetectionAlgorithmRouter extends Actor with InstrumentedActor with ActorLogging {
+class DetectionAlgorithmRouter extends Actor with EnvelopingActor with InstrumentedActor with ActorLogging {
   import DetectionAlgorithmRouter._
 
   var routingTable: Map[Symbol, ActorRef] = Map.empty[Symbol, ActorRef]

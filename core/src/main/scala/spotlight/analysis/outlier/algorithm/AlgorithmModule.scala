@@ -3,13 +3,14 @@ package spotlight.analysis.outlier.algorithm
 import scala.annotation.tailrec
 import scala.reflect.ClassTag
 import akka.actor.{ActorPath, ActorRef, Props}
+import akka.cluster.sharding.ShardRegion
 import akka.event.LoggingReceive
-import com.typesafe.scalalogging.LazyLogging
 
 import scalaz._
 import Scalaz._
 import scalaz.Kleisli.{ask, kleisli}
 import shapeless.Lens
+import com.typesafe.scalalogging.LazyLogging
 import org.apache.commons.math3.ml.clustering.DoublePoint
 import nl.grons.metrics.scala.{MetricName, Timer}
 import peds.akka.envelope._
@@ -19,6 +20,7 @@ import peds.archetype.domain.model.core.Entity
 import peds.commons.{KOp, TryV}
 import peds.commons.log.Trace
 import demesne._
+import peds.akka.publish.ReliablePublisher.ReliableMessage
 import peds.commons.identifier.TaggedID
 import spotlight.analysis.outlier._
 import spotlight.analysis.outlier.algorithm.AlgorithmModule.ModuleProvider
@@ -48,7 +50,6 @@ object AlgorithmModule {
     ) extends Command with AlgorithmMessage
 
     case class Registered( override val sourceId: Registered#TID ) extends Event with AlgorithmMessage
-
 
     case class AlgorithmUsedBeforeRegistrationError(
       sourceId: TID,
@@ -82,6 +83,9 @@ with InitializeAggregateRootClusterSharding { module: ModuleProvider =>
       override val name: String = module.shardName
       override def aggregateRootProps( implicit model: DomainModel ): Props = AlgorithmActor.props( model, this )
       override def maximumNrClusterNodes: Int = module.maximumNrClusterNodes
+      override def aggregateIdFor: ShardRegion.ExtractEntityId = super.aggregateIdFor orElse {
+        case a: AnalysisState.Advanced => ( a.sourceId.toString, a )
+      }
     }
   }
 
@@ -170,7 +174,7 @@ with InitializeAggregateRootClusterSharding { module: ModuleProvider =>
   type State <: AnalysisState
   implicit def evState: ClassTag[State]
 
-  trait AnalysisState extends Entity {
+  trait AnalysisState extends Entity with Equals {
     override type ID = module.ID
     override def evId: ClassTag[ID] = ClassTag( classOf[ID] )
     def scope: OutlierPlan.Scope = id
@@ -181,10 +185,49 @@ with InitializeAggregateRootClusterSharding { module: ModuleProvider =>
     def addThreshold( threshold: ThresholdBoundary ): State
 
     def tolerance: Double
+
+    override def hashCode: Int = {
+      41 * (
+        41 * (
+          41 * (
+            41 + id.##
+          ) + name.##
+        ) + topic.##
+      ) + tolerance.##
+    }
+
+    override def equals( rhs: Any ): Boolean = {
+      rhs match {
+        case that: AnalysisState => {
+          if ( this eq that ) true
+          else {
+            ( that.## == this.## ) &&
+            ( that canEqual this ) &&
+            ( this.id == that.id ) &&
+            ( this.name == that.name) &&
+            ( this.topic == that.topic) &&
+            ( this.tolerance == that.tolerance )
+          }
+        }
+
+        case _ => false
+      }
+    }
   }
 
   object AnalysisState {
-    case class Advanced(
+    object Protocol {
+      import AlgorithmModule.Protocol.AlgorithmMessage
+
+      case class GetStateSnapshot( override val targetId: GetStateSnapshot#TID ) extends Command with AlgorithmMessage
+
+      case class StateSnapshot( sourceId: TID, snapshot: State ) extends Event with AlgorithmMessage
+      object StateSnapshot {
+        def apply( s: State ): StateSnapshot = StateSnapshot( sourceId = s.id, snapshot = s )
+      }
+    }
+
+    private[algorithm] case class Advanced(
       override val sourceId: Advanced#TID,
       point: DataPoint,
       isOutlier: Boolean,
@@ -225,7 +268,12 @@ with InitializeAggregateRootClusterSharding { module: ModuleProvider =>
       case ( Registered(_), s ) => s
       case ( event: AnalysisState.Advanced, s ) => {
         import analysisStateCompanion.{ historyLens, updateHistory }
-        historyLens.modify( s )( oldHistory => updateHistory( oldHistory, event ) )
+        log.info( "ACCEPTANCE: BEFORE state=[{}]", s )
+        val interimState = s.addThreshold(event.threshold)
+        log.info( "ACCEPTANCE: AFTER interim state=[{}]", interimState )
+        val r = historyLens.modify( interimState )( oldHistory => updateHistory( oldHistory, event ) )
+        log.info( "ACCEPTANCE: AFTER final state=[{}]", interimState )
+        r
       }
     }
 
@@ -234,7 +282,7 @@ with InitializeAggregateRootClusterSharding { module: ModuleProvider =>
     val quiescent: Receive = {
       case Add(id) => persist( Added(id) ) { event =>
         acceptAndPublish( event )
-        context become LoggingReceive { around( ready() ) }
+        context become LoggingReceive { around( ready() orElse stateReceiver ) }
       }
     }
 
@@ -246,13 +294,13 @@ with InitializeAggregateRootClusterSharding { module: ModuleProvider =>
 
       case DetectionAlgorithmRouter.AlgorithmRegistered( a ) if driver.isDefined => {
         driver foreach { _ !+ Registered(state.id) }
-        context become LoggingReceive { around( active ) }
+        context become LoggingReceive { around( active orElse stateReceiver ) }
       }
 
       case e: Add => /* handle and drop since already added */
     }
 
-    def active: Receive = {
+    val active: Receive = {
       case msg @ DetectUsing( algo, aggregator, payload: DetectOutliersInSeries, history, algorithmConfig ) => {
         val toOutliers = kleisli[TryV, (Outliers, Context), Outliers] { case (o, _) => o.right }
 
@@ -283,7 +331,14 @@ with InitializeAggregateRootClusterSharding { module: ModuleProvider =>
         }
       }
 
+      case adv: AnalysisState.Advanced => accept( adv ) //todo: what to do here persist?
+
       case e: Add => /* handle and drop since already added */
+    }
+
+    import AnalysisState.Protocol.{GetStateSnapshot, StateSnapshot}
+    val stateReceiver: Receive = {
+      case _: GetStateSnapshot => sender() ! StateSnapshot( state )
     }
 
     override def unhandled( message: Any ): Unit = {
