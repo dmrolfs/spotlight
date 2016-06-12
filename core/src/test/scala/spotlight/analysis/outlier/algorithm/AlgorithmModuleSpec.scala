@@ -72,7 +72,34 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
     }
   }
 
+
+  type TestState = module.State
+  type TestAdvanced = module.AnalysisState.Advanced
+  type TestHistory = module.analysisStateCompanion.History
+
+  def expectedUpdatedState( state: TestState, event: TestAdvanced ): TestState = {
+    state.addThreshold( event.threshold )
+  }
+
+  def actualVsExpectedState( actual: TestState, expected: TestState ): Unit = {
+    actual.id mustBe expected.id
+    actual.name mustBe expected.name
+    actual.algorithm.name mustBe expected.algorithm.name
+    actual.tolerance mustBe expected.tolerance
+    actual.thresholds mustBe expected.thresholds
+    actual.## mustBe expected.##
+    actual mustEqual expected
+    expected mustEqual actual
+  }
+
+  def actualVsExpectedHistory( actual: TestHistory, expected: TestHistory ): Unit = {
+    actual mustEqual expected
+    expected mustEqual actual
+  }
+
+
   object WIP extends Tag( "wip" )
+
 
   def bootstrapSuite(): Unit = {
     s"${module.algorithm.label.name} entity" should {
@@ -119,80 +146,35 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
         aggregate ! adv
         val s1 = Await.result( ( aggregate ? GetStateSnapshot(id) ).mapTo[StateSnapshot], 1.second.dilated )
         val zero = module.analysisStateCompanion.zero( id )
-        analysisStateSuite.actualVsExpectedState( s1.snapshot, analysisStateSuite.expectedUpdatedState(zero, adv) )
+        actualVsExpectedState( s1.snapshot, expectedUpdatedState(zero, adv) )
       }
 
       "register with router" in { f: Fixture =>
         import f._
         implicit val to = f.timeout
         addAndRegisterAggregate()
-//        aggregate ! P.Add( id )
-//        val registered = ( aggregate ? P.Register(id, router.ref) )
-//
-//        router.expectMsgPF( 400.millis.dilated, "router register" ) {
-//          case Envelope(DetectionAlgorithmRouter.RegisterDetectionAlgorithm(a, h), _) => {
-//            a.name mustBe module.algorithm.label.name
-//            h !+ DetectionAlgorithmRouter.AlgorithmRegistered( a )
-//          }
-//        }
-//
-//        whenReady( registered ) { r =>
-//          r mustBe an [Envelope]
-//          val e = r.asInstanceOf[Envelope]
-//          e.payload mustBe a [P.Registered]
-//          val payload = e.payload.asInstanceOf[P.Registered]
-//          payload.sourceId mustBe id
-//        }
       }
     }
   }
 
 
-  def analysisStateSuite: AnalysisStateSuite
+  def analysisStateSuite(): Unit = {
+    s"${module.algorithm.label.name} state" should {
+      "advance history" in { f: Fixture =>
+        import f._
 
-  trait AnalysisStateSuite extends Function0[Unit] {
-    type TestState = module.State
-    type TestAdvanced = module.AnalysisState.Advanced
-    type TestHistory = module.analysisStateCompanion.History
-
-    def expectedUpdatedState( state: TestState, event: TestAdvanced ): TestState = {
-      state.addThreshold( event.threshold )
-    }
-
-    def actualVsExpectedState( actual: TestState, expected: TestState ): Unit = {
-      actual.id mustBe expected.id
-      actual.name mustBe expected.name
-      actual.algorithm.name mustBe expected.algorithm.name
-      actual.tolerance mustBe expected.tolerance
-      actual.thresholds mustBe expected.thresholds
-      actual.## mustBe expected.##
-      actual mustEqual expected
-      expected mustEqual actual
-    }
-
-    def actualVsExpectedHistory( actual: TestHistory, expected: TestHistory ): Unit = {
-      actual mustEqual expected
-      expected mustEqual actual
-    }
-
-    override def apply(): Unit = {
-      s"${module.algorithm.label.name} state" should {
-        "advance history" in { f: Fixture =>
-          import f._
-
-          val zero = module.analysisStateCompanion.zero( id )
-          val now = joda.DateTime.now
-          val pt = DataPoint( now, 3.14159 )
-          val t = ThresholdBoundary( now, Some(1.1), Some(2.2), Some(3.3) )
-          val adv = module.AnalysisState.Advanced( id, pt, false, t )
-          val hlens = module.analysisStateCompanion.historyLens
-          val actualState = hlens.modify( zero.addThreshold(t) ){ h => module.analysisStateCompanion.updateHistory(h, adv) }
-          val expectedState = expectedUpdatedState( zero, adv )
-          val zeroHistory = hlens.get( zero )
-          val actualHistory = module.analysisStateCompanion.updateHistory( zeroHistory, adv )
-          actualVsExpectedState( actualState, expectedState )
-          actualVsExpectedHistory( actualHistory, hlens.get(expectedState) )
-        }
+        val zero = module.analysisStateCompanion.zero( id )
+        val now = joda.DateTime.now
+        val pt = DataPoint( now, 3.14159 )
+        val t = ThresholdBoundary( now, Some(1.1), Some(2.2), Some(3.3) )
+        val adv = module.AnalysisState.Advanced( id, pt, false, t )
+        val hlens = module.analysisStateCompanion.historyLens
+        val actualState = hlens.modify( zero.addThreshold(t) ){ h => module.analysisStateCompanion.updateHistory(h, adv) }
+        val expectedState = expectedUpdatedState( zero, adv )
+        val zeroHistory = hlens.get( zero )
+        val actualHistory = module.analysisStateCompanion.updateHistory( zeroHistory, adv )
+        actualVsExpectedState( actualState, expectedState )
+        actualVsExpectedHistory( actualHistory, hlens.get(expectedState) )
       }
     }
   }

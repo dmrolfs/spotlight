@@ -18,17 +18,17 @@ class SimpleMovingAverageModuleSpec extends AlgorithmModuleSpec[SimpleMovingAver
 
   override def createAkkaFixture(): Fixture = new Fixture
 
-  bootstrapSuite()
-
-
-  override def analysisStateSuite: AnalysisStateSuite = new AnalysisStateSuite {
-    override def expectedUpdatedState( state: module.State, event: module.AnalysisState.Advanced ): module.State = {
-      val s = super.expectedUpdatedState( state, event ).asInstanceOf[SimpleMovingAverageModule.State]
-      val h = s.history
-      h.movingStatistics addValue event.point.value
-      s.copy( history = h ).asInstanceOf[module.State]
-    }
+  override def expectedUpdatedState( state: module.State, event: module.AnalysisState.Advanced ): module.State = {
+    val s = super.expectedUpdatedState( state, event ).asInstanceOf[SimpleMovingAverageModule.State]
+    val h = s.history
+    h.movingStatistics addValue event.point.value
+    s.copy( history = h ).asInstanceOf[module.State]
   }
 
+  bootstrapSuite()
   analysisStateSuite()
+
+//  module.algorithm.label.name + " algorithm" should {
+//    WORK HERE
+//  }
 }
