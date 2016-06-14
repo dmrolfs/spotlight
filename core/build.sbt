@@ -18,6 +18,7 @@ libraryDependencies ++=
 //    facility.suanshu, // don't want to use due to $$$
     facility.scopt,
     demesne.core,
+    facility.lang,
     facility.parboiled,
     facility.hadoopClient,
     facility.pyrolite,

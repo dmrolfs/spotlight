@@ -105,7 +105,8 @@ object Dependencies {
     val inflector = "org.atteo" % "evo-inflector" % "1.2.1"
     val squants = "com.squants"  %% "squants"  % "0.5.3"
     val accord = "com.wix" %% "accord-core" % "0.5"
-    val math3 = "org.apache.commons" % "commons-math3" % "3.6"
+    val lang = "org.apache.commons" % "commons-lang3" % "3.4"
+    val math3 = "org.apache.commons" % "commons-math3" % "3.6.1"
 //    val suanshu = "com.numericalmethod" % "suanshu" % "3.4.0" intransitive()  // don't want to use due to $$$
     val scopt = "com.github.scopt" %% "scopt" % "3.3.0"
     val pyrolite = "net.razorvine" % "pyrolite" % "4.10"

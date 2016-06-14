@@ -7,6 +7,7 @@ import org.apache.commons.math3.ml.clustering.DoublePoint
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import peds.commons.TryV
 import demesne.InitializeAggregateRootClusterSharding
+import org.apache.commons.lang3.ClassUtils
 import spotlight.analysis.outlier.{DetectUsing, HistoricalStatistics}
 import spotlight.analysis.outlier.algorithm.AlgorithmModule
 import spotlight.model.timeseries._
@@ -63,6 +64,14 @@ with InitializeAggregateRootClusterSharding {
   ) extends AnalysisState {
     override def canEqual( that: Any ): Boolean = that.isInstanceOf[State]
     override def addThreshold( threshold: ThresholdBoundary ): State = copy( thresholds = thresholds :+ threshold )
+    override def toString: String = {
+      s"${ClassUtils.getAbbreviatedName(getClass, 15)}( " +
+        s"id:[${id}]; "+
+        s"tolerance:[${tolerance}]; "+
+        s"history:[${history}]; "+
+        s"""thresholds:[${thresholds.mkString(",")}]""" +
+      " )"
+    }
   }
 
   override val analysisStateCompanion: AnalysisStateCompanion = State
@@ -73,15 +82,22 @@ with InitializeAggregateRootClusterSharding {
 
     case class History( movingStatistics: DescriptiveStatistics )
     object History {
+      def statsLens: Lens[History, DescriptiveStatistics] = lens[History] >> 'movingStatistics
       def empty: History = History( new DescriptiveStatistics( AlgorithmModule.ApproximateDayWindow ) )
     }
 
     override def updateHistory( h: History, event: AnalysisState.Advanced ): History = {
-      // DescriptiveStatistics isn't immutable breaking the immutability of History :-(
-      h.movingStatistics addValue event.point.value
-      h
+      History.statsLens.modify( h ){ stats =>
+        val ms = stats.copy
+        ms addValue event.point.value
+        ms
+      }
+//      // DescriptiveStatistics isn't immutable breaking the immutability of History :-(
+//      h.movingStatistics addValue event.point.value
+//      h
     }
 
     override def historyLens: Lens[State, History] = lens[State] >> 'history
+    override def thresholdLens: Lens[State, Seq[ThresholdBoundary]] = lens[State] >> 'thresholds
   }
 }

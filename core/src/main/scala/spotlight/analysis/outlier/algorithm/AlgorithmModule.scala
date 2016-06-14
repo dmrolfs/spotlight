@@ -20,7 +20,6 @@ import peds.archetype.domain.model.core.Entity
 import peds.commons.{KOp, TryV}
 import peds.commons.log.Trace
 import demesne._
-import peds.akka.publish.ReliablePublisher.ReliableMessage
 import peds.commons.identifier.TaggedID
 import spotlight.analysis.outlier._
 import spotlight.analysis.outlier.algorithm.AlgorithmModule.ModuleProvider
@@ -167,7 +166,7 @@ with InitializeAggregateRootClusterSharding { module: ModuleProvider =>
   }
 
   object AlgorithmContext {
-    val DefaultTailAverageLength: Int = 1
+    val DefaultTailAverageLength: Int = 3
   }
 
 
@@ -178,7 +177,7 @@ with InitializeAggregateRootClusterSharding { module: ModuleProvider =>
     override type ID = module.ID
     override def evId: ClassTag[ID] = ClassTag( classOf[ID] )
     def scope: OutlierPlan.Scope = id
-    def algorithm: Symbol = Symbol(name)
+    def algorithm: Symbol = module.algorithm.label
     def topic: Topic = scope.topic
 
     def thresholds: Seq[ThresholdBoundary]
@@ -242,6 +241,7 @@ with InitializeAggregateRootClusterSharding { module: ModuleProvider =>
     type History
     def updateHistory( history: History, event: AnalysisState.Advanced ): History
     def historyLens: Lens[State, History]
+    def thresholdLens: Lens[State, Seq[ThresholdBoundary]]
   }
 
 
@@ -263,17 +263,22 @@ with InitializeAggregateRootClusterSharding { module: ModuleProvider =>
 
     override var state: State = _
 
+    import analysisStateCompanion.{ historyLens, thresholdLens, updateHistory }
+    val advanceLens: Lens[State, (analysisStateCompanion.History, Seq[ThresholdBoundary])] = historyLens ~ thresholdLens
+
     override val acceptance: Acceptance = {
       case ( Added(id), _ ) => analysisStateCompanion zero id
       case ( Registered(_), s ) => s
       case ( event: AnalysisState.Advanced, s ) => {
-        import analysisStateCompanion.{ historyLens, updateHistory }
         log.info( "ACCEPTANCE: BEFORE state=[{}]", s )
-        val interimState = s.addThreshold(event.threshold)
-        log.info( "ACCEPTANCE: AFTER interim state=[{}]", interimState )
-        val r = historyLens.modify( interimState )( oldHistory => updateHistory( oldHistory, event ) )
-        log.info( "ACCEPTANCE: AFTER final state=[{}]", interimState )
-        r
+        //        val interimState = s.addThreshold(event.threshold)
+        //        log.info( "ACCEPTANCE: AFTER interim state=[{}]", interimState )
+        //        val r = historyLens.modify( interimState )( oldHistory => updateHistory( oldHistory, event ) )
+        //        log.info( "ACCEPTANCE: AFTER final state=[{}]", interimState )
+        //        r
+        val result = advanceLens.modify( s ){ case (h, ts) => ( updateHistory( h, event ), ts :+ event.threshold ) }
+        log.info( "ACCEPTANCE: AFTER final state=[{}]", result )
+        result
       }
     }
 
@@ -422,7 +427,10 @@ with InitializeAggregateRootClusterSharding { module: ModuleProvider =>
         }
 
         val events = loop( points.toList, Seq.empty[AnalysisState.Advanced] )( state )
-        persistAllAsync[AnalysisState.Advanced]( events ){ accept }
+        persistAllAsync[AnalysisState.Advanced]( events ){ e =>
+          log.debug( "{} persisting Advanced:[{}]", state.id, e )
+          accept( e )
+        }
         events.right
       }
     }

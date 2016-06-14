@@ -2,12 +2,14 @@ package spotlight.analysis
 
 import scala.reflect.ClassTag
 import akka.actor.ActorRef
+
 import scalaz._
 import Scalaz._
 import com.typesafe.config.{Config, ConfigFactory}
 import org.apache.commons.math3.ml.distance.{DistanceMeasure, EuclideanDistance}
 import peds.commons.Valid
 import peds.commons.math.MahalanobisDistance
+import spotlight.analysis.outlier.algorithm.AlgorithmModule
 import spotlight.model.outlier.OutlierPlan
 import spotlight.model.timeseries.{TimeSeries, TimeSeriesBase, TimeSeriesCohort, Topic}
 
@@ -16,7 +18,8 @@ import spotlight.model.timeseries.{TimeSeries, TimeSeriesBase, TimeSeriesCohort,
  * Created by rolfsd on 10/4/15.
  */
 package object outlier {
-  sealed trait OutlierDetectionMessage {
+  sealed trait OutlierDetectionMessage extends AlgorithmModule.Command {
+    override def targetId: TID = OutlierPlan.Scope( plan, topic )
     def topic: Topic
     type Source <: TimeSeriesBase
     def evSource: ClassTag[Source]
