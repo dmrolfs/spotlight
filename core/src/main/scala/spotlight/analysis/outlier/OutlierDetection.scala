@@ -1,5 +1,7 @@
 package spotlight.analysis.outlier
 
+import java.net.URI
+
 import scala.concurrent.ExecutionContext
 import akka.actor.{Actor, ActorLogging, ActorPath, ActorRef, Props}
 import akka.event.LoggingReceive
@@ -138,7 +140,8 @@ with ActorLogging {
 
     if ( ActorPath isValidPathElement name ) name
     else {
-      val blunted = name.replaceAll( """[\.\[\];/?:@&=+$,]""", "_" )
+//      val blunted = name
+      val blunted = new URI( "akka.tcp", name, null ).getSchemeSpecificPart.replaceAll( """[\.\[\];/?:@&=+$,]""", "_" )
       log.warning( "OutlierDetection attempting to dispatch to invalid aggregator" )
       log.warning(
         " + (plan-name, extractedTopic, uuid):[{}]  name:{}  blunting to:{}", (p.name, extractedTopic.toString, uuid.toString)

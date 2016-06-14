@@ -1,6 +1,7 @@
 package spotlight.model.outlier
 
 import scala.concurrent.duration._
+import scala.reflect.ClassTag
 import scala.util.matching.Regex
 import com.typesafe.config.{Config, ConfigFactory, ConfigOrigin}
 import peds.archetype.domain.model.core.{Entity, EntityCompanion}
@@ -15,7 +16,7 @@ import spotlight.model.timeseries.Topic
  */
 sealed trait OutlierPlan extends Entity with Equals {
   override type ID = ShortUUID
-  override def idClass: Class[_] = classOf[ShortUUID]
+  override def evId: ClassTag[ID] = ClassTag( classOf[ShortUUID] )
 
   def appliesTo: OutlierPlan.AppliesTo
   def algorithms: Set[Symbol]

@@ -3,7 +3,7 @@ import sbt._
 
 object Dependencies {
   object peds {
-    val version = "0.2.7"
+    val version = "0.2.6"
     def module( id: String ) = "com.github.dmrolfs" %% s"peds-$id" % version
     def all = Seq( commons, akka, archetype )
 
@@ -109,7 +109,7 @@ object Dependencies {
 //    val suanshu = "com.numericalmethod" % "suanshu" % "3.4.0" intransitive()  // don't want to use due to $$$
     val scopt = "com.github.scopt" %% "scopt" % "3.3.0"
     val pyrolite = "net.razorvine" % "pyrolite" % "4.10"
-    val msgpack = "org.velvia" % "msgpack4s_2.11" % "0.5.1"
+    val msgpack = "org.velvia" % "msgpack4s_2.11" % "0.5.2"
 
     val hadoopClient = "org.apache.hadoop" % "hadoop-client" % "2.7.1"
 
