@@ -143,14 +143,17 @@ with ActorLogging {
 
     if ( ActorPath isValidPathElement name ) name
     else {
-      val blunted = new URI( "akka.tcp", name, null ).getSchemeSpecificPart
 //      val blunted = name.replaceAll( """[\\\.\[\];/?:@&=+$,]""", "_" )
-      log.warning( "OutlierDetection attempting to dispatch to invalid aggregator" )
-      log.warning(
-        " + (plan-name, extractedTopic, uuid):[{}]  name:{}  blunting to:{}", (p.name, extractedTopic.toString, uuid.toString)
+      val blunted = new URI( "akka.tcp", name, null ).getSchemeSpecificPart.replaceAll( """[\.\[\];/?:@&=+$,]""", "_" )
+      log.info( 
+        "OutlierDetection attempting to dispatch to invalid aggregator\n" +
+        " + (plan-name, extractedTopic, uuid):[{}]\n" +
+        " + attempted name:{}\n" +
+        " + blunted name:{}", 
+        (p.name, extractedTopic.toString, uuid.toString),
+        name,
+        blunted
       )
-      log.warning( " + attempted name:{}", name )
-      log.warning( " + blunted name:{}", blunted )
       blunted
     }
   }
