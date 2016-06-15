@@ -93,12 +93,9 @@ with InitializeAggregateRootClusterSharding { module: ModuleProvider =>
 
   trait Algorithm {
     def label: Symbol
+    def prepareContext( algorithmContext: Context ): Context = identity( algorithmContext )
     def prepareData( algorithmContext: Context ): TryV[Seq[DoublePoint]]
     def step( point: PointT )( implicit state: State, algorithmContext: Context ): (Boolean, ThresholdBoundary)
-//todo: updateStateAfterStep redundant given State.History updateHistory and lens
-//    def updateStateAfterStep( state: State, point: PointT ): State
-
-    def prepareContext( algorithmContext: Context ): Context = identity( algorithmContext )
   }
 
 
@@ -160,9 +157,6 @@ with InitializeAggregateRootClusterSharding { module: ModuleProvider =>
         ( ts, average ).toDoublePoint
       }
     }
-
-    //    def historyKey: OutlierPlan.Scope = OutlierPlan.Scope( plan, topic )
-    //    def messageConfig: Config = message.properties //should configure into specific AlgoConfig via Add
   }
 
   object AlgorithmContext {
@@ -367,8 +361,6 @@ with InitializeAggregateRootClusterSharding { module: ModuleProvider =>
     }
 
     private def collectOutlierPoints( points: Seq[DoublePoint] ): KOp[Context, Seq[AnalysisState.Advanced]] = {
-      import scala.collection.immutable
-
       kleisli[TryV, Context, Seq[AnalysisState.Advanced]] { implicit analysisContext =>
         val currentTimestamps = points.map{ _.timestamp }.toSet
 
@@ -379,9 +371,9 @@ with InitializeAggregateRootClusterSharding { module: ModuleProvider =>
           acc: Seq[AnalysisState.Advanced]
         )(
           implicit loopState: State
-        ): immutable.Seq[AnalysisState.Advanced] = {
+        ): Seq[AnalysisState.Advanced] = {
           pts match {
-            case Nil => acc.to[immutable.Seq]
+            case Nil => acc
 
             case pt :: tail => {
               val ts = pt.timestamp
@@ -419,7 +411,7 @@ with InitializeAggregateRootClusterSharding { module: ModuleProvider =>
         }
 
         val events = loop( points.toList, Seq.empty[AnalysisState.Advanced] )( state )
-        persistAll( events ){ e =>
+        persistAll( events.to[collection.immutable.Seq] ){ e =>
           log.debug( "{} persisting Advanced:[{}]", state.id, e )
           accept( e )
         }
