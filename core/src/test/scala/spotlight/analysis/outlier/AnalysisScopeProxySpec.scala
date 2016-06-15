@@ -8,11 +8,13 @@ import akka.stream.scaladsl.{Flow, Keep}
 import akka.stream.testkit.scaladsl.{TestSink, TestSource}
 import akka.testkit.TestActor.AutoPilot
 import akka.testkit._
+import com.typesafe.config.ConfigFactory
 import org.joda.{time => joda}
 import demesne.{AggregateRootType, DomainModel}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.mock.MockitoSugar
 import org.mockito.Mockito._
+import peds.akka.envelope.Envelope
 import peds.commons.V
 import spotlight.analysis.outlier.OutlierDetection.DetectionResult
 import spotlight.model.outlier._
@@ -29,17 +31,19 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
   class Fixture extends AkkaFixture { fixture =>
     val algo = 'TestAlgorithm
     val router = TestProbe()
+    val subscriber = TestProbe()
+
     val pid = OutlierPlan.nextId()
     val scope = OutlierPlan.Scope( "TestPlan", "TestTopic", pid )
-
-    val testActorRef = TestActorRef( new AnalysisScopeProxy with TestProxyProvider )
-
-    val model = mock[DomainModel]
-
     val plan = mock[OutlierPlan]
     when( plan.algorithms ).thenReturn( Set(algo) )
     when( plan.name ).thenReturn( scope.plan )
     when( plan.appliesTo ).thenReturn( appliesToAll )
+    when( plan.grouping ).thenReturn( None )
+
+    val testActorRef = TestActorRef( new AnalysisScopeProxy with TestProxyProvider )
+
+    val model = mock[DomainModel]
 
     val rootType = mock[AggregateRootType]
 
@@ -70,7 +74,7 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
 
     def addDetectorAutoPilot(
       detector: TestProbe,
-      extractOutliers: OutlierDetectionMessage => Seq[DataPoint] = (m: OutlierDetectionMessage) => Seq.empty[DataPoint]
+      extractOutliers: OutlierDetectionMessage => Seq[DataPoint] = (m: OutlierDetectionMessage) => m.source.points.take(1)
     ): Unit = {
       detector.setAutoPilot(
         new AutoPilot {
@@ -121,6 +125,23 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
       }
 
       OutlierPlan.default( "", 1.second, isQuorun, reduce, Set.empty[Symbol], grouping ).appliesTo
+    }
+
+    def makePlan( name: String, g: Option[OutlierPlan.Grouping] ): OutlierPlan = {
+      OutlierPlan.default(
+        name = name,
+        algorithms = Set( algo ),
+        grouping = g,
+        timeout = 500.millis,
+        isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = 1, triggerPoint = 1 ),
+        reduce = ReduceOutliers.byCorroborationPercentage(50),
+        planSpecification = ConfigFactory.parseString(
+          s"""
+          |algorithm-config.${algo.name}.seedEps: 5.0
+          |algorithm-config.${algo.name}.minDensityConnectedPoints: 3
+          """.stripMargin
+        )
+      )
     }
 
   }
@@ -201,7 +222,7 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
       }
     }
 
-    "detect in flow" taggedAs WIP in { f: Fixture =>
+    "detect in flow" in { f: Fixture =>
       import f._
       import scala.concurrent.ExecutionContext.Implicits.global
 
@@ -259,6 +280,84 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
       }
 
       data.indices foreach { i => validateNext(data(i), i ) }
+    }
+
+    "make functioning plan stream" in { f: Fixture =>
+      import f._
+      val actual = testActorRef.underlyingActor.makePlanStream( subscriber.ref )
+      log.info( "actual = [{}]", actual )
+      addDetectorAutoPilot( detector )
+      actual.ingressRef ! TimeSeries( "dummy", Seq() )
+      detector.expectMsgClass( classOf[DetectOutliersInSeries] )
+      subscriber.expectMsgClass( classOf[NoOutliers] )
+    }
+
+    "make resuable plan stream ingress once" in { f: Fixture =>
+      import f._
+      addDetectorAutoPilot( detector )
+      val a1 = testActorRef.underlyingActor.streamIngressFor( subscriber.ref )
+      log.info( "first actual = [{}]", a1 )
+      val msg1 = TimeSeries( "dummy", Seq() )
+      a1 ! msg1
+      detector.expectMsgClass( classOf[DetectOutliersInSeries] )
+      subscriber.expectMsgClass( classOf[NoOutliers] )
+
+      val a2 = testActorRef.underlyingActor.streamIngressFor( subscriber.ref )
+      log.info( "second actual = [{}]", a2 )
+      val now = joda.DateTime.now
+      val msg2 = TimeSeries( "dummy", Seq(DataPoint(now, 3.14159), DataPoint(now.plusSeconds(1), 2.191919)) )
+      a1 mustBe a2
+      a2 ! msg2
+      detector.expectMsgClass( classOf[DetectOutliersInSeries] )
+      subscriber.expectMsgClass( classOf[SeriesOutliers] )
+    }
+
+    "make plan-dependent streams" taggedAs WIP in { f: Fixture =>
+      import f._
+
+      val now = joda.DateTime.now
+
+      val p1 = makePlan( "p1", Some( OutlierPlan.Grouping(10, 300.seconds) ) )
+      val p2 = makePlan( "p2", None )
+
+      //      val m1 = OutlierDetectionMessage( TimeSeries("dummy", Seq()), p1 ).toOption.get
+      //      val m2 = OutlierDetectionMessage( TimeSeries("dummy", Seq()), p2 ).toOption.get
+      val m1 = TimeSeries( "dummy", Seq() )
+      val m2 = TimeSeries( "dummy", Seq(DataPoint(now, 3.14159), DataPoint(now.plusSeconds(1), 2.191919191)) )
+
+      addDetectorAutoPilot( detector )
+
+      val proxy1 = TestActorRef(
+        new AnalysisScopeProxy with TestProxyProvider {
+          override def plan: OutlierPlan = p1
+          override def scope: Scope = OutlierPlan.Scope( p1, "dummy" )
+          override def makeDetector( routerRef: ActorRef )( implicit context: ActorContext ): ActorRef = detector.ref
+        }
+      )
+
+
+      val proxy2 = TestActorRef(
+        new AnalysisScopeProxy with TestProxyProvider {
+          override def plan: OutlierPlan = p2
+          override def scope: Scope = OutlierPlan.Scope( p2, "dummy" )
+          override def makeDetector( routerRef: ActorRef )( implicit context: ActorContext ): ActorRef = detector.ref
+        }
+      )
+
+      val a1 = proxy1.underlyingActor.streamIngressFor( subscriber.ref )
+      log.info( "first actual ingress = [{}]", a1 )
+      log.info( "first actual graph = [{}]", proxy1.underlyingActor.streams( subscriber.ref ) )
+      a1 ! m1
+      detector.expectNoMsg( 500.millis.dilated )
+      subscriber.expectNoMsg( 500.millis.dilated )
+
+      val a2 = proxy2.underlyingActor.streamIngressFor( subscriber.ref )
+      log.info( "second actual ingress = [{}]", a2 )
+      log.info( "second actual graph = [{}]", proxy2.underlyingActor.streams( subscriber.ref ) )
+      a1 must not be a2
+      a2 ! m2
+      detector.expectMsgClass( 1000.millis.dilated, classOf[DetectOutliersInSeries] )
+      subscriber.expectMsgClass( 1000.millis.dilated, classOf[SeriesOutliers] )
     }
 
     "make a workable plan flow" in { f: Fixture => pending }
