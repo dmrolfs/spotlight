@@ -8,6 +8,7 @@ import akka.actor.SupervisorStrategy.{Escalate, Restart, Stop}
 import akka.event.LoggingReceive
 import akka.stream._
 import akka.stream.scaladsl.{Flow, GraphDSL, Keep, RunnableGraph, Sink, Source}
+import akka.util.Timeout
 import demesne.{AggregateRootType, DomainModel}
 import nl.grons.metrics.scala.{Meter, MetricName, Timer}
 import peds.akka.envelope._
@@ -62,7 +63,7 @@ object AnalysisScopeProxy {
             case LeastSquaresAnalyzer.Algorithm => ??? // LeastSquaresAnalyzer.props( router ),
             case MeanSubtractionCumulationAnalyzer.Algorithm => ??? // MeanSubtractionCumulationAnalyzer.props( router ),
             case MedianAbsoluteDeviationAnalyzer.Algorithm => ??? // MedianAbsoluteDeviationAnalyzer.props( router ),
-            case SimpleMovingAverageAnalyzer.Algorithm => ??? // SimpleMovingAverageAnalyzer.props( router ),
+            case SimpleMovingAverageAnalyzer.Algorithm => Some( SimpleMovingAverageModule.rootType )
             case SeasonalExponentialMovingAverageAnalyzer.Algorithm => ??? // SeasonalExponentialMovingAverageAnalyzer.props( router )
             case _ => None
           }
@@ -72,13 +73,53 @@ object AnalysisScopeProxy {
   }
 
 
-  trait Provider {
+  trait Provider { provider =>
     def scope: OutlierPlan.Scope
     def plan: OutlierPlan
     def model: DomainModel
     def highWatermark: Int
     def bufferSize: Int
     def rootTypeFor( algorithm: Symbol ): Option[AggregateRootType]
+
+    implicit def timeout: Timeout = Timeout( 15.seconds )
+
+    def makeRouter()( implicit context: ActorContext ): ActorRef = {
+      context.actorOf(
+        DetectionAlgorithmRouter.props.withDispatcher( "outlier-detection-dispatcher" ),
+        s"router-${provider.plan.name}"
+      )
+    }
+
+    def makeAlgorithms(
+      routerRef: ActorRef
+    )(
+      implicit context: ActorContext,
+      ec: ExecutionContext
+    ): Future[Set[ActorRef]] = {
+      val algs = {
+        for {
+          a <- provider.plan.algorithms
+          rt <- provider.rootTypeFor( a )
+        } yield {
+          val aref = provider.model.aggregateOf( rt, provider.scope.id )
+          aref !+ AlgorithmModule.Protocol.Add( provider.scope.id )
+//          implicit val to = provider.timeout
+          ( aref ?+ AlgorithmModule.Protocol.Register( provider.scope.id, routerRef ) )
+          .mapTo[AlgorithmModule.Protocol.Registered]
+          .map { _ => aref }
+        }
+      }
+
+      Future sequence algs
+    }
+
+    def makeDetector( routerRef: ActorRef )( implicit context: ActorContext ): ActorRef = {
+      context.actorOf(
+        OutlierDetection.props( routerRef ).withDispatcher( "outlier-detection-dispatcher" ),
+        s"outlier-detector-${provider.plan.name}"
+      )
+    }
+
   }
 }
 
@@ -94,7 +135,7 @@ with ActorLogging { outer: AnalysisScopeProxy.Provider =>
 
   case class Workers private( detector: ActorRef, router: ActorRef, algorithms: Set[ActorRef] )
   //todo: rework to avoid Await. Left here since exposure is limited to first sight of Plan Scope data
-  var workers: Workers = scala.concurrent.Await.result( makeTopicWorkers(outer.scope.topic)(context.dispatcher), 15.seconds )
+  lazy val workers: Workers = scala.concurrent.Await.result( makeTopicWorkers(outer.scope.topic)(context.dispatcher), 15.seconds )
 
   case class PlanStream private( ingressRef: ActorRef, graph: RunnableGraph[NotUsed] )
   var streams: Map[ActorRef, PlanStream] = Map.empty[ActorRef, PlanStream]
@@ -174,44 +215,12 @@ with ActorLogging { outer: AnalysisScopeProxy.Provider =>
 
 
   def makeTopicWorkers( t: Topic )( implicit ec: ExecutionContext ): Future[Workers] = {
-    def makeRouter(): ActorRef = {
-      context.actorOf(
-        DetectionAlgorithmRouter.props.withDispatcher( "outlier-detection-dispatcher" ),
-        s"router-${outer.plan.name}"
-      )
-    }
+    val router = outer.makeRouter()
 
-    def makeAlgorithms( routerRef: ActorRef ): Future[Set[ActorRef]] = {
-      val algs = {
-        for {
-          a <- outer.plan.algorithms
-          rt <- outer.rootTypeFor( a )
-        } yield {
-          val aref = outer.model.aggregateOf( rt, outer.scope.id )
-          aref !+ AlgorithmModule.Protocol.Add( outer.scope.id )
-          implicit val timeout = akka.util.Timeout( 15.seconds )
-          ( aref ?+ AlgorithmModule.Protocol.Register( outer.scope.id, routerRef ) )
-          .mapTo[AlgorithmModule.Protocol.Registered]
-          .map { _ => aref }
-        }
-      }
-
-      Future.sequence( algs )
-    }
-
-    def makeDetector( routerRef: ActorRef ): ActorRef = {
-      context.actorOf(
-        OutlierDetection.props( routerRef ).withDispatcher( "outlier-detection-dispatcher" ),
-        s"outlier-detector-${outer.plan.name}"
-      )
-    }
-
-    val router = makeRouter()
-
-    makeAlgorithms( router ) map { algs =>
+    outer.makeAlgorithms( router ) map { algs =>
       Workers(
         router = router,
-        detector = makeDetector( router ),
+        detector = outer.makeDetector( router ),
         algorithms = algs
       )
     }
