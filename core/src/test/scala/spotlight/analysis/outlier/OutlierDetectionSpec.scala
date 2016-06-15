@@ -1,19 +1,12 @@
 package spotlight.analysis.outlier
 
+import scala.concurrent.duration._
 import akka.actor.{ActorRef, Props}
-import org.apache.http.HttpEntityEnclosingRequest
-
+import akka.testkit._
 import scalaz.Scalaz.{when => _, _}
+import org.scalatest.mock.MockitoSugar
 import com.typesafe.config.ConfigFactory
 import spotlight.model.timeseries._
-
-import scala.concurrent.duration._
-import akka.testkit._
-import org.mockito.Mockito._
-import org.scalatest.mock.MockitoSugar
-import org.mockito.Matchers._
-import org.mockito.invocation.InvocationOnMock
-import org.mockito.stubbing.Answer
 import spotlight.model.outlier.{IsQuorum, OutlierPlan, ReduceOutliers}
 import spotlight.testkit.ParallelAkkaSpec
 
@@ -218,7 +211,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
       router expectNoMsg 1.second.dilated
     }
 
-    "history is updated with each detect request" taggedAs (WIP) in { f: Fixture =>
+    "history is updated with each detect request" in { f: Fixture =>
       import f._
 
 
@@ -300,7 +293,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
         planSpecification = ConfigFactory.empty
       )
 
-      val expectedA = HistoricalStatistics.fromActivePoints( pointsA, false )
+      val expectedA = HistoricalStatistics.fromActivePoints( pointsA, isCovarianceBiasCorrected = false )
 
       val msgA = OutlierDetectionMessage( TimeSeries( topic = metric, points = pointsA ), defaultPlan ).toOption.get
       detect receive msgA
