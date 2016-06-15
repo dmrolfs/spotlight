@@ -80,7 +80,35 @@ with InitializeAggregateRootClusterSharding {
   object State extends AnalysisStateCompanion {
     override def zero( id: State#TID ): State = State( id = id, name = "" )
 
-    case class History( movingStatistics: DescriptiveStatistics )
+    case class History( movingStatistics: DescriptiveStatistics ) extends Equals {
+      override def canEqual( rhs: Any ): Boolean = rhs.isInstanceOf[History]
+
+      override def equals( rhs: Any ): Boolean = {
+        rhs match {
+          case that: History => {
+            if ( this eq that ) true
+            else {
+              ( that.## == this.## ) &&
+              ( that canEqual this ) &&
+              ( this.movingStatistics.getN == that.movingStatistics.getN ) &&
+              ( this.movingStatistics.getMean == that.movingStatistics.getMean ) &&
+              ( this.movingStatistics.getStandardDeviation == that.movingStatistics.getStandardDeviation )
+            }
+          }
+
+          case _ => false
+        }
+      }
+
+      override def hashCode(): Int = {
+        41 * (
+          41 * (
+            41 + movingStatistics.getN.##
+          ) + movingStatistics.getMean.##
+        ) + movingStatistics.getStandardDeviation.##
+      }
+    }
+
     object History {
       def statsLens: Lens[History, DescriptiveStatistics] = lens[History] >> 'movingStatistics
       def empty: History = History( new DescriptiveStatistics( AlgorithmModule.ApproximateDayWindow ) )

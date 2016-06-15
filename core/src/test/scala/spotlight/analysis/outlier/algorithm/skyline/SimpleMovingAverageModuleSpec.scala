@@ -164,9 +164,6 @@ class SimpleMovingAverageModuleSpec extends AlgorithmModuleSpec[SimpleMovingAver
             s mustBe series
 
             t( module.algorithm.label ).zip( expectedCalculations ).zipWithIndex foreach { case ( ((actual, expected), i) ) =>
-//              (i, actual.floor) mustBe(i, expected.floor)
-//              (i, actual.expected) mustBe(i, expected.expected)
-//              (i, actual.ceiling) mustBe(i, expected.ceiling)
               logger.debug( "evaluating expectation: {}", i.toString )
               actual.floor.isDefined mustBe expected.floor.isDefined
               for {
@@ -205,7 +202,6 @@ class SimpleMovingAverageModuleSpec extends AlgorithmModuleSpec[SimpleMovingAver
           logger.info( "{}: history size = {}", hint, as.history.movingStatistics.getN.toString )
           as.history.movingStatistics.getN mustBe ( history.N )
           as.history.movingStatistics.getMean mustBe history.mean(1)
-//          as.history.movingStatistics.getStandardDeviation mustBe ( history.standardDeviation(1) +- 0.0000001 )
           as.thresholds.drop( as.thresholds.size - expectedCalculations.size ).zip( expectedCalculations ).zipWithIndex foreach { case ( ((actual, expected), i) ) =>
             logger.info( "{}: evaluating expectation: {}", hint, i.toString )
             actual.floor.isDefined mustBe expected.floor.isDefined
@@ -247,7 +243,9 @@ class SimpleMovingAverageModuleSpec extends AlgorithmModuleSpec[SimpleMovingAver
         timeWiggle = (0.97, 1.03)
       )
       val series2 = spike( f.testScope.id.topic, flatline2, 1000 )( 0 )
-      val history2 = historyWith( Some(history1), series2 )
+      val history2 = historyWith( Option(history1.recordLastPoints(series1.points)), series2 )
+      logger.error( "HISTORY2 = [{}]", history2)
+      logger.error( "HISTORY2-LAST PTS = [{}]", history2.lastPoints.mkString(",") )
       val expectedCalculations2 = Seq(
         Expected( false, Some(-1139.499146), Some(200.8), Some(1541.099146) ),
         Expected( false, Some(-1213.644145), Some(334), Some(1881.644145) ),

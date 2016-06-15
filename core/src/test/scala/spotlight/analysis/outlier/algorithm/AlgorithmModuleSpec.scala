@@ -30,6 +30,8 @@ import spotlight.model.timeseries._
   * Created by rolfsd on 6/9/16.
   */
 abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] with ScalaFutures with LazyLogging {
+  private val trace = Trace[AlgorithmModuleSpec[S]]
+
   type Module <: AlgorithmModule
   val module: Module
 
@@ -168,10 +170,14 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
     TimeSeries( topic, spiked )
   }
 
-  def historyWith( prior: Option[HistoricalStatistics], series: TimeSeries ): HistoricalStatistics = {
+  def historyWith( prior: Option[HistoricalStatistics], series: TimeSeries ): HistoricalStatistics = trace.block("historyWith") {
+    logger.info( "series:{}", series)
+    logger.info( "prior={}", prior )
     prior map { h =>
+      logger.info( "Adding series to prior history")
       series.points.foldLeft( h ){ _ :+ _ }
     } getOrElse {
+      logger.info( "Creating new history from series")
       HistoricalStatistics.fromActivePoints( series.points, false )
     }
   }
