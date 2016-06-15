@@ -120,9 +120,6 @@ with InitializeAggregateRootClusterSharding {
         ms addValue event.point.value
         ms
       }
-//      // DescriptiveStatistics isn't immutable breaking the immutability of History :-(
-//      h.movingStatistics addValue event.point.value
-//      h
     }
 
     override def historyLens: Lens[State, History] = lens[State] >> 'history
