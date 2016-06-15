@@ -16,7 +16,7 @@ import spotlight.model.timeseries.Topic
  */
 sealed trait OutlierPlan extends Entity with Equals {
   override type ID = ShortUUID
-  override def evId: ClassTag[ShortUUID] = ClassTag( classOf[ShortUUID] )
+  override def evId: ClassTag[ID] = ClassTag( classOf[ShortUUID] )
 
   override def slug: String = name
   def appliesTo: OutlierPlan.AppliesTo
