@@ -119,8 +119,9 @@ object AnalysisScopeProxy {
         s"outlier-detector-${provider.plan.name}"
       )
     }
-
   }
+
+  private[outlier] final case class Workers private( detector: ActorRef, router: ActorRef, algorithms: Set[ActorRef] )
 }
 
 class AnalysisScopeProxy
@@ -128,12 +129,12 @@ extends Actor
 with EnvelopingActor
 with InstrumentedActor
 with ActorLogging { outer: AnalysisScopeProxy.Provider =>
+  import AnalysisScopeProxy.Workers
 
   override lazy val metricBaseName: MetricName = MetricName( classOf[AnalysisScopeProxy] )
   val receiveTimer: Timer = metrics.timer( "receive" )
   val failuresMeter: Meter = metrics.meter( "failures" )
 
-  case class Workers private( detector: ActorRef, router: ActorRef, algorithms: Set[ActorRef] )
   //todo: rework to avoid Await. Left here since exposure is limited to first sight of Plan Scope data
   lazy val workers: Workers = scala.concurrent.Await.result( makeTopicWorkers(outer.scope.topic)(context.dispatcher), 15.seconds )
 
