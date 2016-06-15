@@ -270,15 +270,7 @@ with InitializeAggregateRootClusterSharding { module: ModuleProvider =>
       case ( Added(id), _ ) => analysisStateCompanion zero id
       case ( Registered(_), s ) => s
       case ( event: AnalysisState.Advanced, s ) => {
-        log.info( "ACCEPTANCE: BEFORE state=[{}]", s )
-        //        val interimState = s.addThreshold(event.threshold)
-        //        log.info( "ACCEPTANCE: AFTER interim state=[{}]", interimState )
-        //        val r = historyLens.modify( interimState )( oldHistory => updateHistory( oldHistory, event ) )
-        //        log.info( "ACCEPTANCE: AFTER final state=[{}]", interimState )
-        //        r
-        val result = advanceLens.modify( s ){ case (h, ts) => ( updateHistory( h, event ), ts :+ event.threshold ) }
-        log.info( "ACCEPTANCE: AFTER final state=[{}]", result )
-        result
+        advanceLens.modify( s ){ case (h, ts) => ( updateHistory( h, event ), ts :+ event.threshold ) }
       }
     }
 
@@ -398,7 +390,7 @@ with InitializeAggregateRootClusterSharding { module: ModuleProvider =>
                 analysisContext.data
                 .find { _.timestamp == pt.timestamp }
                 .map { original =>
-                  log.debug( "PT:[{}] ORIGINAL:[{}]", pt, original )
+                  log.debug( "PT:[{}] ORIGINAL:[{}]", (pt._1.toLong, pt._2), (original._1.toLong, original._2) )
                   val event = AnalysisState.Advanced(
                     sourceId = state.id,
                     point = original.toDataPoint,
@@ -416,7 +408,7 @@ with InitializeAggregateRootClusterSharding { module: ModuleProvider =>
                   ( acc :+ event, acceptance(event, loopState) )
                 }
                 .getOrElse {
-                  log.debug( "NOT ORIGINAL PT:[{}]", pt )
+                  log.debug( "NOT ORIGINAL PT:[{}]", (pt._1.toLong, pt._2) )
                   ( acc, loopState )
                 }
               }
@@ -427,7 +419,7 @@ with InitializeAggregateRootClusterSharding { module: ModuleProvider =>
         }
 
         val events = loop( points.toList, Seq.empty[AnalysisState.Advanced] )( state )
-        persistAllAsync[AnalysisState.Advanced]( events ){ e =>
+        persistAll( events ){ e =>
           log.debug( "{} persisting Advanced:[{}]", state.id, e )
           accept( e )
         }
