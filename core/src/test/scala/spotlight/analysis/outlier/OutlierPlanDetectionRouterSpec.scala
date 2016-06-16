@@ -126,114 +126,114 @@ class OutlierPlanDetectionRouterSpec extends ParallelAkkaSpec with LazyLogging {
   val DONE = Tag( "done" )
 
   "OutlierPlanDetectionRouter" should {
-    "make functioning plan stream" in { f: Fixture =>
-      import f._
-      val actual = makePlanRouter().underlyingActor.makePlanStream( plan, subscriber.ref )
-      log.info( "actual = [{}]", actual )
-      actual.ingressRef ! TimeSeries( "dummy", Seq() )
-      detector.expectMsgClass( classOf[DetectOutliersInSeries] )
-      subscriber.expectMsgClass( classOf[NoOutliers] )
-    }
+//    "make functioning plan stream" in { f: Fixture =>
+//      import f._
+//      val actual = makePlanRouter().underlyingActor.makePlanStream( plan, subscriber.ref )
+//      log.info( "actual = [{}]", actual )
+//      actual.ingressRef ! TimeSeries( "dummy", Seq() )
+//      detector.expectMsgClass( classOf[DetectOutliersInSeries] )
+//      subscriber.expectMsgClass( classOf[NoOutliers] )
+//    }
 
-    "make resuable plan stream ingress once" in { f: Fixture =>
-      import f._
-      val pr = makePlanRouter()
-      val a1 = pr.underlyingActor.streamIngressFor( plan, subscriber.ref )
-      log.info( "first actual = [{}]", a1 )
-      val msg = TimeSeries( "dummy", Seq() )
-      a1 ! msg
-      detector.expectMsgClass( classOf[DetectOutliersInSeries] )
-      subscriber.expectMsgClass( classOf[NoOutliers] )
+//    "make resuable plan stream ingress once" in { f: Fixture =>
+//      import f._
+//      val pr = makePlanRouter()
+//      val a1 = pr.underlyingActor.streamIngressFor( plan, subscriber.ref )
+//      log.info( "first actual = [{}]", a1 )
+//      val msg = TimeSeries( "dummy", Seq() )
+//      a1 ! msg
+//      detector.expectMsgClass( classOf[DetectOutliersInSeries] )
+//      subscriber.expectMsgClass( classOf[NoOutliers] )
+//
+//      val a2 = pr.underlyingActor.streamIngressFor( plan, subscriber.ref )
+//      log.info( "second actual = [{}]", a2 )
+//      a1 mustBe a2
+//      a2 ! msg
+//      detector.expectMsgClass( classOf[DetectOutliersInSeries] )
+//      subscriber.expectMsgClass( classOf[NoOutliers] )
+//    }
 
-      val a2 = pr.underlyingActor.streamIngressFor( plan, subscriber.ref )
-      log.info( "second actual = [{}]", a2 )
-      a1 mustBe a2
-      a2 ! msg
-      detector.expectMsgClass( classOf[DetectOutliersInSeries] )
-      subscriber.expectMsgClass( classOf[NoOutliers] )
-    }
+//    "make plan-dependent streams" in { f: Fixture =>
+//      import f._
+//
+//      val p1 = makePlan( "p1", Some( OutlierPlan.Grouping(10, 300.seconds) ) )
+//      val p2 = makePlan( "p2", None )
+//
+////      val m1 = OutlierDetectionMessage( TimeSeries("dummy", Seq()), p1 ).toOption.get
+////      val m2 = OutlierDetectionMessage( TimeSeries("dummy", Seq()), p2 ).toOption.get
+//      val m1 = TimeSeries( "dummy", Seq() )
+//      val m2 = TimeSeries( "dummy", Seq() )
+//
+//      val pr = makePlanRouter( Set(p1, p2) )
+//      val a1 = pr.underlyingActor.streamIngressFor( p1, subscriber.ref )
+//      log.info( "first actual ingress = [{}]", a1 )
+//      log.info( "first actual graph = [{}]", pr.underlyingActor.planStreams( OutlierPlanDetectionRouter.Key( p1.id, subscriber.ref ) ) )
+//      a1 ! m1
+//      detector.expectNoMsg( 500.millis.dilated )
+//      subscriber.expectNoMsg( 500.millis.dilated )
+//
+//      val a2 = pr.underlyingActor.streamIngressFor( p2, subscriber.ref )
+//      log.info( "second actual ingress = [{}]", a2 )
+//      log.info( "second actual graph = [{}]", pr.underlyingActor.planStreams( OutlierPlanDetectionRouter.Key( p2.id, subscriber.ref ) ) )
+//      a1 must not be a2
+//      a2 ! m2
+//      detector.expectMsgClass( 200.millis.dilated, classOf[DetectOutliersInSeries] )
+//      subscriber.expectMsgClass( 200.millis.dilated, classOf[NoOutliers] )
+//    }
 
-    "make plan-dependent streams" in { f: Fixture =>
-      import f._
-
-      val p1 = makePlan( "p1", Some( OutlierPlan.Grouping(10, 300.seconds) ) )
-      val p2 = makePlan( "p2", None )
-
-//      val m1 = OutlierDetectionMessage( TimeSeries("dummy", Seq()), p1 ).toOption.get
-//      val m2 = OutlierDetectionMessage( TimeSeries("dummy", Seq()), p2 ).toOption.get
-      val m1 = TimeSeries( "dummy", Seq() )
-      val m2 = TimeSeries( "dummy", Seq() )
-
-      val pr = makePlanRouter( Set(p1, p2) )
-      val a1 = pr.underlyingActor.streamIngressFor( p1, subscriber.ref )
-      log.info( "first actual ingress = [{}]", a1 )
-      log.info( "first actual graph = [{}]", pr.underlyingActor.planStreams( OutlierPlanDetectionRouter.Key( p1.id, subscriber.ref ) ) )
-      a1 ! m1
-      detector.expectNoMsg( 500.millis.dilated )
-      subscriber.expectNoMsg( 500.millis.dilated )
-
-      val a2 = pr.underlyingActor.streamIngressFor( p2, subscriber.ref )
-      log.info( "second actual ingress = [{}]", a2 )
-      log.info( "second actual graph = [{}]", pr.underlyingActor.planStreams( OutlierPlanDetectionRouter.Key( p2.id, subscriber.ref ) ) )
-      a1 must not be a2
-      a2 ! m2
-      detector.expectMsgClass( 200.millis.dilated, classOf[DetectOutliersInSeries] )
-      subscriber.expectMsgClass( 200.millis.dilated, classOf[NoOutliers] )
-    }
-
-    "router receive uses plan-dependent streams" taggedAs (WIP) in { f: Fixture =>
-      import f._
-
-      val p1 = makePlan( "p1", Some( OutlierPlan.Grouping(10, 300.seconds) ) )
-      val p2 = makePlan( "p2", None )
-
-      val points = makeDataPoints( values = Seq.fill( 9 )( 1.0 ) )
-      val ts = spike( points )( points.size - 1 )
-
-      val m1 = (ts, p1)
-      val m2 = (ts, p2)
-
-      val pr = makePlanRouter( Set(p1, p2) )
-      pr.receive( m1, subscriber.ref )
-      detector.expectNoMsg( 500.millis.dilated )
-      subscriber.expectNoMsg( 500.millis.dilated )
-
-      pr.receive( m2, subscriber.ref )
-      detector.expectMsgClass( 200.millis.dilated, classOf[DetectOutliersInSeries] )
-      subscriber.expectMsgClass( 200.millis.dilated, classOf[NoOutliers] )
-    }
+//    "router receive uses plan-dependent streams" taggedAs (WIP) in { f: Fixture =>
+//      import f._
+//
+//      val p1 = makePlan( "p1", Some( OutlierPlan.Grouping(10, 300.seconds) ) )
+//      val p2 = makePlan( "p2", None )
+//
+//      val points = makeDataPoints( values = Seq.fill( 9 )( 1.0 ) )
+//      val ts = spike( points )( points.size - 1 )
+//
+//      val m1 = (ts, p1)
+//      val m2 = (ts, p2)
+//
+//      val pr = makePlanRouter( Set(p1, p2) )
+//      pr.receive( m1, subscriber.ref )
+//      detector.expectNoMsg( 500.millis.dilated )
+//      subscriber.expectNoMsg( 500.millis.dilated )
+//
+//      pr.receive( m2, subscriber.ref )
+//      detector.expectMsgClass( 200.millis.dilated, classOf[DetectOutliersInSeries] )
+//      subscriber.expectMsgClass( 200.millis.dilated, classOf[NoOutliers] )
+//    }
 
 
-    "router actor uses plan-dependent streams" in { f: Fixture =>
-      import f._
-
-      val p1 = makePlan( "p1", Some( OutlierPlan.Grouping(10, 300.seconds) ) )
-      val p2 = makePlan( "p2", None )
-
-      val points = makeDataPoints( values = Seq.fill( 9 )( 1.0 ) )
-      val ts = spike( points )( points.size - 1 )
-
-      val m1 = ( ts, OutlierPlan.Scope(p1, ts.topic) )
-      val m2 = ( ts, OutlierPlan.Scope(p2, ts.topic) )
-
-      val routerProps = OutlierPlanDetectionRouter.props(
-        detectorRef = detector.ref,
-        detectionBudget = 2.seconds,
-        bufferSize = 100,
-        maxInDetectionCpuFactor = 1.0,
-        plans = Set( p1, p2)
-      )
-
-      val router = system.actorOf( routerProps, "test-plan-router" )
-
-      router.tell( m1, subscriber.ref )
-      detector.expectNoMsg( 500.millis.dilated )
-      subscriber.expectNoMsg( 500.millis.dilated )
-
-      router.tell( m2, subscriber.ref )
-      detector.expectMsgClass( 200.millis.dilated, classOf[DetectOutliersInSeries] )
-      subscriber.expectMsgClass( 200.millis.dilated, classOf[NoOutliers] )
-    }
+//    "router actor uses plan-dependent streams" in { f: Fixture =>
+//      import f._
+//
+//      val p1 = makePlan( "p1", Some( OutlierPlan.Grouping(10, 300.seconds) ) )
+//      val p2 = makePlan( "p2", None )
+//
+//      val points = makeDataPoints( values = Seq.fill( 9 )( 1.0 ) )
+//      val ts = spike( points )( points.size - 1 )
+//
+//      val m1 = ( ts, OutlierPlan.Scope(p1, ts.topic) )
+//      val m2 = ( ts, OutlierPlan.Scope(p2, ts.topic) )
+//
+//      val routerProps = OutlierPlanDetectionRouter.props(
+//        detectorRef = detector.ref,
+//        detectionBudget = 2.seconds,
+//        bufferSize = 100,
+//        maxInDetectionCpuFactor = 1.0,
+//        plans = Set( p1, p2)
+//      )
+//
+//      val router = system.actorOf( routerProps, "test-plan-router" )
+//
+//      router.tell( m1, subscriber.ref )
+//      detector.expectNoMsg( 500.millis.dilated )
+//      subscriber.expectNoMsg( 500.millis.dilated )
+//
+//      router.tell( m2, subscriber.ref )
+//      detector.expectMsgClass( 200.millis.dilated, classOf[DetectOutliersInSeries] )
+//      subscriber.expectMsgClass( 200.millis.dilated, classOf[NoOutliers] )
+//    }
 
     "plan router flow routes to all isApplicable plans" in { f: Fixture =>
       import f._

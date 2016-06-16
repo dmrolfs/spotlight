@@ -3,7 +3,7 @@ package spotlight.analysis.outlier
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
 import akka.NotUsed
-import akka.actor.{ActorContext, ActorRef}
+import akka.actor.{ActorContext, ActorRef, Props}
 import akka.stream.scaladsl.{Flow, Keep}
 import akka.stream.testkit.scaladsl.{TestSink, TestSource}
 import akka.testkit.TestActor.AutoPilot
@@ -395,7 +395,7 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
       subscriber.expectMsgClass( 1.second.dilated, classOf[SeriesOutliers] )
     }
 
-    "router receive uses plan-dependent streams" taggedAs WIP in { f: Fixture =>
+    "router receive uses plan-dependent streams" in { f: Fixture =>
       import f._
 
       // needing grouping time window to be safely less than expectMsg max, since demand isn't propagated until grouping window
@@ -446,8 +446,39 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
     }
 
 
-    "make a workable plan flow" in { f: Fixture => pending }
+    "messaging uses plan-dependent streams" taggedAs WIP in { f: Fixture =>
+      import f._
 
-    "process via plan-specific workflow" in { f: Fixture => pending }
+      // needing grouping time window to be safely less than expectMsg max, since demand isn't propagated until grouping window
+      // expires
+      val p1 = makePlan( "p1", Some( OutlierPlan.Grouping(10, 300.millis) ) )
+      val p2 = makePlan( "p2", None )
+
+      addDetectorAutoPilot( detector )
+
+      val proxyProps = Props(
+        new AnalysisScopeProxy with TestProxyProvider {
+          override def plan: OutlierPlan = p1
+          override def scope: Scope = OutlierPlan.Scope( p1, "dummy" )
+          override def makeDetector( routerRef: ActorRef )( implicit context: ActorContext ): ActorRef = detector.ref
+        }
+      )
+
+      val proxy = system.actorOf( proxyProps, "test-proxy" )
+
+      val points = makeDataPoints( values = Seq.fill( 9 )( 1.0 ) )
+      val ts = spike( data = points, topic = "dummy" )( points.size - 1 )
+
+      val m1p = (ts, p1)
+      val m2s = (ts, OutlierPlan.Scope(p2, "dummy"))
+
+      proxy.tell( m1p, subscriber.ref )
+      detector.expectMsgClass( 5.seconds.dilated, classOf[DetectOutliersInSeries] )
+      subscriber.expectMsgClass( 5.seconds.dilated, classOf[SeriesOutliers] )
+
+      proxy.tell( m2s, subscriber.ref )
+      detector.expectNoMsg( 1.second.dilated )
+      subscriber.expectNoMsg( 1.second.dilated )
+    }
   }
 }
