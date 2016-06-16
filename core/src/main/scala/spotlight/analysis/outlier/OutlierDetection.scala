@@ -7,12 +7,15 @@ import akka.actor.{Actor, ActorLogging, ActorPath, ActorRef, Props}
 import akka.event.LoggingReceive
 import akka.pattern.AskTimeoutException
 import akka.stream.Supervision
+
+import scalaz.{\/, -\/, \/-}
 import com.codahale.metrics.{Metric, MetricFilter}
 import org.slf4j.LoggerFactory
 import com.typesafe.scalalogging.{Logger, StrictLogging}
 import nl.grons.metrics.scala.{Meter, MetricName, Timer}
 import peds.akka.envelope._
 import peds.akka.metrics.{Instrumented, InstrumentedActor}
+import peds.commons.TryV
 import peds.commons.identifier.ShortUUID
 import peds.commons.log.Trace
 import spotlight.model.timeseries._
@@ -70,6 +73,7 @@ object OutlierDetection extends StrictLogging with Instrumented {
 
 class OutlierDetection
 extends Actor
+with EnvelopingActor
 with InstrumentedActor
 with ActorLogging {
   outer: OutlierDetection.ConfigurationProvider =>
@@ -120,8 +124,10 @@ with ActorLogging {
     case m: OutlierDetectionMessage =>  {
       log.debug( "OutlierDetection request: [{}:{}]", m.topic, m.plan )
       val requester = sender()
-      val aggregator = dispatch( m, m.plan )( context.dispatcher )
-      outstanding += aggregator -> DetectionSubscriber( ref = requester )
+      dispatch( m, m.plan )( context.dispatcher ) match {
+        case \/-( aggregator ) => outstanding += aggregator -> DetectionSubscriber( ref = requester )
+        case -\/( ex ) => log.error( ex, "OutlierDetector failed to create aggregator for topic:[{}]", m.topic )
+      }
     }
 
     case to @ OutlierQuorumAggregator.AnalysisTimedOut( topic, plan ) => {
@@ -143,9 +149,8 @@ with ActorLogging {
 
     if ( ActorPath isValidPathElement name ) name
     else {
-//      val blunted = name.replaceAll( """[\\\.\[\];/?:@&=+$,]""", "_" )
       val blunted = new URI( "akka.tcp", name, null ).getSchemeSpecificPart.replaceAll( """[\.\[\];/?:@&=+$,]""", "_" )
-      log.info( 
+      log.debug(
         "OutlierDetection attempting to dispatch to invalid aggregator\n" +
         " + (plan-name, extractedTopic, uuid):[{}]\n" +
         " + attempted name:{}\n" +
@@ -158,26 +163,32 @@ with ActorLogging {
     }
   }
 
-  def dispatch( m: OutlierDetectionMessage, p: OutlierPlan )( implicit ec: ExecutionContext ): ActorRef = {
+  def dispatch( m: OutlierDetectionMessage, p: OutlierPlan )( implicit ec: ExecutionContext ): TryV[ActorRef] = {
     log.debug( "OutlierDetection disptaching: [{}][{}:{}]", m.topic, m.plan, m.plan.id )
-    val aggregator = context.actorOf( OutlierQuorumAggregator.props(p, m.source), aggregatorNameForMessage(m, p) )
-    val history = updateHistory( m.source, p )
 
-    p.algorithms foreach { a =>
-      val detect = {
-        DetectUsing(
-          algorithm = a,
-          aggregator = aggregator,
-          payload = m,
-          history = history,
-          properties = p.algorithmConfig
-        )
+    for {
+      aggregator <- \/ fromTryCatchNonFatal {
+        context.actorOf( OutlierQuorumAggregator.props(p, m.source), aggregatorNameForMessage(m, p) )
+      }
+    } yield {
+      val history = updateHistory( m.source, p )
+
+      p.algorithms foreach { a =>
+        val detect = {
+          DetectUsing(
+            algorithm = a,
+            aggregator = aggregator,
+            payload = m,
+            history = history,
+            properties = p.algorithmConfig
+          )
+        }
+
+        router !+ detect
       }
 
-      router !+ detect
+      aggregator
     }
-
-    aggregator
   }
 
 
