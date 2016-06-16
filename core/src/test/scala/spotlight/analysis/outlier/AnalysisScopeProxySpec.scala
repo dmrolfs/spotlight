@@ -10,11 +10,12 @@ import akka.testkit.TestActor.AutoPilot
 import akka.testkit._
 import com.typesafe.config.ConfigFactory
 import org.joda.{time => joda}
+import com.github.nscala_time.time.Imports.{richDateTime, richSDuration}
 import demesne.{AggregateRootType, DomainModel}
+import org.apache.commons.math3.random.RandomDataGenerator
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.mock.MockitoSugar
 import org.mockito.Mockito._
-import peds.akka.envelope.Envelope
 import peds.commons.V
 import spotlight.analysis.outlier.OutlierDetection.DetectionResult
 import spotlight.model.outlier._
@@ -144,7 +145,41 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
       )
     }
 
+    def spike(
+      data: Seq[DataPoint],
+      topic: Topic = "test.series",
+      value: Double = 1000D
+    )(
+      position: Int = data.size - 1
+    ): TimeSeries = {
+      val (front, last) = data.sortBy{ _.timestamp.getMillis }.splitAt( position )
+      val spiked = ( front :+ last.head.copy( value = value ) ) ++ last.tail
+      TimeSeries( topic, spiked )
+    }
+
+    def makeDataPoints(
+      values: Seq[Double],
+      start: joda.DateTime = joda.DateTime.now,
+      period: FiniteDuration = 1.second,
+      wiggleFactor: (Double, Double) = (1.0, 1.0)
+    ): Seq[DataPoint] = {
+      val secs = start.getMillis / 1000L
+      val epochStart = new joda.DateTime( secs * 1000L )
+      val random = new RandomDataGenerator
+      def nextFactor: Double = {
+        if ( wiggleFactor._1 == wiggleFactor._2 ) wiggleFactor._1
+        else random.nextUniform( wiggleFactor._1, wiggleFactor._2 )
+      }
+
+      values.zipWithIndex map { vi =>
+        val (v, i) = vi
+        val adj = (i * nextFactor) * period
+        val ts = epochStart + adj.toJodaDuration
+        DataPoint( timestamp = ts, value = v )
+      }
+    }
   }
+
 
   override def makeAkkaFixture(): Fixture = new Fixture
 
@@ -312,7 +347,7 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
       subscriber.expectMsgClass( classOf[SeriesOutliers] )
     }
 
-    "make plan-dependent streams" taggedAs WIP in { f: Fixture =>
+    "make plan-dependent streams" in { f: Fixture =>
       import f._
 
       val now = joda.DateTime.now
@@ -348,17 +383,68 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
       log.info( "first actual ingress = [{}]", a1 )
       log.info( "first actual graph = [{}]", proxy1.underlyingActor.streams( subscriber.ref ) )
       a1 ! m1
-      detector.expectNoMsg( 500.millis.dilated )
-      subscriber.expectNoMsg( 500.millis.dilated )
+      detector.expectNoMsg( 1.second.dilated ) // due to empty timeseries
+      subscriber.expectNoMsg( 1.second.dilated ) //dur to empty timeseries
 
       val a2 = proxy2.underlyingActor.streamIngressFor( subscriber.ref )
       log.info( "second actual ingress = [{}]", a2 )
       log.info( "second actual graph = [{}]", proxy2.underlyingActor.streams( subscriber.ref ) )
       a1 must not be a2
       a2 ! m2
-      detector.expectMsgClass( 1000.millis.dilated, classOf[DetectOutliersInSeries] )
-      subscriber.expectMsgClass( 1000.millis.dilated, classOf[SeriesOutliers] )
+      detector.expectMsgClass( 1.second.dilated, classOf[DetectOutliersInSeries] )
+      subscriber.expectMsgClass( 1.second.dilated, classOf[SeriesOutliers] )
     }
+
+    "router receive uses plan-dependent streams" taggedAs WIP in { f: Fixture =>
+      import f._
+
+      // needing grouping time window to be safely less than expectMsg max, since demand isn't propagated until grouping window
+      // expires
+      val p1 = makePlan( "p1", Some( OutlierPlan.Grouping(10, 300.millis) ) )
+      val p2 = makePlan( "p2", None )
+
+      addDetectorAutoPilot( detector )
+
+      val proxy1 = TestActorRef(
+        new AnalysisScopeProxy with TestProxyProvider {
+          override def plan: OutlierPlan = p1
+          override def scope: Scope = OutlierPlan.Scope( p1, "dummy" )
+          override def makeDetector( routerRef: ActorRef )( implicit context: ActorContext ): ActorRef = detector.ref
+        }
+      )
+
+
+      val points = makeDataPoints( values = Seq.fill( 9 )( 1.0 ) )
+      val ts = spike( data = points, topic = "dummy" )( points.size - 1 )
+
+      val m1p = (ts, p1)
+      val m2s = (ts, OutlierPlan.Scope(p2, "dummy"))
+
+      proxy1.receive( m1p, subscriber.ref )
+      detector.expectMsgClass( 5.seconds.dilated, classOf[DetectOutliersInSeries] )
+      subscriber.expectMsgClass( 5.seconds.dilated, classOf[SeriesOutliers] )
+
+      proxy1.receive( m2s, subscriber.ref )
+      detector.expectNoMsg( 1.second.dilated )
+      subscriber.expectNoMsg( 1.second.dilated )
+
+      val proxy2 = TestActorRef(
+        new AnalysisScopeProxy with TestProxyProvider {
+          override def plan: OutlierPlan = p2
+          override def scope: Scope = OutlierPlan.Scope( p2, "dummy" )
+          override def makeDetector( routerRef: ActorRef )( implicit context: ActorContext ): ActorRef = detector.ref
+        }
+      )
+
+      proxy2.receive( m1p, subscriber.ref )
+      detector.expectNoMsg( 1.second.dilated )
+      subscriber.expectNoMsg( 1.second.dilated )
+
+      proxy2.receive( m2s, subscriber.ref )
+      detector.expectMsgClass( 1.second.dilated, classOf[DetectOutliersInSeries] )
+      subscriber.expectMsgClass( 1.second.dilated, classOf[SeriesOutliers] )
+    }
+
 
     "make a workable plan flow" in { f: Fixture => pending }
 
