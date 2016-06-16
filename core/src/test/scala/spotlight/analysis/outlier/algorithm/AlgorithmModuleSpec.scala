@@ -37,7 +37,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
 
   override type Fixture <: AlgorithmFixture
   abstract class AlgorithmFixture extends AggregateFixture { fixture =>
-    logger.info( "Fixture: DomainModel=[{}]",model, model )
+    logger.info( "Fixture: DomainModel=[{}]", model )
 
     override def moduleCompanions: List[AggregateRootModule[_]] = List( module )
     logger.debug( "Fixture.context = [{}]", context )

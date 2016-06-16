@@ -3,6 +3,7 @@ package spotlight.analysis.outlier
 import scala.concurrent.duration._
 import akka.testkit._
 import com.typesafe.config.ConfigFactory
+import peds.akka.envelope._
 import spotlight.analysis.outlier.algorithm.skyline.SimpleMovingAverageModule
 import spotlight.model.outlier.{IsQuorum, OutlierPlan, ReduceOutliers}
 import spotlight.testkit.EntityModuleSpec
@@ -42,7 +43,7 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] {
   s"${module.rootType.name}" should {
     "add OutlierPlan" in { f: Fixture =>
       import f._
-      import AnalysisPlanModule.AggregateRoot.{Protocol => P}
+      import AnalysisPlanModule.AggregateRoot.{ Protocol => P }
 
       val planInfo = makePlan("TestPlan", None)
       entity ! P.Entity.Add( planInfo )
@@ -55,5 +56,16 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] {
         }
       }
     }
+
+    "must not respond before add" taggedAs WIP in { f: Fixture =>
+      import f._
+      import AnalysisPlanModule.AggregateRoot.{ Protocol => P }
+      import peds.akka.envelope.pattern.ask
+
+      implicit val to = akka.util.Timeout( 2.seconds )
+      val info = ( entity ?+ P.UseAlgorithms( id, Set( 'foo, 'bar ), ConfigFactory.empty() ) ).mapTo[P.PlanInfo]
+      bus.expectNoMsg()
+    }
+
   }
 }
