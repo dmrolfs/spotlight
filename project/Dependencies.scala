@@ -14,7 +14,7 @@ object Dependencies {
   }
 
   object demesne {
-    val version = "1.0.6-SNAPSHOT"
+    val version = "1.1.0-SNAPSHOT"
     def module( id: String ) = "com.github.dmrolfs" %% s"demesne-$id" % version
     val core = module( "core" )
     val testkit = module( "testkit" )
@@ -38,6 +38,11 @@ object Dependencies {
     val streamsTestkit = module( "stream-testkit" )
   }
 
+  object persistence {
+    val all = Seq( leveldb, leveldbini )
+    val leveldb = "org.iq80.leveldb" % "leveldb" % "0.7"
+    val leveldbini = "org.fusesource.leveldbjni" % "leveldbjni-all" % "1.8"
+  }
   object scalaz {
     val version = "7.2.1"
     def module( id: String ) = "org.scalaz" %% s"scalaz-$id" % version

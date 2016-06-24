@@ -3,7 +3,7 @@ package spotlight.analysis.outlier
 import akka.actor.{ActorRef, Props}
 import com.typesafe.config.Config
 import demesne.{AggregateRootType, DomainModel}
-import demesne.module.EntityAggregateModule
+import demesne.module.{EntityAggregateModule, EntityAggregateModuleCompanion}
 import demesne.register.StackableRegisterBusPublisher
 import peds.akka.envelope._
 import peds.akka.publish.{EventPublisher, StackableStreamPublisher}
@@ -14,7 +14,7 @@ import spotlight.model.timeseries.{TimeSeries, Topic}
 /**
   * Created by rolfsd on 5/26/16.
   */
-object AnalysisPlanModule {
+object AnalysisPlanModule extends EntityAggregateModuleCompanion[OutlierPlan] {
   object AggregateRoot {
     val module: EntityAggregateModule[OutlierPlan] = {
       val b = EntityAggregateModule.builderFor[OutlierPlan].make
@@ -27,16 +27,19 @@ object AnalysisPlanModule {
       .set( IdLens, OutlierPlan.idLens )
       .set( NameLens, OutlierPlan.nameLens )
       .set( IsActiveLens, Some(OutlierPlan.isActiveLens) )
+      .set( Companion, AnalysisPlanModule )
       .build()
     }
 
-    object Protocol extends module.Protocol {
+    object Protocol {
+      val Entity = EntityProtocol
+
       sealed trait PlanProtocol
       //todo add info change commands
       //todo reify algorithm
       //      case class AddAlgorithm( override val targetId: OutlierPlan#TID, algorithm: Symbol ) extends Command with PlanProtocol
-      case object GetInfo extends PlanProtocol
-      case class PlanInfo( sourceId: module.TID, info: OutlierPlan ) extends PlanProtocol
+      case class GetInfo( override val targetId: GetInfo#TID ) extends Command with PlanProtocol
+      case class PlanInfo( override val sourceId: PlanInfo#TID, info: OutlierPlan ) extends Event with PlanProtocol
 
       case class ApplyTo( override val targetId: ApplyTo#TID, appliesTo: OutlierPlan.AppliesTo ) extends Command with PlanProtocol
 
@@ -65,8 +68,18 @@ object AnalysisPlanModule {
 
 
     object OutlierPlanActor {
-      def props( model: DomainModel, rootType: AggregateRootType ): Props = {
-        Props( new OutlierPlanActor( model, rootType ) with StackableStreamPublisher with StackableRegisterBusPublisher )
+      def props( model: DomainModel, rootType: AggregateRootType ): Props = Props( new AggregateRootActor(model, rootType) )
+
+      class AggregateRootActor( model: DomainModel, rootType: AggregateRootType )
+        extends OutlierPlanActor( model, rootType )
+        with StackableStreamPublisher
+        with StackableRegisterBusPublisher {
+        override protected def onPersistRejected( cause: Throwable, event: Any, seqNr: Long ): Unit = {
+          log.warning(
+                       "Rejected to persist event type [{}] with sequence number [{}] for persistenceId [{}] due to [{}].",
+                       event.getClass.getName, seqNr, persistenceId, cause
+                     )
+        }
       }
     }
 

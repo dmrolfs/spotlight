@@ -4,6 +4,7 @@ import scala.concurrent.duration._
 import scala.reflect.ClassTag
 import akka.actor.{ActorRef, ActorSystem}
 import akka.testkit._
+import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 import shapeless.syntax.typeable._
 import org.joda.{time => joda}
@@ -31,7 +32,10 @@ abstract class EntityModuleSpec[E <: Entity : ClassTag] extends AggregateRootSpe
   val module: Module
 
   override type Fixture <: EntityFixture
-  abstract class EntityFixture extends AggregateFixture { fixture =>
+  abstract class EntityFixture(
+    id: Int = AggregateRootSpec.sysId.incrementAndGet(),
+    config: Config = demesne.testkit.config
+  ) extends AggregateFixture( id, config ) { fixture =>
     logger.info( "Fixture: DomainModel=[{}]", model)
 
     override def moduleCompanions: List[AggregateRootModule[_]] = List( module )
@@ -68,8 +72,8 @@ abstract class EntityModuleSpec[E <: Entity : ClassTag] extends AggregateRootSpe
     system.eventStream.subscribe( bus.ref, classOf[module.Event])
 
     def nextId(): module.TID
-    lazy val id: module.TID = nextId()
-    lazy val entity: ActorRef = module aggregateOf id
+    lazy val tid: module.TID = nextId()
+    lazy val entity: ActorRef = module aggregateOf tid
   }
 
   def makeDataPoints(

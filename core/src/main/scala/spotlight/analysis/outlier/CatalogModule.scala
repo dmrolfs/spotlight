@@ -10,7 +10,7 @@ import akka.util.Timeout
 import com.typesafe.config.{Config, ConfigFactory, ConfigObject}
 import shapeless._
 import demesne.{AggregateRootType, DomainModel}
-import demesne.module.EntityAggregateModule
+import demesne.module.{EntityAggregateModule, EntityAggregateModuleCompanion}
 import demesne.register.StackableRegisterBusPublisher
 import peds.akka.publish.{EventPublisher, StackableStreamPublisher}
 import peds.akka.envelope._
@@ -163,7 +163,7 @@ object Catalog extends EntityCompanion[Catalog] {
 
 
 
-  object AggregateRoot {
+  object AggregateRoot extends EntityAggregateModuleCompanion[Catalog] {
     val module: EntityAggregateModule[Catalog] = {
       val b = EntityAggregateModule.builderFor[Catalog].make
       import b.P.{ Tag => BTag, Props => BProps, _ }
@@ -176,10 +176,13 @@ object Catalog extends EntityCompanion[Catalog] {
       .set( NameLens, nameLens )
       .set( SlugLens, Some(slugLens) )
       .set( IsActiveLens, Some(isActiveLens) )
+      .set( Companion, AggregateRoot )
       .build()
     }
 
-    object Protocol extends module.Protocol {
+    object Protocol {
+      val Entity = EntityProtocol
+
       sealed trait CatalogProtocol
       case class GetPlansForTopic( targetId: Catalog#TID, topic: Topic ) extends CatalogProtocol
       case class CatalogedPlans( sourceId: Catalog#TID, plans: Set[PlanSummary] ) extends CatalogProtocol

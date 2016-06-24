@@ -26,6 +26,8 @@ libraryDependencies ++=
   ) ++ Dependencies.Scope.test(
     akka.streamsTestkit,
     demesne.testkit,
+    persistence.leveldb,
+    persistence.leveldbini,
     "org.python" % "jython-standalone" % "2.5.3",
     "com.github.marklister" %% "product-collections" % "1.4.2"
   )
