@@ -15,12 +15,14 @@ import com.typesafe.scalalogging.LazyLogging
 import org.joda.{time => joda}
 import peds.akka.envelope._
 import demesne.AggregateRootModule
+import demesne.module.entity.{messages => EntityMessage}
 import demesne.testkit.AggregateRootSpec
 import org.apache.commons.math3.random.RandomDataGenerator
+import peds.archetype.domain.model.core.EntityIdentifying
 import peds.commons.V
 import peds.commons.log.Trace
 import spotlight.analysis.outlier.{DetectionAlgorithmRouter, HistoricalStatistics}
-import spotlight.analysis.outlier.algorithm.AlgorithmModule.{Protocol => P}
+import spotlight.analysis.outlier.algorithm.{AlgorithmProtocol => P}
 import spotlight.model.outlier._
 import spotlight.model.timeseries._
 
@@ -34,12 +36,13 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
 
   type Module <: AlgorithmModule
   val module: Module
+  val identifying: EntityIdentifying[AlgorithmModule.AnalysisState] = AlgorithmModule.analysisStateIdentifying
 
   override type Fixture <: AlgorithmFixture
   abstract class AlgorithmFixture extends AggregateFixture { fixture =>
     logger.info( "Fixture: DomainModel=[{}]", model )
 
-    override def moduleCompanions: List[AggregateRootModule[_]] = List( module )
+    override def moduleCompanions: List[AggregateRootModule] = List( module )
     logger.debug( "Fixture.context = [{}]", context )
     logger.debug(
       "checkSystem elems: system:[{}] raw:[{}]",
@@ -72,7 +75,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
     val router = TestProbe()
 
     val bus = TestProbe()
-    system.eventStream.subscribe( bus.ref, classOf[AlgorithmModule.Event] )
+    system.eventStream.subscribe( bus.ref, classOf[P.Event] )
 
     def nextId(): module.TID
     lazy val id: module.TID = nextId()
@@ -93,7 +96,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
       logger.info( "timeout:[{}]", timeout )
       logger.info( "router:[{}]", router )
 
-      aggregate ! P.Add( id )
+      aggregate ! EntityMessage.Add( id )
       val registered = ( aggregate ? P.Register(id, router.ref) ).mapTo[Envelope]
       router.expectMsgPF( 400.millis.dilated, "router register" ) {
         case Envelope(DetectionAlgorithmRouter.RegisterDetectionAlgorithm(a, h), _) => {
@@ -113,14 +116,18 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
 
 
   type TestState = module.State
-  type TestAdvanced = module.AnalysisState.Advanced
+//  type TestState = AlgorithmModule.AnalysisState
+  type TestAdvanced = P.Advanced
   type TestHistory = module.analysisStateCompanion.History
+  val thresholdLens = module.analysisStateCompanion.thresholdLens
 
   def expectedUpdatedState( state: TestState, event: TestAdvanced ): TestState = {
-    state.addThreshold( event.threshold )
+    thresholdLens.modify( state ){ tbs => tbs :+ event.threshold }
+//    val result: TestState = state.addThreshold( event.threshold )
+//    result
   }
 
-  def actualVsExpectedState( actual: TestState, expected: TestState ): Unit = {
+  def actualVsExpectedState( actual: AlgorithmModule.AnalysisState, expected: AlgorithmModule.AnalysisState ): Unit = {
     actual.id mustBe expected.id
     actual.name mustBe expected.name
     actual.algorithm.name mustBe expected.algorithm.name
@@ -221,29 +228,27 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
     s"${module.algorithm.label.name} entity" should {
       "add algorithm" in { f: Fixture =>
         import f._
-        aggregate ! P.Add( id )
+        aggregate ! EntityMessage.Add( id )
         bus.expectMsgPF( max = 400.millis.dilated, hint = "algo added" ) {
-          case p: P.Added => p.sourceId mustBe id
+          case p: EntityMessage.Added => p.sourceId mustBe id
         }
       }
 
       "must not respond before add" in { f: Fixture =>
         import f._
-        import module.AnalysisState.Protocol._
 
         aggregate !+ P.Register( id, router.ref )
-        aggregate !+ GetStateSnapshot( id )
+        aggregate !+ P.GetStateSnapshot( id )
         bus.expectNoMsg()
       }
 
       "have zero state after add" in { f: Fixture =>
         import f._
-        import module.AnalysisState.Protocol._
 
         implicit val to = f.timeout
 
         val algoRef = addAndRegisterAggregate()
-        val actual = ( algoRef ? GetStateSnapshot( id ) ).mapTo[StateSnapshot]
+        val actual = ( algoRef ? P.GetStateSnapshot( id ) ).mapTo[P.StateSnapshot]
         whenReady( actual ) { a =>
           a.sourceId mustBe id
           a.snapshot mustBe module.analysisStateCompanion.zero( id )
@@ -258,14 +263,14 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
 
       "save and load snapshot" in { f: Fixture =>
         import f._
-        import module.AnalysisState.Protocol._
+
         implicit val to = f.timeout
         val algoRef = addAndRegisterAggregate()
         val pt = DataPoint( nowTimestamp, 3.14159 )
         val t = ThresholdBoundary( nowTimestamp, Some(1.1), Some(2.2), Some(3.3) )
-        val adv = module.AnalysisState.Advanced( id, pt, true, t )
+        val adv = P.Advanced( id, pt, true, t )
         algoRef ! adv
-        val s1 = Await.result( ( aggregate ? GetStateSnapshot(id) ).mapTo[StateSnapshot], 1.second.dilated )
+        val s1 = Await.result( ( aggregate ? P.GetStateSnapshot(id) ).mapTo[P.StateSnapshot], 1.second.dilated )
         val zero = module.analysisStateCompanion.zero( id )
         actualVsExpectedState( s1.snapshot, expectedUpdatedState(zero, adv) )
       }
@@ -281,9 +286,10 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
         val zero = module.analysisStateCompanion.zero( id )
         val pt = DataPoint( nowTimestamp, 3.14159 )
         val t = ThresholdBoundary( nowTimestamp, Some(1.1), Some(2.2), Some(3.3) )
-        val adv = module.AnalysisState.Advanced( id, pt, false, t )
+        val adv = P.Advanced( id, pt, false, t )
         val hlens = module.analysisStateCompanion.historyLens
-        val actualState = hlens.modify( zero.addThreshold(t) ){ h => module.analysisStateCompanion.updateHistory(h, adv) }
+        val zeroAdded = thresholdLens.modify( zero ){ _ :+ t }
+        val actualState = hlens.modify( zeroAdded ){ h => module.analysisStateCompanion.updateHistory(h, adv) }
         val expectedState = expectedUpdatedState( zero, adv )
         val zeroHistory = hlens.get( zero )
         val actualHistory = module.analysisStateCompanion.updateHistory( zeroHistory, adv )

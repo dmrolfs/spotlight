@@ -7,11 +7,11 @@ import org.mockito.Mockito._
 import org.joda.{time => joda}
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import peds.akka.envelope._
-import spotlight.analysis.outlier.{DetectOutliersInSeries, DetectUsing, HistoricalStatistics}
 import spotlight.model.outlier.{NoOutliers, OutlierPlan, SeriesOutliers}
-import spotlight.analysis.outlier.algorithm.AlgorithmModuleSpec
 import spotlight.model.timeseries.{DataPoint, ThresholdBoundary, TimeSeries}
-
+import spotlight.analysis.outlier.{DetectOutliersInSeries, DetectUsing, HistoricalStatistics}
+import spotlight.analysis.outlier.algorithm.{ AlgorithmProtocol => P}
+import spotlight.analysis.outlier.algorithm.AlgorithmModuleSpec
 
 
 
@@ -24,7 +24,7 @@ class SimpleMovingAverageModuleSpec extends AlgorithmModuleSpec[SimpleMovingAver
   override val module: Module = SimpleMovingAverageModule
 
   class Fixture extends AlgorithmFixture {
-    val testScope: module.TID = OutlierPlan.Scope( plan = "TestPlan", topic = "TestTopic", planId = OutlierPlan.nextId() )
+    val testScope: module.TID = identifying tag OutlierPlan.Scope(plan = "TestPlan", topic = "TestTopic")
     override def nextId(): module.TID = testScope
   }
 
@@ -58,7 +58,7 @@ class SimpleMovingAverageModuleSpec extends AlgorithmModuleSpec[SimpleMovingAver
     loop( points.toList, lastPoints.map{ _.value }.toArray, Seq.empty[ThresholdBoundary] )
   }
 
-  override def expectedUpdatedState( state: module.State, event: module.AnalysisState.Advanced ): module.State = {
+  override def expectedUpdatedState( state: module.State, event: P.Advanced ): module.State = {
     val historicalStatsLens = module.State.History.statsLens compose module.State.historyLens
     val s = super.expectedUpdatedState( state, event ).asInstanceOf[SimpleMovingAverageModule.State]
     val h = s.history
@@ -187,21 +187,22 @@ class SimpleMovingAverageModuleSpec extends AlgorithmModuleSpec[SimpleMovingAver
         }
 
         import akka.pattern.ask
-        import module.AnalysisState.Protocol._
         implicit val to = f.timeout
 
-        val actual = ( algoRef ? GetStateSnapshot( id ) ).mapTo[StateSnapshot]
+        val actual = ( algoRef ? P.GetStateSnapshot( id ) ).mapTo[P.StateSnapshot]
         whenReady( actual ) { a =>
           val as = a.snapshot
+          a.snapshot mustBe an [module.State]
+          val sas = as.asInstanceOf[module.State]
           logger.info( "{}: ACTUAL = [{}]", hint, as )
           logger.info( "{}: EXPECTED = [{}]", hint, expectedCalculations.mkString(",\n") )
           as.id mustBe id
           as.algorithm.name mustBe module.algorithm.label.name
           as.tolerance mustBe 3.0
           as.thresholds.size mustBe ( history.N )
-          logger.info( "{}: history size = {}", hint, as.history.movingStatistics.getN.toString )
-          as.history.movingStatistics.getN mustBe ( history.N )
-          as.history.movingStatistics.getMean mustBe history.mean(1)
+          logger.info( "{}: history size = {}", hint, sas.history.movingStatistics.getN.toString )
+          sas.history.movingStatistics.getN mustBe ( history.N )
+          sas.history.movingStatistics.getMean mustBe history.mean(1)
           as.thresholds.drop( as.thresholds.size - expectedCalculations.size ).zip( expectedCalculations ).zipWithIndex foreach { case ( ((actual, expected), i) ) =>
             logger.info( "{}: evaluating expectation: {}", hint, i.toString )
             actual.floor.isDefined mustBe expected.floor.isDefined

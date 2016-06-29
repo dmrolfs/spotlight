@@ -61,12 +61,13 @@ with InitializeAggregateRootClusterSharding { outer =>
     history: State.History = State.History.empty,
     override val tolerance: Double = 3.0,
     override val thresholds: Seq[ThresholdBoundary] = Seq.empty[ThresholdBoundary]
-  ) extends AlgorithmModule.AnalysisState {
+  ) extends AlgorithmModule.AnalysisState with AlgorithmModule.StrictSelf[State] {
+    override type Self = State
 
     override def algorithm: Symbol = outer.algorithm.label
 
     override def canEqual( that: Any ): Boolean = that.isInstanceOf[State]
-    override def addThreshold( threshold: ThresholdBoundary ): State = copy( thresholds = thresholds :+ threshold )
+    override def addThreshold( threshold: ThresholdBoundary ): Self = copy( thresholds = thresholds :+ threshold )
     override def toString: String = {
       s"${ClassUtils.getAbbreviatedName(getClass, 15)}( " +
         s"id:[${id}]; "+

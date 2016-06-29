@@ -1,20 +1,21 @@
 package spotlight.analysis.outlier
 
+import scala.concurrent.Await
 import scala.concurrent.duration._
 import akka.testkit._
 import com.typesafe.config.{Config, ConfigFactory}
 import peds.akka.envelope._
 import peds.akka.envelope.pattern.ask
-import AnalysisPlanModule.AggregateRoot.{Protocol => P}
 import akka.actor.{ActorRef, Props}
 import akka.util.Timeout
-import demesne.{AggregateRootType, DomainModel, PassivationSpecification, SnapshotSpecification}
+import demesne.{AggregateRootType, DomainModel, PassivationSpecification}
+import demesne.module.entity.{messages => EntityMessage}
 import demesne.DomainModel.DomainModelImpl
 import spotlight.analysis.outlier.algorithm.skyline.SimpleMovingAverageModule
 import spotlight.model.outlier.{IsQuorum, OutlierPlan, ReduceOutliers}
 import spotlight.testkit.EntityModuleSpec
-
-import scala.concurrent.Await
+import spotlight.analysis.outlier.{ AnalysisPlanProtocol => P }
+import demesne.module.entity.{ messages => EntityMessages }
 
 
 /**
@@ -24,7 +25,8 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] {
   override type Module = AnalysisPlanModule.AggregateRoot.module.type
   override val module: Module = AnalysisPlanModule.AggregateRoot.module
   class Fixture extends EntityFixture( config = AnalysisPlanModuleSpec.config ) {
-    override def nextId(): module.TID = OutlierPlan.nextId()
+    val identifying = AnalysisPlanModule.analysisPlanIdentifying
+    override def nextId(): module.TID = identifying.safeNextId
 
     val algo: Symbol = SimpleMovingAverageModule.algorithm.label
 
@@ -53,13 +55,16 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] {
       import f._
 
       val planInfo = makePlan("TestPlan", None)
-      entity ! P.Entity.Add( planInfo )
+      entity ! EntityMessages.Add( planInfo.id, Some(planInfo) )
       bus.expectMsgPF( max = 400.millis.dilated, hint = "add plan" ) {
-        case p: P.Entity.Added => {
+        case p: EntityMessages.Added => {
           logger.info( "ADD PLAN: p.sourceId[{}]=[{}]   id[{}]=[{}]", p.sourceId.getClass.getCanonicalName, p.sourceId, tid.getClass.getCanonicalName, tid)
           p.sourceId mustBe planInfo.id
-          p.info.name mustBe "TestPlan"
-          p.info.algorithms mustBe Set( algo )
+          assert( p.info.isDefined )
+          p.info.get mustBe an [OutlierPlan]
+          val actual = p.info.get.asInstanceOf[OutlierPlan]
+          actual.name mustBe "TestPlan"
+          actual.algorithms mustBe Set( algo )
         }
       }
     }
@@ -75,7 +80,7 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] {
     "recover and continue after passivation" taggedAs WIP in { f: Fixture =>
       import f._
 
-      def infoFrom( ar: ActorRef ): AnalysisPlanModule.Info = {
+      def infoFrom( ar: ActorRef ): OutlierPlan = {
         import scala.concurrent.ExecutionContext.Implicits.global
         implicit val to = Timeout( 2.seconds )
         Await.result(
@@ -105,8 +110,8 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] {
       logger.info( "TEST:aggregateRegistry = [{}]", aggregateRegistry.get().mkString(","))
 
       val p1 = makePlan( "TestPlan", None )
-      entity ! P.Entity.Add( p1 )
-      bus.expectMsgClass( classOf[P.Entity.Added] )
+      entity ! EntityMessage.Add( p1.id, Some(p1) )
+      bus.expectMsgClass( classOf[EntityMessage.Added] )
 
       logger.info( "TEST:SLEEPING...")
       Thread.sleep( 30000 )

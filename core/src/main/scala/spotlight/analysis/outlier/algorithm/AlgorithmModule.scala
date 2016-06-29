@@ -70,7 +70,11 @@ object AlgorithmProtocol extends EntityProtocol[AlgorithmModule.AnalysisState] {
   * Created by rolfsd on 6/5/16.
   */
 object AlgorithmModule {
-  trait AnalysisState extends Entity with Equals {
+  trait StrictSelf[T <: StrictSelf[T]] { self: T =>
+    type Self >: self.type <: T
+  }
+
+  trait AnalysisState extends Entity with Equals { self: StrictSelf[_] =>
     override type ID = OutlierPlan.Scope
 
     override val evID: ClassTag[ID] = classTag[OutlierPlan.Scope]
@@ -81,7 +85,7 @@ object AlgorithmModule {
     def topic: Topic = scope.topic
 
     def thresholds: Seq[ThresholdBoundary]
-    def addThreshold( threshold: ThresholdBoundary ): AnalysisState
+    def addThreshold( threshold: ThresholdBoundary ): Self
 
     def tolerance: Double
 

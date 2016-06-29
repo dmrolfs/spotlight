@@ -4,13 +4,12 @@ import akka.actor.{ActorRef, Props}
 import com.typesafe.config.Config
 import demesne.module.entity.EntityAggregateModule
 import demesne.module.entity.messages.EntityProtocol
-import demesne.{AggregateProtocol, AggregateRootType, DomainModel}
+import demesne.{AggregateRootType, DomainModel}
 import demesne.register.StackableRegisterBusPublisher
 import peds.akka.envelope._
 import peds.akka.publish.{EventPublisher, StackableStreamPublisher}
 import peds.archetype.domain.model.core.{EntityIdentifying, EntityLensProvider}
-import peds.commons.TryV
-import peds.commons.identifier.{ShortUUID, TaggedID}
+import peds.commons.identifier.ShortUUID
 import shapeless.Lens
 import spotlight.model.outlier.{IsQuorum, OutlierPlan, ReduceOutliers}
 import spotlight.model.timeseries.{TimeSeries, Topic}

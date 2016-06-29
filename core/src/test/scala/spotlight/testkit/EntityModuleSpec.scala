@@ -9,7 +9,8 @@ import com.typesafe.scalalogging.StrictLogging
 import shapeless.syntax.typeable._
 import org.joda.{time => joda}
 import demesne.AggregateRootModule
-import demesne.module.EntityAggregateModule
+import demesne.module.entity.EntityAggregateModule
+import demesne.module.entity.{messages => EntityMessage}
 import demesne.testkit.AggregateRootSpec
 import org.apache.commons.math3.random.RandomDataGenerator
 import org.scalatest.Tag
@@ -35,10 +36,10 @@ abstract class EntityModuleSpec[E <: Entity : ClassTag] extends AggregateRootSpe
   abstract class EntityFixture(
     id: Int = AggregateRootSpec.sysId.incrementAndGet(),
     config: Config = demesne.testkit.config
-  ) extends AggregateFixture( id, config ) { fixture =>
+  ) extends AggregateFixture( id ) { fixture =>
     logger.info( "Fixture: DomainModel=[{}]", model)
 
-    override def moduleCompanions: List[AggregateRootModule[_]] = List( module )
+    override def moduleCompanions: List[AggregateRootModule] = List( module )
     logger.debug( "Fixture.context = [{}]", context )
     logger.debug(
       "checkSystem elems: system:[{}] raw:[{}]",
@@ -69,7 +70,7 @@ abstract class EntityModuleSpec[E <: Entity : ClassTag] extends AggregateRootSpe
     implicit val nowTimestamp: joda.DateTime = joda.DateTime.now
 
     val bus = TestProbe()
-    system.eventStream.subscribe( bus.ref, classOf[module.Event])
+    system.eventStream.subscribe( bus.ref, classOf[AggregateRootModule.Event[module.ID]])
 
     def nextId(): module.TID
     lazy val tid: module.TID = nextId()

@@ -16,8 +16,10 @@ import org.apache.commons.math3.random.RandomDataGenerator
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.mock.MockitoSugar
 import org.mockito.Mockito._
+import peds.archetype.domain.model.core.EntityIdentifying
 import peds.commons.V
 import spotlight.analysis.outlier.OutlierDetection.DetectionResult
+import spotlight.analysis.outlier.algorithm.AlgorithmModule
 import spotlight.model.outlier._
 import spotlight.model.outlier.OutlierPlan.Scope
 import spotlight.model.timeseries._
@@ -34,8 +36,8 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
     val router = TestProbe()
     val subscriber = TestProbe()
 
-    val pid = OutlierPlan.nextId()
-    val scope = OutlierPlan.Scope( "TestPlan", "TestTopic", pid )
+    val pid = OutlierPlan.outlierPlanIdentifying.safeNextId
+    val scope = OutlierPlan.Scope( "TestPlan", "TestTopic" )
     val plan = mock[OutlierPlan]
     when( plan.algorithms ).thenReturn( Set(algo) )
     when( plan.name ).thenReturn( scope.plan )
@@ -65,7 +67,8 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
         routerRef: ActorRef
       )(
         implicit context: ActorContext,
-        ec: ExecutionContext
+        ec: ExecutionContext,
+        algorithmIdentifying: EntityIdentifying[AlgorithmModule.AnalysisState]
       ): Future[Set[ActorRef]] = {
         Future successful Set( algorithmActor.ref )
       }
