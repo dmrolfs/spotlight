@@ -7,9 +7,10 @@ import scalaz._
 import Scalaz._
 import com.typesafe.config.{Config, ConfigFactory}
 import org.apache.commons.math3.ml.distance.{DistanceMeasure, EuclideanDistance}
+import peds.archetype.domain.model.core.EntityIdentifying
 import peds.commons.Valid
 import peds.commons.math.MahalanobisDistance
-import spotlight.analysis.outlier.algorithm.AlgorithmModule
+import spotlight.analysis.outlier.algorithm.{AlgorithmModule, AlgorithmProtocol}
 import spotlight.model.outlier.OutlierPlan
 import spotlight.model.timeseries.{TimeSeries, TimeSeriesBase, TimeSeriesCohort, Topic}
 
@@ -18,13 +19,14 @@ import spotlight.model.timeseries.{TimeSeries, TimeSeriesBase, TimeSeriesCohort,
  * Created by rolfsd on 10/4/15.
  */
 package object outlier {
-  sealed trait OutlierDetectionMessage extends AlgorithmModule.Command {
-    override def targetId: TID = OutlierPlan.Scope( plan, topic )
+  sealed trait OutlierDetectionMessage extends AlgorithmProtocol.Command {
+    override def targetId: TID = identifying.tag( OutlierPlan.Scope(plan, topic) )
     def topic: Topic
     type Source <: TimeSeriesBase
     def evSource: ClassTag[Source]
     def source: Source
     def plan: OutlierPlan
+    final protected val identifying: EntityIdentifying[AlgorithmModule.AnalysisState] = AlgorithmModule.analysisStateIdentifying
   }
 
   object OutlierDetectionMessage {

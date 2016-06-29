@@ -138,16 +138,18 @@ class OutlierPlanDetectionRouter extends Actor with InstrumentedActor with Actor
 
   val route: Receive = {
     case (ts: TimeSeries, p: OutlierPlan) if outer.plans( p ) => streamIngressFor( p, sender() ) forwardEnvelope  ts
-    case (ts: TimeSeries, s: OutlierPlan.Scope) if outer.plans.exists{ _.id == s.planId } => {
-      log.error( "RECEIVED SCOPE:[{}] for series:[{}]", s, ts )
-      outer.plans.find{ _.id == s.planId } foreach { p =>
-        log.error( "PASSING ALONG to PLAN STREAM:[{}] for series:[{}]", p, ts )
+    case (ts: TimeSeries, s: OutlierPlan.Scope) if outer.plans.exists{ _.name == s.plan } => {
+      log.info( "RECEIVED SCOPE:[{}] for series:[{}]", s, ts )
+      outer.plans
+      .find { _.name == s.plan }
+      .foreach { p =>
+        log.info( "PASSING ALONG to PLAN STREAM:[{}] for series:[{}]", p, ts )
         streamIngressFor( p, sender() ) forwardEnvelope ts
       }
     }
 
     case (ts, scope: OutlierPlan.Scope) => {
-      log.error( "UNKNOWN SCOPE:{} scope-id:[{}] ref-plan-ids:[{}]", scope, scope.planId, outer.plans.map{ _.id }.mkString(",") )
+      log.error( "UNKNOWN SCOPE:{} scope-id:[{}] ref-plan-ids:[{}]", scope, scope.plan, outer.plans.map{ _.id }.mkString(",") )
     }
   }
 

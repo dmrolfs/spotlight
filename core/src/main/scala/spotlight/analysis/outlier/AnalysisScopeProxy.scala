@@ -9,15 +9,17 @@ import akka.event.LoggingReceive
 import akka.stream._
 import akka.stream.scaladsl.{Flow, GraphDSL, Keep, RunnableGraph, Sink, Source}
 import akka.util.Timeout
-import demesne.{AggregateRootType, DomainModel}
 import nl.grons.metrics.scala.{Meter, MetricName, Timer}
 import peds.akka.envelope._
 import peds.akka.envelope.pattern.ask
 import peds.akka.metrics.InstrumentedActor
 import peds.akka.stream._
 import peds.commons.util._
+import demesne.{AggregateRootType, DomainModel}
+import demesne.module.entity.{messages => EntityMessage}
+import peds.archetype.domain.model.core.EntityIdentifying
 import spotlight.analysis.outlier.OutlierDetection.DetectionResult
-import spotlight.analysis.outlier.algorithm.AlgorithmModule
+import spotlight.analysis.outlier.algorithm.{AlgorithmModule, AlgorithmProtocol}
 import spotlight.analysis.outlier.algorithm.density.{CohortDensityAnalyzer, SeriesCentroidDensityAnalyzer, SeriesDensityAnalyzer}
 import spotlight.analysis.outlier.algorithm.skyline._
 import spotlight.model.outlier.OutlierPlan.Scope
@@ -94,18 +96,23 @@ object AnalysisScopeProxy {
       routerRef: ActorRef
     )(
       implicit context: ActorContext,
-      ec: ExecutionContext
+      ec: ExecutionContext,
+      algorithmIdentifying: EntityIdentifying[AlgorithmModule.AnalysisState]
     ): Future[Set[ActorRef]] = {
+      def scopeId: AlgorithmModule.AnalysisState#TID = {
+        implicitly[EntityIdentifying[AlgorithmModule.AnalysisState]] tag provider.scope
+      }
+
       val algs = {
         for {
           a <- provider.plan.algorithms
           rt <- provider.rootTypeFor( a )
         } yield {
-          val aref = provider.model.aggregateOf( rt, provider.scope.id )
-          aref !+ AlgorithmModule.Protocol.Add( provider.scope.id )
+          val aref = provider.model.aggregateOf( rt, provider.scope )
+          aref !+ EntityMessage.Add( scopeId )
 //          implicit val to = provider.timeout
-          ( aref ?+ AlgorithmModule.Protocol.Register( provider.scope.id, routerRef ) )
-          .mapTo[AlgorithmModule.Protocol.Registered]
+          ( aref ?+ AlgorithmProtocol.Register( scopeId, routerRef ) )
+          .mapTo[AlgorithmProtocol.Registered]
           .map { _ => aref }
         }
       }

@@ -1,7 +1,7 @@
 package spotlight.analysis.outlier.algorithm
 
 import scala.annotation.tailrec
-import scala.reflect.ClassTag
+import scala.reflect._
 import akka.actor.{ActorPath, ActorRef, Props}
 import akka.cluster.sharding.ShardRegion
 import akka.event.LoggingReceive
@@ -9,56 +9,118 @@ import akka.event.LoggingReceive
 import scalaz._
 import Scalaz._
 import scalaz.Kleisli.{ask, kleisli}
-import shapeless.Lens
+import shapeless.{Lens, TypeCase, Typeable}
 import com.typesafe.scalalogging.LazyLogging
 import org.apache.commons.math3.ml.clustering.DoublePoint
 import nl.grons.metrics.scala.{MetricName, Timer}
 import peds.akka.envelope._
 import peds.akka.metrics.InstrumentedActor
 import peds.akka.publish.{EventPublisher, StackableStreamPublisher}
-import peds.archetype.domain.model.core.Entity
+import peds.archetype.domain.model.core.{Entity, EntityIdentifying}
 import peds.commons.{KOp, TryV}
 import peds.commons.log.Trace
 import demesne._
+import demesne.module.entity.messages.EntityProtocol
 import peds.commons.identifier.TaggedID
 import spotlight.analysis.outlier._
-import spotlight.analysis.outlier.algorithm.AlgorithmModule.ModuleProvider
 import spotlight.model.outlier.{NoOutliers, OutlierPlan, Outliers}
 import spotlight.model.timeseries._
+
+
+object AlgorithmProtocol extends EntityProtocol[AlgorithmModule.AnalysisState] {
+  sealed trait AlgorithmMessage
+  abstract class AlgorithmCommand extends Command with AlgorithmMessage
+  abstract class AlgorithmEvent extends Event with AlgorithmMessage
+
+//  case class AddAlgorithm( override val targetId: AddAlgorithm#TID ) extends AlgorithmCommand
+
+//  case class AlgorithmAdded( override val sourceId: AlgorithmAdded#TID ) extends AlgorithmEvent
+
+  case class Register( override val targetId: Register#TID, routerRef: ActorRef ) extends AlgorithmCommand
+
+  case class Registered( override val sourceId: Registered#TID ) extends AlgorithmEvent
+
+  import AlgorithmModule.AnalysisState
+
+  case class GetStateSnapshot( override val targetId: GetStateSnapshot#TID ) extends AlgorithmCommand
+
+  case class StateSnapshot( sourceId: StateSnapshot#TID, snapshot: AnalysisState ) extends AlgorithmEvent
+  object StateSnapshot {
+    def apply( s: AnalysisState ): StateSnapshot = StateSnapshot( sourceId = s.id, snapshot = s )
+  }
+
+  private[algorithm] case class Advanced(
+    override val sourceId: Advanced#TID,
+    point: DataPoint,
+    isOutlier: Boolean,
+    threshold: ThresholdBoundary
+  ) extends Event
+
+  case class AlgorithmUsedBeforeRegistrationError(
+    sourceId: AnalysisState#TID,
+    algorithm: Symbol,
+    path: ActorPath
+  ) extends IllegalStateException(
+    s"actor [${path}] not registered algorithm [${algorithm.name}] with scope [${sourceId}] before use"
+  ) with OutlierAlgorithmError
+}
 
 
 /**
   * Created by rolfsd on 6/5/16.
   */
 object AlgorithmModule {
-  type ID = OutlierPlan.Scope
-  type TID = TaggedID[ID]
+  trait AnalysisState extends Entity with Equals {
+    override type ID = OutlierPlan.Scope
 
-  type Command = AggregateRootModule.Command[ID]
-  type Event = AggregateRootModule.Event[ID]
+    override val evID: ClassTag[ID] = classTag[OutlierPlan.Scope]
+    override val evTID: ClassTag[TID] = classTag[TaggedID[OutlierPlan.Scope]]
 
-  object Protocol {
-    sealed trait AlgorithmMessage
-    case class Add( override val targetId: Add#TID ) extends Command with AlgorithmMessage
+    def scope: OutlierPlan.Scope = id
+    def algorithm: Symbol
+    def topic: Topic = scope.topic
 
-    case class Added( override val sourceId: Added#TID ) extends Event with AlgorithmMessage
+    def thresholds: Seq[ThresholdBoundary]
+    def addThreshold( threshold: ThresholdBoundary ): AnalysisState
 
-    case class Register(
-      override val targetId: Register#TID,
-      routerRef: ActorRef
-    ) extends Command with AlgorithmMessage
+    def tolerance: Double
 
-    case class Registered( override val sourceId: Registered#TID ) extends Event with AlgorithmMessage
+    override def hashCode: Int = {
+      41 * (
+        41 * (
+          41 * (
+            41 * (
+              41 + id.##
+              ) + name.##
+            ) + topic.##
+          ) + algorithm.##
+        ) + tolerance.##
+    }
 
-    case class AlgorithmUsedBeforeRegistrationError(
-      sourceId: TID,
-      algorithm: Symbol,
-      path: ActorPath
-    ) extends IllegalStateException(
-      s"actor [${path}] not registered algorithm [${algorithm.name}] with scope [${sourceId}] before use"
-    ) with OutlierAlgorithmError
+    override def equals( rhs: Any ): Boolean = {
+      rhs match {
+        case that: AnalysisState => {
+          if ( this eq that ) true
+          else {
+            ( that.## == this.## ) &&
+            ( that canEqual this ) &&
+            ( this.id == that.id ) &&
+            ( this.name == that.name) &&
+            ( this.topic == that.topic) &&
+            ( this.algorithm == that.algorithm ) &&
+            ( this.tolerance == that.tolerance )
+          }
+        }
+
+        case _ => false
+      }
+    }
   }
 
+
+  implicit val analysisStateIdentifying: EntityIdentifying[AnalysisState] = {
+    new EntityIdentifying[AnalysisState] with OutlierPlan.Scope.ScopeIdentifying[AnalysisState]
+  }
 
   /**
     *  approximate number of points in a one day window size @ 1 pt per 10s
@@ -67,15 +129,28 @@ object AlgorithmModule {
 
 
   //todo: ClusterProvider???
-  trait ModuleProvider {
+  trait ModuleConfiguration {
     def maximumNrClusterNodes: Int = 6
   }
 }
 
 abstract class AlgorithmModule
-extends AggregateRootModule[AlgorithmModule.ID]
-with InitializeAggregateRootClusterSharding { module: ModuleProvider =>
+extends AggregateRootModule
+with InitializeAggregateRootClusterSharding { module: AlgorithmModule.ModuleConfiguration =>
+  import AlgorithmModule.AnalysisState
+
   override val trace = Trace[AlgorithmModule]
+
+  implicit val algorithmIdentifying: EntityIdentifying[State] = {
+    new EntityIdentifying[State] with OutlierPlan.Scope.ScopeIdentifying[State]
+  }
+
+
+  override type ID = OutlierPlan.Scope
+  val idType = Typeable[OutlierPlan.Scope]
+  override def nextId: TryV[TID] = algorithmIdentifying.nextIdAs[TID]
+  val advanced = TypeCase[AlgorithmProtocol.Advanced]
+
 
   override def rootType: AggregateRootType = {
     new AggregateRootType {
@@ -83,7 +158,7 @@ with InitializeAggregateRootClusterSharding { module: ModuleProvider =>
       override def aggregateRootProps( implicit model: DomainModel ): Props = AlgorithmActor.props( model, this )
       override def maximumNrClusterNodes: Int = module.maximumNrClusterNodes
       override def aggregateIdFor: ShardRegion.ExtractEntityId = super.aggregateIdFor orElse {
-        case a: AnalysisState.Advanced => ( a.sourceId.toString, a )
+        case advanced( a ) => (a.sourceId.toString, a )
       }
     }
   }
@@ -167,73 +242,12 @@ with InitializeAggregateRootClusterSharding { module: ModuleProvider =>
   type State <: AnalysisState
   implicit def evState: ClassTag[State]
 
-  trait AnalysisState extends Entity with Equals {
-    override type ID = module.ID
-    override def evId: ClassTag[ID] = ClassTag( classOf[ID] )
-    def scope: OutlierPlan.Scope = id
-    def algorithm: Symbol = module.algorithm.label
-    def topic: Topic = scope.topic
-
-    def thresholds: Seq[ThresholdBoundary]
-    def addThreshold( threshold: ThresholdBoundary ): State
-
-    def tolerance: Double
-
-    override def hashCode: Int = {
-      41 * (
-        41 * (
-          41 * (
-            41 + id.##
-          ) + name.##
-        ) + topic.##
-      ) + tolerance.##
-    }
-
-    override def equals( rhs: Any ): Boolean = {
-      rhs match {
-        case that: AnalysisState => {
-          if ( this eq that ) true
-          else {
-            ( that.## == this.## ) &&
-            ( that canEqual this ) &&
-            ( this.id == that.id ) &&
-            ( this.name == that.name) &&
-            ( this.topic == that.topic) &&
-            ( this.tolerance == that.tolerance )
-          }
-        }
-
-        case _ => false
-      }
-    }
-  }
-
-  object AnalysisState {
-    object Protocol {
-      import AlgorithmModule.Protocol.AlgorithmMessage
-
-      case class GetStateSnapshot( override val targetId: GetStateSnapshot#TID ) extends Command with AlgorithmMessage
-
-      case class StateSnapshot( sourceId: TID, snapshot: State ) extends Event with AlgorithmMessage
-      object StateSnapshot {
-        def apply( s: State ): StateSnapshot = StateSnapshot( sourceId = s.id, snapshot = s )
-      }
-    }
-
-    private[algorithm] case class Advanced(
-      override val sourceId: Advanced#TID,
-      point: DataPoint,
-      isOutlier: Boolean,
-      threshold: ThresholdBoundary
-    ) extends Event
-  }
-
   val analysisStateCompanion: AnalysisStateCompanion
   trait AnalysisStateCompanion {
     def zero( id: State#TID ): State
 
     type History
-    def updateHistory( history: History, event: AnalysisState.Advanced ): History
+    def updateHistory( history: History, event: AlgorithmProtocol.Advanced ): History
     def historyLens: Lens[State, History]
     def thresholdLens: Lens[State, Seq[ThresholdBoundary]]
   }
@@ -248,9 +262,11 @@ with InitializeAggregateRootClusterSharding { module: ModuleProvider =>
   class AlgorithmActor(
     override val model: DomainModel,
     override val rootType: AggregateRootType
-  ) extends AggregateRoot[State]
+  ) extends AggregateRoot[State, OutlierPlan.Scope]
   with InstrumentedActor { publisher: EventPublisher =>
-    import AlgorithmModule.Protocol._
+    import demesne.module.entity.{ messages => EntityMessage }
+
+    override def parseId( idstr: String ): ID = algorithmIdentifying.safeParseId( idstr )( algorithmIdentifying.evID )
 
     override lazy val metricBaseName: MetricName = MetricName( "spotlight.analysis.outlier.algorithm" )
     lazy val algorithmTimer: Timer = metrics timer algorithm.label.name
@@ -261,9 +277,13 @@ with InitializeAggregateRootClusterSharding { module: ModuleProvider =>
     val advanceLens: Lens[State, (analysisStateCompanion.History, Seq[ThresholdBoundary])] = historyLens ~ thresholdLens
 
     override val acceptance: Acceptance = {
-      case ( Added(id), _ ) => analysisStateCompanion zero id
-      case ( Registered(_), s ) => s
-      case ( event: AnalysisState.Advanced, s ) => {
+      case ( EntityMessage.Added(id, _), s ) => {
+        idType.cast( id )
+        .map { i => analysisStateCompanion zero i }
+        .getOrElse { s }
+      }
+      case ( AlgorithmProtocol.Registered(_), s ) => s
+      case ( event: AlgorithmProtocol.Advanced, s ) => {
         advanceLens.modify( s ){ case (h, ts) => ( updateHistory( h, event ), ts :+ event.threshold ) }
       }
     }
@@ -271,24 +291,24 @@ with InitializeAggregateRootClusterSharding { module: ModuleProvider =>
     override def receiveCommand: Receive = LoggingReceive { around( quiescent ) }
 
     val quiescent: Receive = {
-      case Add(id) => persist( Added(id) ) { event =>
+      case EntityMessage.Add(id, _) => persist( EntityMessage.Added(id) ) { event =>
         acceptAndPublish( event )
         context become LoggingReceive { around( ready() orElse stateReceiver ) }
       }
     }
 
     def ready( driver: Option[ActorRef] = None ): Receive = {
-      case Register( id, router ) if id == state.id => {
+      case AlgorithmProtocol.Register( id, router ) if id == state.id => {
         router !+ DetectionAlgorithmRouter.RegisterDetectionAlgorithm( algorithm.label, self )
         context become LoggingReceive { around( ready( Some(sender()) ) ) }
       }
 
       case DetectionAlgorithmRouter.AlgorithmRegistered( a ) if driver.isDefined => {
-        driver foreach { _ !+ Registered(state.id) }
+        driver foreach { _ !+ AlgorithmProtocol.Registered(state.id) }
         context become LoggingReceive { around( active orElse stateReceiver ) }
       }
 
-      case e: Add => /* handle and drop since already added */
+      case e: EntityMessage.Add => /* handle and drop since already added */
     }
 
     val active: Receive = {
@@ -322,20 +342,19 @@ with InitializeAggregateRootClusterSharding { module: ModuleProvider =>
         }
       }
 
-      case adv: AnalysisState.Advanced => accept( adv ) //todo: what to do here persist?
+      case adv: AlgorithmProtocol.Advanced => accept( adv ) //todo: what to do here persist?
 
-      case e: Add => /* handle and drop since already added */
+      case e: EntityMessage.Add => /* handle and drop since already added */
     }
 
-    import AnalysisState.Protocol.{GetStateSnapshot, StateSnapshot}
     val stateReceiver: Receive = {
-      case _: GetStateSnapshot => sender() ! StateSnapshot( state )
+      case _: AlgorithmProtocol.GetStateSnapshot => sender() ! AlgorithmProtocol.StateSnapshot( state )
     }
 
     override def unhandled( message: Any ): Unit = {
       message match {
         case m: DetectUsing if m.algorithm == state.algorithm && OutlierPlan.Scope(m.payload.plan, m.payload.topic) == state.id => {
-          val ex = AlgorithmUsedBeforeRegistrationError( state.id, algorithm.label, self.path )
+          val ex = AlgorithmProtocol.AlgorithmUsedBeforeRegistrationError( state.id, algorithm.label, self.path )
           log.error( ex, "algorithm actor [{}] not registered for scope:[{}]", algorithm.label, state.id )
         }
 
@@ -360,18 +379,18 @@ with InitializeAggregateRootClusterSharding { module: ModuleProvider =>
       } yield ( o, ctx )
     }
 
-    private def collectOutlierPoints( points: Seq[DoublePoint] ): KOp[Context, Seq[AnalysisState.Advanced]] = {
-      kleisli[TryV, Context, Seq[AnalysisState.Advanced]] { implicit analysisContext =>
+    private def collectOutlierPoints( points: Seq[DoublePoint] ): KOp[Context, Seq[AlgorithmProtocol.Advanced]] = {
+      kleisli[TryV, Context, Seq[AlgorithmProtocol.Advanced]] { implicit analysisContext =>
         val currentTimestamps = points.map{ _.timestamp }.toSet
 
         @inline def isCurrentPoint( pt: PointT ): Boolean = currentTimestamps contains pt.timestamp
 
         @tailrec def loop(
           pts: List[DoublePoint],
-          acc: Seq[AnalysisState.Advanced]
+          acc: Seq[AlgorithmProtocol.Advanced]
         )(
           implicit loopState: State
-        ): Seq[AnalysisState.Advanced] = {
+        ): Seq[AlgorithmProtocol.Advanced] = {
           pts match {
             case Nil => acc
 
@@ -383,7 +402,7 @@ with InitializeAggregateRootClusterSharding { module: ModuleProvider =>
                 .find { _.timestamp == pt.timestamp }
                 .map { original =>
                   log.debug( "PT:[{}] ORIGINAL:[{}]", (pt._1.toLong, pt._2), (original._1.toLong, original._2) )
-                  val event = AnalysisState.Advanced(
+                  val event = AlgorithmProtocol.Advanced(
                     sourceId = state.id,
                     point = original.toDataPoint,
                     isOutlier = isOutlier,
@@ -410,7 +429,7 @@ with InitializeAggregateRootClusterSharding { module: ModuleProvider =>
           }
         }
 
-        val events = loop( points.toList, Seq.empty[AnalysisState.Advanced] )( state )
+        val events = loop( points.toList, Seq.empty[AlgorithmProtocol.Advanced] )( state )
         persistAll( events.to[collection.immutable.Seq] ){ e =>
           log.debug( "{} persisting Advanced:[{}]", state.id, e )
           accept( e )
@@ -419,7 +438,7 @@ with InitializeAggregateRootClusterSharding { module: ModuleProvider =>
       }
     }
 
-    private def makeOutliers( events: Seq[AnalysisState.Advanced] ): KOp[Context, Outliers] = {
+    private def makeOutliers( events: Seq[AlgorithmProtocol.Advanced] ): KOp[Context, Outliers] = {
       kleisli[TryV, Context, Outliers] { ctx =>
         val outliers = events collect { case e if e.isOutlier => e.point }
         val thresholds = events map { _.threshold }

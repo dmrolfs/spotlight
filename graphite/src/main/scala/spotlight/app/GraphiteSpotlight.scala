@@ -118,7 +118,7 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
     }
   }
 
-
+  //todo: simplfy use by having "bootstrap" (or better name actor) receive all ts request and forward to detector
   def execute( context: BootstrapContext )( implicit system: ActorSystem ): Future[Tcp.ServerBinding] = {
     implicit val materializer = ActorMaterializer(
       ActorMaterializerSettings( system ) withSupervisionStrategy workflowSupervision

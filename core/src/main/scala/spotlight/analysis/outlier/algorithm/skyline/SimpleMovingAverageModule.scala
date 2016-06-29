@@ -9,7 +9,7 @@ import peds.commons.TryV
 import demesne.InitializeAggregateRootClusterSharding
 import org.apache.commons.lang3.ClassUtils
 import spotlight.analysis.outlier.{DetectUsing, HistoricalStatistics}
-import spotlight.analysis.outlier.algorithm.AlgorithmModule
+import spotlight.analysis.outlier.algorithm.{AlgorithmModule, AlgorithmProtocol}
 import spotlight.model.timeseries._
 
 
@@ -18,8 +18,8 @@ import spotlight.model.timeseries._
   */
 object SimpleMovingAverageModule
 extends AlgorithmModule
-with AlgorithmModule.ModuleProvider
-with InitializeAggregateRootClusterSharding {
+with AlgorithmModule.ModuleConfiguration
+with InitializeAggregateRootClusterSharding { outer =>
   override lazy val algorithm: Algorithm = new Algorithm {
     override val label: Symbol = Symbol( "simple-moving-average" )
 
@@ -61,7 +61,10 @@ with InitializeAggregateRootClusterSharding {
     history: State.History = State.History.empty,
     override val tolerance: Double = 3.0,
     override val thresholds: Seq[ThresholdBoundary] = Seq.empty[ThresholdBoundary]
-  ) extends AnalysisState {
+  ) extends AlgorithmModule.AnalysisState {
+
+    override def algorithm: Symbol = outer.algorithm.label
+
     override def canEqual( that: Any ): Boolean = that.isInstanceOf[State]
     override def addThreshold( threshold: ThresholdBoundary ): State = copy( thresholds = thresholds :+ threshold )
     override def toString: String = {
@@ -114,7 +117,7 @@ with InitializeAggregateRootClusterSharding {
       def empty: History = History( new DescriptiveStatistics( AlgorithmModule.ApproximateDayWindow ) )
     }
 
-    override def updateHistory( h: History, event: AnalysisState.Advanced ): History = {
+    override def updateHistory( h: History, event: AlgorithmProtocol.Advanced ): History = {
       History.statsLens.modify( h ){ stats =>
         val ms = stats.copy
         ms addValue event.point.value

@@ -1,12 +1,14 @@
 package spotlight.model.outlier
 
 import scala.concurrent.duration._
-import scala.reflect.ClassTag
+import scala.reflect._
 import scala.util.matching.Regex
+import scalaz.{ Ordering => _, _}
+import Scalaz._
 import com.typesafe.config.{Config, ConfigFactory, ConfigOrigin}
-import peds.archetype.domain.model.core.{Entity, EntityCompanion, Identifying}
+import peds.archetype.domain.model.core._
 import peds.commons._
-import peds.commons.identifier.{ShortUUID, TaggedID}
+import peds.commons.identifier._
 import peds.commons.util._
 import spotlight.model.timeseries.Topic
 
@@ -16,7 +18,8 @@ import spotlight.model.timeseries.Topic
  */
 sealed trait OutlierPlan extends Entity with Equals {
   override type ID = ShortUUID
-  override def evId: ClassTag[ID] = ClassTag( classOf[ShortUUID] )
+  override val evID: ClassTag[ID] = classTag[ShortUUID]
+  override val evTID: ClassTag[TID] = classTag[TaggedID[ShortUUID]]
 
   override def slug: String = name
   def appliesTo: OutlierPlan.AppliesTo
@@ -50,47 +53,37 @@ sealed trait OutlierPlan extends Entity with Equals {
   private[outlier] def typeOrder: Int
 }
 
-object OutlierPlan extends EntityCompanion[OutlierPlan] {
+object OutlierPlan extends EntityLensProvider[OutlierPlan] {
   import shapeless._
 
-  case class Scope( plan: String, topic: Topic, planId: OutlierPlan#TID ) extends Entity {
-    override type ID = Scope
-    override val id: TID = Scope tag this
-    override def evId: ClassTag[Scope] = ClassTag( classOf[Scope] )
-
-    override def name: String = toString
+  case class Scope( plan: String, topic: Topic /*, planId: OutlierPlan#TID*/ ) {
+//    override type ID = Scope
+//    override val id: TID = Scope tag this
+//    override def evId: ClassTag[Scope] = ClassTag( classOf[Scope] )
+    def name: String = toString
     override val toString: String = plan +":"+ topic
   }
 
   object Scope {
-    def apply( plan: OutlierPlan, topic: Topic ): Scope = Scope( plan = plan.name, topic = topic, planId = plan.id )
+    def apply( plan: OutlierPlan, topic: Topic ): Scope = Scope( plan = plan.name, topic = topic /*, planId = plan.id*/ )
 
-    val idTag: Symbol = 'scope
-    implicit def tag( id: Scope ): TaggedID[Scope] = TaggedID( idTag, id )
-
-    val idLens: Lens[Scope, Scope#TID] = new Lens[Scope, Scope#TID] {
-      override def get( s: Scope ): Scope#TID = s.id
-      override def set( s: Scope )( id: Scope#TID ): Scope = s
-    }
-
-    val nameLens: Lens[Scope, String] = new Lens[Scope, String] {
-      override def get( s: Scope ): String = s.name
-      override def set( s: Scope )( n: String ): Scope = {
-        val Array(p, t) = n split ':'
-        s.copy( plan = p, topic = t )
+    trait ScopeIdentifying[T] { self: Identifying[T] =>
+      override type ID = Scope
+      override val evID: ClassTag[ID] = classTag[Scope]
+      override val evTID: ClassTag[TID] = classTag[TaggedID[Scope]]
+      override def nextId: TryV[TID] = new IllegalStateException( "scopes are fixed to plan:topic pairs so not generated" ).left
+      override def fromString( idstr: String ): ID = {
+        val Array(p, t) = idstr split ':'
+        Scope( plan = p, topic = t )
       }
-    }
-
-    implicit val scopeIdentifying: Identifying[Scope] = new Identifying[Scope] {
-      import scalaz.syntax.either._
-      override def nextId: TryV[Scope] = Identifying.NotDefinedForId[Scope]( "nextId" ).left
     }
   }
 
 
-  override def nextId(): OutlierPlan#TID = ShortUUID()
-  override val idTag: Symbol = 'plan
-  override implicit def tag( id: OutlierPlan#ID ): OutlierPlan#TID = TaggedID( idTag, id )
+  implicit val outlierPlanIdentifying: EntityIdentifying[OutlierPlan] = {
+    new EntityIdentifying[OutlierPlan] with ShortUUID.ShortUuidIdentifying[OutlierPlan]
+  }
+
 
   override val idLens: Lens[OutlierPlan, OutlierPlan#TID] = new Lens[OutlierPlan, OutlierPlan#TID] {
     override def get( p: OutlierPlan ): OutlierPlan#TID = p.id
@@ -118,6 +111,26 @@ object OutlierPlan extends EntityCompanion[OutlierPlan] {
       SimpleOutlierPlan(
         id = p.id,
         name = name,
+        appliesTo = p.appliesTo,
+        algorithms = p.algorithms,
+        grouping = p.grouping,
+        timeout = p.timeout,
+        isQuorum = p.isQuorum,
+        reduce = p.reduce,
+        algorithmConfig = p.algorithmConfig,
+        origin = p.origin,
+        typeOrder = p.typeOrder,
+        isActive = p.isActive
+      )
+    }
+  }
+
+  override val slugLens: Lens[OutlierPlan, String] = new Lens[OutlierPlan, String] {
+    override def get( p: OutlierPlan ): String = p.slug
+    override def set( p: OutlierPlan )( slug: String ): OutlierPlan = {
+      SimpleOutlierPlan(
+        id = p.id,
+        name = slug,  // for outlier plan slug == name
         appliesTo = p.appliesTo,
         algorithms = p.algorithms,
         grouping = p.grouping,
@@ -173,7 +186,7 @@ object OutlierPlan extends EntityCompanion[OutlierPlan] {
     appliesTo: (Any) => Boolean
   ): OutlierPlan = {
     SimpleOutlierPlan(
-      id = nextId,
+      id = outlierPlanIdentifying.safeNextId,
       name = name,
       appliesTo = AppliesTo.function( appliesTo ),
       algorithms = algorithms ++ getAlgorithms( planSpecification ),
@@ -199,7 +212,7 @@ object OutlierPlan extends EntityCompanion[OutlierPlan] {
     appliesTo: PartialFunction[Any, Boolean]
   ): OutlierPlan = {
     SimpleOutlierPlan(
-      id = nextId,
+      id = outlierPlanIdentifying.safeNextId,
       name = name,
       appliesTo = AppliesTo.partialFunction( appliesTo ),
       algorithms = algorithms ++ getAlgorithms( planSpecification ),
@@ -225,7 +238,7 @@ object OutlierPlan extends EntityCompanion[OutlierPlan] {
     topics: Set[Topic]
   ): OutlierPlan = {
     SimpleOutlierPlan(
-      id = nextId,
+      id = outlierPlanIdentifying.safeNextId,
       name = name,
       appliesTo = AppliesTo.topics( topics, extractTopic ),
       algorithms = algorithms ++ getAlgorithms( planSpecification ),
@@ -251,7 +264,7 @@ object OutlierPlan extends EntityCompanion[OutlierPlan] {
     topics: String*
   ): OutlierPlan = {
     SimpleOutlierPlan(
-      id = nextId,
+      id = outlierPlanIdentifying.safeNextId,
       name = name,
       appliesTo = AppliesTo.topics( topics.map{ Topic(_) }.toSet, extractTopic ),
       algorithms = algorithms ++ getAlgorithms( planSpecification ),
@@ -277,7 +290,7 @@ object OutlierPlan extends EntityCompanion[OutlierPlan] {
     regex: Regex
   ): OutlierPlan = {
     SimpleOutlierPlan(
-      id = nextId,
+      id = outlierPlanIdentifying.safeNextId,
       name = name,
       appliesTo = AppliesTo.regex( regex, extractTopic ),
       algorithms = algorithms ++ getAlgorithms( planSpecification ),
@@ -301,7 +314,7 @@ object OutlierPlan extends EntityCompanion[OutlierPlan] {
     planSpecification: Config = ConfigFactory.empty
   ): OutlierPlan = {
     SimpleOutlierPlan(
-      id = nextId,
+      id = outlierPlanIdentifying.safeNextId,
       name = name,
       appliesTo = AppliesTo.all,
       algorithms = algorithms ++ getAlgorithms( planSpecification ),

@@ -1,6 +1,6 @@
 package spotlight.model.outlier
 
-import scala.reflect.ClassTag
+import scala.reflect._
 import scalaz.{Lens => _, _}
 import Scalaz._
 import shapeless._
@@ -13,7 +13,9 @@ import spotlight.model.timeseries.Topic
 //todo remove with stateful algo?
 trait OutlierHistory extends Entity {
   override type ID = Topic
-  override def evId: ClassTag[ID] = ClassTag( classOf[Topic] )
+  override val evID: ClassTag[ID] = classTag[Topic]
+  override val evTID: ClassTag[TID] = classTag[TaggedID[Topic]]
+
   def outlierAnnotations: Seq[OutlierAnnotation]
 }
 

@@ -19,6 +19,7 @@ import spotlight.analysis.outlier.{DetectionAlgorithmRouter, OutlierDetection, O
 import spotlight.model.outlier.OutlierPlan
 import spotlight.protocol.GraphiteSerializationProtocol
 
+//todo to simplify usage, have bootstrap be point of of entry for ts messages and forward to processing
 
 /**
   * Created by rolfsd on 1/6/16.

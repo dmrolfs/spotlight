@@ -2,19 +2,72 @@ package spotlight.analysis.outlier
 
 import akka.actor.{ActorRef, Props}
 import com.typesafe.config.Config
-import demesne.{AggregateRootType, DomainModel}
-import demesne.module.{EntityAggregateModule, EntityAggregateModuleCompanion}
+import demesne.module.entity.EntityAggregateModule
+import demesne.module.entity.messages.EntityProtocol
+import demesne.{AggregateProtocol, AggregateRootType, DomainModel}
 import demesne.register.StackableRegisterBusPublisher
 import peds.akka.envelope._
 import peds.akka.publish.{EventPublisher, StackableStreamPublisher}
+import peds.archetype.domain.model.core.{EntityIdentifying, EntityLensProvider}
+import peds.commons.TryV
+import peds.commons.identifier.{ShortUUID, TaggedID}
+import shapeless.Lens
 import spotlight.model.outlier.{IsQuorum, OutlierPlan, ReduceOutliers}
 import spotlight.model.timeseries.{TimeSeries, Topic}
+
+
+object AnalysisPlanProtocol extends EntityProtocol[OutlierPlan] {
+    //todo add info change commands
+    //todo reify algorithm
+    //      case class AddAlgorithm( override val targetId: OutlierPlan#TID, algorithm: Symbol ) extends Command with AnalysisPlanMessage
+    case class GetInfo( override val targetId: GetInfo#TID ) extends CommandMessage
+    case class PlanInfo( override val sourceId: PlanInfo#TID, info: OutlierPlan ) extends EventMessage
+
+    case class ApplyTo( override val targetId: ApplyTo#TID, appliesTo: OutlierPlan.AppliesTo ) extends CommandMessage
+
+    case class UseAlgorithms(
+      override val targetId: UseAlgorithms#TID,
+      algorithms: Set[Symbol],
+      algorithmConfig: Config
+    ) extends CommandMessage
+
+    case class ResolveVia(
+      override val targetId: ResolveVia#TID,
+      isQuorum: IsQuorum,
+      reduce: ReduceOutliers
+    ) extends CommandMessage
+
+
+    case class ScopeChanged( override val sourceId: ScopeChanged#TID, appliesTo: OutlierPlan.AppliesTo ) extends EventMessage
+
+    case class AlgorithmsChanged(
+      override val sourceId: AlgorithmsChanged#TID,
+      algorithms: Set[Symbol],
+      algorithmConfig: Config
+    ) extends EventMessage
+
+    case class AnalysisResolutionChanged(
+      override val sourceId: AnalysisResolutionChanged#TID,
+      isQuorum: IsQuorum,
+      reduce: ReduceOutliers
+    ) extends EventMessage
+}
 
 
 /**
   * Created by rolfsd on 5/26/16.
   */
-object AnalysisPlanModule extends EntityAggregateModuleCompanion[OutlierPlan] {
+object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] {
+  implicit val analysisPlanIdentifying: EntityIdentifying[OutlierPlan] = {
+    new EntityIdentifying[OutlierPlan] with ShortUUID.ShortUuidIdentifying[OutlierPlan]
+  }
+
+
+  override def idLens: Lens[OutlierPlan, OutlierPlan#TID] = OutlierPlan.idLens
+  override def nameLens: Lens[OutlierPlan, String] = OutlierPlan.nameLens
+  override def slugLens: Lens[OutlierPlan, String] = OutlierPlan.slugLens
+
+
   object AggregateRoot {
     val module: EntityAggregateModule[OutlierPlan] = {
       val b = EntityAggregateModule.builderFor[OutlierPlan].make
@@ -22,48 +75,12 @@ object AnalysisPlanModule extends EntityAggregateModuleCompanion[OutlierPlan] {
 
       b
       .builder
-      .set( BTag, OutlierPlan.idTag )
+      .set( BTag, analysisPlanIdentifying.idTag )
       .set( BProps, OutlierPlanActor.props(_, _) )
       .set( IdLens, OutlierPlan.idLens )
       .set( NameLens, OutlierPlan.nameLens )
       .set( IsActiveLens, Some(OutlierPlan.isActiveLens) )
-      .set( Companion, AnalysisPlanModule )
       .build()
-    }
-
-    object Protocol {
-      val Entity = EntityProtocol
-
-      sealed trait PlanProtocol
-      //todo add info change commands
-      //todo reify algorithm
-      //      case class AddAlgorithm( override val targetId: OutlierPlan#TID, algorithm: Symbol ) extends Command with PlanProtocol
-      case class GetInfo( override val targetId: GetInfo#TID ) extends Command with PlanProtocol
-      case class PlanInfo( override val sourceId: PlanInfo#TID, info: OutlierPlan ) extends Event with PlanProtocol
-
-      case class ApplyTo( override val targetId: ApplyTo#TID, appliesTo: OutlierPlan.AppliesTo ) extends Command with PlanProtocol
-
-      case class UseAlgorithms( override val targetId: UseAlgorithms#TID, algorithms: Set[Symbol], algorithmConfig: Config )
-        extends Command with PlanProtocol
-
-      case class ResolveVia( override val targetId: ResolveVia#TID, isQuorum: IsQuorum, reduce: ReduceOutliers )
-        extends Command with PlanProtocol
-
-
-      case class ScopeChanged( override val sourceId: ScopeChanged#TID, appliesTo: OutlierPlan.AppliesTo )
-        extends Event with PlanProtocol
-
-      case class AlgorithmsChanged(
-        override val sourceId: AlgorithmsChanged#TID,
-        algorithms: Set[Symbol],
-        algorithmConfig: Config
-      ) extends Event with PlanProtocol
-
-      case class AnalysisResolutionChanged(
-        override val sourceId: AnalysisResolutionChanged#TID,
-        isQuorum: IsQuorum,
-        reduce: ReduceOutliers
-      ) extends Event with PlanProtocol
     }
 
 
@@ -76,16 +93,16 @@ object AnalysisPlanModule extends EntityAggregateModuleCompanion[OutlierPlan] {
         with StackableRegisterBusPublisher {
         override protected def onPersistRejected( cause: Throwable, event: Any, seqNr: Long ): Unit = {
           log.warning(
-                       "Rejected to persist event type [{}] with sequence number [{}] for persistenceId [{}] due to [{}].",
-                       event.getClass.getName, seqNr, persistenceId, cause
-                     )
+            "Rejected to persist event type [{}] with sequence number [{}] for persistenceId [{}] due to [{}].",
+            event.getClass.getName, seqNr, persistenceId, cause
+          )
         }
       }
     }
 
     class OutlierPlanActor( override val model: DomainModel, override val rootType: AggregateRootType )
     extends module.EntityAggregateActor { publisher: EventPublisher =>
-      import Protocol._
+      import AnalysisPlanProtocol._
 
       override var state: OutlierPlan = _
 

@@ -15,9 +15,16 @@ import org.apache.commons.math3.ml.clustering.DoublePoint
 import peds.akka.metrics.InstrumentedActor
 import peds.commons.{KOp, TryV}
 import peds.commons.math.MahalanobisDistance
+import spotlight.analysis.outlier.{DetectUsing, DetectionAlgorithmRouter, HistoricalStatistics, UnrecognizedPayload}
 import spotlight.model.outlier.OutlierPlan
 import spotlight.model.timeseries._
-import spotlight.analysis.outlier._
+
+
+sealed trait AlgorithmProtocolOLD
+object AlgorithmProtocolOLD extends {
+  case class Register( scopeId: OutlierPlan.Scope, routerRef: ActorRef ) extends AlgorithmProtocolOLD
+  case class Registered( scopeId: OutlierPlan.Scope ) extends AlgorithmProtocolOLD
+}
 
 
 trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
@@ -38,7 +45,7 @@ trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
   override def receive: Receive = LoggingReceive{ around( quiescent ) }
 
   def quiescent: Receive = {
-    case Register( scopeId, routerRef ) => {
+    case AlgorithmProtocolOLD.Register( scopeId, routerRef ) => {
       import scala.concurrent.duration._
       import akka.pattern.{ ask, pipe }
 
@@ -47,7 +54,7 @@ trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
 
       val resp = ( routerRef ? DetectionAlgorithmRouter.RegisterDetectionAlgorithm( algorithm, self ) )
       val registered = resp map { case DetectionAlgorithmRouter.AlgorithmRegistered( a ) if a == algorithm =>
-        Registered( scopeId )
+        AlgorithmProtocolOLD.Registered( scopeId )
       }
       registered pipeTo sender()
     }
@@ -107,10 +114,6 @@ trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
 }
 
 object AlgorithmActor {
-  sealed trait AlgorithmProtocol
-  case class Register( scopeId: OutlierPlan.Scope#TID, routerRef: ActorRef ) extends AlgorithmProtocol
-  case class Registered( scopeId: OutlierPlan.Scope#TID ) extends AlgorithmProtocol
-
 
   trait AlgorithmContext {
     def message: DetectUsing
