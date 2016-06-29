@@ -56,7 +56,7 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] {
 
       val planInfo = makePlan("TestPlan", None)
       entity ! EntityMessages.Add( planInfo.id, Some(planInfo) )
-      bus.expectMsgPF( max = 400.millis.dilated, hint = "add plan" ) {
+      bus.expectMsgPF( max = 1.millis.dilated, hint = "add plan" ) {
         case p: EntityMessages.Added => {
           logger.info( "ADD PLAN: p.sourceId[{}]=[{}]   id[{}]=[{}]", p.sourceId.getClass.getCanonicalName, p.sourceId, tid.getClass.getCanonicalName, tid)
           p.sourceId mustBe planInfo.id

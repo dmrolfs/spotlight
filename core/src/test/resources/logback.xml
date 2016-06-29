@@ -9,7 +9,7 @@
   <timestamp key="bySecond" datePattern="yyyyMMdd'T'HHmmss"/>
 
   <appender name="FILE" class="ch.qos.logback.core.FileAppender">
-    <file>log/testFile-${bySecond}.log</file>
+    <file>core/target/log/testFile-${bySecond}.log</file>
     <append>true</append>
     <!-- encoders are assigned the type
          ch.qos.logback.classic.encoder.PatternLayoutEncoder by default -->
