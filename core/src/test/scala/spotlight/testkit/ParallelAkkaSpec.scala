@@ -39,6 +39,16 @@ object ParallelAkkaSpec {
        |    }
        |  }
        |}
+       |
+       |in-flight-dispatcher {
+       |  type = Dispatcher
+       |  executor = "fork-join-executor"
+       |  fork-join-executor {
+       |    #    parallelism-min = 4
+       |    #    parallelism-tolerance = 2.0
+       |    #    parallelism-max = 16
+       |  }
+       |}
       """.stripMargin
     )
   )

@@ -8,7 +8,7 @@ object SpotlightBuild extends Build {
 
   lazy val root = {
     ( project in file(".") )
-    .settings( defaultBuildSettings:_* )
+    .settings( defaultBuildSettings ++ doNotPublishSettings )
     .aggregate( core, publisher, graphite )
   }
 

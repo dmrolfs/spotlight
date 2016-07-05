@@ -1,10 +1,10 @@
 package spotlight.model.outlier
 
 import scala.concurrent.duration._
-import scala.reflect.ClassTag
+import scala.reflect._
 import scala.util.matching.Regex
 import com.typesafe.config.{Config, ConfigFactory, ConfigOrigin}
-import peds.archetype.domain.model.core.{Entity, EntityCompanion}
+import peds.archetype.domain.model.core.{Entity, EntityIdentifying, EntityLensProvider}
 import peds.commons._
 import peds.commons.identifier.{ShortUUID, TaggedID}
 import peds.commons.util._
@@ -16,7 +16,6 @@ import spotlight.model.timeseries.Topic
  */
 sealed trait OutlierPlan extends Entity with Equals {
   override type ID = ShortUUID
-  override def evId: ClassTag[ID] = ClassTag( classOf[ShortUUID] )
 
   def appliesTo: OutlierPlan.AppliesTo
   def algorithms: Set[Symbol]
@@ -48,12 +47,18 @@ sealed trait OutlierPlan extends Entity with Equals {
   private[outlier] def typeOrder: Int
 }
 
-object OutlierPlan extends EntityCompanion[OutlierPlan] {
+object OutlierPlan extends EntityLensProvider[OutlierPlan] {
   import shapeless._
 
-  override def nextId(): OutlierPlan#TID = ShortUUID()
-  override val idTag: Symbol = 'outlierPlan
-  override implicit def tag( id: OutlierPlan#ID ): OutlierPlan#TID = TaggedID( idTag, id )
+  val outlierPlanIdentifying: EntityIdentifying[OutlierPlan] = {
+    new EntityIdentifying[OutlierPlan] with ShortUUID.ShortUuidIdentifying[OutlierPlan] {
+      override val evEntity: ClassTag[OutlierPlan] = classTag[OutlierPlan]
+    }
+  }
+
+  def nextId(): OutlierPlan#TID = outlierPlanIdentifying.safeNextId
+//  override val idTag: Symbol = 'outlierPlan
+//  override implicit def tag( id: OutlierPlan#ID ): OutlierPlan#TID = TaggedID( idTag, id )
 
   override val idLens: Lens[OutlierPlan, OutlierPlan#TID] = new Lens[OutlierPlan, OutlierPlan#TID] {
     override def get( p: OutlierPlan ): OutlierPlan#TID = p.id
@@ -80,6 +85,25 @@ object OutlierPlan extends EntityCompanion[OutlierPlan] {
       SimpleOutlierPlan(
         id = p.id,
         name = name,
+        appliesTo = p.appliesTo,
+        algorithms = p.algorithms,
+        grouping = p.grouping,
+        timeout = p.timeout,
+        isQuorum = p.isQuorum,
+        reduce = p.reduce,
+        algorithmConfig = p.algorithmConfig,
+        origin = p.origin,
+        typeOrder = p.typeOrder
+      )
+    }
+  }
+
+  override val slugLens: Lens[OutlierPlan, String] = new Lens[OutlierPlan, String] {
+    override def get( p: OutlierPlan ): String = p.slug
+    override def set( p: OutlierPlan )( slug: String ): OutlierPlan = {
+      SimpleOutlierPlan(
+        id = p.id,
+        name = slug,  // for outlier plan slug == name
         appliesTo = p.appliesTo,
         algorithms = p.algorithms,
         grouping = p.grouping,
@@ -280,6 +304,11 @@ object OutlierPlan extends EntityCompanion[OutlierPlan] {
     override private[outlier] val origin: ConfigOrigin,
     override private[outlier] val typeOrder: Int
   ) extends OutlierPlan {
+    override val evID: ClassTag[ID] = classTag[ShortUUID]
+    override val evTID: ClassTag[TID] = classTag[TaggedID[ShortUUID]]
+
+    override def slug: String = name
+
     override val summary: String = getClass.safeSimpleName + s"""(${name} ${appliesTo.toString})"""
 
     override def canEqual( rhs: Any ): Boolean = rhs.isInstanceOf[SimpleOutlierPlan]
