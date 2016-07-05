@@ -17,7 +17,6 @@ import peds.akka.publish.{EventPublisher, StackableStreamPublisher}
 import peds.akka.envelope._
 import peds.akka.envelope.pattern.{ask, pipe}
 import peds.archetype.domain.model.core.{Entity, EntityIdentifying, EntityLensProvider}
-import peds.commons.TryV
 import peds.commons.identifier.{ShortUUID, TaggedID}
 import spotlight.model.outlier.{IsQuorum, OutlierPlan, ReduceOutliers}
 import spotlight.model.timeseries.{TimeSeries, Topic}
@@ -77,7 +76,9 @@ object Catalog extends EntityLensProvider[Catalog] {
   }
 
   implicit val catalogIdentifying: EntityIdentifying[Catalog] = {
-    new EntityIdentifying[Catalog] with ShortUUID.ShortUuidIdentifying[Catalog]
+    new EntityIdentifying[Catalog] with ShortUUID.ShortUuidIdentifying[Catalog] {
+      override val evEntity: ClassTag[Catalog] = classTag[Catalog]
+    }
   }
 
 

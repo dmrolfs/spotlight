@@ -81,7 +81,9 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
 
 
   implicit val outlierPlanIdentifying: EntityIdentifying[OutlierPlan] = {
-    new EntityIdentifying[OutlierPlan] with ShortUUID.ShortUuidIdentifying[OutlierPlan]
+    new EntityIdentifying[OutlierPlan] with ShortUUID.ShortUuidIdentifying[OutlierPlan] {
+      override val evEntity: ClassTag[OutlierPlan] = classTag[OutlierPlan]
+    }
   }
 
 

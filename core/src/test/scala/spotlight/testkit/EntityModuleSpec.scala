@@ -36,7 +36,7 @@ abstract class EntityModuleSpec[E <: Entity : ClassTag] extends AggregateRootSpe
   abstract class EntityFixture(
     id: Int = AggregateRootSpec.sysId.incrementAndGet(),
     config: Config = demesne.testkit.config
-  ) extends AggregateFixture( id ) { fixture =>
+  ) extends AggregateFixture( id, config ) { fixture =>
     logger.info( "Fixture: DomainModel=[{}]", model)
 
     override def moduleCompanions: List[AggregateRootModule] = List( module )

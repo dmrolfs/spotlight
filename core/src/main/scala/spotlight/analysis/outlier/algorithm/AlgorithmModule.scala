@@ -123,7 +123,9 @@ object AlgorithmModule {
 
 
   implicit val analysisStateIdentifying: EntityIdentifying[AnalysisState] = {
-    new EntityIdentifying[AnalysisState] with OutlierPlan.Scope.ScopeIdentifying[AnalysisState]
+    new EntityIdentifying[AnalysisState] with OutlierPlan.Scope.ScopeIdentifying[AnalysisState] {
+      override val evEntity: ClassTag[AnalysisState] = classTag[AnalysisState]
+    }
   }
 
   /**
@@ -145,14 +147,14 @@ with InitializeAggregateRootClusterSharding { module: AlgorithmModule.ModuleConf
 
   override val trace = Trace[AlgorithmModule]
 
-  implicit val algorithmIdentifying: EntityIdentifying[State] = {
-    new EntityIdentifying[State] with OutlierPlan.Scope.ScopeIdentifying[State]
-  }
-
+//  implicit val algorithmIdentifying: EntityIdentifying[State] = {
+//    new EntityIdentifying[State] with OutlierPlan.Scope.ScopeIdentifying[State]
+//  }
+//
 
   override type ID = OutlierPlan.Scope
   val idType = Typeable[OutlierPlan.Scope]
-  override def nextId: TryV[TID] = algorithmIdentifying.nextIdAs[TID]
+  override def nextId: TryV[TID] = AlgorithmModule.analysisStateIdentifying.nextIdAs[TID]
   val advanced = TypeCase[AlgorithmProtocol.Advanced]
 
 
@@ -270,7 +272,10 @@ with InitializeAggregateRootClusterSharding { module: AlgorithmModule.ModuleConf
   with InstrumentedActor { publisher: EventPublisher =>
     import demesne.module.entity.{ messages => EntityMessage }
 
-    override def parseId( idstr: String ): ID = algorithmIdentifying.safeParseId( idstr )( algorithmIdentifying.evID )
+    override def parseId( idstr: String ): TID = {
+      val identifying = AlgorithmModule.analysisStateIdentifying
+      identifying.safeParseId( idstr )( identifying.evID )
+    }
 
     override lazy val metricBaseName: MetricName = MetricName( "spotlight.analysis.outlier.algorithm" )
     lazy val algorithmTimer: Timer = metrics timer algorithm.label.name

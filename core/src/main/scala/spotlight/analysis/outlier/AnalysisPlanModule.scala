@@ -1,5 +1,6 @@
 package spotlight.analysis.outlier
 
+import scala.reflect._
 import akka.actor.{ActorRef, Props}
 import com.typesafe.config.Config
 import demesne.module.entity.EntityAggregateModule
@@ -58,7 +59,9 @@ object AnalysisPlanProtocol extends EntityProtocol[OutlierPlan] {
   */
 object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] {
   implicit val analysisPlanIdentifying: EntityIdentifying[OutlierPlan] = {
-    new EntityIdentifying[OutlierPlan] with ShortUUID.ShortUuidIdentifying[OutlierPlan]
+    new EntityIdentifying[OutlierPlan] with ShortUUID.ShortUuidIdentifying[OutlierPlan] {
+      override val evEntity: ClassTag[OutlierPlan] = classTag[OutlierPlan]
+    }
   }
 
 

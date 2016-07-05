@@ -34,7 +34,7 @@ object BuildSettings {
     javaOptions ++= Seq(
       "-Dconfig.trace=loads"
     ),
-    homepage := Some( url("http://github.com/dmrolfs/bellwether") ),
+    homepage := Some( url("http://github.com/dmrolfs/spotlight") ),
     // licenses := Seq("Apache 2.0" -> url("http://www.apache.org/licenses/LICENSE-2.0.html")),
     conflictManager := ConflictManager.latestRevision,
     dependencyOverrides := Dependencies.defaultDependencyOverrides,
