@@ -90,14 +90,15 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] {
       def props( model: DomainModel, rootType: AggregateRootType ): Props = Props( new AggregateRootActor(model, rootType) )
 
       class AggregateRootActor( model: DomainModel, rootType: AggregateRootType )
-        extends OutlierPlanActor( model, rootType )
-        with StackableStreamPublisher
-        with StackableRegisterBusPublisher {
+      extends OutlierPlanActor( model, rootType )
+      with StackableStreamPublisher
+      with StackableRegisterBusPublisher {
         override protected def onPersistRejected( cause: Throwable, event: Any, seqNr: Long ): Unit = {
-          log.warning(
+          log.error(
             "Rejected to persist event type [{}] with sequence number [{}] for persistenceId [{}] due to [{}].",
             event.getClass.getName, seqNr, persistenceId, cause
           )
+          throw cause
         }
       }
     }

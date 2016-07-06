@@ -7,10 +7,9 @@ import akka.actor.{ActorRef, ActorSystem}
 import akka.pattern.ask
 import akka.testkit._
 import akka.util.Timeout
+import scalaz.{-\/, \/-}
 import shapeless.syntax.typeable._
 import org.scalatest.concurrent.ScalaFutures
-import org.scalatest.Tag
-import org.mockito.Mockito._
 import com.typesafe.scalalogging.LazyLogging
 import org.joda.{time => joda}
 import peds.akka.envelope._
@@ -27,12 +26,16 @@ import spotlight.model.outlier._
 import spotlight.model.timeseries._
 
 
-
 /**
   * Created by rolfsd on 6/9/16.
   */
 abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] with ScalaFutures with LazyLogging {
   private val trace = Trace[AlgorithmModuleSpec[S]]
+
+
+  override type ID = AlgorithmModule#ID
+  override type Protocol = AlgorithmProtocol.type
+  override val protocol: Protocol = AlgorithmProtocol
 
   type Module <: AlgorithmModule
   val module: Module
@@ -74,11 +77,19 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
 
     val router = TestProbe()
 
-    val bus = TestProbe()
-    system.eventStream.subscribe( bus.ref, classOf[P.Event] )
-
-    def nextId(): module.TID
+//    val bus = TestProbe()
+//    system.eventStream.subscribe( bus.ref, classOf[P.Event] )
+//
+//    override def nextId(): module.TID = identifying.safeNextId
     lazy val id: module.TID = nextId()
+
+    override def nextId(): TID = identifying.nextIdAs[TID] match {
+      case \/-( tid ) => tid
+      case -\/( ex ) => {
+        logger.error( "failed to create next ID", ex )
+        throw ex
+      }
+    }
 
     lazy val aggregate = module aggregateOf id
 
@@ -219,9 +230,6 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
     tolerance: Double,
     lastPoints: Seq[DataPoint] = Seq.empty[DataPoint]
   ): Seq[ThresholdBoundary]
-
-
-  object WIP extends Tag( "wip" )
 
 
   def bootstrapSuite(): Unit = {

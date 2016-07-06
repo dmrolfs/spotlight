@@ -49,8 +49,9 @@ sealed trait OutlierPlan extends Entity with Equals {
     }
   }
 
-  private[outlier] def origin: ConfigOrigin
+//  private[outlier] def origin: ConfigOrigin
   private[outlier] def typeOrder: Int
+  private[outlier] def originLineNumber: Int
 }
 
 object OutlierPlan extends EntityLensProvider[OutlierPlan] {
@@ -100,8 +101,9 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
         isQuorum = p.isQuorum,
         reduce = p.reduce,
         algorithmConfig = p.algorithmConfig,
-        origin = p.origin,
+//        origin = p.origin,
         typeOrder = p.typeOrder,
+        originLineNumber = p.originLineNumber,
         isActive = p.isActive
       )
     }
@@ -120,8 +122,9 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
         isQuorum = p.isQuorum,
         reduce = p.reduce,
         algorithmConfig = p.algorithmConfig,
-        origin = p.origin,
+//        origin = p.origin,
         typeOrder = p.typeOrder,
+        originLineNumber = p.originLineNumber,
         isActive = p.isActive
       )
     }
@@ -140,8 +143,9 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
         isQuorum = p.isQuorum,
         reduce = p.reduce,
         algorithmConfig = p.algorithmConfig,
-        origin = p.origin,
+//        origin = p.origin,
         typeOrder = p.typeOrder,
+        originLineNumber = p.originLineNumber,
         isActive = p.isActive
       )
     }
@@ -160,8 +164,9 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
         isQuorum = p.isQuorum,
         reduce = p.reduce,
         algorithmConfig = p.algorithmConfig,
-        origin = p.origin,
+//        origin = p.origin,
         typeOrder = p.typeOrder,
+        originLineNumber = p.originLineNumber,
         isActive = a
       )
     }
@@ -197,8 +202,9 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
       isQuorum = isQuorum,
       reduce = reduce,
       algorithmConfig = getAlgorithmConfig( planSpecification ),
-      origin = planSpecification.origin,
-      typeOrder = 3
+//      origin = planSpecification.origin,
+      typeOrder = 3,
+      originLineNumber = planSpecification.origin.lineNumber
     )
   }
 
@@ -223,8 +229,9 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
       isQuorum = isQuorum,
       reduce = reduce,
       algorithmConfig = getAlgorithmConfig( planSpecification ),
-      origin = planSpecification.origin,
-      typeOrder = 3
+//      origin = planSpecification.origin,
+      typeOrder = 3,
+      originLineNumber = planSpecification.origin.lineNumber
     )
   }
 
@@ -249,8 +256,9 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
       isQuorum = isQuorum,
       reduce = reduce,
       algorithmConfig = getAlgorithmConfig( planSpecification ),
-      origin = planSpecification.origin,
-      typeOrder = 1
+//      origin = planSpecification.origin,
+      typeOrder = 1,
+      originLineNumber = planSpecification.origin.lineNumber
     )
   }
 
@@ -275,8 +283,9 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
       isQuorum = isQuorum,
       reduce = reduce,
       algorithmConfig = getAlgorithmConfig( planSpecification ),
-      origin = planSpecification.origin,
-      typeOrder = 1
+//      origin = planSpecification.origin,
+      typeOrder = 1,
+      originLineNumber = planSpecification.origin.lineNumber
     )
   }
 
@@ -301,8 +310,9 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
       isQuorum = isQuorum,
       reduce = reduce,
       algorithmConfig = getAlgorithmConfig( planSpecification ),
-      origin = planSpecification.origin,
-      typeOrder = 2
+//      origin = planSpecification.origin,
+      typeOrder = 2,
+      originLineNumber = planSpecification.origin.lineNumber
     )
   }
 
@@ -325,8 +335,9 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
       isQuorum = isQuorum,
       reduce = reduce,
       algorithmConfig = getAlgorithmConfig( planSpecification ),
-      origin = planSpecification.origin,
-      typeOrder = Int.MaxValue
+//      origin = planSpecification.origin,
+      typeOrder = Int.MaxValue,
+      originLineNumber = planSpecification.origin.lineNumber
     )
   }
 
@@ -352,8 +363,9 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
     override val isQuorum: IsQuorum,
     override val reduce: ReduceOutliers,
     override val algorithmConfig: Config,
-    override private[outlier] val origin: ConfigOrigin,
+//    override private[outlier] val origin: ConfigOrigin,
     override private[outlier] val typeOrder: Int,
+    override private[outlier] val originLineNumber: Int,
     override val isActive: Boolean = true
   ) extends OutlierPlan {
     override val summary: String = getClass.safeSimpleName + s"""(${name} ${appliesTo.toString})"""
@@ -370,7 +382,7 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
   }
 
 
-  sealed trait AppliesTo extends ((Any) => Boolean)
+  sealed trait AppliesTo extends ((Any) => Boolean) with Serializable
 
   private object AppliesTo {
     def function( f: (Any) => Boolean ): AppliesTo = new AppliesTo {
@@ -415,7 +427,7 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
     override def compare( lhs: OutlierPlan, rhs: OutlierPlan ): Int = {
       val typeOrdering = Ordering[Int].compare( lhs.typeOrder, rhs.typeOrder )
       if ( typeOrdering != 0 ) typeOrdering
-      else Ordering[Int].compare( lhs.origin.lineNumber, rhs.origin.lineNumber )
+      else Ordering[Int].compare( lhs.originLineNumber, rhs.originLineNumber )
     }
   }
 }

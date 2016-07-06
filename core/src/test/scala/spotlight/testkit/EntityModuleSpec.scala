@@ -3,19 +3,15 @@ package spotlight.testkit
 import scala.concurrent.duration._
 import scala.reflect.ClassTag
 import akka.actor.{ActorRef, ActorSystem}
-import akka.testkit._
-import com.typesafe.config.Config
-import com.typesafe.scalalogging.StrictLogging
+import com.typesafe.config.{Config, ConfigFactory}
 import shapeless.syntax.typeable._
 import org.joda.{time => joda}
 import demesne.AggregateRootModule
 import demesne.module.entity.EntityAggregateModule
-import demesne.module.entity.{messages => EntityMessage}
 import demesne.testkit.AggregateRootSpec
 import org.apache.commons.math3.random.RandomDataGenerator
-import org.scalatest.Tag
 import org.scalatest.concurrent.ScalaFutures
-import peds.archetype.domain.model.core.Entity
+import peds.archetype.domain.model.core.{Entity, EntityIdentifying}
 import peds.commons.V
 import peds.commons.log.Trace
 import spotlight.analysis.outlier.HistoricalStatistics
@@ -26,8 +22,10 @@ import spotlight.model.timeseries._
 /**
   * Created by rolfsd on 6/15/16.
   */
-abstract class EntityModuleSpec[E <: Entity : ClassTag] extends AggregateRootSpec[E] with ScalaFutures with StrictLogging {
+abstract class EntityModuleSpec[E <: Entity : ClassTag] extends AggregateRootSpec[E] with ScalaFutures {
   private val trace = Trace[EntityModuleSpec[E]]
+
+  override type ID = E#ID
 
   type Module <: EntityAggregateModule[E]
   val module: Module
@@ -35,7 +33,7 @@ abstract class EntityModuleSpec[E <: Entity : ClassTag] extends AggregateRootSpe
   override type Fixture <: EntityFixture
   abstract class EntityFixture(
     id: Int = AggregateRootSpec.sysId.incrementAndGet(),
-    config: Config = demesne.testkit.config
+    config: Config = spotlight.testkit.config
   ) extends AggregateFixture( id, config ) { fixture =>
     logger.info( "Fixture: DomainModel=[{}]", model)
 
@@ -69,11 +67,13 @@ abstract class EntityModuleSpec[E <: Entity : ClassTag] extends AggregateRootSpe
 
     implicit val nowTimestamp: joda.DateTime = joda.DateTime.now
 
-    val bus = TestProbe()
-    system.eventStream.subscribe( bus.ref, classOf[AggregateRootModule.Event[module.ID]])
+//    val bus = TestProbe()
+//    system.eventStream.subscribe( bus.ref, classOf[AggregateRootModule.Event[module.ID]])
 
-    def nextId(): module.TID
-    lazy val tid: module.TID = nextId()
+    val identifying: EntityIdentifying[E]
+
+    override def nextId(): TID = identifying.safeNextId
+    override lazy val tid: TID = nextId()
     lazy val entity: ActorRef = module aggregateOf tid
   }
 
@@ -146,7 +146,4 @@ abstract class EntityModuleSpec[E <: Entity : ClassTag] extends AggregateRootSpe
     }
     .map { case (ts, pts) => DataPoint( timestamp = ts, value = pts.sum / pts.size ) }
   }
-
-
-  object WIP extends Tag( "wip" )
 }

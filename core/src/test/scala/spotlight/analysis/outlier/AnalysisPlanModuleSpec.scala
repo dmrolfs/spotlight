@@ -9,13 +9,19 @@ import peds.akka.envelope.pattern.ask
 import akka.actor.{ActorRef, Props}
 import akka.util.Timeout
 import demesne.{AggregateRootType, DomainModel, PassivationSpecification}
-import demesne.module.entity.{messages => EntityMessage}
+import demesne.module.entity.{EntityAggregateModule, messages => EntityMessages}
 import demesne.DomainModel.DomainModelImpl
+import demesne.module.AggregateRootProps
+import demesne.module.entity.EntityAggregateModule.MakeIndexSpec
+import demesne.register.AggregateIndexSpec
+import peds.commons.log.Trace
+import shapeless.Lens
 import spotlight.analysis.outlier.algorithm.skyline.SimpleMovingAverageModule
 import spotlight.model.outlier.{IsQuorum, OutlierPlan, ReduceOutliers}
 import spotlight.testkit.EntityModuleSpec
-import spotlight.analysis.outlier.{ AnalysisPlanProtocol => P }
-import demesne.module.entity.{ messages => EntityMessages }
+import spotlight.analysis.outlier.{AnalysisPlanProtocol => P}
+
+import scala.reflect.ClassTag
 
 
 /**
@@ -24,6 +30,11 @@ import demesne.module.entity.{ messages => EntityMessages }
 class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] {
   override type Module = AnalysisPlanModule.AggregateRoot.module.type
   override val module: Module = AnalysisPlanModule.AggregateRoot.module
+
+  override type ID = AnalysisPlanModule.AggregateRoot.module.ID
+  override type Protocol = AnalysisPlanProtocol.type
+  override val protocol: Protocol = AnalysisPlanProtocol
+
   class Fixture extends EntityFixture( config = AnalysisPlanModuleSpec.config ) {
     val identifying = AnalysisPlanModule.analysisPlanIdentifying
     override def nextId(): module.TID = identifying.safeNextId
@@ -56,7 +67,7 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] {
 
       val planInfo = makePlan("TestPlan", None)
       entity ! EntityMessages.Add( planInfo.id, Some(planInfo) )
-      bus.expectMsgPF( max = 1.millis.dilated, hint = "add plan" ) {
+      bus.expectMsgPF( max = 5.seconds.dilated, hint = "add plan" ) {
         case p: EntityMessages.Added => {
           logger.info( "ADD PLAN: p.sourceId[{}]=[{}]   id[{}]=[{}]", p.sourceId.getClass.getCanonicalName, p.sourceId, tid.getClass.getCanonicalName, tid)
           p.sourceId mustBe planInfo.id
@@ -79,6 +90,55 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] {
 
     "recover and continue after passivation" taggedAs WIP in { f: Fixture =>
       import f._
+
+      trait RootTypeConfiguration extends AggregateRootType.ConfigurationProvider {
+
+      }
+
+      class TestModuleBuilderFactory extends EntityAggregateModule.BuilderFactory[OutlierPlan] {
+        override type CC = TestModuleImpl
+
+        case class TestModuleImpl(
+          override val aggregateIdTag: Symbol,
+          override val aggregateRootPropsOp: AggregateRootProps,
+          _indexes: MakeIndexSpec,
+          override val idLens: Lens[OutlierPlan, OutlierPlan#TID],
+          override val nameLens: Lens[OutlierPlan, String],
+          override val slugLens: Option[Lens[OutlierPlan, String]],
+          override val isActiveLens: Option[Lens[OutlierPlan, Boolean]]
+        ) extends EntityAggregateModule[OutlierPlan] with Equals {
+          override val trace: Trace[_] = Trace( s"EntityAggregateModule[OutlierPlan]" )
+          override val evState: ClassTag[OutlierPlan] = implicitly[ClassTag[OutlierPlan]]
+
+
+          override def rootType: AggregateRootType = new EntityAggregateRootType with RootTypeConfiguration {
+            override def aggregateRootProps(implicit model: DomainModel): Props = module.aggregateRootPropsOp( model, this )
+            override def name: String = module.shardName
+          }
+
+          override lazy val indexes: Seq[AggregateIndexSpec[_,_]] = _indexes()
+
+          override def canEqual( rhs: Any ): Boolean = rhs.isInstanceOf[EntityAggregateModuleImpl]
+
+          override def equals( rhs: Any ): Boolean = rhs match {
+            case that: EntityAggregateModuleImpl => {
+              if ( this eq that ) true
+              else {
+                ( that.## == this.## ) &&
+                  ( that canEqual this ) &&
+                  ( this.aggregateIdTag == that.aggregateIdTag )
+              }
+            }
+
+            case _ => false
+          }
+
+          override def hashCode: Int = 41 * ( 41 + aggregateIdTag.## )
+
+        }
+      }
+
+
 
       def infoFrom( ar: ActorRef ): OutlierPlan = {
         import scala.concurrent.ExecutionContext.Implicits.global
@@ -132,110 +192,28 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] {
 }
 
 object AnalysisPlanModuleSpec {
-  val config: Config = ConfigFactory.parseString(
-    """
-      |akka.loggers = ["akka.testkit.TestEventListener"]
-      |
-      |akka.persistence {
-      |#  journal.plugin = "akka.persistence.journal.leveldb-shared"
-      |  journal.plugin = "akka.persistence.journal.leveldb"
-      |  journal.leveldb-shared.store {
-      |    # DO NOT USE 'native = off' IN PRODUCTION !!!
-      |    native = off
-      |    dir = "target/shared-journal"
-      |  }
-      |  journal.leveldb {
-      |    # DO NOT USE 'native = off' IN PRODUCTION !!!
-      |    native = off
-      |    dir = "target/journal"
-      |  }
-      |  snapshot-store.local.dir = "target/snapshots"
-      |}
-      |
-      |#akka {
-      |#  persistence {
-      |#    journal.plugin = "inmemory-journal"
-      |#    snapshot-store.plugin = "inmemory-snapshot-store"
-      |#
-      |#    journal.plugin = "akka.persistence.journal.leveldb"
-      |#    journal.leveldb.dir = "target/journal"
-      |#    journal.leveldb.native = off
-      |#    snapshot-store.plugin = "akka.persistence.snapshot-store.local"
-      |#    snapshot-store.local.dir = "target/snapshots"
-      |#  }
-      |#}
-      |
-      |akka {
-      |  loggers = ["akka.event.slf4j.Slf4jLogger"]
-      |  logging-filter = "akka.event.DefaultLoggingFilter"
-      |  loglevel = DEBUG
-      |  stdout-loglevel = "DEBUG"
-      |  log-dead-letters = on
-      |  log-dead-letters-during-shutdown = on
-      |
-      |  actor {
-      |    provider = "akka.cluster.ClusterActorRefProvider"
-      |  }
-      |
-      |  remote {
-      |    log-remote-lifecycle-events = off
-      |    netty.tcp {
-      |      hostname = "127.0.0.1"
-      |      port = 0
-      |    }
-      |  }
-      |
-      |  cluster {
-      |    seed-nodes = [
-      |      "akka.tcp://ClusterSystem@127.0.0.1:2551",
-      |      "akka.tcp://ClusterSystem@127.0.0.1:2552"
-      |    ]
-      |
-      |    auto-down-unreachable-after = 10s
-      |  }
-      |}
-      |
-      |akka.actor.debug {
-      |  # enable function of Actor.loggable(), which is to log any received message
-      |  # at DEBUG level, see the “Testing Actor Systems” section of the Akka
-      |  # Documentation at http://akka.io/docs
-      |  receive = on
-      |
-      |  # enable DEBUG logging of all AutoReceiveMessages (Kill, PoisonPill et.c.)
-      |  autoreceive = on
-      |
-      |  # enable DEBUG logging of actor lifecycle changes
-      |  lifecycle = on
-      |
-      |  # enable DEBUG logging of all LoggingFSMs for events, transitions and timers
-      |  fsm = on
-      |
-      |  # enable DEBUG logging of subscription changes on the eventStream
-      |  event-stream = on
-      |
-      |  # enable DEBUG logging of unhandled messages
-      |  unhandled = on
-      |
-      |  # enable WARN logging of misconfigured routers
-      |  router-misconfiguration = on
-      |}
-      |
-      |demesne.register-dispatcher {
-      |  type = Dispatcher
-      |  executor = "fork-join-executor"
-      |  fork-join-executor {
-      |    # Min number of threads to cap factor-based parallelism number to
-      |    parallelism-min = 2
-      |    # Parallelism (threads) ... ceil(available processors * factor)
-      |    parallelism-factor = 2.0
-      |    # Max number of threads to cap factor-based parallelism number to
-      |    parallelism-max = 10
-      |  }
-      |  # Throughput defines the maximum number of messages to be
-      |  # processed per actor before the thread jumps to the next actor.
-      |  # Set to 1 for as fair as possible.
-      |  throughput = 100
-      |}
-    """.stripMargin
-  )
+  val config: Config = {
+    val planConfig: Config = ConfigFactory.parseString(
+      """
+        |in-flight-dispatcher {
+        |  type = Dispatcher
+        |  executor = "fork-join-executor"
+        |  fork-join-executor {
+        |#    # Min number of threads to cap factor-based parallelism number to
+        |#    parallelism-min = 2
+        |#    # Parallelism (threads) ... ceil(available processors * factor)
+        |#    parallelism-factor = 2.0
+        |#    # Max number of threads to cap factor-based parallelism number to
+        |#    parallelism-max = 10
+        |  }
+        |  # Throughput defines the maximum number of messages to be
+        |  # processed per actor before the thread jumps to the next actor.
+        |  # Set to 1 for as fair as possible.
+        |#  throughput = 100
+        |}
+      """.stripMargin
+    )
+
+    planConfig withFallback spotlight.testkit.config
+  }
 }
