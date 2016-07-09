@@ -67,7 +67,7 @@ trait Catalog extends Entity {
 object Catalog extends EntityLensProvider[Catalog] {
   def apply( name: String, slug: String, config: Config ): Catalog = {
     CatalogState(
-      id = catalogIdentifying.safeNextId,
+      id = identifying.safeNextId,
       name = name,
       slug = slug,
       configuration = config,
@@ -75,7 +75,7 @@ object Catalog extends EntityLensProvider[Catalog] {
     )
   }
 
-  implicit val catalogIdentifying: EntityIdentifying[Catalog] = {
+  implicit val identifying: EntityIdentifying[Catalog] = {
     new EntityIdentifying[Catalog] with ShortUUID.ShortUuidIdentifying[Catalog] {
       override val evEntity: ClassTag[Catalog] = classTag[Catalog]
     }
@@ -202,7 +202,7 @@ object Catalog extends EntityLensProvider[Catalog] {
       import b.P.{ Tag => BTag, Props => BProps, _ }
 
       b.builder
-      .set( BTag, AnalysisPlanModule.analysisPlanIdentifying.idTag )
+      .set( BTag, Catalog.identifying.idTag )
       .set( BProps, CatalogActor.props(_, _) )
       .set( IdLens, idLens )
       .set( NameLens, nameLens )

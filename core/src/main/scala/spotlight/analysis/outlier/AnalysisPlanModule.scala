@@ -2,6 +2,7 @@ package spotlight.analysis.outlier
 
 import scala.reflect._
 import akka.actor.{ActorRef, Props}
+import akka.event.LoggingReceive
 import com.typesafe.config.Config
 import demesne.module.entity.EntityAggregateModule
 import demesne.module.entity.messages.EntityProtocol
@@ -58,7 +59,7 @@ object AnalysisPlanProtocol extends EntityProtocol[OutlierPlan] {
   * Created by rolfsd on 5/26/16.
   */
 object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] {
-  implicit val analysisPlanIdentifying: EntityIdentifying[OutlierPlan] = {
+  implicit val identifying: EntityIdentifying[OutlierPlan] = {
     new EntityIdentifying[OutlierPlan] with ShortUUID.ShortUuidIdentifying[OutlierPlan] {
       override val evEntity: ClassTag[OutlierPlan] = classTag[OutlierPlan]
     }
@@ -77,7 +78,7 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] {
 
       b
       .builder
-      .set( BTag, analysisPlanIdentifying.idTag )
+      .set( BTag, identifying.idTag )
       .set( BProps, OutlierPlanActor.props(_, _) )
       .set( IdLens, OutlierPlan.idLens )
       .set( NameLens, OutlierPlan.nameLens )
@@ -131,6 +132,26 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] {
         }
       }
 
+      ///// TEST
+      override def entityAcceptance: Acceptance = {
+        case (demesne.module.entity.messages.Added(_, info), s) => {
+          log.info( "ACCEPTED ADDED: info=[{}]", info )
+          context become LoggingReceive{ around( active ) }
+          module.triedToEntity( info ) getOrElse s
+        }
+        case (demesne.module.entity.messages.Renamed(_, _, newName), s ) => module.nameLens.set( s )( newName )
+        case (demesne.module.entity.messages.Reslugged(_, _, newSlug), s ) => module.slugLens map { _.set( s )( newSlug ) } getOrElse s
+        case (_: demesne.module.entity.messages.Disabled, s) => {
+          context become LoggingReceive { around( disabled ) }
+          module.isActiveLens map { _.set( s )( false ) } getOrElse s
+        }
+        case (_: demesne.module.entity.messages.Enabled, s) => {
+          context become LoggingReceive { around( active ) }
+          module.isActiveLens map { _.set( s )( true ) } getOrElse s
+        }
+      }
+      /////
+
       override def acceptance: Acceptance = entityAcceptance orElse {
         case (e: ScopeChanged, s) => {
           //todo: cast for expediency. my ideal is to define a Lens in the OutlierPlan trait; minor solace is this module is in the same package
@@ -154,15 +175,17 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] {
         }
       }
 
-      override def active: Receive = workflow orElse planEntity orElse super.active
+      override def active: Receive = trace.block( "active" ) {
+        workflow orElse planEntity orElse super.active
+      }
 
-      val workflow: Receive = {
+      def workflow: Receive = {
         // forward to retain publisher sender
         case ts: TimeSeries => proxyFor( ts.topic ) forwardEnvelope (ts, OutlierPlan.Scope(plan = state, topic = ts.topic))
       }
 
-      val planEntity: Receive = {
-        case GetInfo => sender( ) !+ PlanInfo( state.id, state )
+      def planEntity: Receive = {
+        case _: GetInfo => sender() !+ PlanInfo( state.id, state )
 
         case ApplyTo( id, appliesTo ) => persist( ScopeChanged(id, appliesTo) ) { e => acceptAndPublish( e ) }
 
@@ -173,6 +196,19 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] {
         case ResolveVia( id, isQuorum, reduce ) => {
           persist( AnalysisResolutionChanged(id, isQuorum, reduce) ) { e => acceptAndPublish( e ) }
         }
+
+//        case x => log.info( "PLAN_ENTITY UNHANDLED: {}", x )
+      }
+
+      override def unhandled( message: Any ): Unit = {
+        val total = workflow orElse planEntity orElse super.active
+        log.error(
+          "UNHANDLED: [{}] (workflow,planEntity,super):[{}] total:[{}]",
+          message,
+          (workflow.isDefinedAt(message), planEntity.isDefinedAt(message), super.active.isDefinedAt(message)),
+          total.isDefinedAt(message)
+        )
+        super.unhandled( message )
       }
     }
   }
