@@ -36,7 +36,7 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] {
   override val protocol: Protocol = AnalysisPlanProtocol
 
   class Fixture extends EntityFixture( config = AnalysisPlanModuleSpec.config ) {
-    val identifying = AnalysisPlanModule.analysisPlanIdentifying
+    val identifying = AnalysisPlanModule.identifying
     override def nextId(): module.TID = identifying.safeNextId
 
     val algo: Symbol = SimpleMovingAverageModule.algorithm.label
@@ -88,106 +88,6 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] {
       bus.expectNoMsg()
     }
 
-    "recover and continue after passivation" taggedAs WIP in { f: Fixture =>
-      import f._
-
-      trait RootTypeConfiguration extends AggregateRootType.ConfigurationProvider {
-
-      }
-
-      class TestModuleBuilderFactory extends EntityAggregateModule.BuilderFactory[OutlierPlan] {
-        override type CC = TestModuleImpl
-
-        case class TestModuleImpl(
-          override val aggregateIdTag: Symbol,
-          override val aggregateRootPropsOp: AggregateRootProps,
-          _indexes: MakeIndexSpec,
-          override val idLens: Lens[OutlierPlan, OutlierPlan#TID],
-          override val nameLens: Lens[OutlierPlan, String],
-          override val slugLens: Option[Lens[OutlierPlan, String]],
-          override val isActiveLens: Option[Lens[OutlierPlan, Boolean]]
-        ) extends EntityAggregateModule[OutlierPlan] with Equals {
-          override val trace: Trace[_] = Trace( s"EntityAggregateModule[OutlierPlan]" )
-          override val evState: ClassTag[OutlierPlan] = implicitly[ClassTag[OutlierPlan]]
-
-
-          override def rootType: AggregateRootType = new EntityAggregateRootType with RootTypeConfiguration {
-            override def aggregateRootProps(implicit model: DomainModel): Props = module.aggregateRootPropsOp( model, this )
-            override def name: String = module.shardName
-          }
-
-          override lazy val indexes: Seq[AggregateIndexSpec[_,_]] = _indexes()
-
-          override def canEqual( rhs: Any ): Boolean = rhs.isInstanceOf[EntityAggregateModuleImpl]
-
-          override def equals( rhs: Any ): Boolean = rhs match {
-            case that: EntityAggregateModuleImpl => {
-              if ( this eq that ) true
-              else {
-                ( that.## == this.## ) &&
-                  ( that canEqual this ) &&
-                  ( this.aggregateIdTag == that.aggregateIdTag )
-              }
-            }
-
-            case _ => false
-          }
-
-          override def hashCode: Int = 41 * ( 41 + aggregateIdTag.## )
-
-        }
-      }
-
-
-
-      def infoFrom( ar: ActorRef ): OutlierPlan = {
-        import scala.concurrent.ExecutionContext.Implicits.global
-        implicit val to = Timeout( 2.seconds )
-        Await.result(
-          ( ar ?+ P.GetInfo(tid) ).mapTo[Envelope].map{ _.payload }.mapTo[P.PlanInfo].map{ _.info },
-          2.seconds
-        )
-      }
-
-      val rootType = new AggregateRootType {
-        override def name: String = module.shardName
-        override def aggregateRootProps( implicit model: DomainModel ): Props = module.aggregateRootPropsOp( model, this )
-        override val toString: String = "AlteredAnalysisPlanAggregateRootType"
-
-        override def passivation: PassivationSpecification = new PassivationSpecification {
-          override def inactivityTimeout: Duration = 100.millis
-        }
-//        override def snapshot: SnapshotSpecification = super.snapshot
-      }
-
-      val aggregateRegistry = model.asInstanceOf[DomainModelImpl].aggregateRegistry
-
-      val change = aggregateRegistry alter { r =>
-        val (ref, oldRootType) = r( module.shardName )
-        r + ( module.shardName -> (ref, rootType) )
-      }
-      Await.ready( change, 2.seconds )
-      logger.info( "TEST:aggregateRegistry = [{}]", aggregateRegistry.get().mkString(","))
-
-      val p1 = makePlan( "TestPlan", None )
-      entity ! EntityMessage.Add( p1.id, Some(p1) )
-      bus.expectMsgClass( classOf[EntityMessage.Added] )
-
-      logger.info( "TEST:SLEEPING...")
-      Thread.sleep( 30000 )
-      logger.info( "TEST:AWAKE...")
-
-      infoFrom( entity ) mustBe p1
-
-      entity ! P.UseAlgorithms( tid, Set( 'stella, 'otis, 'apollo ), ConfigFactory.empty() )
-      bus.expectMsgPF( 1.second, "change algos" ) {
-        case Envelope( P.AlgorithmsChanged(pid, algos, c), _ ) => {
-          pid mustBe tid
-          algos mustBe Set( 'stella, 'otis, 'apollo )
-          assert( c.isEmpty )
-        }
-      }
-    }
   }
 }
 
