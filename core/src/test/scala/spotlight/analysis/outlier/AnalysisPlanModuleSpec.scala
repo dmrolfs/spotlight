@@ -20,6 +20,7 @@ import spotlight.analysis.outlier.algorithm.skyline.SimpleMovingAverageModule
 import spotlight.model.outlier.{IsQuorum, OutlierPlan, ReduceOutliers}
 import spotlight.testkit.EntityModuleSpec
 import spotlight.analysis.outlier.{AnalysisPlanProtocol => P}
+import spotlight.model.timeseries.Topic
 
 import scala.reflect.ClassTag
 
@@ -38,8 +39,10 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] {
   class Fixture extends EntityFixture( config = AnalysisPlanModuleSpec.config ) {
     val identifying = AnalysisPlanModule.identifying
     override def nextId(): module.TID = identifying.safeNextId
+    lazy val plan = makePlan( "TestPlan", None )
+    override lazy val tid: TID = plan.id
 
-    val algo: Symbol = SimpleMovingAverageModule.algorithm.label
+    lazy val algo: Symbol = SimpleMovingAverageModule.algorithm.label
 
     def makePlan( name: String, g: Option[OutlierPlan.Grouping] ): OutlierPlan = {
       OutlierPlan.default(
@@ -57,6 +60,15 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] {
         )
       )
     }
+
+    def stateFrom( ar: ActorRef, tid: module.TID ): OutlierPlan = {
+      import scala.concurrent.ExecutionContext.Implicits.global
+      import akka.pattern.ask
+      Await.result(
+        ( ar ? P.GetInfo(tid) ).mapTo[Envelope].map{ _.payload }.mapTo[P.PlanInfo].map{ _.info },
+        2.seconds.dilated
+      )
+    }
   }
 
   override def createAkkaFixture(): Fixture = new Fixture
@@ -65,12 +77,11 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] {
     "add OutlierPlan" in { f: Fixture =>
       import f._
 
-      val planInfo = makePlan("TestPlan", None)
-      entity ! EntityMessages.Add( planInfo.id, Some(planInfo) )
+      entity ! EntityMessages.Add( tid, Some(plan) )
       bus.expectMsgPF( max = 5.seconds.dilated, hint = "add plan" ) {
         case p: EntityMessages.Added => {
           logger.info( "ADD PLAN: p.sourceId[{}]=[{}]   id[{}]=[{}]", p.sourceId.getClass.getCanonicalName, p.sourceId, tid.getClass.getCanonicalName, tid)
-          p.sourceId mustBe planInfo.id
+          p.sourceId mustBe plan.id
           assert( p.info.isDefined )
           p.info.get mustBe an [OutlierPlan]
           val actual = p.info.get.asInstanceOf[OutlierPlan]
@@ -88,6 +99,31 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] {
       bus.expectNoMsg()
     }
 
+    "change apply to" in { f: Fixture =>
+      import f._
+
+      entity !+ EntityMessages.Add( tid, Some(plan) )
+      bus.expectMsgType[EntityMessages.Added]
+
+      //anonymous partial functions extend Serialiazble
+      val extract: OutlierPlan.ExtractTopic = {
+        case m => Some("TestTopic")
+      }
+
+      val testApplies: OutlierPlan.AppliesTo = OutlierPlan.AppliesTo.topics( Set("foo", "bar"), extract )
+
+      entity !+ AnalysisPlanProtocol.ApplyTo( tid, testApplies )
+      bus.expectMsgPF( max = 3.seconds.dilated, hint = "applies to" ) {
+        case AnalysisPlanProtocol.ScopeChanged(id, app) => {
+          id mustBe tid
+          app must be theSameInstanceAs testApplies
+        }
+      }
+
+      val actual = stateFrom( entity, tid )
+      actual mustBe plan
+      actual.appliesTo must be theSameInstanceAs testApplies
+    }
   }
 }
 

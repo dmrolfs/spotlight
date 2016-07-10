@@ -196,8 +196,6 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] {
         case ResolveVia( id, isQuorum, reduce ) => {
           persist( AnalysisResolutionChanged(id, isQuorum, reduce) ) { e => acceptAndPublish( e ) }
         }
-
-//        case x => log.info( "PLAN_ENTITY UNHANDLED: {}", x )
       }
 
       override def unhandled( message: Any ): Unit = {

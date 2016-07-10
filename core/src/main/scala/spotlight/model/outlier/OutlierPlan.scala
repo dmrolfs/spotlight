@@ -384,7 +384,7 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
 
   sealed trait AppliesTo extends ((Any) => Boolean) with Serializable
 
-  private object AppliesTo {
+  object AppliesTo {
     def function( f: (Any) => Boolean ): AppliesTo = new AppliesTo {
       override def apply( message: Any ): Boolean = f( message )
       override val toString: String = "AppliesTo.function"

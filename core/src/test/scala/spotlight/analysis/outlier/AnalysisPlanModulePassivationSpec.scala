@@ -10,20 +10,14 @@ import akka.actor.{ActorRef, Props}
 import akka.util.Timeout
 import demesne._
 import demesne.module.entity.{EntityAggregateModule, messages => EntityMessages}
-import demesne.DomainModel.DomainModelImpl
 import demesne.module.AggregateRootProps
-import demesne.module.entity.EntityAggregateModule.MakeIndexSpec
-import demesne.register.AggregateIndexSpec
-import peds.commons.builder.HasBuilder
 import peds.commons.identifier.{ShortUUID, TaggedID}
 import peds.commons.log.Trace
-import shapeless.{Generic, HNil, Lens}
+import shapeless.Lens
 import spotlight.analysis.outlier.algorithm.skyline.SimpleMovingAverageModule
 import spotlight.model.outlier.{IsQuorum, OutlierPlan, ReduceOutliers}
 import spotlight.testkit.EntityModuleSpec
 import spotlight.analysis.outlier.{AnalysisPlanProtocol => P}
-
-import scala.reflect.ClassTag
 
 
 /**
@@ -32,72 +26,6 @@ import scala.reflect.ClassTag
 class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[OutlierPlan] {
 
   val trace = Trace[AnalysisPlanModulePassivationSpec]
-//  class TestModuleBuilderFactory extends EntityAggregateModule.BuilderFactory[OutlierPlan] {
-//    override type CC = TestModuleImpl
-//
-//    case class TestModuleImpl(
-//      __aggregateIdTag: Symbol,
-//      __aggregateRootPropsOp: AggregateRootProps,
-//      __indexes: MakeIndexSpec,
-//      __idLens: Lens[OutlierPlan, OutlierPlan#TID],
-//      __nameLens: Lens[OutlierPlan, String],
-//      __slugLens: Option[Lens[OutlierPlan, String]],
-//      __isActiveLens: Option[Lens[OutlierPlan, Boolean]]
-//    ) extends EntityAggregateModuleImpl(
-//      __aggregateIdTag,
-//      __aggregateRootPropsOp,
-//      __indexes,
-//      __idLens,
-//      __nameLens,
-//      __slugLens,
-//      __isActiveLens
-//    ) with Equals {
-//      override val trace: Trace[_] = Trace( "TestModuleImpl" )
-//      override val evState: ClassTag[OutlierPlan] = implicitly[ClassTag[OutlierPlan]]
-//
-//      override def rootType: AggregateRootType = new EntityAggregateRootType {
-//        override def passivateTimeout: Duration = 2.seconds
-//        override def aggregateRootProps(implicit model: DomainModel): Props = module.aggregateRootPropsOp( model, this )
-//        override def name: String = module.shardName
-//      }
-//
-//      override lazy val indexes: Seq[AggregateIndexSpec[_,_]] = _indexes()
-//
-//      override def canEqual( rhs: Any ): Boolean = rhs.isInstanceOf[TestModuleImpl]
-//
-//      override def equals( rhs: Any ): Boolean = rhs match {
-//        case that: TestModuleImpl => {
-//          if ( this eq that ) true
-//          else {
-//            ( that.## == this.## ) &&
-//            ( that canEqual this ) &&
-//            ( this.aggregateIdTag == that.aggregateIdTag )
-//          }
-//        }
-//
-//        case _ => false
-//      }
-//
-//      override def hashCode: Int = 41 * ( 41 + aggregateIdTag.## )
-//
-//    }
-//  }
-//
-//  override type Module = EntityAggregateModule[OutlierPlan]
-//  override val module: Module = {
-//    val b = new TestModuleBuilderFactory().make
-//    import b.P.{ Tag => BTag, Props => BProps, _ }
-//
-//    b
-//    .builder
-//    .set( BTag, AnalysisPlanModule.identifying.idTag )
-//    .set( BProps, AnalysisPlanModule.AggregateRoot.OutlierPlanActor.props(_, _) )
-//    .set( IdLens, OutlierPlan.idLens )
-//    .set( NameLens, OutlierPlan.nameLens )
-//    .set( IsActiveLens, Some(OutlierPlan.isActiveLens) )
-//    .build()
-//  }
-
 
   class Module extends EntityAggregateModule[OutlierPlan] { testModule =>
     override val trace: Trace[_] = Trace[Module]
@@ -145,6 +73,15 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[OutlierPlan] {
         )
       )
     }
+
+    def stateFrom(ar: ActorRef, tid: module.TID ): OutlierPlan = trace.block( s"stateFrom($ar)" ) {
+      import scala.concurrent.ExecutionContext.Implicits.global
+      import akka.pattern.ask
+      Await.result(
+        ( ar ? P.GetInfo(tid) ).mapTo[Envelope].map{ _.payload }.mapTo[P.PlanInfo].map{ _.info },
+        2.seconds.dilated
+      )
+    }
   }
 
   override def createAkkaFixture(): Fixture = new Fixture
@@ -183,27 +120,17 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[OutlierPlan] {
       val p1 = makePlan( "TestPlan", None )
       val planTid = p1.id
 
-      def infoFrom( ar: ActorRef ): OutlierPlan = trace.block( s"infoFrom($ar)" ) {
-        import scala.concurrent.ExecutionContext.Implicits.global
-        import akka.pattern.ask
-        implicit val to = Timeout( 2.seconds )
-        Await.result(
-          ( ar ? P.GetInfo(planTid) ).mapTo[Envelope].map{ _.payload }.mapTo[P.PlanInfo].map{ _.info },
-          2.seconds.dilated
-        )
-      }
-
       logger.info( "TEST: P1.id=[{}]  planTid:[{}]", p1.id, planTid )
       entity ! EntityMessages.Add( p1.id, Some(p1) )
       bus.expectMsgClass( classOf[EntityMessages.Added] )
 
-      infoFrom( entity ) mustBe p1
+      stateFrom( entity, planTid ) mustBe p1
 
       logger.info( "TEST:SLEEPING..." )
       Thread.sleep( 10000 )
       logger.info( "TEST:AWAKE...")
 
-      infoFrom( entity ) mustBe p1
+      stateFrom( entity, planTid ) mustBe p1
 
       entity !+ P.UseAlgorithms( planTid, Set( 'stella, 'otis, 'apollo ), ConfigFactory.empty() )
       bus.expectMsgPF( 1.second.dilated, "change algos" ) {
