@@ -99,7 +99,7 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] {
       bus.expectNoMsg()
     }
 
-    "change apply to" in { f: Fixture =>
+    "change appliesTo" in { f: Fixture =>
       import f._
 
       entity !+ EntityMessages.Add( tid, Some(plan) )
@@ -123,6 +123,34 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] {
       val actual = stateFrom( entity, tid )
       actual mustBe plan
       actual.appliesTo must be theSameInstanceAs testApplies
+    }
+
+    "change algorithms" in { f: Fixture =>
+      import f._
+
+      entity !+ EntityMessages.Add( tid, Some(plan) )
+      bus.expectMsgType[EntityMessages.Added]
+
+      val testConfig = ConfigFactory.parseString(
+        """
+          |foo=bar
+          |zed=gerry
+        """.stripMargin
+      )
+
+      entity !+ AnalysisPlanProtocol.UseAlgorithms( tid, Set('foo, 'bar, 'zed), testConfig )
+      bus.expectMsgPF( max = 3.seconds.dilated, hint = "use algorithms" ) {
+        case AnalysisPlanProtocol.AlgorithmsChanged(id, algos, config) => {
+          id mustBe tid
+          algos mustBe Set('foo, 'bar, 'zed)
+          config mustBe testConfig
+        }
+      }
+
+      val actual = stateFrom( entity, tid )
+      actual mustBe plan
+      actual.algorithms mustBe Set('foo, 'bar, 'zed)
+      actual.algorithmConfig mustBe testConfig
     }
   }
 }
