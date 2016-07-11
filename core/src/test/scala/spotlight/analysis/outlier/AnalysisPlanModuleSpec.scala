@@ -14,13 +14,14 @@ import demesne.DomainModel.DomainModelImpl
 import demesne.module.AggregateRootProps
 import demesne.module.entity.EntityAggregateModule.MakeIndexSpec
 import demesne.register.AggregateIndexSpec
+import peds.commons.V
 import peds.commons.log.Trace
 import shapeless.Lens
 import spotlight.analysis.outlier.algorithm.skyline.SimpleMovingAverageModule
-import spotlight.model.outlier.{IsQuorum, OutlierPlan, ReduceOutliers}
+import spotlight.model.outlier._
 import spotlight.testkit.EntityModuleSpec
 import spotlight.analysis.outlier.{AnalysisPlanProtocol => P}
-import spotlight.model.timeseries.Topic
+import spotlight.model.timeseries.{TimeSeriesBase, Topic}
 
 import scala.reflect.ClassTag
 
@@ -151,6 +152,45 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] {
       actual mustBe plan
       actual.algorithms mustBe Set('foo, 'bar, 'zed)
       actual.algorithmConfig mustBe testConfig
+    }
+
+    "change resolveVia" in { f: Fixture =>
+      import f._
+
+      entity !+ EntityMessages.Add( tid, Some(plan) )
+      bus.expectMsgType[EntityMessages.Added]
+
+      //anonymous partial functions extend Serialiazble
+      val reduce: ReduceOutliers = new ReduceOutliers {
+        import scalaz._
+        override def apply(
+          results: OutlierAlgorithmResults,
+          source: TimeSeriesBase,
+          plan: OutlierPlan
+        ): V[Outliers] =  {
+          Validation.failureNel[Throwable, Outliers]( new IllegalStateException( "dummy" ) ).disjunction
+        }
+      }
+
+      val isq: IsQuorum = new IsQuorum {
+        override def totalIssued: Int = 3
+        override def apply(results: OutlierAlgorithmResults): Boolean = true
+      }
+
+
+      entity !+ AnalysisPlanProtocol.ResolveVia( tid, isq, reduce )
+      bus.expectMsgPF( max = 3.seconds.dilated, hint = "resolve via" ) {
+        case AnalysisPlanProtocol.AnalysisResolutionChanged(id, i, r) => {
+          id mustBe tid
+          i must be theSameInstanceAs isq
+          r must be theSameInstanceAs reduce
+        }
+      }
+
+      val actual = stateFrom( entity, tid )
+      actual mustBe plan
+      actual.isQuorum must be theSameInstanceAs isq
+      actual.reduce must be theSameInstanceAs reduce
     }
   }
 }

@@ -5,7 +5,7 @@ import peds.commons.log.Trace
 import peds.commons.util._
 
 
-trait IsQuorum {
+trait IsQuorum extends Serializable {
   def apply( results: OutlierAlgorithmResults ): Boolean
   def totalIssued: Int
 
