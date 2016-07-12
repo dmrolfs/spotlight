@@ -78,7 +78,7 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[OutlierPlan] {
       import scala.concurrent.ExecutionContext.Implicits.global
       import akka.pattern.ask
       Await.result(
-        ( ar ? P.GetInfo(tid) ).mapTo[Envelope].map{ _.payload }.mapTo[P.PlanInfo].map{ _.info },
+        ( ar ? P.GetPlan(tid) ).mapTo[Envelope].map{ _.payload }.mapTo[P.PlanInfo].map{ _.info },
         2.seconds.dilated
       )
     }

@@ -358,17 +358,15 @@ object Catalog extends EntityLensProvider[Catalog] {
         to: Timeout
       ): Future[AnalysisPlanProtocol.PlanInfo] = {
         val planRef = model.aggregateOf( PlanModule.rootType, id )
-        ( planRef ?+ AnalysisPlanProtocol.GetInfo )
-        .mapTo[AnalysisPlanProtocol.PlanInfo]
+        ( planRef ?+ AnalysisPlanProtocol.GetPlan ).mapTo[AnalysisPlanProtocol.PlanInfo]
       }
 
-
       def persistAddedPlan( summary: PlanSummary ): Unit = {
-          persist( CatalogProtocol.PlanAdded(state.id, summary.id, summary.name) ) { event =>
-            plansCache += ( summary.name -> summary )
-            acceptAndPublish( event )
-          }
+        persist( CatalogProtocol.PlanAdded(state.id, summary.id, summary.name) ) { event =>
+          plansCache += ( summary.name -> summary )
+          acceptAndPublish( event )
         }
+      }
 
       def persistRemovedPlan( name: String ): Unit = {
         state.analysisPlans.get( name ) foreach { pid =>

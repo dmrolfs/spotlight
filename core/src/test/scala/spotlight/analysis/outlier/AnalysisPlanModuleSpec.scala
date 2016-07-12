@@ -6,24 +6,15 @@ import akka.testkit._
 import com.typesafe.config.{Config, ConfigFactory}
 import peds.akka.envelope._
 import peds.akka.envelope.pattern.ask
-import akka.actor.{ActorRef, Props}
+import akka.actor.{ActorRef, PoisonPill}
 import akka.util.Timeout
-import demesne.{AggregateRootType, DomainModel, PassivationSpecification}
-import demesne.module.entity.{EntityAggregateModule, messages => EntityMessages}
-import demesne.DomainModel.DomainModelImpl
-import demesne.module.AggregateRootProps
-import demesne.module.entity.EntityAggregateModule.MakeIndexSpec
-import demesne.register.AggregateIndexSpec
+import demesne.module.entity.{messages => EntityMessages}
 import peds.commons.V
-import peds.commons.log.Trace
-import shapeless.Lens
 import spotlight.analysis.outlier.algorithm.skyline.SimpleMovingAverageModule
 import spotlight.model.outlier._
 import spotlight.testkit.EntityModuleSpec
 import spotlight.analysis.outlier.{AnalysisPlanProtocol => P}
-import spotlight.model.timeseries.{TimeSeriesBase, Topic}
-
-import scala.reflect.ClassTag
+import spotlight.model.timeseries._
 
 
 /**
@@ -66,7 +57,7 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] {
       import scala.concurrent.ExecutionContext.Implicits.global
       import akka.pattern.ask
       Await.result(
-        ( ar ? P.GetInfo(tid) ).mapTo[Envelope].map{ _.payload }.mapTo[P.PlanInfo].map{ _.info },
+        ( ar ? P.GetPlan(tid) ).mapTo[Envelope].map{ _.payload }.mapTo[P.PlanInfo].map{ _.info },
         2.seconds.dilated
       )
     }
@@ -75,6 +66,64 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] {
   override def createAkkaFixture(): Fixture = new Fixture
 
   s"${module.rootType.name}" should {
+    "make proxy for topic" in { f: Fixture =>
+      import f._
+      val planRef = TestActorRef[AnalysisPlanModule.AggregateRoot.OutlierPlanActor](
+        AnalysisPlanModule.AggregateRoot.OutlierPlanActor.props( model, module.rootType )
+      )
+
+      planRef.underlyingActor.state = plan
+      val actual = planRef.underlyingActor.proxyFor( "test" )
+      actual must not be null
+      val a2 = planRef.underlyingActor.proxyFor( "test" )
+      actual must be theSameInstanceAs a2
+    }
+
+    "dead proxy must be cleared" taggedAs WIP in { f: Fixture =>
+      import f._
+
+      def proxiesFrom( ar: ActorRef, tid: module.TID ): Map[Topic, ActorRef] = {
+        import scala.concurrent.ExecutionContext.Implicits.global
+        import akka.pattern.ask
+        implicit val to = f.timeout
+
+        Await.result(
+          ( ar ? P.GetProxies(tid) ).mapTo[P.Proxies].map{ _.scopeProxies },
+          2.seconds.dilated
+        )
+      }
+
+      entity ! EntityMessages.Add( tid, Some(plan) )
+      bus.expectMsgType[EntityMessages.Added]
+      proxiesFrom( entity, tid ) mustBe empty
+
+      entity ! P.AcceptTimeSeries( tid, TimeSeries( "test" ) )
+      val p1 = proxiesFrom( entity, tid )
+      p1.keys must contain ( "test".toTopic )
+
+      val proxy = p1( "test" )
+      proxy ! PoisonPill
+      logger.info( "TEST: waiting a bit for Terminated to propagate..." )
+      Thread.sleep( 1000 )
+      logger.info( "TEST: checking proxy..." )
+
+      val p2 = proxiesFrom( entity, tid )
+      logger.info( "TEST: p2 = [{}]", p2.mkString(", ") )
+      p2 mustBe empty
+
+      entity ! P.AcceptTimeSeries( tid, TimeSeries( "test" ) )
+      val p3 = proxiesFrom( entity, tid )
+      p3.keys must contain ( "test".toTopic )
+    }
+
+    "handle workflow" in { f: Fixture =>
+      import f._
+      entity !+ EntityMessages.Add( tid, Some(plan) )
+      bus.expectMsgType[EntityMessages.Added]
+
+
+    }
+
     "add OutlierPlan" in { f: Fixture =>
       import f._
 
