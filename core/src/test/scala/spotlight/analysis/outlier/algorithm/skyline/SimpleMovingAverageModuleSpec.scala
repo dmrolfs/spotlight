@@ -21,14 +21,23 @@ import spotlight.analysis.outlier.algorithm.AlgorithmModuleSpec
 class SimpleMovingAverageModuleSpec extends AlgorithmModuleSpec[SimpleMovingAverageModuleSpec] {
 
   override type Module = SimpleMovingAverageModule.type
-  override val module: Module = SimpleMovingAverageModule
+  override val defaultModule: Module = SimpleMovingAverageModule
 
   class Fixture extends AlgorithmFixture {
     val testScope: module.TID = identifying tag OutlierPlan.Scope(plan = "TestPlan", topic = "TestTopic")
     override def nextId(): module.TID = testScope
+
+    override def expectedUpdatedState( state: module.State, event: P.Advanced ): module.State = {
+      val historicalStatsLens = module.State.History.statsLens compose module.State.historyLens
+      val s = super.expectedUpdatedState( state, event ).asInstanceOf[SimpleMovingAverageModule.State]
+      val h = s.history
+      val stats = h.movingStatistics.copy
+      stats addValue event.point.value
+      historicalStatsLens.set( s )( stats )
+    }
   }
 
-  override def createAkkaFixture(): Fixture = new Fixture
+  override def createAkkaFixture( test: OneArgTest ): Fixture = new Fixture
 
 
   override def calculateControlBoundaries(
@@ -58,15 +67,6 @@ class SimpleMovingAverageModuleSpec extends AlgorithmModuleSpec[SimpleMovingAver
     loop( points.toList, lastPoints.map{ _.value }.toArray, Seq.empty[ThresholdBoundary] )
   }
 
-  override def expectedUpdatedState( state: module.State, event: P.Advanced ): module.State = {
-    val historicalStatsLens = module.State.History.statsLens compose module.State.historyLens
-    val s = super.expectedUpdatedState( state, event ).asInstanceOf[SimpleMovingAverageModule.State]
-    val h = s.history
-    val stats = h.movingStatistics.copy
-    stats addValue event.point.value
-    historicalStatsLens.set( s )( stats )
-  }
-
   bootstrapSuite()
   analysisStateSuite()
 
@@ -84,7 +84,7 @@ class SimpleMovingAverageModuleSpec extends AlgorithmModuleSpec[SimpleMovingAver
     }
   }
 
-  s"${module.algorithm.label.name} algorithm" should {
+  s"${defaultModule.algorithm.label.name} algorithm" should {
     "step to find anomalies from flat signal" in { f: Fixture =>
       import f._
 

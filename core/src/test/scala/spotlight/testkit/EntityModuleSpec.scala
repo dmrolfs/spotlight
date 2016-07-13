@@ -27,15 +27,15 @@ abstract class EntityModuleSpec[E <: Entity : ClassTag] extends AggregateRootSpe
 
   override type ID = E#ID
 
-  type Module <: EntityAggregateModule[E]
-  val module: Module
-
   override type Fixture <: EntityFixture
   abstract class EntityFixture(
     id: Int = AggregateRootSpec.sysId.incrementAndGet(),
     config: Config = spotlight.testkit.config
   ) extends AggregateFixture( id, config ) { fixture =>
     logger.info( "Fixture: DomainModel=[{}]", model)
+
+    type Module <: EntityAggregateModule[E]
+    val module: Module
 
     override def moduleCompanions: List[AggregateRootModule] = List( module )
     logger.debug( "Fixture.context = [{}]", context )

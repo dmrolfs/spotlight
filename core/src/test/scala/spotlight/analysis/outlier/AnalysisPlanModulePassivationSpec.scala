@@ -23,35 +23,35 @@ import spotlight.analysis.outlier.{AnalysisPlanProtocol => P}
 /**
   * Created by rolfsd on 6/15/16.
   */
-class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[OutlierPlan] {
+class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[OutlierPlan] { outer =>
 
   val trace = Trace[AnalysisPlanModulePassivationSpec]
 
-  class Module extends EntityAggregateModule[OutlierPlan] { testModule =>
-    override val trace: Trace[_] = Trace[Module]
-    override val idLens: Lens[OutlierPlan, TaggedID[ShortUUID]] = OutlierPlan.idLens
-    override val nameLens: Lens[OutlierPlan, String] = OutlierPlan.nameLens
-    override def aggregateRootPropsOp: AggregateRootProps = AnalysisPlanModule.AggregateRoot.OutlierPlanActor.props( _, _ )
-
-    override def rootType: AggregateRootType = {
-      new AggregateRootType {
-        override def passivateTimeout: Duration = {
-          logger.info( "passivateTimeout=[{}]", 2.seconds )
-          2.seconds
-        }
-        override def aggregateRootProps( implicit model: DomainModel ): Props = testModule.aggregateRootPropsOp( model, this )
-        override def name: String = testModule.shardName
-      }
-    }
-  }
-
-  override val module: Module = new Module
-
-  override type ID = module.ID
+  override type ID = OutlierPlan#ID
   override type Protocol = AnalysisPlanProtocol.type
   override val protocol: Protocol = AnalysisPlanProtocol
 
   class Fixture extends EntityFixture( config = AnalysisPlanModulePassivationSpec.config ) {
+    class Module extends EntityAggregateModule[OutlierPlan] { testModule =>
+      override val trace: Trace[_] = Trace[Module]
+      override val idLens: Lens[OutlierPlan, TaggedID[ShortUUID]] = OutlierPlan.idLens
+      override val nameLens: Lens[OutlierPlan, String] = OutlierPlan.nameLens
+      override def aggregateRootPropsOp: AggregateRootProps = AnalysisPlanModule.AggregateRoot.OutlierPlanActor.props( _, _ )
+
+      override def rootType: AggregateRootType = {
+        new AggregateRootType {
+          override def passivateTimeout: Duration = {
+            logger.info( "passivateTimeout=[{}]", 2.seconds )
+            2.seconds
+          }
+          override def aggregateRootProps( implicit model: DomainModel ): Props = testModule.aggregateRootPropsOp( model, this )
+          override def name: String = testModule.shardName
+        }
+      }
+    }
+
+    override val module: Module = new Module
+
     val identifying = AnalysisPlanModule.identifying
     override def nextId(): module.TID = identifying.safeNextId
 
@@ -84,9 +84,9 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[OutlierPlan] {
     }
   }
 
-  override def createAkkaFixture(): Fixture = new Fixture
+  override def createAkkaFixture( test: OneArgTest ): Fixture = new Fixture
 
-  s"${module.rootType.name}" should {
+  "AnalysisPlanModule" should {
     "add OutlierPlan" in { f: Fixture =>
       import f._
 

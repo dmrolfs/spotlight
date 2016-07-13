@@ -1,14 +1,15 @@
 package spotlight
 
 import com.typesafe.config.{Config, ConfigFactory}
+import peds.commons.identifier.ShortUUID
 
 
 /**
   * Created by rolfsd on 7/5/16.
   */
 package object testkit {
-  val config: Config = ConfigFactory.parseString(
-    """
+  def config: Config = ConfigFactory.parseString(
+    s"""
      |akka.loggers = ["akka.testkit.TestEventListener"]
      |
      |akka.persistence {
@@ -22,7 +23,7 @@ package object testkit {
      |  journal.leveldb {
      |    # DO NOT USE 'native = off' IN PRODUCTION !!!
      |    native = off
-     |    dir = "target/journal"
+     |    dir = "target/journal/${ShortUUID()}"
      |  }
      |  snapshot-store.local.dir = "target/snapshots"
      |}

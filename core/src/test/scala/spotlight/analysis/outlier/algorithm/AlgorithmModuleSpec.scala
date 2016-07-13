@@ -29,7 +29,7 @@ import spotlight.model.timeseries._
 /**
   * Created by rolfsd on 6/9/16.
   */
-abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] with ScalaFutures with LazyLogging {
+abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] with ScalaFutures { outer =>
   private val trace = Trace[AlgorithmModuleSpec[S]]
 
 
@@ -37,13 +37,17 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
   override type Protocol = AlgorithmProtocol.type
   override val protocol: Protocol = AlgorithmProtocol
 
+
   type Module <: AlgorithmModule
-  val module: Module
+  val defaultModule: Module
   val identifying: EntityIdentifying[AlgorithmModule.AnalysisState] = AlgorithmModule.analysisStateIdentifying
 
   override type Fixture <: AlgorithmFixture
   abstract class AlgorithmFixture extends AggregateFixture { fixture =>
     logger.info( "Fixture: DomainModel=[{}]", model )
+
+    type Module = outer.Module
+    override val module: Module = outer.defaultModule
 
     override def moduleCompanions: List[AggregateRootModule] = List( module )
     logger.debug( "Fixture.context = [{}]", context )
@@ -52,6 +56,34 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
       context.get(demesne.SystemKey).flatMap{_.cast[ActorSystem]},
       context.get(demesne.SystemKey)
     )
+
+    type TestState = module.State
+    //  type TestState = AlgorithmModule.AnalysisState
+    type TestAdvanced = P.Advanced
+    type TestHistory = module.analysisStateCompanion.History
+    val thresholdLens = module.analysisStateCompanion.thresholdLens
+
+    def expectedUpdatedState( state: TestState, event: TestAdvanced ): TestState = {
+      thresholdLens.modify( state ){ tbs => tbs :+ event.threshold }
+      //    val result: TestState = state.addThreshold( event.threshold )
+      //    result
+    }
+
+    def actualVsExpectedState( actual: AlgorithmModule.AnalysisState, expected: AlgorithmModule.AnalysisState ): Unit = {
+      actual.id mustBe expected.id
+      actual.name mustBe expected.name
+      actual.algorithm.name mustBe expected.algorithm.name
+      actual.tolerance mustBe expected.tolerance
+      actual.thresholds mustBe expected.thresholds
+      actual.## mustBe expected.##
+      actual mustEqual expected
+      expected mustEqual actual
+    }
+
+    def actualVsExpectedHistory( actual: TestHistory, expected: TestHistory ): Unit = {
+      actual mustEqual expected
+      expected mustEqual actual
+    }
 
     val appliesToAll: OutlierPlan.AppliesTo = {
       val isQuorun: IsQuorum = IsQuorum.AtLeastQuorumSpecification(0, 0)
@@ -126,35 +158,6 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
   }
 
 
-  type TestState = module.State
-//  type TestState = AlgorithmModule.AnalysisState
-  type TestAdvanced = P.Advanced
-  type TestHistory = module.analysisStateCompanion.History
-  val thresholdLens = module.analysisStateCompanion.thresholdLens
-
-  def expectedUpdatedState( state: TestState, event: TestAdvanced ): TestState = {
-    thresholdLens.modify( state ){ tbs => tbs :+ event.threshold }
-//    val result: TestState = state.addThreshold( event.threshold )
-//    result
-  }
-
-  def actualVsExpectedState( actual: AlgorithmModule.AnalysisState, expected: AlgorithmModule.AnalysisState ): Unit = {
-    actual.id mustBe expected.id
-    actual.name mustBe expected.name
-    actual.algorithm.name mustBe expected.algorithm.name
-    actual.tolerance mustBe expected.tolerance
-    actual.thresholds mustBe expected.thresholds
-    actual.## mustBe expected.##
-    actual mustEqual expected
-    expected mustEqual actual
-  }
-
-  def actualVsExpectedHistory( actual: TestHistory, expected: TestHistory ): Unit = {
-    actual mustEqual expected
-    expected mustEqual actual
-  }
-
-
   def makeDataPoints(
     values: Seq[Double],
     start: joda.DateTime = joda.DateTime.now,
@@ -203,7 +206,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
   def tailAverageData(
     data: Seq[DataPoint],
     last: Seq[DataPoint] = Seq.empty[DataPoint],
-    tailLength: Int = module.AlgorithmContext.DefaultTailAverageLength
+    tailLength: Int = defaultModule.AlgorithmContext.DefaultTailAverageLength
   ): Seq[DataPoint] = {
     val lastPoints = last.drop( last.size - tailLength + 1 ) map { _.value }
     data.map { _.timestamp }
@@ -233,7 +236,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
 
 
   def bootstrapSuite(): Unit = {
-    s"${module.algorithm.label.name} entity" should {
+    s"${defaultModule.algorithm.label.name} entity" should {
       "add algorithm" in { f: Fixture =>
         import f._
         aggregate ! EntityMessage.Add( id )
@@ -287,7 +290,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
 
 
   def analysisStateSuite(): Unit = {
-    s"${module.algorithm.label.name} state" should {
+    s"${defaultModule.algorithm.label.name} state" should {
       "advance history" in { f: Fixture =>
         import f._
 
