@@ -185,15 +185,41 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] { outer =>
       val p1 = proxiesFrom( entity, tid )
       p1.keys must contain ( "test".toTopic )
 
-      val probes = f.asInstanceOf[WorkflowFixture].proxyProbes
-      probes must have size 1
-      probes( "test".toTopic ).expectMsgPF( hint = "accept test time series" ) {
+      f.asInstanceOf[WorkflowFixture].proxyProbes must have size 1
+      val testProbe = f.asInstanceOf[WorkflowFixture].proxyProbes( "test".toTopic )
+      testProbe.expectMsgPF( hint = "accept test time series" ) {
         case Envelope( (ts: TimeSeries, s: OutlierPlan.Scope), h ) => {
           s.plan mustBe f.plan.name
           s.topic mustBe "test".toTopic
           ts.topic mustBe "test".toTopic
         }
       }
+
+      entity ! P.AcceptTimeSeries( tid, TimeSeries( "test" ) )
+      val p2 = proxiesFrom( entity, tid )
+      p2.keys must contain ( "test".toTopic )
+      f.asInstanceOf[WorkflowFixture].proxyProbes must have size 1
+      testProbe.expectMsgPF( hint = "accept test time series" ) {
+        case Envelope( (ts: TimeSeries, s: OutlierPlan.Scope), h ) => {
+          s.plan mustBe f.plan.name
+          s.topic mustBe "test".toTopic
+          ts.topic mustBe "test".toTopic
+        }
+      }
+
+      entity ! P.AcceptTimeSeries( tid, TimeSeries( "foo" ) )
+      val p3 = proxiesFrom( entity, tid )
+      p3.keys must contain allOf ( "test".toTopic, "foo".toTopic )
+      f.asInstanceOf[WorkflowFixture].proxyProbes must have size 2
+      val fooProbe = f.asInstanceOf[WorkflowFixture].proxyProbes( "foo".toTopic )
+      fooProbe.expectMsgPF( hint = "accept foo time series" ) {
+        case Envelope( (ts: TimeSeries, s: OutlierPlan.Scope), h ) => {
+          s.plan mustBe f.plan.name
+          s.topic mustBe "foo".toTopic
+          ts.topic mustBe "foo".toTopic
+        }
+      }
+      testProbe.expectNoMsg()
     }
 
     "add OutlierPlan" in { f: Fixture =>
