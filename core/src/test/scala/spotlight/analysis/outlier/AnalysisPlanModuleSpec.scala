@@ -6,10 +6,17 @@ import akka.testkit._
 import com.typesafe.config.{Config, ConfigFactory}
 import peds.akka.envelope._
 import peds.akka.envelope.pattern.ask
-import akka.actor.{ActorRef, PoisonPill}
+import akka.actor.{ActorContext, ActorRef, PoisonPill, Props}
 import akka.util.Timeout
+import demesne.{AggregateRootType, DomainModel}
+import demesne.module.AggregateRootProps
 import demesne.module.entity.{EntityAggregateModule, messages => EntityMessages}
+import org.scalatest.Tag
+import peds.akka.publish.StackableStreamPublisher
 import peds.commons.V
+import peds.commons.identifier.{ShortUUID, TaggedID}
+import peds.commons.log.Trace
+import shapeless.Lens
 import spotlight.analysis.outlier.algorithm.skyline.SimpleMovingAverageModule
 import spotlight.model.outlier._
 import spotlight.testkit.EntityModuleSpec
@@ -73,12 +80,59 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] { outer =>
         2.seconds.dilated
       )
     }
-
   }
 
-  override def createAkkaFixture( test: OneArgTest ): Fixture = new Fixture
+  class WorkflowFixture extends Fixture {
+    var proxyProbes = Map.empty[Topic, TestProbe]
 
-  s"${standardModule.rootType.name}" should {
+    class FixtureOutlierPlanActor( model: DomainModel, rootType: AggregateRootType)
+    extends AnalysisPlanModule.AggregateRoot.OutlierPlanActor( model, rootType )
+    with AnalysisPlanModule.AggregateRoot.OutlierPlanActor.ProxyProvider
+    with StackableStreamPublisher {
+      override def makeProxy(topic: Topic, plan: OutlierPlan)( implicit model: DomainModel, context: ActorContext ): ActorRef = {
+        val probe = TestProbe( topic.name )
+        logger.debug( "TEST: making proxy probe: [{}]", probe )
+        proxyProbes += topic -> probe
+        probe.ref
+      }
+
+      override def active: Receive = {
+        case m if super.active isDefinedAt m => {
+          log.debug( "TEST: IN WORKFLOW FIXTURE ACTOR!!!" )
+          super.active( m )
+        }
+      }
+
+      override protected def onPersistRejected( cause: Throwable, event: Any, seqNr: Long ): Unit = {
+        log.error(
+          "Rejected to persist event type [{}] with sequence number [{}] for persistenceId [{}] due to [{}].",
+          event.getClass.getName, seqNr, persistenceId, cause
+        )
+        throw cause
+      }
+    }
+
+    override val module: Module = new EntityAggregateModule[OutlierPlan] {
+      override def trace: Trace[_] = Trace[EntityAggregateModule[OutlierPlan]]
+      override def idLens: Lens[OutlierPlan, TaggedID[ShortUUID]] = OutlierPlan.idLens
+      override def nameLens: Lens[OutlierPlan, String] = OutlierPlan.nameLens
+      override def aggregateRootPropsOp: AggregateRootProps = {
+        ( model: DomainModel, rootType: AggregateRootType ) => Props( new FixtureOutlierPlanActor( model, rootType ) )
+      }
+    }
+  }
+
+  override def createAkkaFixture( test: OneArgTest ): Fixture = {
+    test.tags match {
+      case ts if ts.contains( WORKFLOW.name ) => new WorkflowFixture
+      case _ => new Fixture
+    }
+  }
+
+  object WORKFLOW extends Tag( "workflow" )
+
+
+  "AnalysisPlanModule" should {
     "make proxy for topic" in { f: Fixture =>
       import f._
       val planRef = TestActorRef[AnalysisPlanModule.AggregateRoot.OutlierPlanActor](
@@ -92,7 +146,7 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] { outer =>
       actual must be theSameInstanceAs a2
     }
 
-    "dead proxy must be cleared" taggedAs WIP in { f: Fixture =>
+    "dead proxy must be cleared" in { f: Fixture =>
       import f._
 
       entity ! EntityMessages.Add( tid, Some(plan) )
@@ -105,12 +159,12 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] { outer =>
 
       val proxy = p1( "test" )
       proxy ! PoisonPill
-      logger.info( "TEST: waiting a bit for Terminated to propagate..." )
+      logger.debug( "TEST: waiting a bit for Terminated to propagate..." )
       Thread.sleep( 1000 )
       logger.info( "TEST: checking proxy..." )
 
       val p2 = proxiesFrom( entity, tid )
-      logger.info( "TEST: p2 = [{}]", p2.mkString(", ") )
+      logger.debug( "TEST: p2 = [{}]", p2.mkString(", ") )
       p2 mustBe empty
 
       entity ! P.AcceptTimeSeries( tid, TimeSeries( "test" ) )
@@ -118,8 +172,10 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] { outer =>
       p3.keys must contain ( "test".toTopic )
     }
 
-    "handle workflow" in { f: Fixture =>
+    "handle workflow" taggedAs( WORKFLOW, WIP ) in { f: Fixture =>
       import f._
+      logger.debug( "TEST: fixture class: [{}]", f.getClass )
+
       entity !+ EntityMessages.Add( tid, Some(plan) )
       bus.expectMsgType[EntityMessages.Added]
 
@@ -129,6 +185,15 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] { outer =>
       val p1 = proxiesFrom( entity, tid )
       p1.keys must contain ( "test".toTopic )
 
+      val probes = f.asInstanceOf[WorkflowFixture].proxyProbes
+      probes must have size 1
+      probes( "test".toTopic ).expectMsgPF( hint = "accept test time series" ) {
+        case Envelope( (ts: TimeSeries, s: OutlierPlan.Scope), h ) => {
+          s.plan mustBe f.plan.name
+          s.topic mustBe "test".toTopic
+          ts.topic mustBe "test".toTopic
+        }
+      }
     }
 
     "add OutlierPlan" in { f: Fixture =>
