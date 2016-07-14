@@ -167,6 +167,6 @@ object AnalysisPlanModulePassivationSpec {
       """.stripMargin
     )
 
-    planConfig withFallback spotlight.testkit.config
+    planConfig withFallback spotlight.testkit.config( "core" )
   }
 }

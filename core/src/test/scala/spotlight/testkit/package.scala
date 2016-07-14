@@ -8,7 +8,7 @@ import peds.commons.identifier.ShortUUID
   * Created by rolfsd on 7/5/16.
   */
 package object testkit {
-  def config: Config = ConfigFactory.parseString(
+  def config( rootDir: String = "." ): Config = ConfigFactory.parseString(
     s"""
      |akka.loggers = ["akka.testkit.TestEventListener"]
      |
@@ -23,7 +23,7 @@ package object testkit {
      |  journal.leveldb {
      |    # DO NOT USE 'native = off' IN PRODUCTION !!!
      |    native = off
-     |    dir = "target/journal/${ShortUUID()}"
+     |    dir = "${rootDir}/target/journal/${ShortUUID()}"
      |  }
      |  snapshot-store.local.dir = "target/snapshots"
      |}

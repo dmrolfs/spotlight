@@ -30,7 +30,7 @@ abstract class EntityModuleSpec[E <: Entity : ClassTag] extends AggregateRootSpe
   override type Fixture <: EntityFixture
   abstract class EntityFixture(
     id: Int = AggregateRootSpec.sysId.incrementAndGet(),
-    config: Config = spotlight.testkit.config
+    config: Config = spotlight.testkit.config( "core" )
   ) extends AggregateFixture( id, config ) { fixture =>
     logger.info( "Fixture: DomainModel=[{}]", model)
 
