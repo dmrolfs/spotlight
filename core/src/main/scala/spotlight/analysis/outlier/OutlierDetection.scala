@@ -19,12 +19,10 @@ import spotlight.model.outlier.{OutlierPlan, Outliers}
 
 
 object OutlierDetection extends StrictLogging with Instrumented {
-  def props( routerRef: ActorRef ): Props = {
-    Props(
-      new OutlierDetection with ConfigurationProvider {
-        override def router: ActorRef = routerRef
-      }
-    )
+  def props( routerRef: ActorRef ): Props = Props( new Default(routerRef) )
+
+  private class Default( routerRef: ActorRef ) extends OutlierDetection with ConfigurationProvider {
+    override def router: ActorRef = routerRef
   }
 
   lazy val timeoutMeter: Meter = metrics meter "timeouts"

@@ -215,10 +215,10 @@ class OutlierPlanDetectionRouterSpec extends ParallelAkkaSpec with LazyLogging {
       val m2 = ( ts, p2 )
 
       val routerProps = OutlierPlanDetectionRouter.props(
-        _detectorRef = detector.ref,
-        _detectionBudget = 2.seconds,
-        _bufferSize = 100,
-        _maxInDetectionCpuFactor = 1.0
+        detectorRef = detector.ref,
+        detectionBudget = 2.seconds,
+        bufferSize = 100,
+        maxInDetectionCpuFactor = 1.0
       )
 
       val router = system.actorOf( routerProps, "test-plan-router" )
@@ -284,10 +284,10 @@ class OutlierPlanDetectionRouterSpec extends ParallelAkkaSpec with LazyLogging {
 
       val planRouterRef = system.actorOf(
         OutlierPlanDetectionRouter.props(
-          _detectorRef = detector.ref,
-          _detectionBudget = 2.seconds,
-          _bufferSize = 100,
-          _maxInDetectionCpuFactor = 1.0
+          detectorRef = detector.ref,
+          detectionBudget = 2.seconds,
+          bufferSize = 100,
+          maxInDetectionCpuFactor = 1.0
         ),
         "plan-router"
       )

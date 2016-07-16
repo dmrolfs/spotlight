@@ -80,10 +80,11 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
       )
 
       val detect = b.add(
-        OutlierPlanDetectionRouter.elasticPlanDetectionRouterFlow(
-          planDetectorRouterRef = planRouterRef,
-          maxInDetectionCpuFactor = config.maxInDetectionCpuFactor
-        )
+//        OutlierPlanDetectionRouter.elasticPlanDetectionRouterFlow(
+//          planDetectorRouterRef = planRouterRef,
+//          maxInDetectionCpuFactor = config.maxInDetectionCpuFactor
+//        )
+        OutlierPlanDetectionRouter.fixedPlanDetectionRouterFlow( planRouterRef, 1 )
       )
 
       logMetrics ~> blockPriors ~> broadcast ~> passPlanned ~> zipConcatWithPlans ~> combineByPlan ~> buffer ~> detect
@@ -98,6 +99,26 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
     }
   }
 
+  def scoringFlow(
+    planRouterRef: ActorRef,
+    config: Configuration
+  )(
+    implicit system: ActorSystem,
+    materializer: Materializer
+  ): Flow[TimeSeries, Outliers, NotUsed] = {
+    import akka.stream.scaladsl.GraphDSL.Implicits._
+
+    val graph = GraphDSL.create() { implicit b =>
+      val scoring = b.add( scoringGraph(planRouterRef, config) )
+      val logUnrecognized = b.add( logMetric( Logger( LoggerFactory getLogger "Unrecognized" ), config.plans ) )
+      val termUnrecognized = b.add( Sink.ignore )
+
+      scoring.out1 ~> logUnrecognized ~> termUnrecognized
+      FlowShape( in = scoring.in, out = scoring.out0 )
+    }
+
+    Flow.fromGraph( graph )
+  }
 
   def logMetric(
     destination: Logger,

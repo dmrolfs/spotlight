@@ -18,13 +18,14 @@ import spotlight.model.timeseries.{TimeSeriesBase, Topic}
 object OutlierQuorumAggregator {
   val trace = Trace[OutlierQuorumAggregator.type]
 
-  def props( plan: OutlierPlan, source: TimeSeriesBase ): Props = {
-    Props(
-      new OutlierQuorumAggregator(plan, source) with ConfigurationProvider {
-        override val warningsBeforeTimeout: Int = 3
-      }
-    )
+  def props( plan: OutlierPlan, source: TimeSeriesBase ): Props = Props( new DefaultOutlierQuorumAggregator(plan, source) )
+
+  private class DefaultOutlierQuorumAggregator( plan: OutlierPlan, source: TimeSeriesBase )
+  extends OutlierQuorumAggregator( plan, source )
+  with ConfigurationProvider {
+    override val warningsBeforeTimeout: Int = 3
   }
+
 
   case class AnalysisTimedOut( topic: Topic, plan: OutlierPlan )
 

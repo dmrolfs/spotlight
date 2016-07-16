@@ -353,10 +353,10 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
       val detector = system.actorOf( OutlierDetection.props( routerRef = routerRef ), "detectOutliers" )
       val planRouter = system.actorOf(
         OutlierPlanDetectionRouter.props(
-          _detectorRef = detector,
-          _detectionBudget = 2.minutes,
-          _bufferSize = 1000,
-          _maxInDetectionCpuFactor = 1
+          detectorRef = detector,
+          detectionBudget = 2.minutes,
+          bufferSize = 1000,
+          maxInDetectionCpuFactor = 1
         ),
         "planRouter"
       )
@@ -516,7 +516,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
       import f.system.dispatcher
       import akka.pattern.pipe
 
-      val sourceUnderTest = Source( 1 to 4 ).grouped(2)
+      val sourceUnderTest = Source( 1 to 4 )
       val probe = TestProbe()
       sourceUnderTest.grouped(2).runWith(Sink.head).pipeTo(probe.ref)
       probe.expectMsg( 2.seconds.dilated, Seq(Seq(1,2), Seq(3,4)))

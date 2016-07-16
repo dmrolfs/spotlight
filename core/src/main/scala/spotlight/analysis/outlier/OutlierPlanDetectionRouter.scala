@@ -23,21 +23,20 @@ import spotlight.model.timeseries.TimeSeriesBase.Merging
   * Created by rolfsd on 4/19/16.
   */
 object OutlierPlanDetectionRouter extends LazyLogging {
-  def props(
-    _detectorRef: ActorRef,
-    _detectionBudget: FiniteDuration,
-    _bufferSize: Int,
-    _maxInDetectionCpuFactor: Double
-  ): Props = {
-    Props(
-      //todo change to vals where possible?
-      new OutlierPlanDetectionRouter with ConfigurationProvider {
-        override def detector: ActorRef = _detectorRef
-        override def detectionBudget: FiniteDuration = _detectionBudget
-        override def bufferSize: Int = _bufferSize
-        override def maxInDetectionCpuFactor: Double = _maxInDetectionCpuFactor
-      }
-    )
+  def fixedPlanDetectionRouterFlow(
+    planDetectionRouter: ActorRef,
+    maxInFlight: Int
+  )(
+    implicit system: ActorSystem,
+    materializer: Materializer
+  ): Flow[(TimeSeries, OutlierPlan), Outliers, NotUsed] = {
+    MaxInFlightProcessorAdapter.fixedProcessorFlow[(TimeSeries, OutlierPlan), Outliers](
+      name = WatchPoints.PlanRouter.name,
+      maxInFlight = maxInFlight
+    ) {
+      case m => planDetectionRouter
+    }
+    .named( "fixed-plan-router-stage" )
   }
 
   def elasticPlanDetectionRouterFlow(
@@ -53,7 +52,23 @@ object OutlierPlanDetectionRouter extends LazyLogging {
     ) {
       case m => planDetectorRouterRef
     }
+    .named( "elastic-plan-router-stage" )
   }
+
+
+  def props(
+    detectorRef: ActorRef,
+    detectionBudget: FiniteDuration,
+    bufferSize: Int,
+    maxInDetectionCpuFactor: Double
+  ): Props = Props( new Default(detectorRef, detectionBudget, bufferSize, maxInDetectionCpuFactor) )
+
+  private class Default(
+    override val detector: ActorRef,
+    override val detectionBudget: FiniteDuration,
+    override val bufferSize: Int,
+    override val maxInDetectionCpuFactor: Double
+  ) extends OutlierPlanDetectionRouter with ConfigurationProvider
 
 
   object WatchPoints {
@@ -170,19 +185,21 @@ class OutlierPlanDetectionRouter extends Actor with InstrumentedActor with Actor
 
     val (ingressRef, ingress) = {
       Source
-      .actorPublisher[TimeSeries]( StreamIngress.props[TimeSeries] )
-      .toMat( Sink.asPublisher(false) )( Keep.both )
+      .actorPublisher[TimeSeries]( StreamIngress.props[TimeSeries] ).named( s"${plan.name}-detect-streamlet-inlet" )
+      .toMat( Sink.asPublisher(false).named( s"${plan.name}-detect-streamlet-outlet") )( Keep.both )
       .run()
     }
 
     val graph = GraphDSL.create() { implicit b =>
       import GraphDSL.Implicits._
 
-      val ingressPublisher = b.add( Source fromPublisher ingress )
+      val ingressPublisher = b.add( Source.fromPublisher( ingress ).named( s"${plan.name}-detect-streamlet" ) )
       val batch = plan.grouping map { g => b.add( batchSeries( g ) ) }
       val buffer = b.add( Flow[TimeSeriesBase].buffer(outer.bufferSize, OverflowStrategy.backpressure) )
       val detect = b.add( detectionFlow( plan ) )
-      val egressSubscriber = b.add( Sink.actorSubscriber[Outliers]( StreamEgress.props(subscriber, high = 50) ) )
+      val egressSubscriber = b.add(
+        Sink.actorSubscriber[Outliers]( StreamEgress.props(subscriber, high = 50) ).named( s"${plan.name}-detect-streamlet")
+      )
 
       if ( batch.isDefined ) {
         ingressPublisher ~> batch.get ~> buffer ~> detect ~> egressSubscriber
@@ -232,6 +249,7 @@ class OutlierPlanDetectionRouter extends Actor with InstrumentedActor with Actor
       }
     }
     .map { _.outliers }
+    .named( s"${plan.name}-detection" )
 
     StreamMonitor.add( label )
     flow

@@ -158,8 +158,9 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
         """.stripMargin
       )
 
+      import GraphDSL.Implicits._
+
       val graph = GraphDSL.create() { implicit b =>
-        import GraphDSL.Implicits._
         import StreamMonitor._
 
         //todo add support to watch FlowShapes
@@ -212,27 +213,28 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
 
   def publishOutliers( graphiteAddress: Option[InetSocketAddress] ): Sink[Outliers, ActorRef] = {
     val props = graphiteAddress map { address =>
-      GraphitePublisher.props {
-        new GraphitePublisher with GraphitePublisher.PublishProvider {
-          // cannot use vals; compiler is setting to null regardless of value.
-          override lazy val maxOutstanding: Int = 1000000
-          override lazy val metricBaseName = MetricName( classOf[GraphitePublisher] )
-          override lazy val destinationAddress: InetSocketAddress = address
-          override lazy val batchSize: Int = 1000
-          override def createSocket( address: InetSocketAddress ): Socket = {
-            new Socket( destinationAddress.getAddress, destinationAddress.getPort )
-          }
-          override def publishingTopic( p: OutlierPlan, t: Topic ): Topic = {
-            OutlierScoringModel.OutlierMetricPrefix + super.publishingTopic( p, t )
-          }
-        }
-      }
+      GraphitePublisher.props { new Publisher( maxOutstanding = 1000000, batchSize = 1000, destinationAddress = address ) }
     } getOrElse {
       LogPublisher.props
     }
 
     Sink.actorSubscriber[Outliers]( props.withDispatcher( "publisher-dispatcher" ) ).named( "graphite" )
   }
+
+  private class Publisher(
+    override val maxOutstanding: Int,
+    override val batchSize: Int,
+    override val destinationAddress: InetSocketAddress
+  ) extends GraphitePublisher with GraphitePublisher.PublishProvider {
+    override lazy val metricBaseName = MetricName( classOf[GraphitePublisher] )
+    override def createSocket( address: InetSocketAddress ): Socket = {
+      new Socket( destinationAddress.getAddress, destinationAddress.getPort )
+    }
+    override def publishingTopic( p: OutlierPlan, t: Topic ): Topic = {
+      OutlierScoringModel.OutlierMetricPrefix + super.publishingTopic( p, t )
+    }
+  }
+
 
   def startPlanWatcher( config: Configuration, listeners: Set[ActorRef] )( implicit system: ActorSystem ): Unit = {
 //    logger info s"Outlier plan origin: [${config.planOrigin}]"
@@ -279,21 +281,21 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
   }
 
   def startDetection( config: Configuration, reloader: () => V[Configuration] )( implicit system: ActorSystem ): ActorRef = {
-    system.actorOf(
-      OutlierDetectionBootstrap.props(
-        new OutlierDetectionBootstrap( ) with OneForOneStrategyFactory with OutlierDetectionBootstrap.ConfigurationProvider {
-          override def sourceAddress: InetSocketAddress = config.sourceAddress
-          override def maxFrameLength: Int = config.maxFrameLength
-          override def protocol: GraphiteSerializationProtocol = config.protocol
-          override def windowDuration: FiniteDuration = config.windowDuration
-          override def detectionBudget: FiniteDuration = config.detectionBudget
-          override def bufferSize: Int = config.workflowBufferSize
-          override def maxInDetectionCpuFactor: Double = config.maxInDetectionCpuFactor
-          override def configuration: Config = config
-        }
-      ),
-      "detection-supervisor"
-    )
+    system.actorOf( OutlierDetectionBootstrap.props( new SpotlightBootstrap( config ) ), "detection-supervisor" )
+  }
+
+  private class SpotlightBootstrap( config: Configuration )
+  extends OutlierDetectionBootstrap
+  with OneForOneStrategyFactory
+  with OutlierDetectionBootstrap.ConfigurationProvider {
+    override def sourceAddress: InetSocketAddress = config.sourceAddress
+    override def maxFrameLength: Int = config.maxFrameLength
+    override def protocol: GraphiteSerializationProtocol = config.protocol
+    override def windowDuration: FiniteDuration = config.windowDuration
+    override def detectionBudget: FiniteDuration = config.detectionBudget
+    override def bufferSize: Int = config.workflowBufferSize
+    override def maxInDetectionCpuFactor: Double = config.maxInDetectionCpuFactor
+    override def configuration: Config = config
   }
 }
 
