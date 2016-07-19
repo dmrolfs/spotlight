@@ -98,7 +98,12 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
 
       detect.underlyingActor.router mustBe f.router.ref
 
-      val msg = OutlierDetectionMessage( TimeSeries( topic = "dummy", points = Seq.empty[DataPoint] ), defaultPlan ).toOption.get
+      val subscriber = TestProbe()
+      val msg = OutlierDetectionMessage(
+        TimeSeries( topic = "dummy", points = Seq.empty[DataPoint] ),
+        defaultPlan,
+        subscriber.ref
+      ).toOption.get
 
       detect receive msg
 
@@ -141,7 +146,12 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
         planSpecification = ConfigFactory.empty
       )
 
-      val msg = OutlierDetectionMessage( TimeSeries( topic = metric, points = Seq.empty[DataPoint] ), defaultPlan ).toOption.get
+      val subscriber = TestProbe()
+      val msg = OutlierDetectionMessage(
+        TimeSeries( topic = metric, points = Seq.empty[DataPoint] ),
+        defaultPlan,
+        subscriber.ref
+      ).toOption.get
 
       detect receive msg
 
@@ -183,9 +193,11 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
         reduce = reduceA
       )
 
+      val subscriber = TestProbe()
       val msgForDefault = OutlierDetectionMessage(
         TimeSeries( topic = "dummy", points = Seq.empty[DataPoint] ),
-        defaultPlan
+        defaultPlan,
+        subscriber.ref
       ).toOption.get
 
       detect receive msgForDefault
@@ -201,7 +213,8 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
 
       val metricMsg = OutlierDetectionMessage(
         TimeSeries( topic = metric, points = Seq.empty[DataPoint] ),
-        defaultPlan
+        defaultPlan,
+        subscriber.ref
       ).toOption.get
 
       detect receive metricMsg
@@ -302,7 +315,12 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
 
       val expectedA = HistoricalStatistics.fromActivePoints( pointsA, false )
 
-      val msgA = OutlierDetectionMessage( TimeSeries( topic = metric, points = pointsA ), defaultPlan ).toOption.get
+      val subscriber = TestProbe()
+      val msgA = OutlierDetectionMessage(
+        TimeSeries( topic = metric, points = pointsA ),
+        defaultPlan,
+        subscriber.ref
+      ).toOption.get
       detect receive msgA
 
       router.expectMsgPF( 2.seconds.dilated, "default-routed-foo-A" ) {
@@ -328,7 +346,11 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
       trace( s"expectedAB = $expectedAB" )
       trace( s"""expectedAB LAST= [${expectedAB.lastPoints.toPointTs.mkString(",")}]""" )
 
-      val msgB = OutlierDetectionMessage( TimeSeries( topic = metric, points = pointsB ), defaultPlan ).toOption.get
+      val msgB = OutlierDetectionMessage(
+        TimeSeries( topic = metric, points = pointsB ),
+        defaultPlan,
+        subscriber.ref
+      ).toOption.get
       detect receive msgB
 
       router.expectMsgPF( 2.seconds.dilated, "default-routed-foo-AB" ) {

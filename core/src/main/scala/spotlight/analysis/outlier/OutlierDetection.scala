@@ -7,6 +7,7 @@ import akka.actor.{Actor, ActorLogging, ActorPath, ActorRef, Props}
 import akka.event.LoggingReceive
 import akka.pattern.AskTimeoutException
 import akka.stream.Supervision
+import akka.stream.actor.ActorSubscriberMessage.OnComplete
 import com.codahale.metrics.{Metric, MetricFilter}
 import org.slf4j.LoggerFactory
 import com.typesafe.scalalogging.{Logger, StrictLogging}
@@ -106,6 +107,7 @@ with ActorLogging {
       log.debug( "OutlierDetection results: [{}:{}]", result.topic, result.plan )
       val aggregator = sender()
       val subscriber = outstanding( aggregator )
+      log.debug( "OutlierDetecion sending results to subscriber:[{}]", subscriber.ref )
       subscriber.ref ! DetectionResult( result )
       outstanding -= aggregator
       detectionTimer.update( System.nanoTime() - subscriber.startNanos, scala.concurrent.duration.NANOSECONDS )
@@ -114,7 +116,7 @@ with ActorLogging {
 
     case m: OutlierDetectionMessage =>  {
       log.debug( "OutlierDetection request: [{}:{}]", m.topic, m.plan )
-      val requester = sender()
+      val requester = m.subscriber
       val aggregator = dispatch( m, m.plan )( context.dispatcher )
       outstanding += aggregator -> DetectionSubscriber( ref = requester )
     }
@@ -122,6 +124,11 @@ with ActorLogging {
     case to @ OutlierQuorumAggregator.AnalysisTimedOut( topic, plan ) => {
       log.error( "quorum was not reached in time: [{}]", to )
       outstanding -= sender()
+    }
+
+    case OnComplete => {
+      log.info( "OutlierDetection[{}][{}]: notified that stream is completed", self.path, this.## )
+      context stop self
     }
   }
 

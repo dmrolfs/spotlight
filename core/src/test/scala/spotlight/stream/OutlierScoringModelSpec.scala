@@ -23,6 +23,7 @@ import com.typesafe.scalalogging.LazyLogging
 import org.apache.commons.math3.random.RandomDataGenerator
 import org.joda.{time => joda}
 import com.github.nscala_time.time.Imports.{richDateTime, richSDuration}
+import org.scalatest.concurrent.ScalaFutures
 import peds.commons.log.Trace
 import spotlight.analysis.outlier.algorithm.density.SeriesDensityAnalyzer
 import spotlight.protocol.PythonPickleProtocol
@@ -36,7 +37,7 @@ import spotlight.model.timeseries.{DataPoint, TimeSeries}
 /**
  * Created by rolfsd on 10/28/15.
  */
-class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
+class OutlierScoringModelSpec extends ParallelAkkaSpec with ScalaFutures with LazyLogging {
   import OutlierScoringModelSpec._
 
   class Fixture extends AkkaFixture { fixture =>
@@ -202,7 +203,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
     }
 
 
-    "batch series by plan passthru without merging with demand" taggedAs (WIP) in { f: Fixture =>
+    "batch series by plan passthru without merging with demand" in { f: Fixture =>
       import f._
       import OutlierScoringModelSpec._
 
@@ -259,7 +260,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
       sub.expectNext() mustBe (ts2, p2)
     }
 
-    "batch series by plan with merging if backpressured" taggedAs (WIP) in { f: Fixture =>
+    "batch series by plan with merging if backpressured" in { f: Fixture =>
       import f._
       import OutlierScoringModelSpec._
 
@@ -379,10 +380,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
 //      val expected = TimeSeries( "foo", (dp1 ++ dp3).sortBy( _.timestamp ) )
 
       val graphiteFlow = OutlierScoringModel.batchSeriesByPlan( max = 1000 )
-      val detectFlow = OutlierPlanDetectionRouter.elasticPlanDetectionRouterFlow(
-        planDetectorRouterRef = planRouter,
-        maxInDetectionCpuFactor = 1
-      )
+      val detectFlow = OutlierPlanDetectionRouter.flow( planRouter )
 
       val flowUnderTest = {
         Flow[TimeSeries]
@@ -392,9 +390,9 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
       }
 
       val (pub, sub) = {
-        TestSource.probe[TimeSeries]
+        TestSource.probe[TimeSeries].named( "test-source" )
         .via( flowUnderTest )
-        .toMat( TestSink.probe[Outliers] )( Keep.both )
+        .toMat( TestSink.probe[Outliers].named( "test-sink" ) )( Keep.both )
         .run()
       }
 
@@ -449,7 +447,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
 //      result mustBe expected
     }
 
-    "grouped Example" in { f: Fixture =>
+    "grouped Example" taggedAs WIP in { f: Fixture =>
       import f._
 
       val topics = IndexedSeq( "a", "b", "b", "b", "c" )
@@ -482,45 +480,47 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
                    .via( flowUnderTest )
 //                   .grouped( 5 )
                    .runWith( Sink.head )
-
-      val result = Await.result( future, 5.seconds.dilated )
-      result mustBe Fixture.TickA("b", Seq(1,2,3))
+//      val result = Await.result( future, 5.seconds.dilated )
+//      result mustBe Fixture.TickA("b", Seq(1,2,3))
+      whenReady( future, timeout(5.seconds.dilated) ) { _ mustBe Fixture.TickA("b", Seq(1,2,3)) }
     }
 
     "ex1" in { f: Fixture =>
       import f._
       val sinkUnderTest = Flow[Int].map{ _ * 2 }.toMat{ Sink.fold( 0 ){ _ + _ } }( Keep.right )
       val future = Source( 1 to 4 ) runWith sinkUnderTest
-      val result = Await.result( future, 2.seconds.dilated )
-      result mustBe 20
+      whenReady( future ) { _ mustBe 20 }
     }
 
     "ex2" in { f: Fixture =>
       import f._
       val sourceUnderTest = Source.repeat(1).map(_ * 2)
       val future = sourceUnderTest.grouped(10).runWith(Sink.head)
-      val result = Await.result( future, 2.second.dilated )
-      result mustBe Seq.fill(10)(2)
+      whenReady( future ) { _ mustBe Seq.fill(10)(2) }
     }
 
     "ex3" in { f: Fixture =>
       import f._
       val flowUnderTest = Flow[Int].takeWhile(_ < 5)
       val future = Source( 1 to 10 ).via( flowUnderTest ).runWith( Sink.fold(Seq.empty[Int]){ _ :+ _ } )
-      val result = Await.result( future, 2.seconds.dilated )
-      result mustBe (1 to 4)
+      whenReady( future ) { _ mustBe (1 to 4) }
     }
 
-    "ex4" in { f: Fixture =>
+    "ex4" taggedAs WIP in { f: Fixture =>
       import f._
       import f.system.dispatcher
       import akka.pattern.pipe
 
-      val sourceUnderTest = Source( 1 to 4 )
+      val sourceUnderTest = Source( 1 to 10 )
       val probe = TestProbe()
-      sourceUnderTest.grouped(2).runWith(Sink.head).pipeTo(probe.ref)
-      probe.expectMsg( 2.seconds.dilated, Seq(Seq(1,2), Seq(3,4)))
-    }
+      val future = sourceUnderTest.grouped(2).runWith( Sink.fold( Seq.empty[Seq[Int]] ){ _ :+ _ } )
+      whenReady( future ) { _ mustBe Seq( Seq(1,2), Seq(3,4), Seq(5,6), Seq(7,8), Seq(9, 10) ) }
+
+//      sourceUnderTest.grouped(2).runWith(Sink.head).pipeTo(probe.ref)
+//      probe.expectMsg( 2.seconds.dilated, Seq(1,2) )
+//      probe.expectNoMsg( 10.seconds.dilated )
+//      probe.expectMsg( 2.seconds.dilated, Seq(3,4) )
+     }
 
     "ex5" in { f: Fixture =>
       import f._
@@ -546,8 +546,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
       ref ! 3
       ref ! akka.actor.Status.Success("done")
 
-      val result = Await.result( future, 1.second.dilated )
-      result mustBe "123"
+      whenReady( future ) { _ mustBe "123" }
     }
 
     "ex7" in { f: Fixture =>

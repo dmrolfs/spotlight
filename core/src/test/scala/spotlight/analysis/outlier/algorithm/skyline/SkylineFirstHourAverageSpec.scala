@@ -23,6 +23,7 @@ class SkylineFirstHourAverageSpec extends SkylineBaseSpec {
   class Fixture extends SkylineFixture {
     val algoS = FirstHourAverageAnalyzer.Algorithm
     val algProps = ConfigFactory.parseString( s"""${algoS.name}.tolerance: 3""" )
+    val subscriber = TestProbe()
 
     val plan = mock[OutlierPlan]
     when( plan.name ).thenReturn( "mock-plan" )
@@ -115,7 +116,15 @@ class SkylineFirstHourAverageSpec extends SkylineBaseSpec {
 
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
       val history1 = historyWith( None, series )
-      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series, plan), history1, algProps ) )
+      analyzer.receive(
+        DetectUsing(
+          algoS,
+          aggregator.ref,
+          DetectOutliersInSeries(series, plan, subscriber.ref),
+          history1,
+          algProps
+        )
+      )
       aggregator.expectMsgPF( 2.seconds.dilated, "first hour" ) {
         case m @ SeriesOutliers(alg, source, plan, outliers, control) => {
           alg mustBe Set( algoS )
@@ -138,7 +147,15 @@ class SkylineFirstHourAverageSpec extends SkylineBaseSpec {
       val series2 = spike( full2 )( 0 )
       val history2 = historyWith( Option(history1 recordLastPoints series.points), series2 )
 
-      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
+      analyzer.receive(
+        DetectUsing(
+          algoS,
+          aggregator.ref,
+          DetectOutliersInSeries(series2, plan, subscriber.ref),
+          history2,
+          algProps
+        )
+      )
       aggregator.expectMsgPF( 2.seconds.dilated, "first hour again" ) {
         case m @ SeriesOutliers(alg, source, plan, outliers, control) => {
           alg mustBe Set( algoS )
@@ -170,7 +187,15 @@ class SkylineFirstHourAverageSpec extends SkylineBaseSpec {
 
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered(algoS) )
       val history1 = historyWith( None, series )
-      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series, plan), history1, algProps ) )
+      analyzer.receive(
+        DetectUsing(
+          algoS,
+          aggregator.ref,
+          DetectOutliersInSeries(series, plan, subscriber.ref),
+          history1,
+          algProps
+        )
+      )
       aggregator.expectMsgPF( 2.seconds.dilated, "first hour" ) {
         case m @ NoOutliers(alg, source, plan, control) => {
           alg mustBe Set( algoS )
@@ -191,7 +216,15 @@ class SkylineFirstHourAverageSpec extends SkylineBaseSpec {
       val series2 = spike( full2 )( 0 )
       val history2 = historyWith( Option(history1 recordLastPoints series.points), series2 )
 
-      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
+      analyzer.receive(
+        DetectUsing(
+          algoS,
+          aggregator.ref,
+          DetectOutliersInSeries(series2, plan, subscriber.ref),
+          history2,
+          algProps
+        )
+      )
       aggregator.expectMsgPF( 2.seconds.dilated, "first hour again" ) {
         case m @ SeriesOutliers(alg, source, plan, outliers, control) => {
           alg mustBe Set( algoS )
@@ -225,7 +258,15 @@ class SkylineFirstHourAverageSpec extends SkylineBaseSpec {
 
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
       val history1 = historyWith( None, series )
-      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series, plan), history1, algProps ) )
+      analyzer.receive(
+        DetectUsing(
+          algoS,
+          aggregator.ref,
+          DetectOutliersInSeries(series, plan, subscriber.ref),
+          history1,
+          algProps
+        )
+      )
       aggregator.expectMsgPF( 2.seconds.dilated, "first-hour threshold" ) {
         case m@SeriesOutliers( alg, source, plan, outliers, actual ) => {
           actual.keySet mustBe Set( algoS )
@@ -244,7 +285,15 @@ class SkylineFirstHourAverageSpec extends SkylineBaseSpec {
       val series2 = spike( full2, 100 )( 0 )
       val history2 = historyWith( Option(history1 recordLastPoints series.points), series2 )
 
-      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
+      analyzer.receive(
+        DetectUsing(
+          algoS,
+          aggregator.ref,
+          DetectOutliersInSeries(series2, plan, subscriber.ref),
+          history2,
+          algProps
+        )
+      )
       aggregator.expectMsgPF( 2.seconds.dilated, "first-hour threshold again" ) {
         case m @ SeriesOutliers(alg, source, plan, outliers, actual) => {
           actual.keySet mustBe Set( algoS )

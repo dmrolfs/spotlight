@@ -21,14 +21,15 @@ package object outlier {
     type Source <: TimeSeriesBase
     def source: Source
     def plan: OutlierPlan
+    def subscriber: ActorRef
   }
 
   object OutlierDetectionMessage {
-    def apply( ts: TimeSeriesBase, plan: OutlierPlan ): Valid[OutlierDetectionMessage] = {
-      checkPlan(plan, ts) map { p =>
+    def apply( ts: TimeSeriesBase, plan: OutlierPlan, subscriber: ActorRef ): Valid[OutlierDetectionMessage] = {
+      checkPlan(plan, ts) map { p  =>
         ts match {
-          case s: TimeSeries => DetectOutliersInSeries( s, p )
-          case c: TimeSeriesCohort => DetectOutliersInCohort( c, p )
+          case data: TimeSeries => DetectOutliersInSeries( source = data, plan = p, subscriber )
+          case data: TimeSeriesCohort => DetectOutliersInCohort( source = data, plan = p, subscriber )
         }
       }
     }
@@ -128,7 +129,8 @@ package object outlier {
 
   final case class DetectOutliersInSeries private[outlier](
     override val source: TimeSeries,
-    override val plan: OutlierPlan
+    override val plan: OutlierPlan,
+    override val subscriber: ActorRef
   ) extends OutlierDetectionMessage {
     override def topic: Topic = source.topic
     override type Source = TimeSeries
@@ -136,7 +138,8 @@ package object outlier {
 
   final case class DetectOutliersInCohort private[outlier](
     override val source: TimeSeriesCohort,
-    override val plan: OutlierPlan
+    override val plan: OutlierPlan,
+    override val subscriber: ActorRef
   ) extends OutlierDetectionMessage {
     override def topic: Topic = source.topic
     override type Source = TimeSeriesCohort
@@ -154,6 +157,7 @@ package object outlier {
     override type Source = payload.Source
     override def source: Source = payload.source
     override val plan: OutlierPlan = payload.plan
+    override def subscriber: ActorRef = payload.subscriber
   }
 
 
@@ -165,5 +169,6 @@ package object outlier {
     override type Source = request.Source
     override def source: Source = request.source
     override def plan: OutlierPlan = request.plan
+    override def subscriber: ActorRef = request.subscriber
   }
 }

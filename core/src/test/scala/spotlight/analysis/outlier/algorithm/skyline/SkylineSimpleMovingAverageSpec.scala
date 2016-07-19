@@ -22,6 +22,7 @@ class SkylineSimpleMovingAverageSpec extends SkylineBaseSpec {
   class Fixture extends SkylineFixture {
     val algoS = SimpleMovingAverageAnalyzer.Algorithm
     val algProps = ConfigFactory.parseString( s"""${algoS.name}.tolerance: 3""" )
+    val subscriber = TestProbe()
 
     val plan = mock[OutlierPlan]
     when( plan.name ).thenReturn( "mock-plan" )
@@ -92,7 +93,15 @@ class SkylineSimpleMovingAverageSpec extends SkylineBaseSpec {
 
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
       val history1 = historyWith( None, series )
-      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series, plan), history1, algProps ) )
+      analyzer.receive(
+        DetectUsing(
+          algoS,
+          aggregator.ref,
+          DetectOutliersInSeries(series, plan, subscriber.ref),
+          history1,
+          algProps
+        )
+      )
       aggregator.expectMsgPF( 2.seconds.dilated, "stddev from average" ) {
         case m @ SeriesOutliers(alg, source, plan, outliers, control) => {
           alg mustBe Set( algoS )
@@ -111,7 +120,15 @@ class SkylineSimpleMovingAverageSpec extends SkylineBaseSpec {
       val series2 = spike( full2 )( 0 )
       val history2 = historyWith( Option(history1 recordLastPoints series.points), series2 )
 
-      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
+      analyzer.receive(
+        DetectUsing(
+          algoS,
+          aggregator.ref,
+          DetectOutliersInSeries(series2, plan, subscriber.ref),
+          history2,
+          algProps
+        )
+      )
       aggregator.expectMsgPF( 2.seconds.dilated, "stddev from average again" ) {
         case m @ SeriesOutliers(alg, source, plan, outliers, control) => {
           alg mustBe Set( algoS )
@@ -142,7 +159,15 @@ class SkylineSimpleMovingAverageSpec extends SkylineBaseSpec {
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
       val history1 = historyWith( None, series )
       val lastPoints1 = history1.lastPoints.map{ p => DataPoint( new joda.DateTime(p(0).toLong), p(1) ) }
-      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series, plan), history1, algProps ) )
+      analyzer.receive(
+        DetectUsing(
+          algoS,
+          aggregator.ref,
+          DetectOutliersInSeries(series, plan, subscriber.ref),
+          history1,
+          algProps
+        )
+      )
       aggregator.expectMsgPF( 2.seconds.dilated, "sma threshold" ) {
         case m @ SeriesOutliers(alg, source, plan, outliers, actual) => {
           actual.keySet mustBe Set( algoS )
@@ -163,7 +188,15 @@ class SkylineSimpleMovingAverageSpec extends SkylineBaseSpec {
       val series2 = spike( full2, 100 )( 0 )
       val history2 = historyWith( Option(history1 recordLastPoints series.points), series2 )
       val lastPoints2 = history2.lastPoints.map{ p => DataPoint( new joda.DateTime(p(0).toLong), p(1) ) }
-      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
+      analyzer.receive(
+        DetectUsing(
+          algoS,
+          aggregator.ref,
+          DetectOutliersInSeries(series2, plan, subscriber.ref),
+          history2,
+          algProps
+        )
+      )
       aggregator.expectMsgPF( 2.seconds.dilated, "sma threshold again" ) {
         case m @ SeriesOutliers(alg, source, plan, outliers, actual) => {
           actual.keySet mustBe Set( algoS )

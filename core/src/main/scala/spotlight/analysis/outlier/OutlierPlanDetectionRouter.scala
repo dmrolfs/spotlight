@@ -1,19 +1,22 @@
 package spotlight.analysis.outlier
 
-import akka.NotUsed
-
 import scala.concurrent.duration.FiniteDuration
-import akka.actor.{Actor, ActorLogging, ActorRef, ActorSystem, Props, SupervisorStrategy}
+import akka.NotUsed
+import akka.actor.{Actor, ActorLogging, ActorRef, ActorSystem, Props}
 import akka.event.LoggingReceive
+import akka.stream.actor.ActorSubscriberMessage.OnComplete
 import akka.stream.{ActorMaterializerSettings, _}
 import akka.stream.scaladsl._
-import com.typesafe.scalalogging.LazyLogging
-import nl.grons.metrics.scala.Meter
 
 import scalaz.\/-
+import shapeless.TypeCase
+import com.typesafe.scalalogging.LazyLogging
+import nl.grons.metrics.scala.Meter
 import peds.akka.metrics.InstrumentedActor
-import peds.akka.stream.{MaxInFlightProcessorAdapter, StreamEgress, StreamIngress, StreamMonitor}
+import peds.akka.stream.{CommonActorPublisher, StreamIngress}
+import peds.akka.stream.StreamMonitor._
 import spotlight.analysis.outlier.OutlierDetection.DetectionResult
+import spotlight.analysis.outlier.OutlierPlanDetectionRouter.StreamMessage
 import spotlight.model.outlier.{OutlierPlan, Outliers}
 import spotlight.model.timeseries.{TimeSeries, TimeSeriesBase}
 import spotlight.model.timeseries.TimeSeriesBase.Merging
@@ -23,37 +26,60 @@ import spotlight.model.timeseries.TimeSeriesBase.Merging
   * Created by rolfsd on 4/19/16.
   */
 object OutlierPlanDetectionRouter extends LazyLogging {
-  def fixedPlanDetectionRouterFlow(
-    planDetectionRouter: ActorRef,
-    maxInFlight: Int
+//  def sink(
+//    planDetectionRouter: ActorRef,
+//    subscriber: ActorRef
+//  )(
+//    implicit system: ActorSystem,
+//    materializer: Materializer
+//  ): Sink[(TimeSeries, OutlierPlan), NotUsed] = {
+//    Flow[(TimeSeries, OutlierPlan)]
+//    .map { tp => StreamMessage( tp, subscriber ) }
+//    .toMat(
+//      Sink.actorRef[StreamMessage[(TimeSeries, OutlierPlan)]]( planDetectionRouter, OnComplete ).named( "plan-router" )
+//    )( Keep.right )
+//  }
+
+  def flow(
+    planDetectionRouter: ActorRef
   )(
     implicit system: ActorSystem,
     materializer: Materializer
   ): Flow[(TimeSeries, OutlierPlan), Outliers, NotUsed] = {
-    MaxInFlightProcessorAdapter.fixedProcessorFlow[(TimeSeries, OutlierPlan), Outliers](
-      name = WatchPoints.PlanRouter.name,
-      maxInFlight = maxInFlight
-    ) {
-      case m => planDetectionRouter
+    val outletProps = CommonActorPublisher.props[DetectionResult]
+
+    val g = GraphDSL.create() { implicit b =>
+      import akka.stream.scaladsl.GraphDSL.Implicits._
+
+      val (outletRef, outlet) = {
+        Source.actorPublisher[DetectionResult]( outletProps ).named( "plan-router-outlet" )
+        .toMat( Sink.asPublisher(false) )( Keep.both )
+        .run()
+      }
+
+      val addSubscriber = b.add( Flow[(TimeSeries, OutlierPlan)]  map { tsp => StreamMessage(tsp, outletRef) } )
+      val workStage = b.add(
+        Sink
+        .actorRef[StreamMessage[(TimeSeries, OutlierPlan)]]( planDetectionRouter, OnComplete )
+        .named( "plan-router-inlet")
+      )
+      addSubscriber ~> workStage
+
+      val outletStage = b.add( Source fromPublisher[DetectionResult] outlet )
+      val extractOutliers = b.add(
+        Flow[DetectionResult]
+        .map { m => logger.info( "TEST: OUTLET RECEIVED RESULT: [{}]", m ); m }
+        .map { _.outliers }
+      )
+      outletStage ~> extractOutliers
+
+      FlowShape( addSubscriber.in, extractOutliers.out )
     }
-    .named( "fixed-plan-router-stage" )
+
+    Flow.fromGraph( g ).watchFlow( Symbol("fixed-plan-router") )
   }
 
-  def elasticPlanDetectionRouterFlow(
-    planDetectorRouterRef: ActorRef,
-    maxInDetectionCpuFactor: Double
-  )(
-    implicit system: ActorSystem,
-    materializer: Materializer
-  ): Flow[(TimeSeries, OutlierPlan), Outliers, NotUsed] = {
-    MaxInFlightProcessorAdapter.elasticProcessorFlow[(TimeSeries, OutlierPlan), Outliers](
-      name = WatchPoints.PlanRouter.name,
-      maxInDetectionCpuFactor
-    ) {
-      case m => planDetectorRouterRef
-    }
-    .named( "elastic-plan-router-stage" )
-  }
+  private[outlier] case class StreamMessage[P]( payload: P, subscriber: ActorRef )
 
 
   def props(
@@ -61,7 +87,16 @@ object OutlierPlanDetectionRouter extends LazyLogging {
     detectionBudget: FiniteDuration,
     bufferSize: Int,
     maxInDetectionCpuFactor: Double
-  ): Props = Props( new Default(detectorRef, detectionBudget, bufferSize, maxInDetectionCpuFactor) )
+  ): Props = {
+    Props(
+      new Default(
+        detector = detectorRef,
+        detectionBudget,
+        bufferSize,
+        maxInDetectionCpuFactor
+      )
+    )
+  }
 
   private class Default(
     override val detector: ActorRef,
@@ -121,7 +156,6 @@ class OutlierPlanDetectionRouter extends Actor with InstrumentedActor with Actor
 
   var planStreams: Map[Key, PlanStream] = Map.empty[Key, PlanStream]
 
-
   override def postStop(): Unit = {
     planStreams.values foreach { ps =>
       ps.ingressRef ! StreamIngress.CompleteAndStop
@@ -141,10 +175,16 @@ class OutlierPlanDetectionRouter extends Actor with InstrumentedActor with Actor
   implicit val system: ActorSystem = context.system
   implicit val materializer = ActorMaterializer( ActorMaterializerSettings( system ) withSupervisionStrategy workflowSupervision )
 
+  val Payload = TypeCase[(TimeSeries, OutlierPlan)]
+
   val route: Receive = {
-    case (ts: TimeSeries, p: OutlierPlan) => {
-      val subscriber = sender()
-      streamIngressFor( p, subscriber ) forward ts
+    case StreamMessage( Payload((ts, p)), subscriber ) => {
+      streamIngressFor( p, subscriber ) forward StreamMessage[TimeSeries]( ts, subscriber )
+    }
+
+    case OnComplete => {
+      log.info( "OutlierPlanDetectionRouter[{}][{}]: notified that stream is completed", self.path, this.## )
+      context stop self
     }
   }
 
@@ -185,7 +225,8 @@ class OutlierPlanDetectionRouter extends Actor with InstrumentedActor with Actor
 
     val (ingressRef, ingress) = {
       Source
-      .actorPublisher[TimeSeries]( StreamIngress.props[TimeSeries] ).named( s"${plan.name}-detect-streamlet-inlet" )
+      .actorPublisher[StreamMessage[TimeSeries]]( StreamIngress.props[StreamMessage[TimeSeries]] )
+      .named( s"${plan.name}-detect-streamlet-inlet" )
       .toMat( Sink.asPublisher(false).named( s"${plan.name}-detect-streamlet-outlet") )( Keep.both )
       .run()
     }
@@ -193,18 +234,24 @@ class OutlierPlanDetectionRouter extends Actor with InstrumentedActor with Actor
     val graph = GraphDSL.create() { implicit b =>
       import GraphDSL.Implicits._
 
-      val ingressPublisher = b.add( Source.fromPublisher( ingress ).named( s"${plan.name}-detect-streamlet" ) )
+      val ingressPublisher = b.add(
+        Source
+        .fromPublisher( ingress )
+        .map { _.payload }
+        .named( s"${plan.name}-detect-streamlet" )
+      )
       val batch = plan.grouping map { g => b.add( batchSeries( g ) ) }
-      val buffer = b.add( Flow[TimeSeriesBase].buffer(outer.bufferSize, OverflowStrategy.backpressure) )
-      val detect = b.add( detectionFlow( plan ) )
-      val egressSubscriber = b.add(
-        Sink.actorSubscriber[Outliers]( StreamEgress.props(subscriber, high = 50) ).named( s"${plan.name}-detect-streamlet")
+      val detect = b.add(
+        Flow[TimeSeries]
+        .buffer(outer.bufferSize, OverflowStrategy.backpressure)
+        .map{ m => log.info( "TEST: detect-streamlet exitingbuffer: [{}]", m); m }
+        .toMat( detectionSink(plan, subscriber) )( Keep.right )
       )
 
       if ( batch.isDefined ) {
-        ingressPublisher ~> batch.get ~> buffer ~> detect ~> egressSubscriber
+        ingressPublisher ~> batch.get ~> detect
       } else {
-        ingressPublisher ~> buffer ~> detect ~> egressSubscriber
+        ingressPublisher ~> detect
       }
 
       ClosedShape
@@ -233,28 +280,19 @@ class OutlierPlanDetectionRouter extends Actor with InstrumentedActor with Actor
     .mapConcat { identity }
   }
 
-  def detectionFlow( plan: OutlierPlan )( implicit system: ActorSystem ): Flow[TimeSeriesBase, Outliers, NotUsed] = {
-    val label = Symbol( OutlierDetection.WatchPoints.DetectionFlow.name + "." + plan.name )
-
-    val flow = Flow[TimeSeriesBase]
+  def detectionSink( plan: OutlierPlan, subscriber: ActorRef )( implicit system: ActorSystem ): Sink[TimeSeriesBase, NotUsed] = {
+    Flow[TimeSeriesBase]
     .filter { plan.appliesTo }
-    .map { ts => OutlierDetectionMessage( ts, plan ).disjunction }
+    .map { ts => OutlierDetectionMessage( ts, plan, subscriber ).disjunction }
     .collect { case \/-( m ) => m }
-    .via {
-      MaxInFlightProcessorAdapter.elasticProcessorFlow[OutlierDetectionMessage, DetectionResult](
-        label.name,
-        outer.maxInDetectionCpuFactor
-      ) {
-        case m => outer.detector
-      }
-    }
-    .map { _.outliers }
-    .named( s"${plan.name}-detection" )
-
-    StreamMonitor.add( label )
-    flow
+//    .watchFlow( Symbol( OutlierDetection.WatchPoints.DetectionFlow.name + "." + plan.name ) )
+    .map{ m => log.info( "TEST: sending to outlier-detector: [{}]", m); m }
+    .toMat{
+      Sink
+      .actorRef[OutlierDetectionMessage]( outer.detector, OnComplete )
+      .named( "outlier-detector-inlet" )
+    }( Keep.right )
   }
-
-
-  override def supervisorStrategy: SupervisorStrategy = SupervisorStrategy.defaultStrategy
+//
+//  override def supervisorStrategy: SupervisorStrategy = SupervisorStrategy.defaultStrategy
 }

@@ -12,9 +12,10 @@ import akka.stream.stage._
 import com.typesafe.scalalogging.{Logger, StrictLogging}
 import org.slf4j.LoggerFactory
 import peds.akka.metrics.Instrumented
-import peds.akka.stream.StreamMonitor
+import peds.akka.stream.{CommonActorPublisher, StreamMonitor}
 import peds.commons.{V, Valid}
 import peds.commons.collection.BloomFilter
+import spotlight.analysis.outlier.OutlierDetection.DetectionResult
 import spotlight.analysis.outlier.OutlierPlanDetectionRouter
 import spotlight.model.outlier._
 import spotlight.model.timeseries.TimeSeriesBase.Merging
@@ -79,13 +80,7 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
         Flow[(TimeSeries, OutlierPlan)].buffer( 1000, OverflowStrategy.backpressure ).watchFlow( Symbol("plan.buffer") )
       )
 
-      val detect = b.add(
-//        OutlierPlanDetectionRouter.elasticPlanDetectionRouterFlow(
-//          planDetectorRouterRef = planRouterRef,
-//          maxInDetectionCpuFactor = config.maxInDetectionCpuFactor
-//        )
-        OutlierPlanDetectionRouter.fixedPlanDetectionRouterFlow( planRouterRef, 1 )
-      )
+      val detect = b.add( OutlierPlanDetectionRouter.flow( planRouterRef ) )
 
       logMetrics ~> blockPriors ~> broadcast ~> passPlanned ~> zipConcatWithPlans ~> combineByPlan ~> buffer ~> detect
                                    broadcast ~> passUnrecognized
