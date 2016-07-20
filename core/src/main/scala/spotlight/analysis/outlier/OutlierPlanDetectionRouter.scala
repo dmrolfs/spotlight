@@ -184,7 +184,9 @@ class OutlierPlanDetectionRouter extends Actor with InstrumentedActor with Actor
 
     case OnComplete => {
       log.info( "OutlierPlanDetectionRouter[{}][{}]: notified that stream is completed", self.path, this.## )
-      context stop self
+      Thread.sleep( 10000 ) //todo test
+      completePlanStreams()
+//      context stop self
     }
   }
 
@@ -260,6 +262,13 @@ class OutlierPlanDetectionRouter extends Actor with InstrumentedActor with Actor
     val runnable = RunnableGraph.fromGraph( graph ).named( s"plan-detection-${plan.name}-${subscriber.path}" )
     runnable.run()
     PlanStream( ingressRef, runnable )
+  }
+
+  def completePlanStreams(): Unit = {
+    planStreams foreach { case (Key(_, subscriber), stream) =>
+      stream.ingressRef ! OnComplete
+      subscriber ! OnComplete
+    }
   }
 
   def batchSeries(
