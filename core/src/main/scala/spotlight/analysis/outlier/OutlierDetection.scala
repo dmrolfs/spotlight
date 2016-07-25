@@ -1,14 +1,14 @@
 package spotlight.analysis.outlier
 
 import java.net.URI
-
 import scala.concurrent.ExecutionContext
 import akka.actor.{Actor, ActorLogging, ActorPath, ActorRef, Props}
 import akka.event.LoggingReceive
 import akka.pattern.AskTimeoutException
 import akka.stream.Supervision
+import akka.stream.actor.ActorSubscriberMessage
 
-import scalaz.{\/, -\/, \/-}
+import scalaz.{-\/, \/, \/-}
 import com.codahale.metrics.{Metric, MetricFilter}
 import org.slf4j.LoggerFactory
 import com.typesafe.scalalogging.{Logger, StrictLogging}
@@ -23,13 +23,12 @@ import spotlight.model.outlier.{OutlierPlan, Outliers}
 
 
 object OutlierDetection extends StrictLogging with Instrumented {
-  def props( routerRef: ActorRef ): Props = {
-    Props(
-      new OutlierDetection with ConfigurationProvider {
-        override def router: ActorRef = routerRef
-      }
-    )
+  def props( routerRef: ActorRef ): Props = Props( new Default(routerRef) )
+
+  private class Default( routerRef: ActorRef ) extends OutlierDetection with ConfigurationProvider {
+    override def router: ActorRef = routerRef
   }
+
 
   lazy val timeoutMeter: Meter = metrics meter "timeouts"
 
@@ -115,6 +114,7 @@ with ActorLogging {
       log.debug( "OutlierDetection results: [{}:{}]", result.topic, result.plan )
       val aggregator = sender()
       val subscriber = outstanding( aggregator )
+      log.debug( "OutlierDetecion sending results to subscriber:[{}]", subscriber.ref )
       subscriber.ref ! DetectionResult( result )
       outstanding -= aggregator
       detectionTimer.update( System.nanoTime() - subscriber.startNanos, scala.concurrent.duration.NANOSECONDS )
@@ -123,7 +123,7 @@ with ActorLogging {
 
     case m: OutlierDetectionMessage =>  {
       log.debug( "OutlierDetection request: [{}:{}]", m.topic, m.plan )
-      val requester = sender()
+      val requester = m.subscriber
       dispatch( m, m.plan )( context.dispatcher ) match {
         case \/-( aggregator ) => outstanding += aggregator -> DetectionSubscriber( ref = requester )
         case -\/( ex ) => log.error( ex, "OutlierDetector failed to create aggregator for topic:[{}]", m.topic )
@@ -133,6 +133,11 @@ with ActorLogging {
     case to @ OutlierQuorumAggregator.AnalysisTimedOut( topic, plan ) => {
       log.error( "quorum was not reached in time: [{}]", to )
       outstanding -= sender()
+    }
+
+    case ActorSubscriberMessage.OnComplete => {
+      log.info( "OutlierDetection[{}][{}]: notified that stream is completed", self.path, this.## )
+      context stop self
     }
   }
 

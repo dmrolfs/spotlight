@@ -4,7 +4,7 @@ import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
 import akka.NotUsed
 import akka.actor.{ActorContext, ActorRef, Props}
-import akka.stream.scaladsl.{Flow, Keep}
+import akka.stream.scaladsl.{Flow, Keep, Sink}
 import akka.stream.testkit.scaladsl.{TestSink, TestSource}
 import akka.testkit.TestActor.AutoPilot
 import akka.testkit._
@@ -280,34 +280,31 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
       addDetectorAutoPilot( detector, findAndExtract )
       val workers = Await.result( testActorRef.underlyingActor.makeTopicWorkers( topic ), 2.seconds )
 
-      val flowUnderTest: Flow[TimeSeries, Outliers, NotUsed] = testActorRef.underlyingActor.detectionFlow( plan, workers )
+      val sinkUnderTest: Sink[TimeSeries, NotUsed] = testActorRef.underlyingActor.detectionFlow( plan, subscriber.ref, workers )
 
-      val (pub, sub) = {
+      val probe = {
         TestSource.probe[TimeSeries]
-        .via( flowUnderTest )
-        .toMat( TestSink.probe[Outliers] )( Keep.both )
+        .toMat( sinkUnderTest )( Keep.left )
         .run()
       }
 
-      val ps = pub.expectSubscription()
-      val ss = sub.expectSubscription()
+      val ps = probe.expectSubscription()
+//      val ss = sub.expectSubscription()
 
-      data foreach { ps.sendNext }
+      data foreach { probe.sendNext }
 
       def validateNext( ts: TimeSeries, i: Int ): Unit = {
-        ss.request( 1 )
-        val actual = sub.expectNext()
-        if ( i == 0 ) actual mustBe a [NoOutliers]
-        else  actual mustBe a [SeriesOutliers]
-
-        actual match{
-          case m @ NoOutliers( as, s, p, tbs ) if i == 0 => {
+        probe.sendNext( ts )
+        subscriber.expectMsgPF( hint = s"detect-${i}" ) {
+          case NoOutliers(as, s, p, tbs) => {
+            i mustBe 0
             as mustBe Set( algo )
             s mustBe data( i )
             p mustBe plan
           }
 
-          case m @ SeriesOutliers( as, s, p, os, _ ) if i != 0 => {
+          case SeriesOutliers( as, s, p, os, _ ) => {
+            i must not be (0)
             as mustBe Set( algo )
             s mustBe data(i)
             p mustBe plan
@@ -317,7 +314,7 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
         }
       }
 
-      data.indices foreach { i => validateNext(data(i), i ) }
+      data.zipWithIndex foreach { case (ts, i) => validateNext( ts, i ) }
     }
 
     "make functioning plan stream" in { f: Fixture =>

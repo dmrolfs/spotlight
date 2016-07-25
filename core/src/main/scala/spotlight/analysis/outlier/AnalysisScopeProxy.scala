@@ -7,6 +7,7 @@ import akka.actor._
 import akka.actor.SupervisorStrategy.{Escalate, Restart, Stop}
 import akka.event.LoggingReceive
 import akka.stream._
+import akka.stream.actor.ActorSubscriberMessage
 import akka.stream.scaladsl.{Flow, GraphDSL, Keep, RunnableGraph, Sink, Source}
 import akka.util.Timeout
 import nl.grons.metrics.scala.{Meter, MetricName, Timer}
@@ -256,13 +257,12 @@ with ActorLogging { outer: AnalysisScopeProxy.Provider =>
       val ingressPublisher = b.add( Source fromPublisher ingress )
       val batch = outer.plan.grouping map { g => b.add( batchSeries( g ) ) }
       val buffer = b.add( Flow[TimeSeries].buffer(outer.bufferSize, OverflowStrategy.backpressure) )
-      val detect = b.add( detectionFlow( outer.plan, outer.workers ) )
-      val egressSubscriber = b.add( Sink.actorSubscriber[Outliers]( StreamEgress.props(subscriber, high = outer.highWatermark) ) )
+      val detect = b.add( detectionFlow( outer.plan, subscriber, outer.workers ) )
 
       if ( batch.isDefined ) {
-        ingressPublisher ~> batch.get ~> buffer ~> detect ~> egressSubscriber
+        ingressPublisher ~> batch.get ~> buffer ~> detect
       } else {
-        ingressPublisher ~> buffer ~> detect ~> egressSubscriber
+        ingressPublisher ~> buffer ~> detect
       }
 
       ClosedShape
@@ -291,28 +291,23 @@ with ActorLogging { outer: AnalysisScopeProxy.Provider =>
     .mapConcat { identity }
   }
 
-  def detectionFlow( p: OutlierPlan, w: Workers )( implicit system: ActorSystem ): Flow[TimeSeries, Outliers, NotUsed] = {
+  def detectionFlow(
+    p: OutlierPlan,
+    subscriber: ActorRef,
+    w: Workers
+  )(
+    implicit system: ActorSystem
+  ): Sink[TimeSeries, NotUsed] = {
     val label = Symbol( OutlierDetection.WatchPoints.DetectionFlow.name + "." + p.name )
 
-    val flow = {
-      import scalaz.\/-
-
-      Flow[TimeSeries]
-      .filter { p.appliesTo }
-      .map { ts => OutlierDetectionMessage( ts, p ).disjunction }
-      .collect { case \/-( m ) => m }
-      .via {
-        WatermarkProcessorAdapter.elasticProcessorFlow[OutlierDetectionMessage, DetectionResult](
-          label.name,
-          outer.highWatermark
-        ) {
-          case m => w.detector
-        }
-      }
-      .map { _.outliers }
-    }
-
-    StreamMonitor.add( label )
-    flow
+    Flow[TimeSeries]
+    .filter { p.appliesTo }
+    .map { ts => OutlierDetectionMessage( ts, p, subscriber ).disjunction }
+    .collect { case scalaz.\/-( m ) => m }
+    .toMat {
+      Sink
+      .actorRef[OutlierDetectionMessage]( w.detector, ActorSubscriberMessage.OnComplete )
+      .named( s"${p.name}-outlier-detection-inlet" )
+    }( Keep.right )
   }
 }

@@ -1,7 +1,6 @@
 package spotlight.stream
 
 import java.net.InetSocketAddress
-
 import scala.concurrent.duration._
 import akka.actor.SupervisorStrategy._
 import akka.actor._
@@ -18,6 +17,7 @@ import spotlight.analysis.outlier.algorithm.density.SeriesDensityAnalyzer
 import spotlight.analysis.outlier.{DetectionAlgorithmRouter, OutlierDetection, OutlierPlanDetectionRouter}
 import spotlight.model.outlier.OutlierPlan
 import spotlight.protocol.GraphiteSerializationProtocol
+
 
 //todo to simplify usage, have bootstrap be point of of entry for ts messages and forward to processing
 
@@ -44,12 +44,10 @@ object OutlierDetectionBootstrap {
     def detectionBudget: FiniteDuration
     def bufferSize: Int
     def maxInDetectionCpuFactor: Double
-    def plans: Set[OutlierPlan]
     def configuration: Config
 
     def makePlanDetectionRouter(
       detector: ActorRef,
-      plans: Set[OutlierPlan],
       detectionBudget: FiniteDuration,
       bufferSize: Int,
       maxInDetectionCpuFactor: Double
@@ -66,7 +64,7 @@ object OutlierDetectionBootstrap {
 
       ctx.actorOf(
         OutlierPlanDetectionRouter
-        .props( detector, plans, detectionBudget, bufferSize, maxInDetectionCpuFactor )
+        .props( detector, detectionBudget, bufferSize, maxInDetectionCpuFactor )
         .withDispatcher( "plan-router-dispatcher" ),
         "plan-detection-router"
       )
@@ -126,7 +124,6 @@ class OutlierDetectionBootstrap(
     detectorRef = makeOutlierDetector( routerRef )
     planRouterRef = makePlanDetectionRouter(
       detector = detectorRef,
-      plans = outer.plans,
       detectionBudget = outer.detectionBudget,
       bufferSize = outer.bufferSize,
       maxInDetectionCpuFactor = outer.maxInDetectionCpuFactor

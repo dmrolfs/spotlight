@@ -1,7 +1,6 @@
 package spotlight.stream
 
 import java.util.concurrent.atomic.AtomicInteger
-
 import scala.concurrent.duration._
 import akka.NotUsed
 import akka.stream.FanOutShape.{Init, Name}
@@ -13,7 +12,7 @@ import com.typesafe.scalalogging.{Logger, StrictLogging}
 import org.slf4j.LoggerFactory
 import peds.akka.metrics.Instrumented
 import peds.akka.stream.StreamMonitor
-import peds.commons.{V, Valid}
+import peds.commons.V
 import peds.commons.collection.BloomFilter
 import spotlight.analysis.outlier.OutlierPlanDetectionRouter
 import spotlight.model.outlier._
@@ -79,12 +78,7 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
         Flow[(TimeSeries, OutlierPlan.Scope)].buffer( 1000, OverflowStrategy.backpressure ).watchFlow( Symbol("plan.buffer") )
       )
 
-      val detect = b.add(
-        OutlierPlanDetectionRouter.elasticPlanDetectionRouterFlow(
-          planDetectorRouterRef = planRouterRef,
-          maxInDetectionCpuFactor = config.maxInDetectionCpuFactor
-        )
-      )
+      val detect = b.add( OutlierPlanDetectionRouter.flow( planRouterRef ) )
 
       logMetrics ~> blockPriors ~> broadcast ~> passPlanned ~> zipConcatWithPlans ~> combineByPlan ~> buffer ~> detect
                                    broadcast ~> passUnrecognized
@@ -96,6 +90,28 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
         )
       )
     }
+  }
+
+
+  def scoringFlow(
+    planRouterRef: ActorRef,
+    config: Configuration
+  )(
+    implicit system: ActorSystem,
+    materializer: Materializer
+  ): Flow[TimeSeries, Outliers, NotUsed] = {
+    import akka.stream.scaladsl.GraphDSL.Implicits._
+
+    val graph = GraphDSL.create() { implicit b =>
+      val scoring = b.add( scoringGraph(planRouterRef, config) )
+      val logUnrecognized = b.add( logMetric( Logger( LoggerFactory getLogger "Unrecognized" ), config.plans ) )
+      val termUnrecognized = b.add( Sink.ignore )
+
+      scoring.out1 ~> logUnrecognized ~> termUnrecognized
+      FlowShape( in = scoring.in, out = scoring.out0 )
+    }
+
+    Flow.fromGraph( graph )
   }
 
 
