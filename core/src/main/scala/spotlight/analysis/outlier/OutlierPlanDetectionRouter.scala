@@ -1,10 +1,10 @@
 package spotlight.analysis.outlier
 
-import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.duration._
 import akka.NotUsed
-import akka.actor.{Actor, ActorLogging, ActorRef, ActorSystem, Props}
+import akka.actor.{Actor, ActorLogging, ActorRef, ActorSystem, Cancellable, Props, Terminated}
 import akka.event.LoggingReceive
-import akka.stream.actor.ActorSubscriberMessage.OnComplete
+import akka.stream.actor.ActorSubscriberMessage
 import akka.stream.{ActorMaterializerSettings, _}
 import akka.stream.scaladsl._
 
@@ -20,6 +20,8 @@ import spotlight.analysis.outlier.OutlierPlanDetectionRouter.StreamMessage
 import spotlight.model.outlier.{OutlierPlan, Outliers}
 import spotlight.model.timeseries.{TimeSeries, TimeSeriesBase}
 import spotlight.model.timeseries.TimeSeriesBase.Merging
+
+import scala.concurrent.ExecutionContext
 
 
 /**
@@ -60,7 +62,7 @@ object OutlierPlanDetectionRouter extends LazyLogging {
       val addSubscriber = b.add( Flow[(TimeSeries, OutlierPlan)]  map { tsp => StreamMessage(tsp, outletRef) } )
       val workStage = b.add(
         Sink
-        .actorRef[StreamMessage[(TimeSeries, OutlierPlan)]]( planDetectionRouter, OnComplete )
+        .actorRef[StreamMessage[(TimeSeries, OutlierPlan)]]( planDetectionRouter, ActorSubscriberMessage.OnComplete )
         .named( "plan-router-inlet")
       )
       addSubscriber ~> workStage
@@ -144,6 +146,7 @@ object OutlierPlanDetectionRouter extends LazyLogging {
     def maxInDetectionCpuFactor: Double
     def detectionBudget: FiniteDuration
     def bufferSize: Int
+    def completionTimeout: FiniteDuration = 1.minute
   }
 }
 
@@ -182,11 +185,51 @@ class OutlierPlanDetectionRouter extends Actor with InstrumentedActor with Actor
       streamIngressFor( p, subscriber ) forward StreamMessage[TimeSeries]( ts, subscriber )
     }
 
-    case OnComplete => {
+    case ActorSubscriberMessage.OnComplete => {
       log.info( "OutlierPlanDetectionRouter[{}][{}]: notified that stream is completed", self.path, this.## )
       Thread.sleep( 10000 ) //todo test
       completePlanStreams()
-//      context stop self
+      context become LoggingReceive { around( waitingToComplete(scheduleCompletion()) ) }
+    }
+
+    case Terminated( actor ) => {
+      log.info(
+        "OutlierPlanDetectionRouter[{}][{}]: notified of actor termination outstide of complete: [{}]",
+        self.path,
+        this.##,
+        actor.path
+      )
+      clearTerminatedPlanStream( actor )
+    }
+  }
+
+  case object CompleteTimedOut
+
+  def scheduleCompletion(): Cancellable = {
+    implicit val ec = system.dispatcher
+    system.scheduler.scheduleOnce( outer.completionTimeout, self, CompleteTimedOut )
+  }
+
+  def waitingToComplete( timeout: Cancellable ): Receive = {
+    case Terminated( actor ) => {
+      timeout.cancel()
+      clearTerminatedPlanStream( actor )
+      if ( planStreams.isEmpty ) {
+        log.info( "OutlierPlanDetectionRouter[{}][{}] cleaned all plan sub streams. Stopping.", self.path, this.## )
+        context stop self
+      } else {
+        context become LoggingReceive { around( waitingToComplete(scheduleCompletion()) ) }
+      }
+    }
+
+    case CompleteTimedOut => {
+      log.warning(
+        "OutlierPlanDetectionRouter[{}][{}] timed out before [{}] sub streams completed. Stopping.",
+        self.path,
+        this.##,
+        planStreams.size
+      )
+      context stop self
     }
   }
 
@@ -261,15 +304,30 @@ class OutlierPlanDetectionRouter extends Actor with InstrumentedActor with Actor
 
     val runnable = RunnableGraph.fromGraph( graph ).named( s"plan-detection-${plan.name}-${subscriber.path}" )
     runnable.run()
+    context watch ingressRef
     PlanStream( ingressRef, runnable )
   }
 
   def completePlanStreams(): Unit = {
     planStreams foreach { case (Key(_, subscriber), stream) =>
-      stream.ingressRef ! OnComplete
-      subscriber ! OnComplete
+      stream.ingressRef ! ActorSubscriberMessage.OnComplete
+      subscriber ! ActorSubscriberMessage.OnComplete
     }
   }
+
+  def clearTerminatedPlanStream( ingress: ActorRef ): Unit = {
+    planStreams.keys
+    .find { case Key(_, planIngress) => ingress == planIngress }
+    .map { key => planStreams -= key }
+    .getOrElse {
+      log.warning(
+        "plan-router waiting to complete [{}] notified of non-plan-stream terminated actor:[{}]",
+        self.path,
+        ingress.path
+      )
+    }
+  }
+
 
   def batchSeries(
     grouping: OutlierPlan.Grouping
@@ -298,7 +356,7 @@ class OutlierPlanDetectionRouter extends Actor with InstrumentedActor with Actor
     .map{ m => log.info( "TEST: sending to outlier-detector: [{}]", m); m }
     .toMat{
       Sink
-      .actorRef[OutlierDetectionMessage]( outer.detector, OnComplete )
+      .actorRef[OutlierDetectionMessage]( outer.detector, ActorSubscriberMessage.OnComplete )
       .named( "outlier-detector-inlet" )
     }( Keep.right )
   }
