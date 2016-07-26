@@ -31,7 +31,7 @@ class OutlierPlanDetectionRouterSpec extends ParallelAkkaSpec with LazyLogging {
 
   class Fixture extends AkkaFixture { fixture =>
     def status[T]( label: String ): Flow[T, T, NotUsed] = {
-      Flow[T].map { e => logger info s"\n$label:${e.toString}"; e }
+      Flow[T] map { e => logger info s"\n$label:${e.toString}"; e }
     }
 
     val algo = SimpleMovingAverageAnalyzer.Algorithm
@@ -86,7 +86,7 @@ class OutlierPlanDetectionRouterSpec extends ParallelAkkaSpec with LazyLogging {
             override def detectionBudget: FiniteDuration = 500.millis
             override def bufferSize: Int = 100
             override def maxInDetectionCpuFactor: Double = 1.0
-            override def plans: Set[OutlierPlan] = ps
+//            override def plans: Set[OutlierPlan] = ps
           }
         ),
         "fixture-plan-router"
@@ -247,16 +247,12 @@ class OutlierPlanDetectionRouterSpec extends ParallelAkkaSpec with LazyLogging {
           detectorRef = detector.ref,
           detectionBudget = 2.seconds,
           bufferSize = 100,
-          maxInDetectionCpuFactor = 1.0,
-          plans = testPlans
+          maxInDetectionCpuFactor = 1.0
         ),
         "plan-router"
       )
 
-      val planDetectionFlow = OutlierPlanDetectionRouter.elasticPlanDetectionRouterFlow(
-        planDetectorRouterRef = planRouterRef,
-        maxInDetectionCpuFactor = 1.0
-      )
+      val planDetectionFlow = OutlierPlanDetectionRouter.flow( planRouterRef )
 
       val preFlow = {
         Flow[TimeSeries]

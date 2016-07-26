@@ -14,7 +14,6 @@ import spotlight.analysis.outlier.algorithm.{ AlgorithmProtocol => P}
 import spotlight.analysis.outlier.algorithm.AlgorithmModuleSpec
 
 
-
 /**
   * Created by rolfsd on 6/9/16.
   */
@@ -139,7 +138,7 @@ class SimpleMovingAverageModuleSpec extends AlgorithmModuleSpec[SimpleMovingAver
         algoRef !+ DetectUsing(
           algorithm = module.algorithm.label,
           aggregator = destination.ref,
-          payload = DetectOutliersInSeries( series, plan ),
+          payload = DetectOutliersInSeries( series, plan, subscriber.ref ),
           history = history
         )
 

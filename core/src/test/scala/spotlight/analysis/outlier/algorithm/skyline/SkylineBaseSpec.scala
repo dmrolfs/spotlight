@@ -49,6 +49,7 @@ abstract class SkylineBaseSpec extends ParallelAkkaSpec with MockitoSugar with L
 
     val router = TestProbe()
     val aggregator = TestProbe()
+    val subscriber = TestProbe()
 
     def makeDataPoints(
       values: Seq[Double],

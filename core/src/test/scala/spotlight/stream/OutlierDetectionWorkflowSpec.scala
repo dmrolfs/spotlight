@@ -20,9 +20,6 @@ import spotlight.model.outlier.OutlierPlan
 import spotlight.testkit.ParallelAkkaSpec
 import spotlight.protocol.GraphiteSerializationProtocol
 
-import scala.concurrent.ExecutionContext
-
-
 
 /**
   * Created by rolfsd on 1/7/16.
@@ -40,7 +37,6 @@ class OutlierDetectionWorkflowSpec extends ParallelAkkaSpec with MockitoSugar wi
     import scalaz.Scalaz._
 
     val protocol = mock[GraphiteSerializationProtocol]
-//    val makePlans: PlanConfigurationProvider.Creator = () => { Seq.empty[OutlierPlan].right }
     val config = mock[Config]
 
     val rateLimiter = TestProbe()
@@ -60,7 +56,6 @@ class OutlierDetectionWorkflowSpec extends ParallelAkkaSpec with MockitoSugar wi
         override def detectionBudget: FiniteDuration = 3.seconds
         override def bufferSize: Int = 1000
         override def maxInDetectionCpuFactor: Double = 1.0
-        override def plans: Set[OutlierPlan] = Set.empty[OutlierPlan]
 
         override def makeAlgorithmRouter()(implicit context: ActorContext): ActorRef = planRouter.ref
         override def makeOutlierDetector(rateLimiter: ActorRef)(implicit context: ActorContext): ActorRef = detector.ref
@@ -70,7 +65,6 @@ class OutlierDetectionWorkflowSpec extends ParallelAkkaSpec with MockitoSugar wi
 
         override def makePlanDetectionRouter(
           detector: ActorRef,
-          plans: Set[OutlierPlan],
           detectionBudget: FiniteDuration,
           bufferSize: Int,
           maxInDetectionCpuFactor: Double

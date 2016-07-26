@@ -46,6 +46,8 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
   abstract class AlgorithmFixture extends AggregateFixture { fixture =>
     logger.info( "Fixture: DomainModel=[{}]", model )
 
+    val subscriber = TestProbe()
+
     type Module = outer.Module
     override val module: Module = outer.defaultModule
 

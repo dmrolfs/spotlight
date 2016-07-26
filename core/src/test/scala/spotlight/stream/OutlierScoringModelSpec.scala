@@ -3,7 +3,6 @@ package spotlight.stream
 import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicInteger
 
-import scala.collection.immutable
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 import scala.util.Failure
@@ -13,10 +12,7 @@ import akka.stream.testkit.scaladsl.{TestSink, TestSource}
 import akka.stream.scaladsl._
 import akka.util.ByteString
 import akka.testkit._
-import akka.actor.ActorRef
-import akka.stream.testkit.TestSubscriber.OnNext
 
-import scalaz.Scalaz._
 import com.typesafe.config.ConfigFactory
 import org.scalatest.Tag
 import com.typesafe.scalalogging.LazyLogging
@@ -348,8 +344,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
           detectorRef = detector,
           detectionBudget = 2.minutes,
           bufferSize = 1000,
-          maxInDetectionCpuFactor = 1,
-          plans = Set( defaultPlan )
+          maxInDetectionCpuFactor = 1
         ),
         "planRouter"
       )
@@ -372,10 +367,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
 //      val expected = TimeSeries( "foo", (dp1 ++ dp3).sortBy( _.timestamp ) )
 
       val graphiteFlow = OutlierScoringModel.batchSeriesByPlan( max = 1000 )
-      val detectFlow = OutlierPlanDetectionRouter.elasticPlanDetectionRouterFlow(
-        planDetectorRouterRef = planRouter,
-        maxInDetectionCpuFactor = 1
-      )
+      val detectFlow = OutlierPlanDetectionRouter.flow( planRouter )
 
       val flowUnderTest = {
         Flow[TimeSeries]
@@ -471,10 +463,12 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
         .mapConcat { identity }
       }
 
-      val future = source
-                   .via( flowUnderTest )
-//                   .grouped( 5 )
-                   .runWith( Sink.head )
+      val future = {
+        source
+        .via( flowUnderTest )
+//        .grouped( 5 )
+        .runWith( Sink.head )
+      }
 
       val result = Await.result( future, 5.seconds.dilated )
       result mustBe Fixture.TickA("b", Seq(1,2,3))
