@@ -1,13 +1,12 @@
 package spotlight.analysis.outlier
 
-import spotlight.model.outlier.OutlierPlan
-
 import scala.concurrent.duration._
 import akka.testkit._
 import org.joda.{ time => joda }
-import spotlight.testkit.ParallelAkkaSpec
 import org.scalatest.mock.MockitoSugar
+import spotlight.model.outlier.OutlierPlan
 import spotlight.model.timeseries.{TimeSeries, DataPoint}
+import spotlight.testkit.ParallelAkkaSpec
 
 
 /**

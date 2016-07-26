@@ -28,6 +28,7 @@ abstract class EntityModuleSpec[E <: Entity : ClassTag] extends AggregateRootSpe
   override type ID = E#ID
 
   override type Fixture <: EntityFixture
+
   abstract class EntityFixture(
     id: Int = AggregateRootSpec.sysId.incrementAndGet(),
     config: Config = spotlight.testkit.config( "core" )
