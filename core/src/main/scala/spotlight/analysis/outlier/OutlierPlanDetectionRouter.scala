@@ -159,6 +159,12 @@ class OutlierPlanDetectionRouter extends Actor with InstrumentedActor with Actor
 
   var planStreams: Map[Key, PlanStream] = Map.empty[Key, PlanStream]
 
+
+  override def preStart(): Unit = {
+    super.preStart()
+    context watch outer.detector
+  }
+
   override def postStop(): Unit = {
     planStreams.values foreach { ps =>
       ps.ingressRef ! StreamIngress.CompleteAndStop
@@ -187,14 +193,31 @@ class OutlierPlanDetectionRouter extends Actor with InstrumentedActor with Actor
 
     case ActorSubscriberMessage.OnComplete => {
       log.info( "OutlierPlanDetectionRouter[{}][{}]: notified that stream is completed", self.path, this.## )
-      Thread.sleep( 10000 ) //todo test
-      completePlanStreams()
-      context become LoggingReceive { around( waitingToComplete(scheduleCompletion()) ) }
+//      Thread.sleep( 10000 ) //todo test
+      if ( planStreams.isEmpty ) {
+        log.info( "OutlierPlanDetectionRouter[{}][{}] is not waiting on sub-streams. Stopping.", self.path, this.## )
+        context stop self
+      } else {
+        outer.detector ! ActorSubscriberMessage.OnComplete
+        context become LoggingReceive { around( waitingToCompleteDetector(scheduleCompletion()) orElse manageComplete ) }
+      }
+    }
+
+    case Terminated( actor ) if actor == outer.detector => {
+      log.error(
+        "OutlierPlanDetectionRouter[{}][{}] notified of outlier-detector termination [{}]. erroring plan sub-streams",
+        self.path,
+        this.##,
+        actor.path
+      )
+
+      val cause = new IllegalStateException( s"outlier-detector[${actor.path}] terminated" )
+      planStreams foreach { case (_, stream) => stream.ingressRef ! ActorSubscriberMessage.OnError( cause ) }
     }
 
     case Terminated( actor ) => {
-      log.info(
-        "OutlierPlanDetectionRouter[{}][{}]: notified of actor termination outstide of complete: [{}]",
+      log.warning(
+        "OutlierPlanDetectionRouter[{}][{}]: notified of actor termination outside of complete: [{}]",
         self.path,
         this.##,
         actor.path
@@ -210,7 +233,30 @@ class OutlierPlanDetectionRouter extends Actor with InstrumentedActor with Actor
     system.scheduler.scheduleOnce( outer.completionTimeout, self, CompleteTimedOut )
   }
 
-  def waitingToComplete( timeout: Cancellable ): Receive = {
+  def waitingToCompleteDetector( timeout: Cancellable ): Receive = {
+    case Terminated( actor ) if actor == outer.detector => {
+      timeout.cancel()
+      log.info(
+        "OutlierPlanDetectionRouter[{}][{}] recognized outlier-detector [{}] termination during completion",
+        self.path,
+        this.##,
+        actor.path
+      )
+
+      completePlanStreams()
+
+      if ( planStreams.isEmpty ) {
+        log.info( "OutlierPlanDetectionRouter[{}][{}] cleaned all plan sub streams. Stopping.", self.path, this.## )
+        context stop self
+      } else {
+        log.info( "OutlierPlanDetectionRouter[{}][{}] waiting for sub-streams to complete...", self.path, this.## )
+        context become LoggingReceive { around( waitingToCompleteSubStreams(scheduleCompletion()) orElse manageComplete ) }
+      }
+    }
+
+  }
+
+  def waitingToCompleteSubStreams( timeout: Cancellable ): Receive = {
     case Terminated( actor ) => {
       timeout.cancel()
       clearTerminatedPlanStream( actor )
@@ -218,10 +264,12 @@ class OutlierPlanDetectionRouter extends Actor with InstrumentedActor with Actor
         log.info( "OutlierPlanDetectionRouter[{}][{}] cleaned all plan sub streams. Stopping.", self.path, this.## )
         context stop self
       } else {
-        context become LoggingReceive { around( waitingToComplete(scheduleCompletion()) ) }
+        context become LoggingReceive { around( waitingToCompleteSubStreams(scheduleCompletion()) orElse manageComplete ) }
       }
     }
+  }
 
+  val manageComplete: Receive = {
     case CompleteTimedOut => {
       log.warning(
         "OutlierPlanDetectionRouter[{}][{}] timed out before [{}] sub streams completed. Stopping.",
@@ -310,21 +358,42 @@ class OutlierPlanDetectionRouter extends Actor with InstrumentedActor with Actor
 
   def completePlanStreams(): Unit = {
     planStreams foreach { case (Key(_, subscriber), stream) =>
+      log.info(
+        "OutlierPlanDetectionRouter[{}][{}] sending OnComplete to plan sub-stream: [{}]",
+        self.path,
+        this.##,
+        stream.ingressRef
+      )
       stream.ingressRef ! ActorSubscriberMessage.OnComplete
-      subscriber ! ActorSubscriberMessage.OnComplete
+      subscriber ! ActorSubscriberMessage.OnComplete  // subscriber doesn't receive OnComplete from sub-stream
     }
   }
 
   def clearTerminatedPlanStream( ingress: ActorRef ): Unit = {
-    planStreams.keys
-    .find { case Key(_, planIngress) => ingress == planIngress }
-    .map { key => planStreams -= key }
-    .getOrElse {
-      log.warning(
-        "plan-router waiting to complete [{}] notified of non-plan-stream terminated actor:[{}]",
+    planStreams find { case (_, PlanStream(planIngress, _)) =>
+      log.debug(
+        "OutlierPlanDetectionRouter[{}] checking ingress:[{}] == planIngress[{}] = [{}]",
         self.path,
-        ingress.path
+        ingress.path,
+        planIngress.path,
+        (ingress == planIngress).toString
       )
+
+      ingress == planIngress
+    } match {
+      case Some( (key, _) ) => {
+        log.info( "OutlierPlanDetectionRouter[{}][{}] found key [{}] to clear", self.path, this.##, key )
+        planStreams -= key
+      }
+
+      case None => {
+        log.warning(
+          "OutlierPlanDetectionRouter[{}][{}] waiting to complete notified of non-plan-stream terminated actor:[{}]",
+          self.path,
+          this.##,
+          ingress.path
+        )
+      }
     }
   }
 

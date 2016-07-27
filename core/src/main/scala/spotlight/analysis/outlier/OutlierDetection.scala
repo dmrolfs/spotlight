@@ -100,9 +100,21 @@ with ActorLogging {
   type AggregatorSubscribers = Map[ActorRef, DetectionSubscriber]
   var outstanding: AggregatorSubscribers = Map.empty[ActorRef, DetectionSubscriber]
 
-  override def receive: Receive = LoggingReceive { around( detection ) }
+  override def receive: Receive = LoggingReceive { around( detection() ) }
 
-  val detection: Receive = {
+  def detection( isWaitingToComplete: Boolean = false ): Receive = {
+    case m: OutlierDetectionMessage =>  {
+      log.debug( "OutlierDetection request: [{}:{}]", m.topic, m.plan )
+      val requester = m.subscriber
+      val aggregator = dispatch( m, m.plan )( context.dispatcher )
+      outstanding += aggregator -> DetectionSubscriber( ref = requester )
+    }
+
+    case OnComplete => {
+      log.info( "OutlierDetection[{}][{}]: notified that stream is completed. waiting to complete", self.path, this.## )
+      context become LoggingReceive { around( detection(isWaitingToComplete = true) ) }
+    }
+
     case result: Outliers if outstanding.contains( sender() ) => {
       log.debug( "OutlierDetection results: [{}:{}]", result.topic, result.plan )
       val aggregator = sender()
@@ -112,22 +124,20 @@ with ActorLogging {
       outstanding -= aggregator
       detectionTimer.update( System.nanoTime() - subscriber.startNanos, scala.concurrent.duration.NANOSECONDS )
       updateScore( result )
-    }
 
-    case m: OutlierDetectionMessage =>  {
-      log.debug( "OutlierDetection request: [{}:{}]", m.topic, m.plan )
-      val requester = m.subscriber
-      val aggregator = dispatch( m, m.plan )( context.dispatcher )
-      outstanding += aggregator -> DetectionSubscriber( ref = requester )
+      if ( isWaitingToComplete ) stopIfFullyComplete()
     }
 
     case to @ OutlierQuorumAggregator.AnalysisTimedOut( topic, plan ) => {
       log.error( "quorum was not reached in time: [{}]", to )
       outstanding -= sender()
+      if ( isWaitingToComplete ) stopIfFullyComplete()
     }
+  }
 
-    case OnComplete => {
-      log.info( "OutlierDetection[{}][{}]: notified that stream is completed", self.path, this.## )
+  private def stopIfFullyComplete(): Unit = {
+    if ( outstanding.isEmpty ) {
+      log.info( "OutlierDetection[{}][{}] finished outstanding work. stopping for completion", self.path, this.## )
       context stop self
     }
   }
