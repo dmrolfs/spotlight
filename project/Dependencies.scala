@@ -3,7 +3,7 @@ import sbt._
 
 object Dependencies {
   object peds {
-    val version = "0.3.2-SNAPSHOT"
+    val version = "0.3.3-SNAPSHOT"
     def module( id: String ) = "com.github.dmrolfs" %% s"peds-$id" % version
     def all = Seq( commons, akka, archetype )
 
@@ -14,7 +14,7 @@ object Dependencies {
   }
 
   object demesne {
-    val version = "1.1.2-SNAPSHOT"
+    val version = "1.1.3-SNAPSHOT"
     def module( id: String ) = "com.github.dmrolfs" %% s"demesne-$id" % version
     val core = module( "core" )
     val testkit = module( "testkit" )

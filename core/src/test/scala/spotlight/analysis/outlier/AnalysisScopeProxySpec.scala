@@ -97,7 +97,7 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
                 )
 
                 log.info( "Detector AutoPilot\n + received: [{}]\n + sending:[{}]\n", m, results )
-                dest ! results
+                subscriber.ref ! results
                 TestActor.KeepRunning
               }
 
@@ -260,7 +260,7 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
       }
     }
 
-    "detect in flow" in { f: Fixture =>
+    "detect in flow" taggedAs WIP in { f: Fixture =>
       import f._
       import scala.concurrent.ExecutionContext.Implicits.global
 
@@ -288,22 +288,22 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
         .run()
       }
 
-      val ps = probe.expectSubscription()
-//      val ss = sub.expectSubscription()
-
       data foreach { probe.sendNext }
 
       def validateNext( ts: TimeSeries, i: Int ): Unit = {
         probe.sendNext( ts )
+        detector.expectMsgType[OutlierDetectionMessage]
         subscriber.expectMsgPF( hint = s"detect-${i}" ) {
-          case NoOutliers(as, s, p, tbs) => {
+          case DetectionResult(NoOutliers(as, s, p, tbs)) => {
+            log.info( "TEST: NO-OUTLIERS" )
             i mustBe 0
             as mustBe Set( algo )
             s mustBe data( i )
             p mustBe plan
           }
 
-          case SeriesOutliers( as, s, p, os, _ ) => {
+          case DetectionResult(SeriesOutliers( as, s, p, os, _ )) => {
+            log.info( "TEST: SERIES-OUTLIERS" )
             i must not be (0)
             as mustBe Set( algo )
             s mustBe data(i)
@@ -324,7 +324,7 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
       addDetectorAutoPilot( detector )
       actual.ingressRef ! TimeSeries( "dummy", Seq() )
       detector.expectMsgClass( classOf[DetectOutliersInSeries] )
-      subscriber.expectMsgClass( classOf[NoOutliers] )
+      subscriber.expectMsgClass( classOf[DetectionResult] )
     }
 
     "make resuable plan stream ingress once" in { f: Fixture =>
@@ -335,7 +335,7 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
       val msg1 = TimeSeries( "dummy", Seq() )
       a1 ! msg1
       detector.expectMsgClass( classOf[DetectOutliersInSeries] )
-      subscriber.expectMsgClass( classOf[NoOutliers] )
+      subscriber.expectMsgClass( classOf[DetectionResult] )
 
       val a2 = testActorRef.underlyingActor.streamIngressFor( subscriber.ref )
       log.info( "second actual = [{}]", a2 )
@@ -344,7 +344,7 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
       a1 mustBe a2
       a2 ! msg2
       detector.expectMsgClass( classOf[DetectOutliersInSeries] )
-      subscriber.expectMsgClass( classOf[SeriesOutliers] )
+      subscriber.expectMsgClass( classOf[DetectionResult] )
     }
 
     "make plan-dependent streams" in { f: Fixture =>
@@ -392,7 +392,7 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
       a1 must not be a2
       a2 ! m2
       detector.expectMsgClass( 1.second.dilated, classOf[DetectOutliersInSeries] )
-      subscriber.expectMsgClass( 1.second.dilated, classOf[SeriesOutliers] )
+      subscriber.expectMsgClass( 1.second.dilated, classOf[DetectionResult] )
     }
 
     "router receive uses plan-dependent streams" in { f: Fixture =>
@@ -422,7 +422,7 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
 
       proxy1.receive( m1p, subscriber.ref )
       detector.expectMsgClass( 5.seconds.dilated, classOf[DetectOutliersInSeries] )
-      subscriber.expectMsgClass( 5.seconds.dilated, classOf[SeriesOutliers] )
+      subscriber.expectMsgClass( 5.seconds.dilated, classOf[DetectionResult] )
 
       proxy1.receive( m2s, subscriber.ref )
       detector.expectNoMsg( 1.second.dilated )
@@ -442,11 +442,11 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
 
       proxy2.receive( m2s, subscriber.ref )
       detector.expectMsgClass( 1.second.dilated, classOf[DetectOutliersInSeries] )
-      subscriber.expectMsgClass( 1.second.dilated, classOf[SeriesOutliers] )
+      subscriber.expectMsgClass( 1.second.dilated, classOf[DetectionResult] )
     }
 
 
-    "messaging uses plan-dependent streams" taggedAs WIP in { f: Fixture =>
+    "messaging uses plan-dependent streams" in { f: Fixture =>
       import f._
 
       // needing grouping time window to be safely less than expectMsg max, since demand isn't propagated until grouping window
@@ -474,7 +474,10 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
 
       proxy.tell( m1p, subscriber.ref )
       detector.expectMsgClass( 5.seconds.dilated, classOf[DetectOutliersInSeries] )
-      subscriber.expectMsgClass( 5.seconds.dilated, classOf[SeriesOutliers] )
+      subscriber.expectMsgPF( 5.seconds.dilated, "results" ) {
+        case DetectionResult( m ) => m mustBe a [SeriesOutliers]
+        case m => m mustBe a [SeriesOutliers]
+      }
 
       proxy.tell( m2s, subscriber.ref )
       detector.expectNoMsg( 1.second.dilated )

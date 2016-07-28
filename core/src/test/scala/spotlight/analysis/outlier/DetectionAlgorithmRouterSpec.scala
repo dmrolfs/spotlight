@@ -2,10 +2,11 @@ package spotlight.analysis.outlier
 
 import scala.concurrent.duration._
 import akka.testkit._
-import org.joda.{ time => joda }
+import org.joda.{time => joda}
 import org.scalatest.mock.MockitoSugar
+import peds.akka.envelope.Envelope
 import spotlight.model.outlier.OutlierPlan
-import spotlight.model.timeseries.{TimeSeries, DataPoint}
+import spotlight.model.timeseries.{DataPoint, TimeSeries}
 import spotlight.testkit.ParallelAkkaSpec
 
 
@@ -28,7 +29,7 @@ class DetectionAlgorithmRouterSpec extends ParallelAkkaSpec with MockitoSugar {
       val probe = TestProbe()
       router.receive( RegisterDetectionAlgorithm('foo, probe.ref), probe.ref )
       probe.expectMsgPF( hint = "register", max = 200.millis.dilated ) {
-        case AlgorithmRegistered( actual ) => actual.name mustBe Symbol("foo").name
+        case Envelope( AlgorithmRegistered(actual), _ ) => actual.name mustBe Symbol("foo").name
       }
     }
 
@@ -70,7 +71,9 @@ class DetectionAlgorithmRouterSpec extends ParallelAkkaSpec with MockitoSugar {
       )
 
       router.receive( msg )
-      algo.expectMsg( 2.seconds.dilated, "route", msg )
+      algo.expectMsgPF( 2.seconds.dilated, "route" ) {
+        case Envelope( actual, _ ) => actual mustBe msg
+      }
     }
   }
 }
