@@ -28,6 +28,7 @@ with InitializeAggregateRootClusterSharding { outer =>
     }
 
     override def step( point: PointT )( implicit state: State, algorithmContext: Context ): (Boolean, ThresholdBoundary) = {
+      logger.debug( "TEST:step( {} ): state=[{}]", point, state )
       val moving = state.history.movingStatistics
       val mean = moving.getMean
       val stddev = moving.getStandardDeviation

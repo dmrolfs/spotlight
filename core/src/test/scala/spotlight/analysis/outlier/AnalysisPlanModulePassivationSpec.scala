@@ -122,13 +122,14 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[OutlierPlan] { 
 
       logger.info( "TEST: P1.id=[{}]  planTid:[{}]", p1.id, planTid )
       entity ! EntityMessages.Add( p1.id, Some(p1) )
-      bus.expectMsgClass( classOf[EntityMessages.Added] )
 
       stateFrom( entity, planTid ) mustBe p1
 
       logger.info( "TEST:SLEEPING..." )
       Thread.sleep( 10000 )
       logger.info( "TEST:AWAKE...")
+
+      bus.expectMsgClass( classOf[EntityMessages.Added] )
 
       stateFrom( entity, planTid ) mustBe p1
 

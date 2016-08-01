@@ -27,7 +27,8 @@ package object outlier {
     def source: Source
     def plan: OutlierPlan
     def subscriber: ActorRef
-    final protected val identifying: EntityIdentifying[AlgorithmModule.AnalysisState] = AlgorithmModule.analysisStateIdentifying
+    final protected val identifying: EntityIdentifying[AlgorithmModule.AnalysisState] = AlgorithmModule.identifying
+    lazy val scope: OutlierPlan.Scope = OutlierPlan.Scope( plan, topic )
   }
 
   object OutlierDetectionMessage {

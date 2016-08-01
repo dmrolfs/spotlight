@@ -8,6 +8,7 @@ import org.scalatest.{Outcome, Tag}
 import org.scalatest.mock.MockitoSugar
 import org.mockito.Mockito._
 import com.typesafe.config.ConfigFactory
+import peds.akka.envelope.Envelope
 import peds.commons.V
 import spotlight.model.timeseries.{ThresholdBoundary, TimeSeries, TimeSeriesBase, Topic}
 import spotlight.testkit.ParallelAkkaSpec
@@ -119,7 +120,7 @@ class OutlierQuorumAggregatorSpec extends ParallelAkkaSpec with MockitoSugar {
       log.info( "outliers.anomalySize = [{}]", outliers.anomalySize )
 
       aggregator.receive( outliers )
-      destination.expectMsgClass( classOf[NoOutliers] )
+      destination.expectMsgPF( hint = "destination expectation" ) { case Envelope( m, _ ) => { m mustBe a [NoOutliers] } }
     }
   }
 }

@@ -16,7 +16,9 @@ import spotlight.testkit.ParallelAkkaSpec
 class DetectionAlgorithmRouterSpec extends ParallelAkkaSpec with MockitoSugar {
 
   class Fixture extends AkkaFixture {
-    val router = TestActorRef[DetectionAlgorithmRouter]( DetectionAlgorithmRouter.props )
+    val algo = 'foo
+    val algorithm = TestProbe()
+    val router = TestActorRef[DetectionAlgorithmRouter]( DetectionAlgorithmRouter.props( Map(algo -> algorithm.ref) ) )
     val subscriber = TestProbe()
   }
 
@@ -35,8 +37,7 @@ class DetectionAlgorithmRouterSpec extends ParallelAkkaSpec with MockitoSugar {
 
     "route detection messages" in { f: Fixture =>
       import f._
-      val algo = TestProbe()
-      router.receive( RegisterDetectionAlgorithm('foo, algo.ref) )
+      router.receive( RegisterDetectionAlgorithm(algo, algorithm.ref) )
 
       val myPoints = Seq(
         DataPoint( new joda.DateTime(448), 8.46 ),
@@ -71,7 +72,7 @@ class DetectionAlgorithmRouterSpec extends ParallelAkkaSpec with MockitoSugar {
       )
 
       router.receive( msg )
-      algo.expectMsgPF( 2.seconds.dilated, "route" ) {
+      algorithm.expectMsgPF( 2.seconds.dilated, "route" ) {
         case Envelope( actual, _ ) => actual mustBe msg
       }
     }

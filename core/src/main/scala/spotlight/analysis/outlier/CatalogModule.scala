@@ -306,7 +306,7 @@ object Catalog extends EntityLensProvider[Catalog] {
           for {
             p <- plansCache.values if p appliesTo ts
             pref = model.aggregateOf( PlanModule.rootType, p.id )
-          } { pref forwardEnvelope ts }
+          } { pref forwardEnvelope AnalysisPlanProtocol.AcceptTimeSeries( p.id, ts ) }
         }
       }
 

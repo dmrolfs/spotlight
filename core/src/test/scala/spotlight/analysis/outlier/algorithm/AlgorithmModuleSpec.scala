@@ -7,6 +7,7 @@ import akka.actor.{ActorRef, ActorSystem}
 import akka.pattern.ask
 import akka.testkit._
 import akka.util.Timeout
+
 import scalaz.{-\/, \/-}
 import shapeless.syntax.typeable._
 import org.scalatest.concurrent.ScalaFutures
@@ -17,6 +18,7 @@ import demesne.AggregateRootModule
 import demesne.module.entity.{messages => EntityMessage}
 import demesne.testkit.AggregateRootSpec
 import org.apache.commons.math3.random.RandomDataGenerator
+import org.scalatest.OptionValues
 import peds.archetype.domain.model.core.EntityIdentifying
 import peds.commons.V
 import peds.commons.log.Trace
@@ -29,7 +31,7 @@ import spotlight.model.timeseries._
 /**
   * Created by rolfsd on 6/9/16.
   */
-abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] with ScalaFutures { outer =>
+abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] with ScalaFutures with OptionValues { outer =>
   private val trace = Trace[AlgorithmModuleSpec[S]]
 
 
@@ -40,7 +42,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
 
   type Module <: AlgorithmModule
   val defaultModule: Module
-  val identifying: EntityIdentifying[AlgorithmModule.AnalysisState] = AlgorithmModule.analysisStateIdentifying
+  val identifying: EntityIdentifying[AlgorithmModule.AnalysisState] = AlgorithmModule.identifying
 
   override type Fixture <: AlgorithmFixture
   abstract class AlgorithmFixture extends AggregateFixture { fixture =>
@@ -71,13 +73,23 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
       //    result
     }
 
-    def actualVsExpectedState( actual: AlgorithmModule.AnalysisState, expected: AlgorithmModule.AnalysisState ): Unit = {
-      actual.id mustBe expected.id
-      actual.name mustBe expected.name
-      actual.algorithm.name mustBe expected.algorithm.name
-      actual.tolerance mustBe expected.tolerance
-      actual.thresholds mustBe expected.thresholds
-      actual.## mustBe expected.##
+    import AlgorithmModule.AnalysisState
+
+    def actualVsExpectedState( actual: Option[AnalysisState], expected: Option[AnalysisState] ): Unit = {
+      actual.isDefined mustBe expected.isDefined
+      for {
+        a <- actual
+        e <- expected
+      } {
+        logger.debug( "TEST: actualVsExpectedState:\n  Actual:[{}]\nExpected:[{}]", a, e )
+        a.id mustBe e.id
+        a.name mustBe e.name
+        a.algorithm.name mustBe e.algorithm.name
+        a.tolerance mustBe e.tolerance
+        a.thresholds mustBe e.thresholds
+        a.## mustBe e.##
+      }
+
       actual mustEqual expected
       expected mustEqual actual
     }
@@ -141,19 +153,19 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
       logger.info( "timeout:[{}]", timeout )
       logger.info( "router:[{}]", router )
 
-      aggregate ! EntityMessage.Add( id )
-      val registered = ( aggregate ? P.Register(id, router.ref) ).mapTo[Envelope]
-      router.expectMsgPF( 400.millis.dilated, "router register" ) {
-        case Envelope(DetectionAlgorithmRouter.RegisterDetectionAlgorithm(a, h), _) => {
-          a.name mustBe module.algorithm.label.name
-          h !+ DetectionAlgorithmRouter.AlgorithmRegistered( a )
-        }
-      }
-
-      val envelope = Await.result( registered, 1.second.dilated )
-      envelope.payload mustBe a [P.Registered]
-      val actual = envelope.payload.asInstanceOf[P.Registered]
-      actual.sourceId mustBe id
+//      aggregate ! EntityMessage.Add( id )
+//      val registered = ( aggregate ? P.Register(id, router.ref) ).mapTo[Envelope]
+//      router.expectMsgPF( 400.millis.dilated, "router register" ) {
+//        case Envelope(DetectionAlgorithmRouter.RegisterDetectionAlgorithm(a, h), _) => {
+//          a.name mustBe module.algorithm.label.name
+//          h !+ DetectionAlgorithmRouter.AlgorithmRegistered( a )
+//        }
+//      }
+//
+//      val envelope = Await.result( registered, 1.second.dilated )
+//      envelope.payload mustBe a [P.Registered]
+//      val actual = envelope.payload.asInstanceOf[P.Registered]
+//      actual.sourceId mustBe id
 
       aggregate
     }
@@ -239,23 +251,23 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
 
   def bootstrapSuite(): Unit = {
     s"${defaultModule.algorithm.label.name} entity" should {
-      "add algorithm" in { f: Fixture =>
-        import f._
-        aggregate ! EntityMessage.Add( id )
-        bus.expectMsgPF( max = 400.millis.dilated, hint = "algo added" ) {
-          case p: EntityMessage.Added => p.sourceId mustBe id
-        }
-      }
+//      "add algorithm" taggedAs WIP in { f: Fixture =>
+//        import f._
+//        aggregate ! EntityMessage.Add( id )
+//        bus.expectMsgPF( max = 400.millis.dilated, hint = "algo added" ) {
+//          case p: EntityMessage.Added => p.sourceId mustBe id
+//        }
+//      }
 
-      "must not respond before add" in { f: Fixture =>
-        import f._
+//      "must not respond before add" in { f: Fixture =>
+//        import f._
+//
+////        aggregate !+ P.Register( id, router.ref )
+//        aggregate !+ P.GetStateSnapshot( id )
+//        bus.expectNoMsg()
+//      }
 
-        aggregate !+ P.Register( id, router.ref )
-        aggregate !+ P.GetStateSnapshot( id )
-        bus.expectNoMsg()
-      }
-
-      "have zero state after add" in { f: Fixture =>
+      "have zero state before advance" in { f: Fixture =>
         import f._
 
         implicit val to = f.timeout
@@ -264,28 +276,33 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
         val actual = ( algoRef ? P.GetStateSnapshot( id ) ).mapTo[P.StateSnapshot]
         whenReady( actual ) { a =>
           a.sourceId mustBe id
-          a.snapshot mustBe module.analysisStateCompanion.zero( id )
+          a.snapshot mustBe None
         }
       }
 
-      "register with router" in { f: Fixture =>
-        import f._
-        implicit val to = f.timeout
-        addAndRegisterAggregate()
-      }
+//      "register with router" in { f: Fixture =>
+//        import f._
+//        implicit val to = f.timeout
+//        addAndRegisterAggregate()
+//      }
 
-      "save and load snapshot" in { f: Fixture =>
-        import f._
+      "advance for datapoint processing" in { f: Fixture =>
+        import f.{ timeout => _, _ }
 
         implicit val to = f.timeout
         val algoRef = addAndRegisterAggregate()
         val pt = DataPoint( nowTimestamp, 3.14159 )
         val t = ThresholdBoundary( nowTimestamp, Some(1.1), Some(2.2), Some(3.3) )
         val adv = P.Advanced( id, pt, true, t )
+        logger.debug( "TEST: Advancing: [{}] for id:[{}]", adv, id )
         algoRef ! adv
-        val s1 = Await.result( ( aggregate ? P.GetStateSnapshot(id) ).mapTo[P.StateSnapshot], 1.second.dilated )
-        val zero = module.analysisStateCompanion.zero( id )
-        actualVsExpectedState( s1.snapshot, expectedUpdatedState(zero, adv) )
+
+        Thread.sleep(1000)
+        logger.warn( "TEST: getting current state of id:[{}]...", id )
+        whenReady( ( algoRef ? P.GetStateSnapshot(id) ).mapTo[P.StateSnapshot], timeout(15.seconds.dilated) ){ s1 =>
+          val zero = module.analysisStateCompanion.zero( id )
+          actualVsExpectedState( s1.snapshot, Option(expectedUpdatedState(zero, adv)) )
+        }
       }
     }
   }
@@ -306,7 +323,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
         val expectedState = expectedUpdatedState( zero, adv )
         val zeroHistory = hlens.get( zero )
         val actualHistory = module.analysisStateCompanion.updateHistory( zeroHistory, adv )
-        actualVsExpectedState( actualState, expectedState )
+        actualVsExpectedState( Option(actualState), Option(expectedState) )
         actualVsExpectedHistory( actualHistory, hlens.get(expectedState) )
       }
     }

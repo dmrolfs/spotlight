@@ -42,6 +42,8 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
     val configurationReloader = Configuration.reloader( Array.empty[String] )()()
 
     val algo = SeriesDensityAnalyzer.Algorithm
+    val algoRef = TestProbe()
+    val routingTable = Map( algo -> algoRef.ref )
 
     val grouping: Option[OutlierPlan.Grouping] = {
       val window = None
@@ -336,7 +338,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
         )
       )
 
-      val routerRef = system.actorOf( DetectionAlgorithmRouter.props, "router" )
+      val routerRef = system.actorOf( DetectionAlgorithmRouter.props(routingTable), "router" )
       val dbscan = system.actorOf( SeriesDensityAnalyzer.props( routerRef ), "dbscan" )
       val detector = system.actorOf( OutlierDetection.props( routerRef = routerRef ), "detectOutliers" )
       val planRouter = system.actorOf(

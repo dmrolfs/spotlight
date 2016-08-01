@@ -71,7 +71,8 @@ object OutlierDetectionBootstrap {
     }
 
     def makeAlgorithmRouter()( implicit ctx: ActorContext ): ActorRef = {
-      ctx.actorOf( DetectionAlgorithmRouter.props.withDispatcher("outlier-detection-dispatcher"), "router" )
+      //todo won't work but okay since this is going away in v2
+      ctx.actorOf( DetectionAlgorithmRouter.props( Map.empty[Symbol, ActorRef] ).withDispatcher("outlier-detection-dispatcher"), "router" )
     }
 
     def makeAlgorithmWorkers( router: ActorRef )( implicit ctx: ActorContext ): Map[Symbol, ActorRef] = {

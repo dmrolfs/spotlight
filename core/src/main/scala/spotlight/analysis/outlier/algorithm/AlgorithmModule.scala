@@ -36,18 +36,15 @@ object AlgorithmProtocol extends EntityProtocol[AlgorithmModule.AnalysisState] {
 
 //  case class AlgorithmAdded( override val sourceId: AlgorithmAdded#TID ) extends AlgorithmEvent
 
-  case class Register( override val targetId: Register#TID, routerRef: ActorRef ) extends AlgorithmCommand
-
-  case class Registered( override val sourceId: Registered#TID ) extends AlgorithmEvent
+//  case class Register( override val targetId: Register#TID, routerRef: ActorRef ) extends AlgorithmCommand
+//
+//  case class Registered( override val sourceId: Registered#TID ) extends AlgorithmEvent
 
   import AlgorithmModule.AnalysisState
 
   case class GetStateSnapshot( override val targetId: GetStateSnapshot#TID ) extends AlgorithmCommand
 
-  case class StateSnapshot( sourceId: StateSnapshot#TID, snapshot: AnalysisState ) extends AlgorithmEvent
-  object StateSnapshot {
-    def apply( s: AnalysisState ): StateSnapshot = StateSnapshot( sourceId = s.id, snapshot = s )
-  }
+  case class StateSnapshot( sourceId: StateSnapshot#TID, snapshot: Option[AnalysisState] ) extends AlgorithmEvent
 
   private[algorithm] case class Advanced(
     override val sourceId: Advanced#TID,
@@ -74,11 +71,13 @@ object AlgorithmModule {
     type Self >: self.type <: T
   }
 
-  trait AnalysisState extends Entity with Equals { self: StrictSelf[_] =>
-    override type ID = OutlierPlan.Scope
+  type ID = OutlierPlan.Scope
 
-    override val evID: ClassTag[ID] = classTag[OutlierPlan.Scope]
-    override val evTID: ClassTag[TID] = classTag[TaggedID[OutlierPlan.Scope]]
+  trait AnalysisState extends Entity with Equals { self: StrictSelf[_] =>
+    override type ID = AlgorithmModule.ID
+
+    override val evID: ClassTag[ID] = classTag[AlgorithmModule.ID]
+    override val evTID: ClassTag[TID] = classTag[TaggedID[AlgorithmModule.ID]]
 
     def scope: OutlierPlan.Scope = id
     def algorithm: Symbol
@@ -122,8 +121,9 @@ object AlgorithmModule {
   }
 
 
-  implicit val analysisStateIdentifying: EntityIdentifying[AnalysisState] = {
+  implicit val identifying: EntityIdentifying[AnalysisState] = {
     new EntityIdentifying[AnalysisState] with OutlierPlan.Scope.ScopeIdentifying[AnalysisState] {
+      override lazy val idTag: Symbol = 'algorithm
       override val evEntity: ClassTag[AnalysisState] = classTag[AnalysisState]
     }
   }
@@ -147,15 +147,10 @@ with InitializeAggregateRootClusterSharding { module: AlgorithmModule.ModuleConf
 
   override val trace = Trace[AlgorithmModule]
 
-//  implicit val algorithmIdentifying: EntityIdentifying[State] = {
-//    new EntityIdentifying[State] with OutlierPlan.Scope.ScopeIdentifying[State]
-//  }
-//
-
-  override type ID = OutlierPlan.Scope
-  val idType = Typeable[OutlierPlan.Scope]
-  override def nextId: TryV[TID] = AlgorithmModule.analysisStateIdentifying.nextIdAs[TID]
-  val advanced = TypeCase[AlgorithmProtocol.Advanced]
+  override type ID = AlgorithmModule.ID
+  val IdType = TypeCase[TID]
+  override def nextId: TryV[TID] = AlgorithmModule.identifying.nextIdAs[TID]
+  val AdvancedType = TypeCase[AlgorithmProtocol.Advanced]
 
 
   override def rootType: AggregateRootType = {
@@ -164,19 +159,22 @@ with InitializeAggregateRootClusterSharding { module: AlgorithmModule.ModuleConf
       override def aggregateRootProps( implicit model: DomainModel ): Props = AlgorithmActor.props( model, this )
       override def maximumNrClusterNodes: Int = module.maximumNrClusterNodes
       override def aggregateIdFor: ShardRegion.ExtractEntityId = super.aggregateIdFor orElse {
-        case advanced( a ) => (a.sourceId.toString, a )
+        case AdvancedType( a ) => {
+          logger.debug( "TEST: aggregateIdFor( {} ) = [{}]", a, a.sourceId.id.toString )
+          (a.sourceId.id.toString, a )
+        }
       }
     }
   }
 
   def algorithm: Algorithm
-  override val aggregateIdTag: Symbol = algorithm.label
+  override val aggregateIdTag: Symbol = AlgorithmModule.identifying.idTag
 
   trait Algorithm {
     def label: Symbol
     def prepareContext( algorithmContext: Context ): Context = identity( algorithmContext )
     def prepareData( algorithmContext: Context ): TryV[Seq[DoublePoint]]
-    def step( point: PointT )( implicit state: State, algorithmContext: Context ): (Boolean, ThresholdBoundary)
+    def step( point: PointT )( implicit s: State, algorithmContext: Context ): (Boolean, ThresholdBoundary)
   }
 
 
@@ -260,20 +258,18 @@ with InitializeAggregateRootClusterSharding { module: AlgorithmModule.ModuleConf
 
 
   object AlgorithmActor {
-    def props( model: DomainModel, rootType: AggregateRootType ): Props = {
-      Props( new AlgorithmActor( model, rootType ) with StackableStreamPublisher )
-    }
+    def props( model: DomainModel, rootType: AggregateRootType ): Props = Props( new Default( model, rootType ) )
+
+    private class Default( model: DomainModel, rootType: AggregateRootType )
+    extends AlgorithmActor(model, rootType) with StackableStreamPublisher
   }
 
-  class AlgorithmActor(
-    override val model: DomainModel,
-    override val rootType: AggregateRootType
-  ) extends AggregateRoot[State, OutlierPlan.Scope]
+  class AlgorithmActor( override val model: DomainModel, override val rootType: AggregateRootType )
+  extends AggregateRoot[State, ID]
   with InstrumentedActor { publisher: EventPublisher =>
-    import demesne.module.entity.{ messages => EntityMessage }
 
     override def parseId( idstr: String ): TID = {
-      val identifying = AlgorithmModule.analysisStateIdentifying
+      val identifying = AlgorithmModule.identifying
       identifying.safeParseId( idstr )( identifying.evID )
     }
 
@@ -285,40 +281,21 @@ with InitializeAggregateRootClusterSharding { module: AlgorithmModule.ModuleConf
     import analysisStateCompanion.{ historyLens, thresholdLens, updateHistory }
     val advanceLens: Lens[State, (analysisStateCompanion.History, Seq[ThresholdBoundary])] = historyLens ~ thresholdLens
 
+
     override val acceptance: Acceptance = {
-      case ( EntityMessage.Added(id, _), s ) => {
-        idType.cast( id )
-        .map { i => analysisStateCompanion zero i }
-        .getOrElse { s }
-      }
-      case ( AlgorithmProtocol.Registered(_), s ) => s
-      case ( event: AlgorithmProtocol.Advanced, s ) => {
-        advanceLens.modify( s ){ case (h, ts) => ( updateHistory( h, event ), ts :+ event.threshold ) }
-      }
-    }
-
-    override def receiveCommand: Receive = LoggingReceive { around( quiescent ) }
-
-    val quiescent: Receive = {
-      case EntityMessage.Add(id, _) => persist( EntityMessage.Added(id) ) { event =>
-        acceptAndPublish( event )
-        context become LoggingReceive { around( ready() orElse stateReceiver ) }
+      case ( AdvancedType(event), s ) => {
+        log.debug( "TEST:[{}]: accepting Advanced:[{}]", self.path, event )
+        val currentState = Option(s) getOrElse {
+          log.debug( "AlgorithmModule[{}]: processed first data. creating initial state", self.path )
+          analysisStateCompanion zero aggregateId
+        }
+        val result = advanceLens.modify( currentState ){ case (h, ts) => ( updateHistory( h, event ), ts :+ event.threshold ) }
+        log.debug( "TEST:[{}]: resultingState=[{}] aggregateId:[{}]", self.path, result, aggregateId )
+        result
       }
     }
 
-    def ready( driver: Option[ActorRef] = None ): Receive = {
-      case AlgorithmProtocol.Register( id, router ) if id == state.id => {
-        router !+ DetectionAlgorithmRouter.RegisterDetectionAlgorithm( algorithm.label, self )
-        context become LoggingReceive { around( ready( Some(sender()) ) ) }
-      }
-
-      case DetectionAlgorithmRouter.AlgorithmRegistered( a ) if driver.isDefined => {
-        driver foreach { _ !+ AlgorithmProtocol.Registered(state.id) }
-        context become LoggingReceive { around( active orElse stateReceiver ) }
-      }
-
-      case e: EntityMessage.Add => /* handle and drop since already added */
-    }
+    override def receiveCommand: Receive = LoggingReceive { around( active orElse stateReceiver ) }
 
     val active: Receive = {
       case msg @ DetectUsing( algo, aggregator, payload: DetectOutliersInSeries, history, algorithmConfig ) => {
@@ -335,7 +312,7 @@ with InitializeAggregateRootClusterSharding { module: AlgorithmModule.ModuleConf
           case -\/( ex ) => {
             log.error(
               ex,
-              "failed [{}] analysis on [{}] @ [{}]",
+              "failed [{}] analysis on [{}] @ [{}] - no outliers marked for interval",
               algo.name,
               payload.plan.name + "][" + payload.topic,
               payload.source.interval
@@ -351,20 +328,32 @@ with InitializeAggregateRootClusterSharding { module: AlgorithmModule.ModuleConf
         }
       }
 
-      case adv: AlgorithmProtocol.Advanced => accept( adv ) //todo: what to do here persist?
-
-      case e: EntityMessage.Add => /* handle and drop since already added */
+      case AdvancedType( adv ) => {
+        log.info( "TEST:[{}]: Algorithm[{}] HANDLING Advanced msg: [{}]", self.path, algorithm.label.name, adv )
+        accept( adv )
+      } //todo: what to do here persist?
+//
+//      case m => {
+//        log.info( "TEST-ACTIVE[{}]: working on Advanced...", self.path )
+//        log.info( "TEST: m = [{}]", m )
+//        log.info( "TEST: AdvancedType:[ {} ]\tAdvancedType(m)=[{}]", AdvancedType.toString, AdvancedType.unapply(m) )
+//      }
     }
 
     val stateReceiver: Receive = {
-      case _: AlgorithmProtocol.GetStateSnapshot => sender() ! AlgorithmProtocol.StateSnapshot( state )
+      case _: AlgorithmProtocol.GetStateSnapshot => {
+        val snapshot = AlgorithmProtocol.StateSnapshot( aggregateId, Option(state) )
+        log.debug( "TEST:[{}]: Algorithm[{}] returning state snapshot: [{}]", self.path, algorithm.label.name, snapshot )
+        sender() ! snapshot
+      }
     }
+
 
     override def unhandled( message: Any ): Unit = {
       message match {
-        case m: DetectUsing if m.algorithm == state.algorithm && OutlierPlan.Scope(m.payload.plan, m.payload.topic) == state.id => {
-          val ex = AlgorithmProtocol.AlgorithmUsedBeforeRegistrationError( state.id, algorithm.label, self.path )
-          log.error( ex, "algorithm actor [{}] not registered for scope:[{}]", algorithm.label, state.id )
+        case m: DetectUsing if Option(state).isDefined && m.algorithm == state.algorithm && m.scope == state.id => {
+          val ex = AlgorithmProtocol.AlgorithmUsedBeforeRegistrationError( aggregateId, algorithm.label, self.path )
+          log.error( ex, "algorithm actor [{}] not registered for scope:[{}]", algorithm.label, aggregateId )
         }
 
         case m: DetectUsing => {
@@ -372,7 +361,19 @@ with InitializeAggregateRootClusterSharding { module: AlgorithmModule.ModuleConf
           m.aggregator !+ UnrecognizedPayload( algorithm.label, m )
         }
 
-        case m => super.unhandled( m )
+        case AdvancedType(m) => {
+          log.info( "TEST:[{}]: unhandled but yet matched on Advanced...", self.path )
+          log.info( "TEST: m = [{}]", m )
+          log.info( "TEST: AdvancedType:[ {} ]\tAdvancedType(m)=[{}]", AdvancedType.toString, AdvancedType.unapply(m) )
+        }
+
+        case m => {
+          log.info( "TEST:[{}]: working on Advanced but unknown...", self.path )
+          log.info( "TEST: m = [{}]", m )
+          log.info( "TEST: AdvancedType:[ {} ]\tAdvancedType(m)=[{}]", AdvancedType.toString, AdvancedType.unapply(m) )
+        }
+
+//        case m => super.unhandled( m )
       }
     }
 
@@ -412,7 +413,7 @@ with InitializeAggregateRootClusterSharding { module: AlgorithmModule.ModuleConf
                 .map { original =>
                   log.debug( "PT:[{}] ORIGINAL:[{}]", (pt._1.toLong, pt._2), (original._1.toLong, original._2) )
                   val event = AlgorithmProtocol.Advanced(
-                    sourceId = state.id,
+                    sourceId = aggregateId,
                     point = original.toDataPoint,
                     isOutlier = isOutlier,
                     threshold = threshold
@@ -438,9 +439,10 @@ with InitializeAggregateRootClusterSharding { module: AlgorithmModule.ModuleConf
           }
         }
 
-        val events = loop( points.toList, Seq.empty[AlgorithmProtocol.Advanced] )( state )
+        val effState = Option( state ) getOrElse { analysisStateCompanion zero aggregateId }
+        val events = loop( points.toList, Seq.empty[AlgorithmProtocol.Advanced] )( effState )
         persistAll( events.to[collection.immutable.Seq] ){ e =>
-          log.debug( "{} persisting Advanced:[{}]", state.id, e )
+          log.debug( "{} persisting Advanced:[{}]", aggregateId, e )
           accept( e )
         }
         events.right

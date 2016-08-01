@@ -39,44 +39,38 @@ object AnalysisScopeProxy {
     model: DomainModel,
     highWatermark: Int,
     bufferSize: Int
-  ): Props = {
-    val s = scope
-    val p = plan
-    val m = model
-    val hwm = highWatermark
-    val bs = bufferSize
+  ): Props = Props( new Default(scope, plan, model, highWatermark, bufferSize) )
 
-    Props(
-      new AnalysisScopeProxy with Provider {
-        override val scope: Scope = s
-        override val plan: OutlierPlan = p
-        override val model: DomainModel = m
-        override val highWatermark: Int = hwm
-        override val bufferSize: Int = bs
-        override def rootTypeFor( algorithm: Symbol ): Option[AggregateRootType] = {
-          algorithm match {
-            case SeriesDensityAnalyzer.Algorithm => ??? // SeriesDensityAnalyzer.props( router ),
-            case SeriesCentroidDensityAnalyzer.Algorithm => ??? // SeriesCentroidDensityAnalyzer.props( router ),
-            case CohortDensityAnalyzer.Algorithm => ??? // CohortDensityAnalyzer.props( router ),
-            case ExponentialMovingAverageAnalyzer.Algorithm => ??? // ExponentialMovingAverageAnalyzer.props( router ),
-            case FirstHourAverageAnalyzer.Algorithm => ??? // FirstHourAverageAnalyzer.props( router ),
-            case GrubbsAnalyzer.Algorithm => ??? // GrubbsAnalyzer.props( router ),
-            case HistogramBinsAnalyzer.Algorithm => ??? // HistogramBinsAnalyzer.props( router ),
-            case KolmogorovSmirnovAnalyzer.Algorithm => ??? // KolmogorovSmirnovAnalyzer.props( router ),
-            case LeastSquaresAnalyzer.Algorithm => ??? // LeastSquaresAnalyzer.props( router ),
-            case MeanSubtractionCumulationAnalyzer.Algorithm => ??? // MeanSubtractionCumulationAnalyzer.props( router ),
-            case MedianAbsoluteDeviationAnalyzer.Algorithm => ??? // MedianAbsoluteDeviationAnalyzer.props( router ),
-            case SimpleMovingAverageAnalyzer.Algorithm => Some( SimpleMovingAverageModule.rootType )
-            case SeasonalExponentialMovingAverageAnalyzer.Algorithm => ??? // SeasonalExponentialMovingAverageAnalyzer.props( router )
-            case _ => None
-          }
-        }
+  private class Default(
+    override val scope: Scope,
+    override val plan: OutlierPlan,
+    override val model: DomainModel,
+    override val highWatermark: Int,
+    override val bufferSize: Int
+  ) extends AnalysisScopeProxy
+  with Provider {
+    override def rootTypeFor( algorithm: Symbol ): Option[AggregateRootType] = {
+      algorithm match {
+        case SeriesDensityAnalyzer.Algorithm => ??? // SeriesDensityAnalyzer.props( router ),
+        case SeriesCentroidDensityAnalyzer.Algorithm => ??? // SeriesCentroidDensityAnalyzer.props( router ),
+        case CohortDensityAnalyzer.Algorithm => ??? // CohortDensityAnalyzer.props( router ),
+        case ExponentialMovingAverageAnalyzer.Algorithm => ??? // ExponentialMovingAverageAnalyzer.props( router ),
+        case FirstHourAverageAnalyzer.Algorithm => ??? // FirstHourAverageAnalyzer.props( router ),
+        case GrubbsAnalyzer.Algorithm => ??? // GrubbsAnalyzer.props( router ),
+        case HistogramBinsAnalyzer.Algorithm => ??? // HistogramBinsAnalyzer.props( router ),
+        case KolmogorovSmirnovAnalyzer.Algorithm => ??? // KolmogorovSmirnovAnalyzer.props( router ),
+        case LeastSquaresAnalyzer.Algorithm => ??? // LeastSquaresAnalyzer.props( router ),
+        case MeanSubtractionCumulationAnalyzer.Algorithm => ??? // MeanSubtractionCumulationAnalyzer.props( router ),
+        case MedianAbsoluteDeviationAnalyzer.Algorithm => ??? // MedianAbsoluteDeviationAnalyzer.props( router ),
+        case SimpleMovingAverageAnalyzer.Algorithm => Some( SimpleMovingAverageModule.rootType )
+        case SeasonalExponentialMovingAverageAnalyzer.Algorithm => ??? // SeasonalExponentialMovingAverageAnalyzer.props( router )
+        case _ => None
       }
-    )
+    }
   }
 
 
-  trait Provider { provider =>
+  trait Provider { provider: Actor with ActorLogging =>
     def scope: OutlierPlan.Scope
     def plan: OutlierPlan
     def model: DomainModel
@@ -87,39 +81,47 @@ object AnalysisScopeProxy {
     implicit def timeout: Timeout = Timeout( 15.seconds )
 
     def makeRouter()( implicit context: ActorContext ): ActorRef = {
+      val algoId = AlgorithmModule.identifying tag scope
+
+      val algorithmRefs = for {
+        name <- plan.algorithms.toSeq
+        rt <- rootTypeFor( name ).toSeq
+        ref = model.aggregateOf( rt, algoId )
+      } yield ( name, ref )
+
       context.actorOf(
-        DetectionAlgorithmRouter.props.withDispatcher( "outlier-detection-dispatcher" ),
+        DetectionAlgorithmRouter.props( Map(algorithmRefs:_*) ).withDispatcher( "outlier-detection-dispatcher" ),
         s"router-${provider.plan.name}"
       )
     }
 
-    def makeAlgorithms(
-      routerRef: ActorRef
-    )(
-      implicit context: ActorContext,
-      ec: ExecutionContext,
-      algorithmIdentifying: EntityIdentifying[AlgorithmModule.AnalysisState]
-    ): Future[Set[ActorRef]] = {
-      def scopeId: AlgorithmModule.AnalysisState#TID = {
-        implicitly[EntityIdentifying[AlgorithmModule.AnalysisState]] tag provider.scope
-      }
-
-      val algs = {
-        for {
-          a <- provider.plan.algorithms
-          rt <- provider.rootTypeFor( a )
-        } yield {
-          val aref = provider.model.aggregateOf( rt, provider.scope )
-          aref !+ EntityMessage.Add( scopeId )
-//          implicit val to = provider.timeout
-          ( aref ?+ AlgorithmProtocol.Register( scopeId, routerRef ) )
-          .mapTo[AlgorithmProtocol.Registered]
-          .map { _ => aref }
-        }
-      }
-
-      Future sequence algs
-    }
+//    def makeAlgorithms(
+//      routerRef: ActorRef
+//    )(
+//      implicit context: ActorContext,
+//      ec: ExecutionContext,
+//      algorithmIdentifying: EntityIdentifying[AlgorithmModule.AnalysisState]
+//    ): Future[Set[ActorRef]] = {
+//      def scopeId: AlgorithmModule.AnalysisState#TID = {
+//        implicitly[EntityIdentifying[AlgorithmModule.AnalysisState]] tag provider.scope
+//      }
+//
+//      val algs = {
+//        for {
+//          a <- provider.plan.algorithms
+//          rt <- provider.rootTypeFor( a )
+//        } yield {
+//          val aref = provider.model.aggregateOf( rt, provider.scope )
+//          aref !+ EntityMessage.Add( scopeId )
+////          implicit val to = provider.timeout
+//          ( aref ?+ AlgorithmProtocol.Register( scopeId, routerRef ) )
+//          .mapTo[AlgorithmProtocol.Registered]
+//          .map { _ => aref }
+//        }
+//      }
+//
+//      Future sequence algs
+//    }
 
     def makeDetector( routerRef: ActorRef )( implicit context: ActorContext ): ActorRef = {
       context.actorOf(
@@ -129,7 +131,7 @@ object AnalysisScopeProxy {
     }
   }
 
-  private[outlier] final case class Workers private( detector: ActorRef, router: ActorRef, algorithms: Set[ActorRef] )
+  private[outlier] final case class Workers private( detector: ActorRef, router: ActorRef )
 }
 
 class AnalysisScopeProxy
@@ -143,8 +145,7 @@ with ActorLogging { outer: AnalysisScopeProxy.Provider =>
   val receiveTimer: Timer = metrics.timer( "receive" )
   val failuresMeter: Meter = metrics.meter( "failures" )
 
-  //todo: rework to avoid Await. Left here since exposure is limited to first sight of Plan Scope data
-  lazy val workers: Workers = scala.concurrent.Await.result( makeTopicWorkers(outer.scope.topic)(context.dispatcher), 15.seconds )
+  lazy val workers: Workers = makeTopicWorkers( outer.scope.topic )
 
   case class PlanStream private( ingressRef: ActorRef, graph: RunnableGraph[NotUsed] )
   var streams: Map[ActorRef, PlanStream] = Map.empty[ActorRef, PlanStream]
@@ -186,53 +187,10 @@ with ActorLogging { outer: AnalysisScopeProxy.Provider =>
     ingress
   }
 
-  override val supervisorStrategy: SupervisorStrategy = OneForOneStrategy( maxNrOfRetries = -1 ) {
-    case ex: ActorInitializationException => {
-      log.error( ex, "{} stopping actor on caught initialization error", classOf[AnalysisScopeProxy].safeSimpleName )
-      failuresMeter.mark()
-      Stop
-    }
 
-    case ex: ActorKilledException => {
-      log.error(
-        ex,
-        "{} stopping killed actor on caught actor killed exception",
-        classOf[AnalysisScopeProxy].safeSimpleName
-      )
-      failuresMeter.mark()
-      Stop
-    }
-
-    case ex: InvalidActorNameException => {
-      log.error( ex, "{} restarting on caught invalid actor name", classOf[AnalysisScopeProxy].safeSimpleName )
-      failuresMeter.mark()
-      Restart
-    }
-
-    case ex: Exception => {
-      log.error( ex,  "{} restarting on caught exception from child", classOf[AnalysisScopeProxy].safeSimpleName )
-      failuresMeter.mark()
-      Restart
-    }
-
-    case ex => {
-      log.error( ex,  "{} restarting on unknown error from child", classOf[AnalysisScopeProxy].safeSimpleName )
-      failuresMeter.mark()
-      Escalate
-    }
-  }
-
-
-  def makeTopicWorkers( t: Topic )( implicit ec: ExecutionContext ): Future[Workers] = {
+  def makeTopicWorkers( t: Topic ): Workers = {
     val router = outer.makeRouter()
-
-    outer.makeAlgorithms( router ) map { algs =>
-      Workers(
-        router = router,
-        detector = outer.makeDetector( router ),
-        algorithms = algs
-      )
-    }
+    Workers( detector = outer.makeDetector( router ), router = router )
   }
 
   def makePlanStream(
@@ -309,5 +267,38 @@ with ActorLogging { outer: AnalysisScopeProxy.Provider =>
       .actorRef[OutlierDetectionMessage]( w.detector, ActorSubscriberMessage.OnComplete )
       .named( s"${p.name}-outlier-detection-inlet" )
     }( Keep.right )
+  }
+
+
+  override val supervisorStrategy: SupervisorStrategy = OneForOneStrategy( maxNrOfRetries = -1 ) {
+    case ex: ActorInitializationException => {
+      log.error( ex, "AnalysisScopeProxy[{}] stopping actor on caught initialization error", self.path )
+      failuresMeter.mark()
+      Stop
+    }
+
+    case ex: ActorKilledException => {
+      log.error( ex, "AnalysisScopeProxy[{}] stopping killed actor on caught actor killed exception", self.path )
+      failuresMeter.mark()
+      Stop
+    }
+
+    case ex: InvalidActorNameException => {
+      log.error( ex, "AnalysisScopeProxy[{}] restarting on caught invalid actor name", self.path )
+      failuresMeter.mark()
+      Restart
+    }
+
+    case ex: Exception => {
+      log.error( ex, "AnalysisScopeProxy[{}] restarting on caught exception from child", self.path )
+      failuresMeter.mark()
+      Restart
+    }
+
+    case ex => {
+      log.error( ex, "AnalysisScopeProxy[{}] restarting on unknown error from child", self.path )
+      failuresMeter.mark()
+      Escalate
+    }
   }
 }

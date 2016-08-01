@@ -16,13 +16,23 @@ object DetectionAlgorithmRouter {
 
   val ContextKey = 'DetectionAlgorithmRouter
 
-  def props: Props = Props( new DetectionAlgorithmRouter )
+  def props( routingTable: Map[Symbol, ActorRef] ): Props = Props( new Default( routingTable ) )
+
+  private class Default( override val initialRoutingTable: Map[Symbol, ActorRef] ) extends DetectionAlgorithmRouter with Provider
+
+
+  trait Provider {
+    def initialRoutingTable: Map[Symbol, ActorRef]
+  }
 }
 
 class DetectionAlgorithmRouter extends Actor with EnvelopingActor with InstrumentedActor with ActorLogging {
-  import DetectionAlgorithmRouter._
+  provider: DetectionAlgorithmRouter.Provider =>
 
-  var routingTable: Map[Symbol, ActorRef] = Map.empty[Symbol, ActorRef]
+  var routingTable: Map[Symbol, ActorRef] = provider.initialRoutingTable
+  log.debug( "DetectionAlgorithmRouter[{}] created supporting algorithms:[{}]", routingTable.keys.mkString(",") )
+
+  import DetectionAlgorithmRouter.{ RegisterDetectionAlgorithm, AlgorithmRegistered }
 
   val registration: Receive = {
     case RegisterDetectionAlgorithm( algorithm, handler ) => {

@@ -43,8 +43,8 @@
   </logger>
 
   <!--<root level="WARN">-->
-  <root level="INFO">
-  <!--<root level="DEBUG">-->
+  <!--<root level="INFO">-->
+  <root level="DEBUG">
     <appender-ref ref="STDOUT" />
     <appender-ref ref="FILE" />
   </root>

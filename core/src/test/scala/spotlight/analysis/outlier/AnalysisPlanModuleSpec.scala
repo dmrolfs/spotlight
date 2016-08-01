@@ -177,7 +177,6 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] { outer =>
       logger.debug( "TEST: fixture class: [{}]", f.getClass )
 
       entity !+ EntityMessages.Add( tid, Some(plan) )
-      bus.expectMsgType[EntityMessages.Added]
 
       proxiesFrom( entity, tid ) mustBe empty
 

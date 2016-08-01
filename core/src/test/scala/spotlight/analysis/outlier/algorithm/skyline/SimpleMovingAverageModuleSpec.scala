@@ -118,7 +118,7 @@ class SimpleMovingAverageModuleSpec extends AlgorithmModuleSpec[SimpleMovingAver
       }
     }
 
-    "happy path process two batches" taggedAs (WIP) in { f: Fixture =>
+    "happy path process two batches" taggedAs WIP in { f: Fixture =>
       import f._
 
       val algoRef = addAndRegisterAggregate()
@@ -127,6 +127,7 @@ class SimpleMovingAverageModuleSpec extends AlgorithmModuleSpec[SimpleMovingAver
       when( plan.name ).thenReturn( f.testScope.id.plan )
       when( plan.appliesTo ).thenReturn( appliesToAll )
       when( plan.algorithms ).thenReturn( Set(module.algorithm.label) )
+
 
       logger.info( "****************** TEST NOW ****************" )
       def evaluateMessage(
@@ -191,18 +192,25 @@ class SimpleMovingAverageModuleSpec extends AlgorithmModuleSpec[SimpleMovingAver
         val actual = ( algoRef ? P.GetStateSnapshot( id ) ).mapTo[P.StateSnapshot]
         whenReady( actual ) { a =>
           val as = a.snapshot
-          a.snapshot mustBe an [module.State]
-          val sas = as.asInstanceOf[module.State]
           logger.info( "{}: ACTUAL = [{}]", hint, as )
           logger.info( "{}: EXPECTED = [{}]", hint, expectedCalculations.mkString(",\n") )
-          as.id mustBe id
-          as.algorithm.name mustBe module.algorithm.label.name
-          as.tolerance mustBe 3.0
-          as.thresholds.size mustBe ( history.N )
+          a.snapshot mustBe defined
+          as mustBe defined
+          as.value mustBe an [module.State]
+          val sas = as.value.asInstanceOf[module.State]
+          sas.id mustBe id
+          sas.algorithm.name mustBe module.algorithm.label.name
+          sas.tolerance mustBe 3.0
+          sas.thresholds.size mustBe ( history.N )
           logger.info( "{}: history size = {}", hint, sas.history.movingStatistics.getN.toString )
           sas.history.movingStatistics.getN mustBe ( history.N )
           sas.history.movingStatistics.getMean mustBe history.mean(1)
-          as.thresholds.drop( as.thresholds.size - expectedCalculations.size ).zip( expectedCalculations ).zipWithIndex foreach { case ( ((actual, expected), i) ) =>
+
+          sas.thresholds
+          .drop( sas.thresholds.size - expectedCalculations.size )
+          .zip( expectedCalculations )
+          .zipWithIndex
+          .foreach { case ( ((actual, expected), i) ) =>
             logger.info( "{}: evaluating expectation: {}", hint, i.toString )
             actual.floor.isDefined mustBe expected.floor.isDefined
             for {
@@ -224,6 +232,7 @@ class SimpleMovingAverageModuleSpec extends AlgorithmModuleSpec[SimpleMovingAver
           }
         }
       }
+
 
       val flatline1 = makeDataPoints( values = Seq.fill( 5 ){ 1.0 }, timeWiggle = (0.97, 1.03) )
       val series1 = spike( f.testScope.id.topic, flatline1, 1000 )()

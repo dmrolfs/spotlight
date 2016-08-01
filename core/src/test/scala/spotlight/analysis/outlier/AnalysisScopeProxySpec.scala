@@ -1,9 +1,8 @@
 package spotlight.analysis.outlier
 
-import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
 import akka.NotUsed
-import akka.actor.{ActorContext, ActorRef, Props}
+import akka.actor.{Actor, ActorContext, ActorLogging, ActorRef, Props}
 import akka.stream.scaladsl.{Flow, Keep, Sink}
 import akka.stream.testkit.scaladsl.{TestSink, TestSource}
 import akka.testkit.TestActor.AutoPilot
@@ -16,10 +15,9 @@ import org.apache.commons.math3.random.RandomDataGenerator
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.mock.MockitoSugar
 import org.mockito.Mockito._
-import peds.archetype.domain.model.core.EntityIdentifying
 import peds.commons.V
+import peds.akka.envelope._
 import spotlight.analysis.outlier.OutlierDetection.DetectionResult
-import spotlight.analysis.outlier.algorithm.AlgorithmModule
 import spotlight.model.outlier._
 import spotlight.model.outlier.OutlierPlan.Scope
 import spotlight.model.timeseries._
@@ -34,6 +32,16 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
   class Fixture extends AkkaFixture { fixture =>
     val algo = 'TestAlgorithm
     val router = TestProbe()
+    router.setAutoPilot(
+      new TestActor.AutoPilot {
+        override def run( sender: ActorRef, msg: Any ): AutoPilot = {
+          val ctx = mock[ActorContext]
+          algorithmActor.ref.forwardEnvelope( msg )( ctx )
+          TestActor.KeepRunning
+        }
+      }
+    )
+
     val subscriber = TestProbe()
 
     val pid = OutlierPlan.outlierPlanIdentifying.safeNextId
@@ -53,7 +61,7 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
     val algorithmActor = TestProbe()
     val detector = TestProbe()
 
-    trait TestProxyProvider extends AnalysisScopeProxy.Provider {
+    trait TestProxyProvider extends AnalysisScopeProxy.Provider { provider: Actor with ActorLogging =>
       override def scope: Scope = fixture.scope
       override def plan: OutlierPlan = fixture.plan
       override def model: DomainModel = fixture.model
@@ -62,17 +70,6 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
       override def rootTypeFor( algorithm: Symbol ): Option[AggregateRootType] = Some( rootType )
 
       override def makeRouter()( implicit context: ActorContext ): ActorRef = router.ref
-
-      override def makeAlgorithms(
-        routerRef: ActorRef
-      )(
-        implicit context: ActorContext,
-        ec: ExecutionContext,
-        algorithmIdentifying: EntityIdentifying[AlgorithmModule.AnalysisState]
-      ): Future[Set[ActorRef]] = {
-        Future successful Set( algorithmActor.ref )
-      }
-
       override def makeDetector( routerRef: ActorRef )( implicit context: ActorContext ): ActorRef = detector.ref
     }
 
@@ -191,13 +188,9 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
     "make topic workers" in { f: Fixture =>
       import f._
       val topic = Topic( "WORKER-TEST-TOPIC" )
-      import scala.concurrent.ExecutionContext.Implicits.global
-      val workers = testActorRef.underlyingActor.makeTopicWorkers( topic )
-      whenReady( workers ) { actual =>
-        actual.detector mustBe f.detector.ref
-        actual.algorithms mustBe Set( f.algorithmActor.ref )
-        actual.router mustBe f.router.ref
-      }
+      val actual = testActorRef.underlyingActor.makeTopicWorkers( topic )
+      actual.detector mustBe f.detector.ref
+      actual.router mustBe f.router.ref
     }
 
     "batch series" in { f: Fixture =>
@@ -278,7 +271,7 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
       }
 
       addDetectorAutoPilot( detector, findAndExtract )
-      val workers = Await.result( testActorRef.underlyingActor.makeTopicWorkers( topic ), 2.seconds )
+      val workers = testActorRef.underlyingActor.makeTopicWorkers( topic )
 
       val sinkUnderTest: Sink[TimeSeries, NotUsed] = testActorRef.underlyingActor.detectionFlow( plan, subscriber.ref, workers )
 
