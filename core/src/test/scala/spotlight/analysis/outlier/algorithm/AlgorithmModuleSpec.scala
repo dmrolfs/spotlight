@@ -1,28 +1,23 @@
 package spotlight.analysis.outlier.algorithm
 
-import scala.concurrent.Await
 import scala.concurrent.duration._
 import scala.reflect.ClassTag
-import akka.actor.{ActorRef, ActorSystem}
+import akka.actor.ActorSystem
 import akka.pattern.ask
 import akka.testkit._
-import akka.util.Timeout
 
 import scalaz.{-\/, \/-}
 import shapeless.syntax.typeable._
 import org.scalatest.concurrent.ScalaFutures
-import com.typesafe.scalalogging.LazyLogging
 import org.joda.{time => joda}
-import peds.akka.envelope._
 import demesne.AggregateRootModule
-import demesne.module.entity.{messages => EntityMessage}
 import demesne.testkit.AggregateRootSpec
 import org.apache.commons.math3.random.RandomDataGenerator
 import org.scalatest.OptionValues
 import peds.archetype.domain.model.core.EntityIdentifying
 import peds.commons.V
 import peds.commons.log.Trace
-import spotlight.analysis.outlier.{DetectionAlgorithmRouter, HistoricalStatistics}
+import spotlight.analysis.outlier.HistoricalStatistics
 import spotlight.analysis.outlier.algorithm.{AlgorithmProtocol => P}
 import spotlight.model.outlier._
 import spotlight.model.timeseries._
@@ -62,15 +57,12 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
     )
 
     type TestState = module.State
-    //  type TestState = AlgorithmModule.AnalysisState
     type TestAdvanced = P.Advanced
     type TestHistory = module.analysisStateCompanion.History
     val thresholdLens = module.analysisStateCompanion.thresholdLens
 
     def expectedUpdatedState( state: TestState, event: TestAdvanced ): TestState = {
       thresholdLens.modify( state ){ tbs => tbs :+ event.threshold }
-      //    val result: TestState = state.addThreshold( event.threshold )
-      //    result
     }
 
     import AlgorithmModule.AnalysisState
@@ -123,10 +115,6 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
 
     val router = TestProbe()
 
-//    val bus = TestProbe()
-//    system.eventStream.subscribe( bus.ref, classOf[P.Event] )
-//
-//    override def nextId(): module.TID = identifying.safeNextId
     lazy val id: module.TID = nextId()
 
     override def nextId(): TID = identifying.nextIdAs[TID] match {
@@ -140,35 +128,6 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
     lazy val aggregate = module aggregateOf id
 
     private val trace = Trace[AlgorithmFixture]
-
-    def addAndRegisterAggregate(
-      aggregate: ActorRef = fixture.aggregate,
-      id: module.TID = fixture.id
-    )(
-      implicit timeout: Timeout = fixture.timeout,
-      router: TestProbe = fixture.router
-    ): ActorRef = trace.block( "addAndRegisterAggregate" ){
-      logger.info( "aggregate:[{}]", aggregate )
-      logger.info( "id:[{}]", id )
-      logger.info( "timeout:[{}]", timeout )
-      logger.info( "router:[{}]", router )
-
-//      aggregate ! EntityMessage.Add( id )
-//      val registered = ( aggregate ? P.Register(id, router.ref) ).mapTo[Envelope]
-//      router.expectMsgPF( 400.millis.dilated, "router register" ) {
-//        case Envelope(DetectionAlgorithmRouter.RegisterDetectionAlgorithm(a, h), _) => {
-//          a.name mustBe module.algorithm.label.name
-//          h !+ DetectionAlgorithmRouter.AlgorithmRegistered( a )
-//        }
-//      }
-//
-//      val envelope = Await.result( registered, 1.second.dilated )
-//      envelope.payload mustBe a [P.Registered]
-//      val actual = envelope.payload.asInstanceOf[P.Registered]
-//      actual.sourceId mustBe id
-
-      aggregate
-    }
   }
 
 
@@ -251,55 +210,30 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
 
   def bootstrapSuite(): Unit = {
     s"${defaultModule.algorithm.label.name} entity" should {
-//      "add algorithm" taggedAs WIP in { f: Fixture =>
-//        import f._
-//        aggregate ! EntityMessage.Add( id )
-//        bus.expectMsgPF( max = 400.millis.dilated, hint = "algo added" ) {
-//          case p: EntityMessage.Added => p.sourceId mustBe id
-//        }
-//      }
-
-//      "must not respond before add" in { f: Fixture =>
-//        import f._
-//
-////        aggregate !+ P.Register( id, router.ref )
-//        aggregate !+ P.GetStateSnapshot( id )
-//        bus.expectNoMsg()
-//      }
-
       "have zero state before advance" in { f: Fixture =>
         import f._
 
         implicit val to = f.timeout
-
-        val algoRef = addAndRegisterAggregate()
-        val actual = ( algoRef ? P.GetStateSnapshot( id ) ).mapTo[P.StateSnapshot]
+        val actual = ( aggregate ? P.GetStateSnapshot( id ) ).mapTo[P.StateSnapshot]
         whenReady( actual ) { a =>
           a.sourceId mustBe id
           a.snapshot mustBe None
         }
       }
 
-//      "register with router" in { f: Fixture =>
-//        import f._
-//        implicit val to = f.timeout
-//        addAndRegisterAggregate()
-//      }
-
       "advance for datapoint processing" in { f: Fixture =>
         import f.{ timeout => _, _ }
 
         implicit val to = f.timeout
-        val algoRef = addAndRegisterAggregate()
         val pt = DataPoint( nowTimestamp, 3.14159 )
         val t = ThresholdBoundary( nowTimestamp, Some(1.1), Some(2.2), Some(3.3) )
         val adv = P.Advanced( id, pt, true, t )
         logger.debug( "TEST: Advancing: [{}] for id:[{}]", adv, id )
-        algoRef ! adv
+        aggregate ! adv
 
         Thread.sleep(1000)
         logger.warn( "TEST: getting current state of id:[{}]...", id )
-        whenReady( ( algoRef ? P.GetStateSnapshot(id) ).mapTo[P.StateSnapshot], timeout(15.seconds.dilated) ){ s1 =>
+        whenReady( ( aggregate ? P.GetStateSnapshot(id) ).mapTo[P.StateSnapshot], timeout(15.seconds.dilated) ){ s1 =>
           val zero = module.analysisStateCompanion.zero( id )
           actualVsExpectedState( s1.snapshot, Option(expectedUpdatedState(zero, adv)) )
         }

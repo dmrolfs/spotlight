@@ -121,7 +121,6 @@ class SimpleMovingAverageModuleSpec extends AlgorithmModuleSpec[SimpleMovingAver
     "happy path process two batches" taggedAs WIP in { f: Fixture =>
       import f._
 
-      val algoRef = addAndRegisterAggregate()
       val destination = TestProbe()
       val plan = mock[OutlierPlan]
       when( plan.name ).thenReturn( f.testScope.id.plan )
@@ -136,7 +135,7 @@ class SimpleMovingAverageModuleSpec extends AlgorithmModuleSpec[SimpleMovingAver
         expectedCalculations: Seq[Expected],
         hint: String
       ): Unit = {
-        algoRef !+ DetectUsing(
+        aggregate !+ DetectUsing(
           algorithm = module.algorithm.label,
           aggregator = destination.ref,
           payload = DetectOutliersInSeries( series, plan, subscriber.ref ),
@@ -189,7 +188,7 @@ class SimpleMovingAverageModuleSpec extends AlgorithmModuleSpec[SimpleMovingAver
         import akka.pattern.ask
         implicit val to = f.timeout
 
-        val actual = ( algoRef ? P.GetStateSnapshot( id ) ).mapTo[P.StateSnapshot]
+        val actual = ( aggregate ? P.GetStateSnapshot( id ) ).mapTo[P.StateSnapshot]
         whenReady( actual ) { a =>
           val as = a.snapshot
           logger.info( "{}: ACTUAL = [{}]", hint, as )

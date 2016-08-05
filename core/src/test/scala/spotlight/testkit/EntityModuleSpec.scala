@@ -3,7 +3,7 @@ package spotlight.testkit
 import scala.concurrent.duration._
 import scala.reflect.ClassTag
 import akka.actor.{ActorRef, ActorSystem}
-import com.typesafe.config.{Config, ConfigFactory}
+import com.typesafe.config.Config
 import shapeless.syntax.typeable._
 import org.joda.{time => joda}
 import demesne.AggregateRootModule
@@ -30,9 +30,9 @@ abstract class EntityModuleSpec[E <: Entity : ClassTag] extends AggregateRootSpe
   override type Fixture <: EntityFixture
 
   abstract class EntityFixture(
-    id: Int = AggregateRootSpec.sysId.incrementAndGet(),
-    config: Config = spotlight.testkit.config( "core" )
-  ) extends AggregateFixture( id, config ) { fixture =>
+    override val fixtureId: Int = AggregateRootSpec.sysId.incrementAndGet(),
+    override val config: Config = spotlight.testkit.config( "core" )
+  ) extends AggregateFixture( fixtureId, config ) { fixture =>
     logger.info( "Fixture: DomainModel=[{}]", model)
 
     type Module <: EntityAggregateModule[E]

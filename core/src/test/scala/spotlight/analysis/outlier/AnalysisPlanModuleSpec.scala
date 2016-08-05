@@ -28,11 +28,11 @@ import spotlight.model.timeseries._
   * Created by rolfsd on 6/15/16.
   */
 class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] { outer =>
-  override type ID = AnalysisPlanModule.AggregateRoot.module.ID
+  override type ID = AnalysisPlanModule.module.ID
   override type Protocol = AnalysisPlanProtocol.type
   override val protocol: Protocol = AnalysisPlanProtocol
 
-  val standardModule: EntityAggregateModule[OutlierPlan] = AnalysisPlanModule.AggregateRoot.module
+  val standardModule: EntityAggregateModule[OutlierPlan] = AnalysisPlanModule.module
 
   class Fixture extends EntityFixture( config = AnalysisPlanModuleSpec.config ) {
     override type Module = EntityAggregateModule[OutlierPlan]

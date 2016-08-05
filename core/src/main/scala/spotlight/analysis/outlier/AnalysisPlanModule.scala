@@ -2,7 +2,6 @@ package spotlight.analysis.outlier
 
 import scala.reflect._
 import akka.actor.{ActorContext, ActorRef, PoisonPill, Props, Terminated}
-import akka.event.LoggingReceive
 import com.typesafe.config.Config
 import demesne.module.entity.EntityAggregateModule
 import demesne.module.entity.messages.EntityProtocol
@@ -79,26 +78,26 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] {
   override def slugLens: Lens[OutlierPlan, String] = OutlierPlan.slugLens
 
 
+  val module: EntityAggregateModule[OutlierPlan] = {
+    val b = EntityAggregateModule.builderFor[OutlierPlan].make
+    import b.P.{ Tag => BTag, Props => BProps, _ }
+
+    b
+    .builder
+    .set( BTag, identifying.idTag )
+    .set( BProps, AggregateRoot.OutlierPlanActor.props(_, _) )
+    .set( IdLens, OutlierPlan.idLens )
+    .set( NameLens, OutlierPlan.nameLens )
+    .set( IsActiveLens, Some(OutlierPlan.isActiveLens) )
+    .build()
+  }
+
+
   object AggregateRoot {
-    val module: EntityAggregateModule[OutlierPlan] = {
-      val b = EntityAggregateModule.builderFor[OutlierPlan].make
-      import b.P.{ Tag => BTag, Props => BProps, _ }
-
-      b
-      .builder
-      .set( BTag, identifying.idTag )
-      .set( BProps, OutlierPlanActor.props(_, _) )
-      .set( IdLens, OutlierPlan.idLens )
-      .set( NameLens, OutlierPlan.nameLens )
-      .set( IsActiveLens, Some(OutlierPlan.isActiveLens) )
-      .build()
-    }
-
-
     object OutlierPlanActor {
       def props( model: DomainModel, rootType: AggregateRootType ): Props = Props( new AggregateRootActor(model, rootType) )
 
-      class AggregateRootActor( model: DomainModel, rootType: AggregateRootType )
+      private class AggregateRootActor( model: DomainModel, rootType: AggregateRootType )
       extends OutlierPlanActor( model, rootType )
       with ProxyProvider
       with StackableStreamPublisher
@@ -205,6 +204,26 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] {
             isQuorum = e.isQuorum,
             reduce = e.reduce
           )
+        }
+      }
+
+      val IdType = identifying.evTID
+
+      import demesne.module.entity.{ messages => EntityMessages }
+      override def quiescent: Receive = {
+        case EntityMessages.Add( IdType(targetId), info ) if targetId == aggregateId => {
+          persist( EntityMessages.Added(targetId, info) ) { e =>
+            acceptAndPublish( e )
+            sender() !+ e  // per akka docs: safe to use sender() here
+          }
+        }
+
+        case EntityMessages.Add( targetId, info ) => {
+          log.info( "AnalysisPlanModule caught Add message but unsure targetId[{}] matches aggregateId:[{}] => [{}][{}]",
+                    (targetId, targetId.id.getClass), (aggregateId, aggregateId.id.getClass), targetId == aggregateId, targetId.id == aggregateId.id )
+        }
+        case a => {
+          log.info( "AnalysisPlanModule caught generic message: [{}]", a )
         }
       }
 

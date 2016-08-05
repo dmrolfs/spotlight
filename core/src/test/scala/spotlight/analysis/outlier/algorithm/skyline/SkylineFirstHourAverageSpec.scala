@@ -1,6 +1,5 @@
 package spotlight.analysis.outlier.algorithm.skyline
 
-import scala.annotation.tailrec
 import scala.collection.immutable
 import scala.concurrent.duration._
 import akka.testkit._
@@ -11,7 +10,7 @@ import org.joda.{time => joda}
 import com.github.nscala_time.time.JodaImplicits._
 import spotlight.analysis.outlier.algorithm.CommonAnalyzer
 import spotlight.analysis.outlier.{DetectOutliersInSeries, DetectUsing, DetectionAlgorithmRouter}
-import spotlight.model.outlier.{NoOutliers, OutlierPlan, SeriesOutliers}
+import spotlight.model.outlier.{OutlierPlan, SeriesOutliers}
 import spotlight.model.timeseries.{DataPoint, ThresholdBoundary}
 
 
