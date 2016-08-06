@@ -34,7 +34,11 @@ object CatalogProtocol extends EntityProtocol[Catalog] {
 
   sealed trait CatalogProtocol
   case class GetPlansForTopic( targetId: Catalog#TID, topic: Topic ) extends Command with CatalogProtocol
-  case class CatalogedPlans( sourceId: Catalog#TID, plans: Set[PlanSummary] ) extends Event with CatalogProtocol
+  case class CatalogedPlans(
+    sourceId: Catalog#TID,
+    plans: Set[PlanSummary],
+    request: GetPlansForTopic
+  ) extends Event with CatalogProtocol
 
   case class AddPlan( override val targetId: Catalog#TID, summary: PlanSummary ) extends Command with CatalogProtocol
 
@@ -321,10 +325,10 @@ object CatalogModule extends EntityAggregateModule[Catalog] { module =>
 
         case CatalogProtocol.RemovePlan( _, pid, name ) if state.analysisPlans.contains( name ) => persistRemovedPlan( name )
 
-        case CatalogProtocol.GetPlansForTopic( _, topic ) => {
+        case req @ CatalogProtocol.GetPlansForTopic( _, topic ) => {
           val ps = plansCache collect { case (_, p) if p appliesTo topic => p }
           log.debug( "CatalogModule[{}]: for topic:[{}] returning plans:[{}]", topic, ps.mkString(", ") )
-          sender() !+ CatalogProtocol.CatalogedPlans( sourceId = state.id, plans = ps.toSet )
+          sender() !+ CatalogProtocol.CatalogedPlans( sourceId = state.id, plans = ps.toSet, request = req )
         }
       }
 

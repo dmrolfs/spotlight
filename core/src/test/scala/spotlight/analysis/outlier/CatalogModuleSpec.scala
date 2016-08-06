@@ -49,15 +49,24 @@ class CatalogModuleSpec extends EntityModuleSpec[Catalog] with ScalaFutures { ou
       logger.info( "TEST: entity-type=[{}] tid=[{}]", identifying.evEntity, tid )
 
       import scala.concurrent.ExecutionContext.Implicits.global
-      
+
       entity ! EntityMessages.Add( tid, Some(catalog) )
       whenReady(
         ( entity ? P.GetPlansForTopic(tid, "foo") ).mapTo[Envelope].map(_.payload).mapTo[P.CatalogedPlans],
-        timeout(15.seconds.dilated)
+        timeout(3.seconds.dilated)
       ) { actual =>
+        logger.info( "TEST: actual plans for topic:[{}] = [{}]", actual.request, actual )
         actual.plans.size mustBe 1
         val actualPlan = actual.plans.head
         actualPlan.name mustBe "foo"
+      }
+
+      whenReady(
+        ( entity ? P.GetPlansForTopic(tid, "dummy") ).mapTo[Envelope].map(_.payload).mapTo[P.CatalogedPlans],
+        timeout(3.seconds.dilated)
+      ) { actual =>
+        logger.info( "TEST: actual plans for topic:[{}] = [{}]", actual.request, actual )
+        actual.plans mustBe empty
       }
     }
   }
