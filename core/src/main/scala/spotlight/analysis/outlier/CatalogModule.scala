@@ -25,13 +25,13 @@ import spotlight.analysis.outlier.AnalysisPlanProtocol.PlanInfo
 import spotlight.model.outlier.{IsQuorum, OutlierPlan, ReduceOutliers}
 import spotlight.model.timeseries.{TimeSeries, Topic}
 
+import scalaz.{-\/, \/-}
+
 
 /**
   * Created by rolfsd on 5/20/16.
   */
 object CatalogProtocol extends EntityProtocol[Catalog] {
-  import CatalogModule.PlanSummary
-
   sealed trait CatalogProtocol
   case class GetPlansForTopic( targetId: Catalog#TID, topic: Topic ) extends Command with CatalogProtocol
   case class CatalogedPlans(
@@ -59,6 +59,16 @@ object CatalogProtocol extends EntityProtocol[Catalog] {
     planId: OutlierPlan#TID,
     planName: String
   ) extends Event with CatalogProtocol
+
+
+  case class PlanSummary( id: OutlierPlan#TID, name: String, appliesTo: OutlierPlan.AppliesTo )
+  object PlanSummary {
+    def apply( info: OutlierPlan ): PlanSummary = PlanSummary( id = info.id, name = info.name, appliesTo = info.appliesTo )
+
+    def apply( summary: AnalysisPlanProtocol.PlanInfo ): PlanSummary = {
+      PlanSummary( id = summary.sourceId, name = summary.info.name, appliesTo = summary.info.appliesTo )
+    }
+  }
 }
 
 
@@ -85,14 +95,25 @@ object Catalog {
     analysisPlans: Map[String, OutlierPlan#TID] = Map.empty[String, OutlierPlan#TID],
     isActive: Boolean = true
   ): Catalog = {
-    CatalogModule.CatalogState( id, name, slug, analysisPlans, isActive )
+    CatalogState( id, name, slug, analysisPlans, isActive )
   }
 }
 
 
-object CatalogModule extends EntityAggregateModule[Catalog] { module =>
-  override val trace: Trace[_] = Trace[CatalogModule.type]
+object CatalogModule extends CatalogModule
 
+
+final case class CatalogState private[outlier](
+  override val id: Catalog#TID,
+  override val name: String,
+  override val slug: String,
+  override val analysisPlans: Map[String, OutlierPlan#TID] = Map.empty[String, OutlierPlan#TID],
+  override val isActive: Boolean = true
+) extends Catalog
+
+
+private[outlier] abstract class CatalogModule extends EntityAggregateModule[Catalog] { module =>
+  override val trace: Trace[_] = Trace[CatalogModule.type]
 
   override def initializer(
     rootType: AggregateRootType,
@@ -111,13 +132,22 @@ object CatalogModule extends EntityAggregateModule[Catalog] { module =>
     )
 
     val init: Option[Valid[Future[Done]]] = {
+      val spotlightPath = "spotlight"
       for {
         conf <- props get demesne.ConfigurationKey
         base <- conf.cast[Config]
-        spotlight = base getConfig "spotlight"
-        _ = specifyDetectionBudget( spotlight getConfig "workflow" )
-        _ = specifyPlans( spotlight getConfig "detection-plans" )
-      } yield super.initializer( rootType, model, props )
+        spotlight <- if ( base hasPath spotlightPath ) Some(base getConfig spotlightPath ) else None
+        budget <- specifyDetectionBudget( spotlight getConfig "workflow" )
+        plans <- Option( specifyPlans(spotlight getConfig "detection-plans") )
+      } yield {
+        detectionBudget = budget
+        logger.debug( "CatalogModule: specified detection budget = [{}]", detectionBudget.toCoarsest )
+
+        specifiedPlans = plans
+        logger.debug( "CatalogModule: specified plans = [{}]", specifiedPlans.mkString(", ") )
+
+        super.initializer( rootType, model, props )
+      }
     }
 
     init getOrElse {
@@ -125,22 +155,25 @@ object CatalogModule extends EntityAggregateModule[Catalog] { module =>
     }
   }
 
-  private var detectionBudget: FiniteDuration = 10.seconds
-  private def specifyDetectionBudget( specification: Config ): Unit = {
-    module.detectionBudget = FiniteDuration( specification.getDuration("detect.timeout", NANOSECONDS), NANOSECONDS )
+  protected var detectionBudget: FiniteDuration = 10.seconds
+  private def specifyDetectionBudget( specification: Config ): Option[FiniteDuration] = trace.block("specifyDetectionBudget") {
+    val budgetPath = "detect.timeout"
+    if ( specification hasPath budgetPath ) {
+      Some( FiniteDuration( specification.getDuration(budgetPath, NANOSECONDS), NANOSECONDS ) )
+    } else {
+      None
+    }
   }
 
-  private var specifiedPlans: Set[OutlierPlan] = Set.empty[OutlierPlan]
-  private def specifyPlans( specification: Config ): Unit = {
+  protected var specifiedPlans: Set[OutlierPlan] = Set.empty[OutlierPlan]
+  private def specifyPlans( specification: Config ): Set[OutlierPlan] = {
     import scala.collection.JavaConversions._ // since config is java API needed for collect
 
-    module.specifiedPlans = {
-      specification.root
-      .collect { case (n, s: ConfigObject) => ( n, s.toConfig ) }
-      .toSet[(String, Config)]
-      .map { case (name, spec) => module.makePlan( name, spec )( module.detectionBudget ) }
-      .flatten
-    }
+    specification.root
+    .collect { case (n, s: ConfigObject) => ( n, s.toConfig ) }
+    .toSet[(String, Config)]
+    .map { case (name, spec) => module.makePlan( name, spec )( module.detectionBudget ) }
+    .flatten
   }
 
 
@@ -192,202 +225,219 @@ object CatalogModule extends EntityAggregateModule[Catalog] { module =>
   }
 
 
-  final case class CatalogState private[CatalogModule](
-    override val id: Catalog#TID,
-    override val name: String,
-    override val slug: String,
-    override val analysisPlans: Map[String, OutlierPlan#TID] = Map.empty[String, OutlierPlan#TID],
-    override val isActive: Boolean = true
-  ) extends Catalog
+  object CatalogActor {
+    def props( model: DomainModel, rootType: AggregateRootType ): Props = Props( new Default( model, rootType ) )
+
+    private class Default( model: DomainModel, rootType: AggregateRootType )
+    extends CatalogActor( model, rootType ) with Provider with StackableStreamPublisher with StackableRegisterBusPublisher
 
 
-  case class PlanSummary( id: OutlierPlan#TID, name: String, appliesTo: OutlierPlan.AppliesTo )
-  object PlanSummary {
-    def apply( info: OutlierPlan ): PlanSummary = PlanSummary( id = info.id, name = info.name, appliesTo = info.appliesTo )
-
-    def apply( summary: AnalysisPlanProtocol.PlanInfo ): PlanSummary = {
-      PlanSummary( id = summary.sourceId, name = summary.info.name, appliesTo = summary.info.appliesTo )
+    trait Provider {
+      def detectionBudget: FiniteDuration = module.detectionBudget
+      def specifiedPlans: Set[OutlierPlan] = module.specifiedPlans
     }
   }
 
+  class CatalogActor( override val model: DomainModel, override val rootType: AggregateRootType )
+  extends module.EntityAggregateActor { actor: CatalogActor.Provider with EventPublisher =>
+    import demesne.module.entity.{ messages => EntityMessage }
+    import spotlight.analysis.outlier.{ CatalogProtocol => P }
 
-    object CatalogActor {
-      def props( model: DomainModel, rootType: AggregateRootType ): Props = Props( new Default( model, rootType ) )
+    override var state: Catalog = _
 
-      private class Default( model: DomainModel, rootType: AggregateRootType )
-      extends CatalogActor( model, rootType ) with StackableStreamPublisher with StackableRegisterBusPublisher
+    initialize upon first data message? to avoid order dependency?
+    catalog doesn't need to be persistent if impl in terms of plan index
+
+    val planIndex = {
+      model.aggregateRegisterFor[String, OutlierPlan](
+        AnalysisPlanModule.module.rootType,
+        AnalysisPlanModule.namedPlanIndex
+      ) match {
+        case \/-( pindex ) => pindex
+        case -\/( ex ) => {
+          log.error( ex, "CatalogModule[{}]: failed to initialize CatalogActor's plan index", self.path )
+          throw ex
+        }
+      }
     }
 
-    class CatalogActor( override val model: DomainModel, override val rootType: AggregateRootType )
-    extends module.EntityAggregateActor { actor: EventPublisher =>
-      import demesne.module.entity.{ messages => EntityMessage }
+    var plansCache: Map[String, P.PlanSummary] = Map.empty[String, P.PlanSummary]
 
-      override var state: Catalog = _
-
-      var plansCache: Map[String, PlanSummary] = Map.empty[String, PlanSummary]
-
-      val actorDispatcher = context.system.dispatcher
-      val defaultTimeout = akka.util.Timeout( 30.seconds )
+    val actorDispatcher = context.system.dispatcher
+    val defaultTimeout = akka.util.Timeout( 30.seconds )
 
 
-      override def preStart(): Unit = {
-        super.preStart( )
-        context.system.eventStream.subscribe( self, classOf[EntityMessage] )
-        context.system.eventStream.subscribe( self, classOf[AnalysisPlanProtocol.Message] )
+    override def preStart(): Unit = {
+      super.preStart( )
+      context.system.eventStream.subscribe( self, classOf[EntityMessage] )
+      context.system.eventStream.subscribe( self, classOf[AnalysisPlanProtocol.Message] )
+    }
+
+    override def receiveRecover: Receive = {
+      case akka.persistence.RecoveryCompleted => {
+
+        val (oldPlans, newPlans) = actor.specifiedPlans partition { p =>
+          Option(state)
+          .map { _.analysisPlans contains p.name }
+          .getOrElse { false }
+        }
+        log.info( "TEST: CatalogModule[{}] oldPlans=[{}]", self.path, oldPlans.mkString(",") )
+        log.info( "TEST: CatalogModule[{}] newPlans=[{}]", self.path, newPlans.mkString(",") )
+
+        implicit val ec = actorDispatcher
+        implicit val to = defaultTimeout
+
+        val plans = for {
+          existing <- loadExistingCacheElements( oldPlans )
+          created <- makeNewCacheElements( newPlans )
+        } yield existing ++ created
+
+        actor.plansCache = scala.concurrent.Await.result( plans , 5.seconds )
+        log.debug( "CatalogModule[{}]: plans-cache=[{}]", self.path, actor.plansCache.mkString(", ") )
+      }
+    }
+
+    def loadExistingCacheElements(
+      plans: Set[OutlierPlan]
+    )(
+      implicit ec: ExecutionContext,
+      to: Timeout
+    ): Future[Map[String, P.PlanSummary]] = {
+      val queries = plans.toSeq.map { p => loadPlan( p.id ) }
+      Future.sequence( queries ) map { qs => Map( qs:_* ) }
+    }
+
+    def makeNewCacheElements(
+      plans: Set[OutlierPlan]
+    )(
+      implicit ec: ExecutionContext,
+      to: Timeout
+    ): Future[Map[String, P.PlanSummary]] = {
+      val queries = plans.toSeq.map { p =>
+        log.info( "CatalogModule: making plan entity for: [{}]", p )
+        val planRef =  model.aggregateOf( AnalysisPlanModule.module.rootType, p.id )
+
+        for {
+          added <- ( planRef ?+ EntityMessage.Add( p.id, Some(p) ) )
+          _ = log.debug( "CatalogModule: notified that plan is added:[{}]", added )
+          loaded <- loadPlan( p.id )
+          _ = log.debug( "CatalogModule: loaded plan:[{}]", loaded )
+        } yield loaded
       }
 
-      override def receiveRecover: Receive = {
-        case akka.persistence.RecoveryCompleted => {
-          val (oldPlans, newPlans) = module.specifiedPlans partition { p =>
-            Option(state)
-            .map { _.analysisPlans contains p.name }
-            .getOrElse { false }
-          }
-          log.info( "TEST: CatalogModule[{}] oldPlans=[{}]", self.path, oldPlans.mkString(",") )
-          log.info( "TEST: CatalogModule[{}] newPlans=[{}]", self.path, newPlans.mkString(",") )
+      Future.sequence( queries ) map { qs =>
+        log.info( "TEST: CatalogModule loaded plans: [{}]", qs.map{ case (n,p) => s"$n->$p" }.mkString(",") )
+        Map( qs:_* )
+      }
+    }
 
-          implicit val ec = actorDispatcher
-          implicit val to = defaultTimeout
+    def loadPlan( planId: OutlierPlan#TID )( implicit ec: ExecutionContext, to: Timeout ): Future[(String, P.PlanSummary)] = {
+      fetchPlanInfo( planId ) map { summary => ( summary.info.name, P.PlanSummary(summary) ) }
+    }
 
-          val plans = for {
-            existing <- loadExistingCacheElements( oldPlans )
-            created <- makeNewCacheElements( newPlans )
-          } yield existing ++ created
+    WORK HERE NEED TO RECORD PLAN-ADDED FOR ESTABLISHED PLANS...  MAYBE PERSIST PLAN-ADDED EVENTS FOR SPECIFIED PLANS?
+    WORK HERE HOW NOT TO CONFLICT WITH RECEOVERY SCENARIO?
 
-          actor.plansCache = scala.concurrent.Await.result( plans , 5.seconds )
+    //todo upon add watch info actor for changes and incorporate them in to cache
+    //todo the cache is what is sent out in reply to GetPlansForXYZ
+
+    import spotlight.analysis.outlier.{ AnalysisPlanProtocol => PlanProtocol }
+
+    override val acceptance: Acceptance = entityAcceptance orElse {
+      case (P.PlanAdded(_, pid, name), s) => analysisPlansLens.modify( s ){ _ + (name -> pid) }
+      case (P.PlanRemoved(_, _, name), s) => analysisPlansLens.modify( s ){ _ - name }
+    }
+
+
+    override def active: Receive = workflow orElse catalog orElse plans orElse super.active
+
+    val workflow: Receive = {
+      case ts: TimeSeries if plansCache.values.exists { _ appliesTo ts } => {
+        // forwarding to retain publisher sender
+        for {
+          p <- plansCache.values if p appliesTo ts
+          pref = model.aggregateOf( AnalysisPlanModule.module.rootType, p.id )
+        } {
+          log.debug( "CatalogModule[{}]: forwarding data[{}] to plan-module[{}]", self.path, ts.topic, pref.path )
+          pref forwardEnvelope AnalysisPlanProtocol.AcceptTimeSeries( p.id, ts )
         }
       }
 
-      def loadExistingCacheElements(
-        plans: Set[OutlierPlan]
-      )(
-        implicit ec: ExecutionContext,
-        to: Timeout
-      ): Future[Map[String, PlanSummary]] = {
-        val queries = plans.toSeq.map { p => loadPlan( p.id ) }
-        Future.sequence( queries ) map { qs => Map( qs:_* ) }
+      case ts: TimeSeries => log.warning( "CatalogModule[{}]: no plan found for time-series:[{}]", self.path, ts.topic )
+    }
+
+    val catalog: Receive = {
+      case P.AddPlan( _, summary ) => persistAddedPlan( summary )
+
+      case P.RemovePlan( _, pid, name ) if state.analysisPlans.contains( name ) => persistRemovedPlan( name )
+
+      case req @ P.GetPlansForTopic( _, topic ) => {
+        val ps = plansCache collect { case (_, p) if p appliesTo topic => p }
+        log.debug( "CatalogModule[{}]: for topic:[{}] returning plans:[{}]", topic, ps.mkString(", ") )
+        log.debug( "TEST: IN GET-PLANS specified-plans:[{}]", specifiedPlans.mkString(", ") )
+        sender() !+ P.CatalogedPlans( sourceId = state.id, plans = ps.toSet, request = req )
+      }
+    }
+
+    val planTidType = TypeCase[OutlierPlan#TID]
+    val planType = TypeCase[OutlierPlan]
+
+    val plans: Receive = {
+      case e @ EntityMessage.Added( _, Some(planType(info)) ) => persistAddedPlan( P.PlanSummary(info) )
+
+      case e @ EntityMessage.Enabled( planTidType(id), _ ) => {
+        implicit val ec = actorDispatcher
+        implicit val to = defaultTimeout
+
+        fetchPlanInfo( id )
+        .map { i => P.AddPlan( targetId = state.id, summary = P.PlanSummary(i.info) ) }
+        .pipeEnvelopeTo( self )
       }
 
-      def makeNewCacheElements(
-        plans: Set[OutlierPlan]
-      )(
-        implicit ec: ExecutionContext,
-        to: Timeout
-      ): Future[Map[String, PlanSummary]] = {
-        val queries = plans.toSeq.map { p =>
-          val planRef =  model.aggregateOf( AnalysisPlanModule.module.rootType, p.id )
+      case e @ EntityMessage.Disabled( planTidType(id), slug ) => persistRemovedPlan( slug )
 
-          for {
-            _ <- ( planRef ?+ EntityMessage.Add( p.id, Some(p) ) )
-            loaded <- loadPlan( p.id )
-          } yield loaded
-        }
-        Future.sequence( queries ) map { qs =>
-          log.info( "TEST: CatalogModule loaded plans: [{}]", qs.map{ case (n,p) => s"$n->$p" }.mkString(",") )
-          Map( qs:_* )
-        }
+      case e @ EntityMessage.Renamed( planTidType(id), oldName, newName ) => {
+        implicit val ec = actorDispatcher
+        implicit val to = defaultTimeout
+
+        persistRemovedPlan( oldName )
+
+        fetchPlanInfo( id )
+        .map { i => P.AddPlan( targetId = state.id, summary = P.PlanSummary(i.info) ) }
+        .pipeEnvelopeTo( self )
       }
+    }
 
-      def loadPlan( planId: OutlierPlan#TID )( implicit ec: ExecutionContext, to: Timeout ): Future[(String, PlanSummary)] = {
-        log.info( "TEST: CatalogModule: LOADING PLAN: [{}]", planId )
-        fetchPlanInfo( planId ) map { summary => ( summary.info.name, PlanSummary(summary) ) }
+
+    def fetchPlanInfo(
+      id: module.TID
+    )(
+      implicit ec: ExecutionContext,
+      to: Timeout
+    ): Future[AnalysisPlanProtocol.PlanInfo] = {
+      val planRef = model.aggregateOf( AnalysisPlanModule.module.rootType, id )
+      ( planRef ?+ AnalysisPlanProtocol.GetPlan( id ) ).collect { case Envelope( info: PlanInfo, _ ) =>
+        log.info( "CatalogModule: fetched plan entity: [{}]", info.sourceId )
+        info
       }
+    }
 
-
-      //todo upon add watch info actor for changes and incorporate them in to cache
-      //todo the cache is what is sent out in reply to GetPlansForXYZ
-
-      import spotlight.analysis.outlier.{ AnalysisPlanProtocol => PlanProtocol }
-
-      override val acceptance: Acceptance = entityAcceptance orElse {
-        case (CatalogProtocol.PlanAdded(_, pid, name), s) => analysisPlansLens.modify( s ){ _ + (name -> pid) }
-        case (CatalogProtocol.PlanRemoved(_, _, name), s) => analysisPlansLens.modify( s ){ _ - name }
+    def persistAddedPlan( summary: P.PlanSummary ): Unit = {
+      persist( P.PlanAdded(state.id, summary.id, summary.name) ) { event =>
+        plansCache += ( summary.name -> summary )
+        acceptAndPublish( event )
       }
+    }
 
-
-      override def active: Receive = workflow orElse catalog orElse plans orElse super.active
-
-      val workflow: Receive = {
-        case ts: TimeSeries => {
-          // forwarding to retain publisher sender
-          for {
-            p <- plansCache.values if p appliesTo ts
-            pref = model.aggregateOf( AnalysisPlanModule.module.rootType, p.id )
-          } {
-            log.debug( "CatalogModule[{}]: forwarding data[{}] to plan-module[{}]", self.path, ts.topic, pref.path )
-            pref forwardEnvelope AnalysisPlanProtocol.AcceptTimeSeries( p.id, ts )
-          }
-        }
-      }
-
-      val catalog: Receive = {
-        case CatalogProtocol.AddPlan( _, summary ) => persistAddedPlan( summary )
-
-        case CatalogProtocol.RemovePlan( _, pid, name ) if state.analysisPlans.contains( name ) => persistRemovedPlan( name )
-
-        case req @ CatalogProtocol.GetPlansForTopic( _, topic ) => {
-          val ps = plansCache collect { case (_, p) if p appliesTo topic => p }
-          log.debug( "CatalogModule[{}]: for topic:[{}] returning plans:[{}]", topic, ps.mkString(", ") )
-          sender() !+ CatalogProtocol.CatalogedPlans( sourceId = state.id, plans = ps.toSet, request = req )
-        }
-      }
-
-      val planTidType = TypeCase[OutlierPlan#TID]
-      val planType = TypeCase[OutlierPlan]
-
-      val plans: Receive = {
-        case e @ EntityMessage.Added( _, Some(planType(info)) ) => persistAddedPlan( PlanSummary(info) )
-
-        case e @ EntityMessage.Enabled( planTidType(id), _ ) => {
-          implicit val ec = actorDispatcher
-          implicit val to = defaultTimeout
-
-          fetchPlanInfo( id )
-          .map { i => CatalogProtocol.AddPlan( targetId = state.id, summary = PlanSummary(i.info) ) }
-          .pipeEnvelopeTo( self )
-        }
-
-        case e @ EntityMessage.Disabled( planTidType(id), slug ) => persistRemovedPlan( slug )
-
-        case e @ EntityMessage.Renamed( planTidType(id), oldName, newName ) => {
-          implicit val ec = actorDispatcher
-          implicit val to = defaultTimeout
-
-          persistRemovedPlan( oldName )
-
-          fetchPlanInfo( id )
-          .map { i => CatalogProtocol.AddPlan( targetId = state.id, summary = PlanSummary(i.info) ) }
-          .pipeEnvelopeTo( self )
-        }
-      }
-
-
-      def fetchPlanInfo(
-        id: module.TID
-      )(
-        implicit ec: ExecutionContext,
-        to: Timeout
-      ): Future[AnalysisPlanProtocol.PlanInfo] = {
-        val planRef = model.aggregateOf( AnalysisPlanModule.module.rootType, id )
-        ( planRef ?+ AnalysisPlanProtocol.GetPlan( id ) ).collect { case Envelope( info: PlanInfo, _ ) => info }
-      }
-
-      def persistAddedPlan( summary: PlanSummary ): Unit = {
-        persist( CatalogProtocol.PlanAdded(state.id, summary.id, summary.name) ) { event =>
-          plansCache += ( summary.name -> summary )
+    def persistRemovedPlan( name: String ): Unit = {
+      state.analysisPlans.get( name ) foreach { pid =>
+        persist( P.PlanRemoved(state.id, pid, name) ) { event =>
           acceptAndPublish( event )
-        }
-      }
-
-      def persistRemovedPlan( name: String ): Unit = {
-        state.analysisPlans.get( name ) foreach { pid =>
-          persist( CatalogProtocol.PlanRemoved(state.id, pid, name) ) { event =>
-            acceptAndPublish( event )
-            plansCache -= name
-          }
+          plansCache -= name
         }
       }
     }
+  }
 
 
   private def makePlan( name: String, planSpecification: Config )( budget: FiniteDuration ): Option[OutlierPlan] = {
