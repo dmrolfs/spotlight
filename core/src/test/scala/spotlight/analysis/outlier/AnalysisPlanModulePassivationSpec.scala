@@ -11,6 +11,7 @@ import akka.util.Timeout
 import demesne._
 import demesne.module.entity.{EntityAggregateModule, messages => EntityMessages}
 import demesne.module.AggregateRootProps
+import peds.archetype.domain.model.core.EntityIdentifying
 import peds.commons.identifier.{ShortUUID, TaggedID}
 import peds.commons.log.Trace
 import shapeless.Lens
@@ -52,7 +53,7 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[OutlierPlan] { 
 
     override val module: Module = new Module
 
-    val identifying = AnalysisPlanModule.identifying
+    override val identifying: EntityIdentifying[OutlierPlan] = AnalysisPlanModule.identifying
     override def nextId(): module.TID = identifying.safeNextId
 
     val algo: Symbol = SimpleMovingAverageModule.algorithm.label
