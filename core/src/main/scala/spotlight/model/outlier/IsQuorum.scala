@@ -41,6 +41,6 @@ object IsQuorum {
       }
     }
 
-    override def toString: String = s"${getClass.safeSimpleName}(trigger:[${triggerPoint}]% of total:[${totalIssued}])"
+    override def toString: String = s"${getClass.safeSimpleName}(trigger:[${triggerPoint * 100}]% of total:[${totalIssued}])"
   }
 }
