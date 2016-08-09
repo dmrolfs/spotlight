@@ -3,10 +3,14 @@ package spotlight.analysis.outlier
 import scala.reflect._
 import akka.actor.{ActorContext, ActorRef, PoisonPill, Props, Terminated}
 import com.typesafe.config.Config
+import com.typesafe.scalalogging.LazyLogging
 import demesne.module.entity.EntityAggregateModule
+import demesne.module.entity.EntityAggregateModule.MakeIndexSpec
 import demesne.module.entity.messages.EntityProtocol
+import demesne.module.entity.{messages => EntityMessages}
+import demesne.register.local.RegisterLocalAgent
 import demesne.{AggregateRootType, DomainModel}
-import demesne.register.StackableRegisterBusPublisher
+import demesne.register.{AggregateIndexSpec, Directive, RegisterBusSubscription, StackableRegisterBusPublisher}
 import peds.akka.envelope._
 import peds.akka.publish.{EventPublisher, StackableStreamPublisher}
 import peds.archetype.domain.model.core.{EntityIdentifying, EntityLensProvider}
@@ -17,55 +21,59 @@ import spotlight.model.timeseries.{TimeSeries, Topic}
 
 
 object AnalysisPlanProtocol extends EntityProtocol[OutlierPlan] {
-  case class AcceptTimeSeries( override val targetId: AcceptTimeSeries#TID, data: TimeSeries ) extends CommandMessage
+  sealed trait AnalysisPlanMessage
+  sealed abstract class AnalysisPlanCommand extends AnalysisPlanMessage with CommandMessage
+  sealed abstract class AnalysisPlanEvent extends AnalysisPlanMessage with EventMessage
+
+  case class AcceptTimeSeries( override val targetId: AcceptTimeSeries#TID, data: TimeSeries ) extends AnalysisPlanCommand
 
   //todo add info change commands
   //todo reify algorithm
   //      case class AddAlgorithm( override val targetId: OutlierPlan#TID, algorithm: Symbol ) extends Command with AnalysisPlanMessage
-  case class ApplyTo( override val targetId: ApplyTo#TID, appliesTo: OutlierPlan.AppliesTo ) extends CommandMessage
+  case class ApplyTo( override val targetId: ApplyTo#TID, appliesTo: OutlierPlan.AppliesTo ) extends AnalysisPlanCommand
 
   case class UseAlgorithms(
     override val targetId: UseAlgorithms#TID,
     algorithms: Set[Symbol],
     algorithmConfig: Config
-  ) extends CommandMessage
+  ) extends AnalysisPlanCommand
 
   case class ResolveVia(
     override val targetId: ResolveVia#TID,
     isQuorum: IsQuorum,
     reduce: ReduceOutliers
-  ) extends CommandMessage
+  ) extends AnalysisPlanCommand
 
 
-  case class ScopeChanged( override val sourceId: ScopeChanged#TID, appliesTo: OutlierPlan.AppliesTo ) extends EventMessage
+  case class ScopeChanged( override val sourceId: ScopeChanged#TID, appliesTo: OutlierPlan.AppliesTo ) extends AnalysisPlanEvent
 
   case class AlgorithmsChanged(
     override val sourceId: AlgorithmsChanged#TID,
     algorithms: Set[Symbol],
     algorithmConfig: Config
-  ) extends EventMessage
+  ) extends AnalysisPlanEvent
 
   case class AnalysisResolutionChanged(
     override val sourceId: AnalysisResolutionChanged#TID,
     isQuorum: IsQuorum,
     reduce: ReduceOutliers
-  ) extends EventMessage
+  ) extends AnalysisPlanEvent
 
-  case class GetPlan( override val targetId: GetPlan#TID ) extends CommandMessage
-  case class PlanInfo( override val sourceId: PlanInfo#TID, info: OutlierPlan ) extends EventMessage
+  case class GetPlan( override val targetId: GetPlan#TID ) extends AnalysisPlanCommand
+  case class PlanInfo( override val sourceId: PlanInfo#TID, info: OutlierPlan ) extends AnalysisPlanEvent
 
-  private[outlier] case class GetProxies( override val targetId: GetProxies#TID ) extends CommandMessage
+  private[outlier] case class GetProxies( override val targetId: GetProxies#TID ) extends AnalysisPlanCommand
   private[outlier] case class Proxies(
     override val sourceId: Proxies#TID,
     scopeProxies: Map[Topic, ActorRef]
-  ) extends EventMessage
+  ) extends AnalysisPlanEvent
 }
 
 
 /**
   * Created by rolfsd on 5/26/16.
   */
-object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] {
+object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLogging {
   implicit val identifying: EntityIdentifying[OutlierPlan] = {
     new EntityIdentifying[OutlierPlan] with ShortUUID.ShortUuidIdentifying[OutlierPlan] {
       override val evEntity: ClassTag[OutlierPlan] = classTag[OutlierPlan]
@@ -77,6 +85,25 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] {
   override def nameLens: Lens[OutlierPlan, String] = OutlierPlan.nameLens
   override def slugLens: Lens[OutlierPlan, String] = OutlierPlan.slugLens
 
+  val namedPlanIndex: Symbol = 'namedPlan
+
+  val indexes: MakeIndexSpec = {
+    () => {
+      Seq(
+        RegisterLocalAgent.spec[String, OutlierPlan]( specName = namedPlanIndex, RegisterBusSubscription ) {
+          case EntityMessages.Added( sid, Some( p: OutlierPlan ) ) => Directive.Record( p.name, p )
+          case EntityMessages.Added( sid, info ) => {
+            logger.error( "AnalysisPlanModule: IGNORING ADDED event since info was not Some OutlierPlan: [{}]", info )
+            Directive.Ignore
+          }
+          case EntityMessages.Disabled( sid, _ ) => Directive.Withdraw( sid )
+          case EntityMessages.Renamed( sid, oldName, newName ) => Directive.Revise( oldName, newName )
+          case m: EntityMessages.EntityMessage => Directive.Ignore
+          case m: AnalysisPlanProtocol.AnalysisPlanMessage => Directive.Ignore
+        }
+      )
+    }
+  }
 
   val module: EntityAggregateModule[OutlierPlan] = {
     val b = EntityAggregateModule.builderFor[OutlierPlan].make
@@ -86,6 +113,7 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] {
     .builder
     .set( BTag, identifying.idTag )
     .set( BProps, AggregateRoot.OutlierPlanActor.props(_, _) )
+    .set( Indexes, Some(indexes) )
     .set( IdLens, OutlierPlan.idLens )
     .set( NameLens, OutlierPlan.nameLens )
     .set( IsActiveLens, Some(OutlierPlan.isActiveLens) )
