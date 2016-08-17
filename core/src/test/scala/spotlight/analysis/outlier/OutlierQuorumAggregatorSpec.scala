@@ -63,10 +63,10 @@ class OutlierQuorumAggregatorSpec extends ParallelAkkaSpec with MockitoSugar {
     }
   }
 
-  override def makeAkkaFixture(): Fixture = new Fixture
+  override def createAkkaFixture( test: OneArgTest ): Fixture = new Fixture
 
   override def withFixture( test: OneArgTest ): Outcome = trace.block( s"withFixture($test)" ) {
-    val f = makeAkkaFixture()
+    val f = createAkkaFixture( test )
 
     try {
       f.before()

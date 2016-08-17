@@ -150,7 +150,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
   }
 
 
-  override def makeAkkaFixture(): Fixture = new Fixture
+  override def createAkkaFixture( test: OneArgTest ): Fixture = new Fixture
 
   "SeriesDensityAnalyzer" should  {
     "register with router upon create" in { f: Fixture =>

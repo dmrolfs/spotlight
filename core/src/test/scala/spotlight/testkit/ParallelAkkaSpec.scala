@@ -70,10 +70,10 @@ with ParallelTestExecution { outer =>
 
   type Fixture <: AkkaFixture
   type FixtureParam = Fixture
-  def makeAkkaFixture(): Fixture
+  def createAkkaFixture( test: OneArgTest ): Fixture
 
-  class AkkaFixture( id: Int = sysId.incrementAndGet(), config: Config = testConf )
-  extends TestKit( makeSystem(s"Parallel-${id}", config) ) with ImplicitSender {
+  class AkkaFixture( val fixtureId: Int = sysId.incrementAndGet(), val config: Config = testConf )
+  extends TestKit( makeSystem(s"Parallel-${fixtureId}", config) ) with ImplicitSender {
     def before(): Unit = { }
     def after(): Unit = { }
 
@@ -97,7 +97,7 @@ with ParallelTestExecution { outer =>
 
 
   override def withFixture( test: OneArgTest ): Outcome = {
-    val f = makeAkkaFixture()
+    val f = createAkkaFixture( test )
     try {
       f.before()
       test( f )

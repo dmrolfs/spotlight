@@ -72,7 +72,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
     actual.lastPoints.flatten mustBe expected.lastPoints.flatten
   }
 
-  override def makeAkkaFixture(): Fixture = new Fixture
+  override def createAkkaFixture( test: OneArgTest ): Fixture = new Fixture
 
   "OutlierDetection" should {
     "apply default plan if no other plan is assigned" in { f: Fixture =>

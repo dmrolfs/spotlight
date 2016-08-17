@@ -42,7 +42,7 @@ class SeriesCentroidDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSug
     }
   }
 
-  override def makeAkkaFixture(): Fixture = new Fixture
+  override def createAkkaFixture( test: OneArgTest ): Fixture = new Fixture
 
   "SeriesCentroidDensityAnalyzer" should  {
     "register with router upon create" in { f: Fixture =>

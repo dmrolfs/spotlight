@@ -32,7 +32,7 @@ class SkylineSeasonalEWMASpec extends SkylineBaseSpec {
     when( plan.algorithms ).thenReturn( Set(algoS) )
   }
 
-  override def makeAkkaFixture(): Fixture = new Fixture
+  override def createAkkaFixture( test: OneArgTest ): Fixture = new Fixture
 
 
   "SeasonalExponentialMovingAverageAnalyzer" should {

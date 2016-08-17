@@ -97,7 +97,7 @@ class SkylineGrubbsSpec extends SkylineBaseSpec {
     }
   }
 
-  override def makeAkkaFixture(): Fixture = new Fixture
+  override def createAkkaFixture( test: OneArgTest ): Fixture = new Fixture
 
 
   "GrubbsAnalyzer" should {

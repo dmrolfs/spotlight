@@ -5,7 +5,7 @@ import scala.reflect._
 import scala.util.matching.Regex
 import scalaz.{ Ordering => _, _}
 import Scalaz._
-import com.typesafe.config.{Config, ConfigFactory, ConfigOrigin}
+import com.typesafe.config.{Config, ConfigFactory}
 import peds.archetype.domain.model.core._
 import peds.commons._
 import peds.commons.identifier._
@@ -31,6 +31,7 @@ sealed trait OutlierPlan extends Entity with Equals {
   def algorithmConfig: Config
   def summary: String
   def isActive: Boolean
+  def toSummary: OutlierPlan.Summary = OutlierPlan summarize this
 
   override def hashCode: Int = 41 + id.##
 
@@ -49,18 +50,19 @@ sealed trait OutlierPlan extends Entity with Equals {
     }
   }
 
-//  private[outlier] def origin: ConfigOrigin
   private[outlier] def typeOrder: Int
   private[outlier] def originLineNumber: Int
 }
 
 object OutlierPlan extends EntityLensProvider[OutlierPlan] {
-  import shapeless._
+  implicit def summarize( p: OutlierPlan ): Summary = Summary( p.id, p.name, p.appliesTo )
 
-  case class Scope( plan: String, topic: Topic /*, planId: OutlierPlan#TID*/ ) {
-//    override type ID = Scope
-//    override val id: TID = Scope tag this
-//    override def evId: ClassTag[Scope] = ClassTag( classOf[Scope] )
+  case class Summary( id: OutlierPlan#TID, name: String, appliesTo: OutlierPlan.AppliesTo )
+  object Summary {
+    def apply( info: OutlierPlan ): Summary = Summary( id = info.id, name = info.name, appliesTo = info.appliesTo )
+  }
+
+  case class Scope( plan: String, topic: Topic ) {
     def name: String = toString
     override val toString: String = plan +":"+ topic
   }
@@ -88,6 +90,8 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
   }
 
 
+  import shapeless._
+
   override val idLens: Lens[OutlierPlan, OutlierPlan#TID] = new Lens[OutlierPlan, OutlierPlan#TID] {
     override def get( p: OutlierPlan ): OutlierPlan#TID = p.id
     override def set( p: OutlierPlan )( id: OutlierPlan#TID ): OutlierPlan = {
@@ -101,7 +105,6 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
         isQuorum = p.isQuorum,
         reduce = p.reduce,
         algorithmConfig = p.algorithmConfig,
-//        origin = p.origin,
         typeOrder = p.typeOrder,
         originLineNumber = p.originLineNumber,
         isActive = p.isActive
@@ -122,7 +125,6 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
         isQuorum = p.isQuorum,
         reduce = p.reduce,
         algorithmConfig = p.algorithmConfig,
-//        origin = p.origin,
         typeOrder = p.typeOrder,
         originLineNumber = p.originLineNumber,
         isActive = p.isActive
@@ -143,7 +145,6 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
         isQuorum = p.isQuorum,
         reduce = p.reduce,
         algorithmConfig = p.algorithmConfig,
-//        origin = p.origin,
         typeOrder = p.typeOrder,
         originLineNumber = p.originLineNumber,
         isActive = p.isActive
@@ -164,7 +165,6 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
         isQuorum = p.isQuorum,
         reduce = p.reduce,
         algorithmConfig = p.algorithmConfig,
-//        origin = p.origin,
         typeOrder = p.typeOrder,
         originLineNumber = p.originLineNumber,
         isActive = a
@@ -202,7 +202,6 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
       isQuorum = isQuorum,
       reduce = reduce,
       algorithmConfig = getAlgorithmConfig( planSpecification ),
-//      origin = planSpecification.origin,
       typeOrder = 3,
       originLineNumber = planSpecification.origin.lineNumber
     )
@@ -229,7 +228,6 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
       isQuorum = isQuorum,
       reduce = reduce,
       algorithmConfig = getAlgorithmConfig( planSpecification ),
-//      origin = planSpecification.origin,
       typeOrder = 3,
       originLineNumber = planSpecification.origin.lineNumber
     )
@@ -256,7 +254,6 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
       isQuorum = isQuorum,
       reduce = reduce,
       algorithmConfig = getAlgorithmConfig( planSpecification ),
-//      origin = planSpecification.origin,
       typeOrder = 1,
       originLineNumber = planSpecification.origin.lineNumber
     )
@@ -283,7 +280,6 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
       isQuorum = isQuorum,
       reduce = reduce,
       algorithmConfig = getAlgorithmConfig( planSpecification ),
-//      origin = planSpecification.origin,
       typeOrder = 1,
       originLineNumber = planSpecification.origin.lineNumber
     )
@@ -310,7 +306,6 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
       isQuorum = isQuorum,
       reduce = reduce,
       algorithmConfig = getAlgorithmConfig( planSpecification ),
-//      origin = planSpecification.origin,
       typeOrder = 2,
       originLineNumber = planSpecification.origin.lineNumber
     )
@@ -335,7 +330,6 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
       isQuorum = isQuorum,
       reduce = reduce,
       algorithmConfig = getAlgorithmConfig( planSpecification ),
-//      origin = planSpecification.origin,
       typeOrder = Int.MaxValue,
       originLineNumber = planSpecification.origin.lineNumber
     )
@@ -363,7 +357,6 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
     override val isQuorum: IsQuorum,
     override val reduce: ReduceOutliers,
     override val algorithmConfig: Config,
-//    override private[outlier] val origin: ConfigOrigin,
     override private[outlier] val typeOrder: Int,
     override private[outlier] val originLineNumber: Int,
     override val isActive: Boolean = true

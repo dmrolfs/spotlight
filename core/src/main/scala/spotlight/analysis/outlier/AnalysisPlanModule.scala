@@ -8,9 +8,9 @@ import demesne.module.entity.EntityAggregateModule
 import demesne.module.entity.EntityAggregateModule.MakeIndexSpec
 import demesne.module.entity.messages.EntityProtocol
 import demesne.module.entity.{messages => EntityMessages}
-import demesne.register.local.RegisterLocalAgent
+import demesne.index.local.IndexLocalAgent
 import demesne.{AggregateRootType, DomainModel}
-import demesne.register.{AggregateIndexSpec, Directive, RegisterBusSubscription, StackableRegisterBusPublisher}
+import demesne.index.{Directive, IndexBusSubscription, StackableIndexBusPublisher}
 import peds.akka.envelope._
 import peds.akka.publish.{EventPublisher, StackableStreamPublisher}
 import peds.archetype.domain.model.core.{EntityIdentifying, EntityLensProvider}
@@ -60,7 +60,9 @@ object AnalysisPlanProtocol extends EntityProtocol[OutlierPlan] {
   ) extends AnalysisPlanEvent
 
   case class GetPlan( override val targetId: GetPlan#TID ) extends AnalysisPlanCommand
-  case class PlanInfo( override val sourceId: PlanInfo#TID, info: OutlierPlan ) extends AnalysisPlanEvent
+  case class PlanInfo( override val sourceId: PlanInfo#TID, info: OutlierPlan ) extends AnalysisPlanEvent {
+    def toSummary: OutlierPlan.Summary = OutlierPlan.Summary( id = sourceId, name = info.name, appliesTo = info.appliesTo )
+  }
 
   private[outlier] case class GetProxies( override val targetId: GetProxies#TID ) extends AnalysisPlanCommand
   private[outlier] case class Proxies(
@@ -90,14 +92,14 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
   val indexes: MakeIndexSpec = {
     () => {
       Seq(
-        RegisterLocalAgent.spec[String, OutlierPlan]( specName = namedPlanIndex, RegisterBusSubscription ) {
-          case EntityMessages.Added( sid, Some( p: OutlierPlan ) ) => Directive.Record( p.name, p )
+        IndexLocalAgent.spec[String, module.TID, OutlierPlan.Summary]( specName = namedPlanIndex, IndexBusSubscription ) {
+          case EntityMessages.Added( sid, Some( p: OutlierPlan ) ) => Directive.Record( p.name, sid, p.toSummary )
           case EntityMessages.Added( sid, info ) => {
             logger.error( "AnalysisPlanModule: IGNORING ADDED event since info was not Some OutlierPlan: [{}]", info )
             Directive.Ignore
           }
           case EntityMessages.Disabled( sid, _ ) => Directive.Withdraw( sid )
-          case EntityMessages.Renamed( sid, oldName, newName ) => Directive.Revise( oldName, newName )
+          case EntityMessages.Renamed( sid, oldName, newName ) => Directive.ReviseKey( oldName, newName )
           case m: EntityMessages.EntityMessage => Directive.Ignore
           case m: AnalysisPlanProtocol.AnalysisPlanMessage => Directive.Ignore
         }
@@ -113,7 +115,7 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
     .builder
     .set( BTag, identifying.idTag )
     .set( BProps, AggregateRoot.OutlierPlanActor.props(_, _) )
-    .set( Indexes, Some(indexes) )
+    .set( Indexes, indexes )
     .set( IdLens, OutlierPlan.idLens )
     .set( NameLens, OutlierPlan.nameLens )
     .set( IsActiveLens, Some(OutlierPlan.isActiveLens) )
@@ -129,7 +131,7 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
       extends OutlierPlanActor( model, rootType )
       with ProxyProvider
       with StackableStreamPublisher
-      with StackableRegisterBusPublisher {
+      with StackableIndexBusPublisher {
         override protected def onPersistRejected( cause: Throwable, event: Any, seqNr: Long ): Unit = {
           log.error(
             "Rejected to persist event type [{}] with sequence number [{}] for persistenceId [{}] due to [{}].",

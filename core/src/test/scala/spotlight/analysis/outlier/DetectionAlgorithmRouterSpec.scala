@@ -22,7 +22,7 @@ class DetectionAlgorithmRouterSpec extends ParallelAkkaSpec with MockitoSugar {
     val subscriber = TestProbe()
   }
 
-  override def makeAkkaFixture(): Fixture = new Fixture
+  override def createAkkaFixture( test: OneArgTest ): Fixture = new Fixture
 
   "DetectionAlgorithmRouter" should {
     import DetectionAlgorithmRouter.{ AlgorithmRegistered, RegisterDetectionAlgorithm }

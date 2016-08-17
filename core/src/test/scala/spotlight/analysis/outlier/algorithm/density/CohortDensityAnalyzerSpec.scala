@@ -41,7 +41,7 @@ class CohortDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
     }
   }
 
-  override def makeAkkaFixture(): Fixture = new Fixture
+  override def createAkkaFixture( test: OneArgTest ): Fixture = new Fixture
 
   "CohortDensityAnalyzer" should  {
     "register with router upon create" in { f: Fixture =>

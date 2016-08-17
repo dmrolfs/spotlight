@@ -37,7 +37,7 @@ class OutlierDetectionWorkflowSpec extends ParallelAkkaSpec with MockitoSugar wi
     import scalaz.Scalaz._
 
     val protocol = mock[GraphiteSerializationProtocol]
-    val config = mock[Config]
+    val config2 = mock[Config]
 
     val rateLimiter = TestProbe()
     val publisher = TestProbe()
@@ -52,7 +52,7 @@ class OutlierDetectionWorkflowSpec extends ParallelAkkaSpec with MockitoSugar wi
         override def protocol: GraphiteSerializationProtocol = fixture.protocol
         override def windowDuration: FiniteDuration = 2.minutes
 //        override def makePlans: PlanConfigurationProvider.Creator = fixture.makePlans
-        override def configuration: Config = fixture.config
+        override def configuration: Config = fixture.config2
         override def detectionBudget: FiniteDuration = 3.seconds
         override def bufferSize: Int = 1000
         override def maxInDetectionCpuFactor: Double = 1.0
@@ -80,7 +80,7 @@ class OutlierDetectionWorkflowSpec extends ParallelAkkaSpec with MockitoSugar wi
     def propMaker(result: Props ): MakeProps = (ActorRef) => {result }
   }
 
-  def makeAkkaFixture(): Fixture = new Fixture
+  def createAkkaFixture( test: OneArgTest ): Fixture = new Fixture
 
   val DONE = Tag( "done" )
 

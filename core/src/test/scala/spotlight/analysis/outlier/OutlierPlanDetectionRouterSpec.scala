@@ -120,7 +120,7 @@ class OutlierPlanDetectionRouterSpec extends ParallelAkkaSpec with LazyLogging {
     }
   }
 
-  override def makeAkkaFixture(): Fixture = new Fixture
+  override def createAkkaFixture( test: OneArgTest ): Fixture = new Fixture
 
   val NEXT = Tag( "next" )
   val DONE = Tag( "done" )

@@ -161,7 +161,7 @@ with MockitoSugar {
     }
   }
 
-  def makeAkkaFixture(): Fixture = new Fixture
+  def createAkkaFixture( test: OneArgTest ): Fixture = new Fixture
 
 
   val DONE = Tag("done")
