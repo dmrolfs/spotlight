@@ -29,7 +29,7 @@ libraryDependencies ++=
     persistence.leveldb,
     persistence.leveldbini,
     "org.python" % "jython-standalone" % "2.5.3",
-    "com.github.marklister" %% "product-collections" % "1.4.2"
+    "com.github.marklister" %% "product-collections" % "1.4.3"
   )
 
 //libraryDependencies += ( "com.jsuereth" %% "scala-arm" % "2.0.0-M1" )

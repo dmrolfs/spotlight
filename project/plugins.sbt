@@ -34,4 +34,4 @@ addSbtPlugin("com.julianpeeters" % "sbt-avrohugger" % "0.9.8")
 
 addSbtPlugin("org.oedura" % "scavro-plugin" % "1.0.1")
 
-//addSbtPlugin("io.get-coursier" % "sbt-coursier" % "1.0.0-M12")
+addSbtPlugin("io.get-coursier" % "sbt-coursier" % "1.0.0-M14-2")

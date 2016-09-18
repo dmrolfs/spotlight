@@ -5,9 +5,8 @@ import scalaz.syntax.either._
 import shapeless.{Lens, lens}
 import org.apache.commons.math3.ml.clustering.DoublePoint
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
-import peds.commons.TryV
-import demesne.InitializeAggregateRootClusterSharding
 import org.apache.commons.lang3.ClassUtils
+import peds.commons.TryV
 import spotlight.analysis.outlier.{DetectUsing, HistoricalStatistics}
 import spotlight.analysis.outlier.algorithm.{AlgorithmModule, AlgorithmProtocol}
 import spotlight.model.timeseries._
@@ -16,12 +15,9 @@ import spotlight.model.timeseries._
 /**
   * Created by rolfsd on 6/8/16.
   */
-object SimpleMovingAverageModule
-extends AlgorithmModule
-with AlgorithmModule.ModuleConfiguration
-with InitializeAggregateRootClusterSharding { outer =>
+object SimpleMovingAverageModule extends AlgorithmModule with AlgorithmModule.ModuleConfiguration { outer =>
   override lazy val algorithm: Algorithm = new Algorithm {
-    override val label: Symbol = Symbol( "simple-moving-average" )
+    override val label: Symbol = Symbol( "SimpleMovingAverage" )
 
     override def prepareData( algorithmContext: Context ): TryV[Seq[DoublePoint]] = {
       algorithmContext.tailAverage()( algorithmContext.data ).right

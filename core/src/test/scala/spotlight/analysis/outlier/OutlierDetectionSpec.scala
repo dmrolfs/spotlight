@@ -5,7 +5,7 @@ import akka.actor.{ActorRef, Props}
 import akka.testkit._
 
 import scalaz.Scalaz.{when => _, _}
-import org.scalatest.mock.MockitoSugar
+import org.scalatest.mockito.MockitoSugar
 import com.typesafe.config.ConfigFactory
 import peds.akka.envelope.Envelope
 import spotlight.model.timeseries._

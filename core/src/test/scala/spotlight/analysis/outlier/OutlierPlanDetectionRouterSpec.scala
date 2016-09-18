@@ -26,7 +26,7 @@ import spotlight.stream.{OutlierScoringModel}
 /**
  * Created by rolfsd on 10/28/15.
  */
-class OutlierPlanDetectionRouterSpec extends ParallelAkkaSpec with LazyLogging {
+class OutlierPlanDetectionRouterSpec extends ParallelAkkaSpec {
   import OutlierPlanDetectionRouterSpec._
 
   class Fixture extends AkkaFixture { fixture =>

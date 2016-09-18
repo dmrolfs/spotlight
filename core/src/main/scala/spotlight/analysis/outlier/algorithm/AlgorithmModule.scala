@@ -2,14 +2,15 @@ package spotlight.analysis.outlier.algorithm
 
 import scala.annotation.tailrec
 import scala.reflect._
-import akka.actor.{ActorPath, ActorRef, Props}
+import akka.Done
+import akka.actor.{ActorPath, Props}
 import akka.cluster.sharding.ShardRegion
 import akka.event.LoggingReceive
 
 import scalaz._
 import Scalaz._
 import scalaz.Kleisli.{ask, kleisli}
-import shapeless.{Lens, TypeCase, Typeable}
+import shapeless.{Lens, TypeCase}
 import com.typesafe.scalalogging.LazyLogging
 import org.apache.commons.math3.ml.clustering.DoublePoint
 import nl.grons.metrics.scala.{MetricName, Timer}
@@ -17,11 +18,14 @@ import peds.akka.envelope._
 import peds.akka.metrics.InstrumentedActor
 import peds.akka.publish.{EventPublisher, StackableStreamPublisher}
 import peds.archetype.domain.model.core.{Entity, EntityIdentifying}
-import peds.commons.{KOp, TryV}
+import peds.commons.{KOp, TryV, Valid}
+import peds.commons.identifier.TaggedID
 import peds.commons.log.Trace
 import demesne._
 import demesne.module.entity.messages.EntityProtocol
-import peds.commons.identifier.TaggedID
+import demesne.repository.StartProtocol.Loaded
+import demesne.repository.{AggregateRootRepository, EnvelopingAggregateRootRepository}
+import demesne.repository.AggregateRootRepository.{ClusteredAggregateContext, LocalAggregateContext}
 import spotlight.analysis.outlier._
 import spotlight.model.outlier.{NoOutliers, OutlierPlan, Outliers}
 import spotlight.model.timeseries._
@@ -134,18 +138,15 @@ object AlgorithmModule {
   val ApproximateDayWindow: Int = 6 * 60 * 24
 
 
-  //todo: ClusterProvider???
   trait ModuleConfiguration {
     def maximumNrClusterNodes: Int = 6
   }
 }
 
-abstract class AlgorithmModule
-extends AggregateRootModule
-with InitializeAggregateRootClusterSharding { module: AlgorithmModule.ModuleConfiguration =>
+abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmModule.ModuleConfiguration =>
   import AlgorithmModule.AnalysisState
 
-  override val trace = Trace[AlgorithmModule]
+  private val trace = Trace[AlgorithmModule]
 
   override type ID = AlgorithmModule.ID
   val IdType = TypeCase[TID]
@@ -153,22 +154,39 @@ with InitializeAggregateRootClusterSharding { module: AlgorithmModule.ModuleConf
   val AdvancedType = TypeCase[AlgorithmProtocol.Advanced]
 
 
-  override def rootType: AggregateRootType = {
-    new AggregateRootType {
-      override val name: String = module.shardName
-      override def aggregateRootProps( implicit model: DomainModel ): Props = AlgorithmActor.props( model, this )
-      override def maximumNrClusterNodes: Int = module.maximumNrClusterNodes
-      override def aggregateIdFor: ShardRegion.ExtractEntityId = super.aggregateIdFor orElse {
-        case AdvancedType( a ) => {
-          logger.debug( "TEST: aggregateIdFor( {} ) = [{}]", a, a.sourceId.id.toString )
-          (a.sourceId.id.toString, a )
-        }
+  override lazy val rootType: AggregateRootType = new RootType
+
+  class RootType extends AggregateRootType {
+    override lazy val name: String = module.shardName
+    override def repositoryProps( implicit model: DomainModel ): Props = Repository clusteredProps model
+    override def maximumNrClusterNodes: Int = module.maximumNrClusterNodes
+    override def aggregateIdFor: ShardRegion.ExtractEntityId = super.aggregateIdFor orElse {
+      case AdvancedType( a ) => {
+        logger.debug( "TEST: aggregateIdFor( {} ) = [{}]", a, a.sourceId.id.toString )
+        (a.sourceId.id.toString, a )
       }
     }
   }
 
+
+  object Repository {
+    def localProps( model: DomainModel ): Props = Props( new Repository(model) with LocalAggregateContext )
+    def clusteredProps( model: DomainModel ): Props = Props( new Repository(model) with ClusteredAggregateContext )
+
+  }
+
+  class Repository( model: DomainModel )
+  extends EnvelopingAggregateRootRepository( model, module.rootType ) { actor: AggregateRootRepository.AggregateContext =>
+    override def aggregateProps: Props = AlgorithmActor.props( model, rootType )
+
+    //todo    import demesne.repository.{ StartProtocol => SP }
+    override def doLoad(): Loaded = super.doLoad()
+    override def doInitialize(resources: Map[Symbol, Any]): Valid[Done] = super.doInitialize( resources )
+  }
+
+
   def algorithm: Algorithm
-  override val aggregateIdTag: Symbol = AlgorithmModule.identifying.idTag
+  override lazy val aggregateIdTag: Symbol = algorithm.label
 
   trait Algorithm {
     def label: Symbol

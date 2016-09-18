@@ -2,7 +2,6 @@ package spotlight.stream
 
 import java.net.InetSocketAddress
 import java.util.concurrent.atomic.AtomicInteger
-
 import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.duration._
 import akka.actor.{Actor, ActorContext, ActorRef, Props}
@@ -12,11 +11,10 @@ import akka.util.Timeout
 import org.scalatest.concurrent.ScalaFutures
 import com.typesafe.config.Config
 import org.scalatest.Tag
-import org.scalatest.mock.MockitoSugar
+import org.scalatest.mockito.MockitoSugar
 import peds.akka.supervision.OneForOneStrategyFactory
 import peds.commons.log.Trace
 import peds.akka.supervision.IsolatedLifeCycleSupervisor.{ChildStarted, Started, WaitForStart}
-import spotlight.model.outlier.OutlierPlan
 import spotlight.testkit.ParallelAkkaSpec
 import spotlight.protocol.GraphiteSerializationProtocol
 

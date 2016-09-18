@@ -19,6 +19,7 @@ import peds.commons.util._
 import demesne.{AggregateRootType, DomainModel}
 import demesne.module.entity.{messages => EntityMessage}
 import peds.archetype.domain.model.core.EntityIdentifying
+import peds.commons.log.Trace
 import spotlight.analysis.outlier.OutlierDetection.DetectionResult
 import spotlight.analysis.outlier.algorithm.{AlgorithmModule, AlgorithmProtocol}
 import spotlight.analysis.outlier.algorithm.density.{CohortDensityAnalyzer, SeriesCentroidDensityAnalyzer, SeriesDensityAnalyzer}
@@ -33,6 +34,8 @@ import spotlight.model.timeseries.{TimeSeries, Topic}
   * Created by rolfsd on 5/26/16.
   */
 object AnalysisScopeProxy {
+  private val trace = Trace[AnalysisScopeProxy.type]
+
   def props(
     scope: OutlierPlan.Scope,
     plan: OutlierPlan,
@@ -49,7 +52,9 @@ object AnalysisScopeProxy {
     override val bufferSize: Int
   ) extends AnalysisScopeProxy
   with Provider {
-    override def rootTypeFor( algorithm: Symbol ): Option[AggregateRootType] = {
+    private val trace = Trace[Default]
+
+    override def rootTypeFor( algorithm: Symbol ): Option[AggregateRootType] = trace.block( s"rootTypeFor(${algorithm})" ) {
       algorithm match {
         case SeriesDensityAnalyzer.Algorithm => ??? // SeriesDensityAnalyzer.props( router ),
         case SeriesCentroidDensityAnalyzer.Algorithm => ??? // SeriesCentroidDensityAnalyzer.props( router ),
@@ -80,13 +85,18 @@ object AnalysisScopeProxy {
 
     implicit def timeout: Timeout = Timeout( 15.seconds )
 
-    def makeRouter()( implicit context: ActorContext ): ActorRef = {
+    def makeRouter()( implicit context: ActorContext ): ActorRef = trace.block( "makeRouter" ){
       val algoId = AlgorithmModule.identifying tag scope
+      log.debug( "TEST: scope:[{}] algoId:[{}]", scope, algoId )
 
       val algorithmRefs = for {
         name <- plan.algorithms.toSeq
+      _ = log.debug( "TEST: plan algorithm name:[{}]", name )
         rt <- rootTypeFor( name ).toSeq
+      _ = log.debug( "TEST: root type for [{}] = [{}]", name, rt )
+      _ = log.debug( "TEST: algoId [{}]", algoId )
         ref = model.aggregateOf( rt, algoId )
+      _ = log.debug( "TEST: aggregate for [{}]:[{}] = [{}]", name, rt.name, ref)
       } yield ( name, ref )
 
       context.actorOf(
@@ -172,11 +182,13 @@ with ActorLogging { outer: AnalysisScopeProxy.Provider =>
   }
 
   def streamIngressFor( subscriber: ActorRef )( implicit system: ActorSystem, materializer: Materializer ): ActorRef = {
+    log.debug( "looking for plan stream for subscriber:[{}]", subscriber )
     val ingress = {
       streams
       .get( subscriber )
       .map { _.ingressRef }
       .getOrElse {
+        log.debug( "making plan stream for subscriber:[{}]", subscriber )
         val ps = makePlanStream( subscriber )
         streams += ( subscriber -> ps )
         ps.ingressRef

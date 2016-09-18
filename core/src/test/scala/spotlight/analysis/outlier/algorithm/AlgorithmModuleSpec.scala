@@ -10,7 +10,7 @@ import scalaz.{-\/, \/-}
 import shapeless.syntax.typeable._
 import org.scalatest.concurrent.ScalaFutures
 import org.joda.{time => joda}
-import demesne.AggregateRootModule
+import demesne.{AggregateRootModule, AggregateRootType}
 import demesne.testkit.AggregateRootSpec
 import org.apache.commons.math3.random.RandomDataGenerator
 import org.scalatest.OptionValues
@@ -47,14 +47,8 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
 
     type Module = outer.Module
     override val module: Module = outer.defaultModule
+    override def rootTypes: Set[AggregateRootType] = Set( module.rootType )
 
-    override def moduleCompanions: List[AggregateRootModule] = List( module )
-    logger.debug( "Fixture.context = [{}]", context )
-    logger.debug(
-      "checkSystem elems: system:[{}] raw:[{}]",
-      context.get(demesne.SystemKey).flatMap{_.cast[ActorSystem]},
-      context.get(demesne.SystemKey)
-    )
 
     type TestState = module.State
     type TestAdvanced = P.Advanced

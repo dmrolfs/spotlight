@@ -1,11 +1,11 @@
 package spotlight.analysis.outlier
 
-import scala.concurrent.{Await, ExecutionContext, Future}
+import scala.concurrent.Await
 import scala.concurrent.duration._
 import akka.actor.Terminated
 import akka.testkit._
-import org.scalatest.{Outcome, Tag}
-import org.scalatest.mock.MockitoSugar
+import org.scalatest.Outcome
+import org.scalatest.mockito.MockitoSugar
 import org.mockito.Mockito._
 import com.typesafe.config.ConfigFactory
 import peds.akka.envelope.Envelope

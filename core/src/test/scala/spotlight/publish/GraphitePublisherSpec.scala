@@ -10,7 +10,7 @@ import akka.actor.Props
 import akka.testkit.{TestActorRef, TestProbe}
 import akka.util.ByteString
 import com.typesafe.config.ConfigFactory
-import spotlight.model.outlier.{NoOutliers, OutlierPlan, Outliers, SeriesOutliers}
+import spotlight.model.outlier.{NoOutliers, OutlierPlan, SeriesOutliers}
 import spotlight.model.timeseries.{ThresholdBoundary, DataPoint, TimeSeries, Topic}
 import spotlight.protocol.PythonPickleProtocol
 import spotlight.testkit.ParallelAkkaSpec
@@ -21,7 +21,7 @@ import org.mockito.invocation.InvocationOnMock
 import org.mockito.stubbing.Answer
 import org.python.core.{PyList, PyTuple}
 import org.scalatest.Tag
-import org.scalatest.mock.MockitoSugar
+import org.scalatest.mockito.MockitoSugar
 import peds.commons.log.Trace
 
 

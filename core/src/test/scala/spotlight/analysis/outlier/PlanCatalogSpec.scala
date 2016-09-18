@@ -9,12 +9,12 @@ import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.StrictLogging
 import org.scalatest.concurrent.ScalaFutures
 import peds.akka.envelope.Envelope
-import demesne.DomainModel
+import demesne.{AggregateRootType, BoundedContext, DomainModel}
 import demesne.testkit.concurrent.CountDownFunction
 import peds.akka.envelope._
-import spotlight.analysis.outlier.CatalogProtocol.CatalogedPlans
+import spotlight.analysis.outlier.PlanCatalogProtocol.CatalogedPlans
 import spotlight.testkit.ParallelAkkaSpec
-import spotlight.analysis.outlier.{CatalogProtocol => P}
+import spotlight.analysis.outlier.{PlanCatalogProtocol => P}
 import spotlight.model.outlier.OutlierPlan
 import spotlight.model.timeseries.Topic
 
@@ -22,27 +22,33 @@ import spotlight.model.timeseries.Topic
 /**
   * Created by rolfsd on 8/1/16.
   */
-class CatalogActorSpec extends ParallelAkkaSpec with ScalaFutures with StrictLogging { outer =>
-  class Fixture( config: Config = CatalogActorSpec.config ) extends AkkaFixture( config = config ) with StrictLogging { fixture =>
+class PlanCatalogSpec extends ParallelAkkaSpec with ScalaFutures with StrictLogging { outer =>
+  class Fixture( config: Config = PlanCatalogSpec.config ) extends AkkaFixture( config = config ) with StrictLogging { fixture =>
     import ExecutionContext.Implicits.global
 
-    val model: DomainModel = Await.result( DomainModel.make( s"CatalogTest-${fixtureId}" )( system, global ).toOption.get, 1.second )
-    val modelContext = Map(
-      demesne.ModelKey -> model,
-      demesne.SystemKey -> system,
-      demesne.FactoryKey -> demesne.factory.contextFactory,
-      demesne.ConfigurationKey -> config
-    )
+    def rootTypes: Set[AggregateRootType] = Set( AnalysisPlanModule.module.rootType )
+    lazy val boundedContext: BoundedContext = trace.block( "boundedContext" ) {
+      val bc = {
+        for {
+          made <- BoundedContext.make( Symbol(s"Parallel-${fixtureId}"), config, rootTypes )
+          started <- made.start()
+        } yield started
+      }
+      Await.result( bc, 5.seconds )
+    }
+
+    implicit lazy val model: DomainModel = trace.block( "model" ) { Await.result( boundedContext.futureModel, 5.seconds ) }
 
     implicit val actorTimeout = Timeout( 5.seconds.dilated )
-    AnalysisPlanModule.module.initialize( modelContext ) map { Await.ready( _ , 5.seconds ) }
 
     val bus = TestProbe()
     system.eventStream.subscribe( bus.ref, classOf[AnalysisPlanProtocol.Event] )
 
-    val index = model.aggregateIndexFor[String, AnalysisPlanModule.module.TID, OutlierPlan.Summary](
-      AnalysisPlanModule.module.rootType, AnalysisPlanModule.namedPlanIndex
-    ).toOption.get
+    lazy val index = trace.block( "index" ) {
+      model.aggregateIndexFor[String, AnalysisPlanModule.module.TID, OutlierPlan.Summary](
+        AnalysisPlanModule.module.rootType, AnalysisPlanModule.namedPlanIndex
+      ).toOption.get
+    }
 
     def stateFrom( ar: ActorRef, topic: Topic ): Future[CatalogedPlans] = {
       import scala.concurrent.ExecutionContext.Implicits.global
@@ -53,8 +59,8 @@ class CatalogActorSpec extends ParallelAkkaSpec with ScalaFutures with StrictLog
   }
 
 //  class
-//  class PassivationFixture( config: Config = CatalogActorSpec.config ) extends Fixture( config = config ) { fixture =>
-//    class PassivationModule extends CatalogModule { testModule =>
+//  class PassivationFixture( config: Config = PlanCatalogSpec.config ) extends Fixture( config = config ) { fixture =>
+//    class PassivationModule extends PlanCatalog { testModule =>
 //      override def initializer(
 //        rootType: AggregateRootType,
 //        model: DomainModel,
@@ -67,7 +73,7 @@ class CatalogActorSpec extends ParallelAkkaSpec with ScalaFutures with StrictLog
 //
 //
 //      override def aggregateRootPropsOp: AggregateRootProps = {
-//        (model: DomainModel, rootType: AggregateRootType) => Props( new FixtureCatalogActor( model, rootType ) )
+//        (model: DomainModel, rootType: AggregateRootType) => Props( new FixturePlanCatalog( model, rootType ) )
 //      }
 //
 //      override def rootType: AggregateRootType = {
@@ -85,9 +91,9 @@ class CatalogActorSpec extends ParallelAkkaSpec with ScalaFutures with StrictLog
 //      }
 //
 //
-//      class FixtureCatalogActor( model: DomainModel, rootType: AggregateRootType )
-//      extends CatalogModule.CatalogActor( model, rootType )
-//      with CatalogModule.CatalogActor.Provider
+//      class FixturePlanCatalog( model: DomainModel, rootType: AggregateRootType )
+//      extends PlanCatalog.PlanCatalog( model, rootType )
+//      with PlanCatalog.PlanCatalog.Provider
 //      with StackableStreamPublisher
 //      with StackableRegisterBusPublisher {
 //        override def detectionBudget: FiniteDuration = testModule.detectionBudget
@@ -126,17 +132,14 @@ class CatalogActorSpec extends ParallelAkkaSpec with ScalaFutures with StrictLog
 //    }
 //  }
 
-  override def createAkkaFixture( test: OneArgTest ): Fixture = {
+  override def createAkkaFixture( test: OneArgTest ): Fixture = trace.block( "createAkkaFixture" ) {
     test.tags match {
 //      case tags if tags.contains( PASSIVATE.name ) => new PassivationFixture
       case _ => new Fixture
     }
   }
 
-//  object PASSIVATE extends Tag( "passivate" )
-
-
-  "CatalogActor" should {
+  "PlanCatalog" should {
     "start Catalog" in { f: Fixture =>
       import f._
       import akka.pattern.ask
@@ -147,7 +150,7 @@ class CatalogActorSpec extends ParallelAkkaSpec with ScalaFutures with StrictLog
       whenReady( index.futureEntries, timeout(3.seconds.dilated) ) { _ mustBe empty }
 
       logger.info( "TEST: ==============  CREATING CATALOG  ==============")
-      val catalog = system.actorOf( CatalogActor.props(model, config) )
+      val catalog = system.actorOf( PlanCatalog.props( model, config ) )
       val foo = (catalog ? P.WaitingForStart).mapTo[P.Started.type]
       Await.ready( foo, 15.seconds.dilated )
 
@@ -202,7 +205,7 @@ class CatalogActorSpec extends ParallelAkkaSpec with ScalaFutures with StrictLog
   }
 }
 
-object CatalogActorSpec extends StrictLogging {
+object PlanCatalogSpec extends StrictLogging {
   val config: Config = {
     val catalogConfig: Config = ConfigFactory.parseString(
       """

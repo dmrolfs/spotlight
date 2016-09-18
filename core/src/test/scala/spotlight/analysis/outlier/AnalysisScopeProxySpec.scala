@@ -13,7 +13,7 @@ import com.github.nscala_time.time.Imports.{richDateTime, richSDuration}
 import demesne.{AggregateRootType, DomainModel}
 import org.apache.commons.math3.random.RandomDataGenerator
 import org.scalatest.concurrent.ScalaFutures
-import org.scalatest.mock.MockitoSugar
+import org.scalatest.mockito.MockitoSugar
 import org.mockito.Mockito._
 import peds.commons.V
 import peds.akka.envelope._
@@ -22,7 +22,6 @@ import spotlight.model.outlier._
 import spotlight.model.outlier.OutlierPlan.Scope
 import spotlight.model.timeseries._
 import spotlight.testkit.ParallelAkkaSpec
-
 
 
 /**

@@ -8,7 +8,7 @@ import com.github.nscala_time.time.OrderingImplicits._
 import com.typesafe.config.ConfigFactory
 import org.apache.commons.math3.random.RandomDataGenerator
 import org.joda.{time => joda}
-import org.scalatest.mock.MockitoSugar
+import org.scalatest.mockito.MockitoSugar
 import shapeless._
 import spotlight.analysis.outlier._
 import spotlight.analysis.outlier.algorithm.AlgorithmActor

@@ -87,7 +87,7 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
   override def nameLens: Lens[OutlierPlan, String] = OutlierPlan.nameLens
   override def slugLens: Lens[OutlierPlan, String] = OutlierPlan.slugLens
 
-  val namedPlanIndex: Symbol = 'namedPlan
+  val namedPlanIndex: Symbol = 'NamedPlan
 
   val indexes: MakeIndexSpec = {
     () => {

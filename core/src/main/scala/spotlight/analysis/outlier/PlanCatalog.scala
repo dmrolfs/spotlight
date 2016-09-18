@@ -26,7 +26,7 @@ import spotlight.model.timeseries.{TimeSeries, Topic}
 /**
   * Created by rolfsd on 5/20/16.
   */
-object CatalogProtocol {
+object PlanCatalogProtocol {
   sealed trait CatalogMessage
   case object WaitingForStart extends CatalogMessage
   case object Started extends CatalogMessage
@@ -35,12 +35,12 @@ object CatalogProtocol {
 }
 
 
-object CatalogActor extends LazyLogging {
+object PlanCatalog extends LazyLogging {
   def props(model: DomainModel, configuration: Config): Props = {
     Default.checkConfiguration( configuration ).disjunction match {
       case \/-( c ) => Props( new Default( model, c ) )
       case -\/( exs ) => {
-        exs foreach { ex => logger.error( "CatalogActor failed to make actor Props", ex ) }
+        exs foreach { ex => logger.error( "PlanCatalog failed to make actor Props", ex ) }
         throw exs.head
       }
     }
@@ -54,25 +54,25 @@ object CatalogActor extends LazyLogging {
 
 
   object Default {
-    val detectionBudgetPath = "spotlight.workflow.detect.timeout"
-    val outlierPlansPath = "spotlight.detection-plans"
+    val DetectionBudgetPath = "spotlight.workflow.detect.timeout"
+    val OutlierPlansPath = "spotlight.detection-plans"
 
     def checkConfiguration(configuration: Config): Valid[Config] = {
-      if ( configuration hasPath outlierPlansPath ) configuration.successNel
-      else Validation.failureNel( new ServiceConfigurationError( s"configuration does not have path: ${outlierPlansPath}" ) )
+      if ( configuration hasPath OutlierPlansPath ) configuration.successNel
+      else Validation.failureNel( new ServiceConfigurationError( s"configuration does not have path: ${OutlierPlansPath}" ) )
     }
   }
 
-  final class Default private[CatalogActor]( model: DomainModel, configuration: Config )
-  extends CatalogActor( model ) with Provider {
+  final class Default private[PlanCatalog]( model: DomainModel, configuration: Config )
+  extends PlanCatalog( model ) with Provider {
     private val trace = Trace[Default]
 
     override lazy val detectionBudget: FiniteDuration = specifyDetectionBudget( configuration ) getOrElse 10.seconds
 
     private def specifyDetectionBudget(specification: Config): Option[FiniteDuration] = trace.block( "specifyDetectionBudget" ) {
-      import Default.{ detectionBudgetPath => budgetPath}
-      if ( specification hasPath budgetPath ) {
-        Some( FiniteDuration( specification.getDuration( Default.detectionBudgetPath, NANOSECONDS ), NANOSECONDS ) )
+      import Default.DetectionBudgetPath
+      if ( specification hasPath DetectionBudgetPath ) {
+        Some( FiniteDuration( specification.getDuration( DetectionBudgetPath, NANOSECONDS ), NANOSECONDS ) )
       } else {
         None
       }
@@ -81,9 +81,10 @@ object CatalogActor extends LazyLogging {
     override lazy val specifiedPlans: Set[OutlierPlan] = specifyPlans( configuration )
 
     private def specifyPlans( specification: Config ): Set[OutlierPlan] = trace.block( "specifyPlans" ) {
-      import Default.{ outlierPlansPath => planPath }
-      if ( specification hasPath planPath ) {
-        val planSpecs = specification getConfig planPath
+      import Default.OutlierPlansPath
+
+      if ( specification hasPath OutlierPlansPath ) {
+        val planSpecs = specification getConfig OutlierPlansPath
         log.debug( "specification = [{}]", planSpecs.root().render() )
         import scala.collection.JavaConversions._
         // since config is java API needed for collect
@@ -94,17 +95,17 @@ object CatalogActor extends LazyLogging {
         .map { case (name, spec) => makePlan( name, spec )( detectionBudget ) }
         .flatten
       } else {
-        log.warning( "CatalogActor[{}]: no plan specifications found", self.path)
+        log.warning( "PlanCatalog[{}]: no plan specifications found", self.path)
         Set.empty[OutlierPlan]
       }
     }
 
 
     private def makePlan( name: String, planSpecification: Config )( budget: FiniteDuration ): Option[OutlierPlan] = {
-      logger.info( "CatalogModule plan speclet: [{}]", planSpecification )
+      logger.info( "PlanCatalog plan speclet: [{}]", planSpecification )
 
       //todo: bring initialization of plans into module init and base config on init config?
-      val utilization = 0.8
+      val utilization = 0.9
       val utilized = budget * utilization
       val timeout = if ( utilized.isFinite ) utilized.asInstanceOf[FiniteDuration] else budget
 
@@ -130,7 +131,7 @@ object CatalogActor extends LazyLogging {
 
       if ( planSpecification.hasPath(IS_DEFAULT) && planSpecification.getBoolean(IS_DEFAULT) ) {
         logger.info(
-          "CatalogModule: topic[{}] default-type plan specification origin:[{}] line:[{}]",
+          "PlanCatalog: topic[{}] default-type plan specification origin:[{}] line:[{}]",
           name,
           planSpecification.origin,
           planSpecification.origin.lineNumber.toString
@@ -150,7 +151,7 @@ object CatalogActor extends LazyLogging {
       } else if ( planSpecification hasPath TOPICS ) {
         import scala.collection.JavaConverters._
         logger.info(
-          "CatalogModule: topic:[{}] topic-based plan specification origin:[{}] line:[{}]",
+          "PlanCatalog: topic:[{}] topic-based plan specification origin:[{}] line:[{}]",
           name,
           planSpecification.origin,
           planSpecification.origin.lineNumber.toString
@@ -171,7 +172,7 @@ object CatalogActor extends LazyLogging {
         )
       } else if ( planSpecification hasPath REGEX ) {
         logger.info(
-          "CatalogModule: topic:[{}] regex-based plan specification origin:[{}] line:[{}]",
+          "PlanCatalog: topic:[{}] regex-based plan specification origin:[{}] line:[{}]",
           name,
           planSpecification.origin,
           planSpecification.origin.lineNumber.toString
@@ -228,11 +229,11 @@ object CatalogActor extends LazyLogging {
   }
 }
 
-class CatalogActor( model: DomainModel ) extends Actor with InstrumentedActor with ActorLogging { outer: CatalogActor.Provider =>
-  import spotlight.analysis.outlier.{ CatalogProtocol => P }
+class PlanCatalog(model: DomainModel ) extends Actor with InstrumentedActor with ActorLogging { outer: PlanCatalog.Provider =>
+  import spotlight.analysis.outlier.{ PlanCatalogProtocol => P }
   import spotlight.analysis.outlier.{ AnalysisPlanProtocol => AP }
 
-  override lazy val metricBaseName: MetricName = MetricName( classOf[CatalogActor] )
+  override lazy val metricBaseName: MetricName = MetricName( classOf[PlanCatalog] )
 
   type PlanIndex = DomainModel.AggregateIndex[String, AnalysisPlanModule.module.TID, OutlierPlan.Summary]
   lazy val planIndex: PlanIndex = {
@@ -243,7 +244,7 @@ class CatalogActor( model: DomainModel ) extends Actor with InstrumentedActor wi
     ) match {
       case \/-( pindex ) => pindex
       case -\/( ex ) => {
-        log.error( ex, "CatalogActor[{}]: failed to initialize CatalogActor's plan index", self.path )
+        log.error( ex, "PlanCatalog[{}]: failed to initialize PlanCatalog's plan index", self.path )
         throw ex
       }
     }
@@ -260,7 +261,7 @@ class CatalogActor( model: DomainModel ) extends Actor with InstrumentedActor wi
     case Initialize => {
       implicit val ec = context.system.dispatcher //todo: consider moving off actor threadpool
       postStartInitialization() foreach { _ =>
-        log.info( "CatalogActor[{}] initialization completed" )
+        log.info( "PlanCatalog[{}] initialization completed" )
         context become LoggingReceive { around( active ) }
       }
     }
@@ -271,15 +272,15 @@ class CatalogActor( model: DomainModel ) extends Actor with InstrumentedActor wi
       // forwarding to retain publisher sender
       for {
         p <- planIndex.entries.values if p appliesTo ts
-        pref = model.aggregateOf( AnalysisPlanModule.module.rootType, p.id )
+        pref = model( AnalysisPlanModule.module.rootType, p.id )
       } {
-        log.debug( "CatalogActor[{}]: forwarding data[{}] to plan-module[{}]", self.path, ts.topic, pref.path )
+        log.debug( "PlanCatalog[{}]: forwarding data[{}] to plan-module[{}]", self.path, ts.topic, pref.path )
         pref forwardEnvelope AP.AcceptTimeSeries( p.id, ts )
       }
     }
 
     case ts: TimeSeries => {
-      log.warning( "CatalogActor[{}]: no plan on record that applies to time-series:[{}]", self.path, ts.topic )
+      log.warning( "PlanCatalog[{}]: no plan on record that applies to time-series:[{}]", self.path, ts.topic )
     }
 
     case req @ P.GetPlansForTopic( topic ) => {
@@ -290,7 +291,7 @@ class CatalogActor( model: DomainModel ) extends Actor with InstrumentedActor wi
       planIndex.futureEntries
       .map { entries =>
         val ps = entries collect { case (_, p) if p appliesTo topic => p }
-        log.debug( "CatalogActor[{}]: for topic:[{}] returning plans:[{}]", self.path, topic, ps.mkString(", ") )
+        log.debug( "PlanCatalog[{}]: for topic:[{}] returning plans:[{}]", self.path, topic, ps.mkString(", ") )
         log.debug( "TEST: IN GET-PLANS specified-plans:[{}]", specifiedPlans.mkString(", ") )
         P.CatalogedPlans( plans = ps.toSet, request = req )
       }
@@ -307,12 +308,12 @@ class CatalogActor( model: DomainModel ) extends Actor with InstrumentedActor wi
     for {
       entries <- planIndex.futureEntries
       ( registered, missing ) = outer.specifiedPlans partition { entries contains _.name }
-      _ = log.info( "TEST: CatalogActor[{}] registered plans=[{}]", self.path, registered.mkString(",") )
-      _ = log.info( "TEST: CatalogActor[{}] missing plans=[{}]", self.path, missing.mkString(",") )
+      _ = log.info( "TEST: PlanCatalog[{}] registered plans=[{}]", self.path, registered.mkString(",") )
+      _ = log.info( "TEST: PlanCatalog[{}] missing plans=[{}]", self.path, missing.mkString(",") )
       created <- makeMissingSpecifiedPlans( missing )
     } yield {
       log.info(
-        "CatalogActor[{}] created additional {} plans: [{}]",
+        "PlanCatalog[{}] created additional {} plans: [{}]",
         self.path,
         created.size,
         created.map{ case (n, c) => s"${n}: ${c}" }.mkString( "\n", "\n", "\n" )
@@ -332,20 +333,20 @@ class CatalogActor( model: DomainModel ) extends Actor with InstrumentedActor wi
     import demesne.module.entity.{ messages => EntityMessages }
 
     val queries = missing.toSeq.map { p =>
-      log.info( "CatalogActor[{}]: making plan entity for: [{}]", self.path, p )
-      val planRef =  model.aggregateOf( AnalysisPlanModule.module.rootType, p.id )
+      log.info( "PlanCatalog[{}]: making plan entity for: [{}]", self.path, p )
+      val planRef =  model( AnalysisPlanModule.module.rootType, p.id )
 
       for {
         added <- ( planRef ?+ EntityMessages.Add( p.id, Some(p) ) )
-        _ = log.debug( "CatalogModule: notified that plan is added:[{}]", added )
+        _ = log.debug( "PlanCatalog: notified that plan is added:[{}]", added )
         loaded <- loadPlan( p.id )
-        _ = log.debug( "CatalogModule: loaded plan:[{}]", loaded )
+        _ = log.debug( "PlanCatalog: loaded plan:[{}]", loaded )
       } yield loaded
     }
 
 
     Future.sequence( queries ) map { qs =>
-      log.info( "TEST: CatalogModule loaded plans: [{}]", qs.map{ case (n,p) => s"$n->$p" }.mkString(",") )
+      log.info( "TEST: PlanCatalog loaded plans: [{}]", qs.map{ case (n,p) => s"$n->$p" }.mkString(",") )
       Map( qs:_* )
     }
   }
@@ -360,9 +361,9 @@ class CatalogActor( model: DomainModel ) extends Actor with InstrumentedActor wi
     implicit ec: ExecutionContext,
     to: Timeout
   ): Future[AnalysisPlanProtocol.PlanInfo] = {
-    val planRef = model.aggregateOf( AnalysisPlanModule.module.rootType, pid )
+    val planRef = model( AnalysisPlanModule.module.rootType, pid )
     ( planRef ?+ AP.GetPlan( pid ) ).collect { case Envelope( info: AP.PlanInfo, _ ) =>
-      log.info( "CatalogActore[{}]: fetched plan entity: [{}]", self.path, info.sourceId )
+      log.info( "PlanCataloge[{}]: fetched plan entity: [{}]", self.path, info.sourceId )
       info
     }
   }
@@ -412,7 +413,7 @@ class CatalogActor( model: DomainModel ) extends Actor with InstrumentedActor wi
 //  override val isActive: Boolean = true
 //) extends Catalog
 
-//class CatalogActor extends Actor with InstrumentedActor with ActorLogging { module: CatalogActor.Provider =>
+//class PlanCatalog extends Actor with InstrumentedActor with ActorLogging { module: PlanCatalog.Provider =>
 //
 //
 //
@@ -509,15 +510,15 @@ class CatalogActor( model: DomainModel ) extends Actor with InstrumentedActor wi
 //  }
 //
 //  override def aggregateRootPropsOp: AggregateRootProps = {
-//    (model: DomainModel, rootType: AggregateRootType) => CatalogActor.props( model, rootType )
+//    (model: DomainModel, rootType: AggregateRootType) => PlanCatalog.props( model, rootType )
 //  }
 //
 //
-//  object CatalogActor {
+//  object PlanCatalog {
 //    def props( model: DomainModel, rootType: AggregateRootType ): Props = Props( new Default( model, rootType ) )
 //
 //    private class Default( model: DomainModel, rootType: AggregateRootType )
-//    extends CatalogActor( model, rootType ) with Provider with StackableStreamPublisher with StackableRegisterBusPublisher
+//    extends PlanCatalog( model, rootType ) with Provider with StackableStreamPublisher with StackableRegisterBusPublisher
 //
 //
 //    trait Provider {
@@ -526,10 +527,10 @@ class CatalogActor( model: DomainModel ) extends Actor with InstrumentedActor wi
 //    }
 //  }
 //
-//  class CatalogActor( override val model: DomainModel, override val rootType: AggregateRootType )
-//  extends module.EntityAggregateActor { actor: CatalogActor.Provider with EventPublisher =>
+//  class PlanCatalog( override val model: DomainModel, override val rootType: AggregateRootType )
+//  extends module.EntityAggregateActor { actor: PlanCatalog.Provider with EventPublisher =>
 //    import demesne.module.entity.{ messages => EntityMessage }
-//    import spotlight.analysis.outlier.{ CatalogProtocol => P }
+//    import spotlight.analysis.outlier.{ PlanCatalogProtocol => P }
 //    import spotlight.analysis.outlier.{ AnalysisPlanProtocol => AP }
 //
 ////    override var state: Catalog = _

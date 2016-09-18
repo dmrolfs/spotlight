@@ -6,11 +6,11 @@ import akka.testkit._
 import com.typesafe.config.{Config, ConfigFactory}
 import peds.akka.envelope._
 import peds.akka.envelope.pattern.ask
-import akka.actor.{ActorRef, Props}
+import akka.actor.ActorRef
 import akka.util.Timeout
-import demesne._
+import demesne.module.{AggregateEnvironment, LocalAggregate}
 import demesne.module.entity.{EntityAggregateModule, messages => EntityMessages}
-import demesne.module.AggregateRootProps
+import demesne.repository.AggregateRootProps
 import peds.archetype.domain.model.core.EntityIdentifying
 import peds.commons.identifier.{ShortUUID, TaggedID}
 import peds.commons.log.Trace
@@ -34,21 +34,11 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[OutlierPlan] { 
 
   class Fixture extends EntityFixture( config = AnalysisPlanModulePassivationSpec.config ) {
     class Module extends EntityAggregateModule[OutlierPlan] { testModule =>
-      override val trace: Trace[_] = Trace[Module]
+      private val trace: Trace[_] = Trace[Module]
       override val idLens: Lens[OutlierPlan, TaggedID[ShortUUID]] = OutlierPlan.idLens
       override val nameLens: Lens[OutlierPlan, String] = OutlierPlan.nameLens
       override def aggregateRootPropsOp: AggregateRootProps = AnalysisPlanModule.AggregateRoot.OutlierPlanActor.props( _, _ )
-
-      override def rootType: AggregateRootType = {
-        new AggregateRootType {
-          override def passivateTimeout: Duration = {
-            logger.info( "passivateTimeout=[{}]", 2.seconds )
-            2.seconds
-          }
-          override def aggregateRootProps( implicit model: DomainModel ): Props = testModule.aggregateRootPropsOp( model, this )
-          override def name: String = testModule.shardName
-        }
-      }
+      override def environment: AggregateEnvironment = LocalAggregate
     }
 
     override val module: Module = new Module
@@ -88,7 +78,7 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[OutlierPlan] { 
   override def createAkkaFixture( test: OneArgTest ): Fixture = new Fixture
 
   "AnalysisPlanModule" should {
-    "add OutlierPlan" in { f: Fixture =>
+    "add OutlierPlan" taggedAs WIP in { f: Fixture =>
       import f._
 
       val planInfo = makePlan("TestPlan", None)
@@ -114,7 +104,7 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[OutlierPlan] { 
       bus.expectNoMsg()
     }
 
-    "recover and continue after passivation" taggedAs WIP in { f: Fixture =>
+    "recover and continue after passivation" in { f: Fixture =>
       import f._
       import demesne.module.entity.{ messages => EntityMessages }
 

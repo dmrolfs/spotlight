@@ -8,8 +8,9 @@ import peds.akka.envelope._
 import peds.akka.envelope.pattern.ask
 import akka.actor.{ActorContext, ActorRef, PoisonPill, Props}
 import akka.util.Timeout
+import demesne.module.{AggregateEnvironment, LocalAggregate}
 import demesne.{AggregateRootType, DomainModel}
-import demesne.module.AggregateRootProps
+import demesne.repository.AggregateRootProps
 import demesne.module.entity.{EntityAggregateModule, messages => EntityMessages}
 import org.scalatest.Tag
 import peds.akka.publish.StackableStreamPublisher
@@ -35,6 +36,8 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] { outer =>
   val standardModule: EntityAggregateModule[OutlierPlan] = AnalysisPlanModule.module
 
   class Fixture extends EntityFixture( config = AnalysisPlanModuleSpec.config ) {
+    private val trace = Trace[Fixture]
+
     override type Module = EntityAggregateModule[OutlierPlan]
     override val module: Module = outer.standardModule
 
@@ -42,6 +45,11 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] { outer =>
     override def nextId(): module.TID = identifying.safeNextId
     lazy val plan = makePlan( "TestPlan", None )
     override lazy val tid: TID = plan.id
+
+
+    override def rootTypes: Set[AggregateRootType] = trace.block( "rootTypes" ) {
+      super.rootTypes ++ Set( SimpleMovingAverageModule.rootType )
+    }
 
     lazy val algo: Symbol = SimpleMovingAverageModule.algorithm.label
 
@@ -113,7 +121,7 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] { outer =>
     }
 
     override val module: Module = new EntityAggregateModule[OutlierPlan] {
-      override def trace: Trace[_] = Trace[EntityAggregateModule[OutlierPlan]]
+      override val environment: AggregateEnvironment = LocalAggregate
       override def idLens: Lens[OutlierPlan, TaggedID[ShortUUID]] = OutlierPlan.idLens
       override def nameLens: Lens[OutlierPlan, String] = OutlierPlan.nameLens
       override def aggregateRootPropsOp: AggregateRootProps = {
@@ -146,7 +154,7 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] { outer =>
       actual must be theSameInstanceAs a2
     }
 
-    "dead proxy must be cleared" in { f: Fixture =>
+    "dead proxy must be cleared" taggedAs WIP in { f: Fixture =>
       import f._
 
       entity ! EntityMessages.Add( tid, Some(plan) )
@@ -172,7 +180,7 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] { outer =>
       p3.keys must contain ( "test".toTopic )
     }
 
-    "handle workflow" taggedAs( WORKFLOW, WIP ) in { f: Fixture =>
+    "handle workflow" taggedAs( WORKFLOW ) in { f: Fixture =>
       import f._
       logger.debug( "TEST: fixture class: [{}]", f.getClass )
 

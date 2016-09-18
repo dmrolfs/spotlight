@@ -2,11 +2,10 @@ package spotlight.testkit
 
 import scala.concurrent.duration._
 import scala.reflect.ClassTag
-import akka.actor.{ActorRef, ActorSystem}
+import akka.actor.ActorRef
 import com.typesafe.config.Config
-import shapeless.syntax.typeable._
 import org.joda.{time => joda}
-import demesne.AggregateRootModule
+import demesne.AggregateRootType
 import demesne.module.entity.EntityAggregateModule
 import demesne.testkit.AggregateRootSpec
 import org.apache.commons.math3.random.RandomDataGenerator
@@ -33,18 +32,11 @@ abstract class EntityModuleSpec[E <: Entity : ClassTag] extends AggregateRootSpe
     override val fixtureId: Int = AggregateRootSpec.sysId.incrementAndGet(),
     override val config: Config = spotlight.testkit.config( "core" )
   ) extends AggregateFixture( fixtureId, config ) { fixture =>
-    logger.info( "Fixture: DomainModel=[{}]", model)
 
     type Module <: EntityAggregateModule[E]
     val module: Module
 
-    override def moduleCompanions: List[AggregateRootModule] = List( module )
-    logger.debug( "Fixture.context = [{}]", context )
-    logger.debug(
-      "checkSystem elems: system:[{}] raw:[{}]",
-      context.get( demesne.SystemKey ).flatMap{ _.cast[ActorSystem] },
-      context.get( demesne.SystemKey )
-    )
+    override def rootTypes: Set[AggregateRootType] = Set( module.rootType )
 
     val appliesToAll: OutlierPlan.AppliesTo = {
       val isQuorun: IsQuorum = IsQuorum.AtLeastQuorumSpecification(0, 0)
@@ -75,7 +67,9 @@ abstract class EntityModuleSpec[E <: Entity : ClassTag] extends AggregateRootSpe
 
     override def nextId(): TID = identifying.safeNextId
     override lazy val tid: TID = nextId()
-    lazy val entity: ActorRef = module aggregateOf tid
+    lazy val entity: ActorRef = trace.block( "entity" ) {
+      module aggregateOf tid
+    }
   }
 
   def makeDataPoints(

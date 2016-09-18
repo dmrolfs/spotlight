@@ -1,18 +1,22 @@
 package spotlight.testkit
 
 import java.util.concurrent.atomic.AtomicInteger
-import scala.concurrent.{ Await, Future }
+
+import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 import akka.actor.ActorSystem
 import akka.dispatch.Dispatchers
-import akka.event.{ Logging, LoggingAdapter }
-import akka.stream.{ ActorMaterializer, Materializer }
+import akka.event.{Logging, LoggingAdapter}
+import akka.stream.{ActorMaterializer, Materializer}
 import akka.testkit.TestEvent.Mute
-import akka.testkit.{ DeadLettersFilter, ImplicitSender, TestKit }
-import com.typesafe.config.{ Config, ConfigFactory }
-import org.scalatest.{ fixture, Outcome, Tag, ParallelTestExecution, MustMatchers }
+import akka.testkit.{DeadLettersFilter, ImplicitSender, TestKit}
+import com.typesafe.config.{Config, ConfigFactory}
+import com.typesafe.scalalogging.StrictLogging
+import org.scalatest.{MustMatchers, Outcome, ParallelTestExecution, Tag, fixture}
 import peds.commons.log.Trace
 import peds.commons.util._
+
+import scalaz.{-\/, \/, \/-}
 
 
 /**
@@ -59,7 +63,10 @@ object ParallelAkkaSpec {
 trait ParallelAkkaSpec
 extends fixture.WordSpec
 with MustMatchers
-with ParallelTestExecution { outer =>
+with ParallelTestExecution
+with StrictLogging {
+  outer =>
+
   import ParallelAkkaSpec._
 
   val trace = Trace( getClass.safeSimpleName )
@@ -97,15 +104,29 @@ with ParallelTestExecution { outer =>
 
 
   override def withFixture( test: OneArgTest ): Outcome = {
-    val f = createAkkaFixture( test )
-    try {
+    val fixture = \/ fromTryCatchNonFatal { createAkkaFixture( test ) }
+    val results = fixture map { f =>
       f.before()
-      test( f )
-    } finally {
+      ( test(f), f )
+    }
+
+    val outcome = results map { case (outcome, f) =>
       f.after()
-      val terminated = f.system.terminate()
-      Await.ready( terminated, 1.second )
+
+      Option(f.system) foreach { s =>
+        val terminated = s.terminate()
+        Await.ready( terminated, 1.second )
+      }
+
+      outcome
+    }
+
+    outcome match {
+      case \/-( o ) => o
+      case -\/( ex ) => {
+        logger.error( s"test[${test.name}] failed", ex )
+        throw ex
+      }
     }
   }
-
 }

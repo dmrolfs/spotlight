@@ -1,5 +1,6 @@
 package spotlight.analysis.outlier.algorithm.skyline
 
+import scala.concurrent.duration._
 import akka.testkit._
 import com.typesafe.scalalogging.LazyLogging
 import spotlight.analysis.outlier.HistoricalStatistics
@@ -10,18 +11,15 @@ import org.apache.commons.math3.random.RandomDataGenerator
 import org.joda.{time => joda}
 import org.mockito.Mockito._
 import org.scalatest.Tag
-import org.scalatest.mock.MockitoSugar
+import org.scalatest.mockito.MockitoSugar
 import peds.commons.V
 import spotlight.analysis.outlier.algorithm.CommonAnalyzer
-
-import scala.concurrent.duration._
-import scala.concurrent.{ExecutionContext, Future}
 
 
 /**
   * Created by rolfsd on 2/15/16.
   */
-abstract class SkylineBaseSpec extends ParallelAkkaSpec with MockitoSugar with LazyLogging {
+abstract class SkylineBaseSpec extends ParallelAkkaSpec with MockitoSugar {
   object SkylineFixture {
     val appliesToAll: OutlierPlan.AppliesTo = {
       val isQuorun: IsQuorum = IsQuorum.AtLeastQuorumSpecification(0, 0)

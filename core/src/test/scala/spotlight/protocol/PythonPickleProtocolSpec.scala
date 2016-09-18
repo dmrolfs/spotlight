@@ -1,11 +1,10 @@
 package spotlight.protocol
 
 import javax.script.{ Compilable, ScriptEngineManager, SimpleBindings }
-
 import akka.util.ByteString
 import org.python.core.{ PyTuple, PyList }
 import org.scalatest._
-import org.scalatest.mock.MockitoSugar
+import org.scalatest.mockito.MockitoSugar
 import peds.commons.log.Trace
 import spotlight.model.timeseries._
 

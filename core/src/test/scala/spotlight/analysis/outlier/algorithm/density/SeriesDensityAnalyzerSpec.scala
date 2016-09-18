@@ -11,7 +11,7 @@ import org.apache.commons.math3.random.RandomDataGenerator
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import org.joda.{time => joda}
 import org.mockito.Mockito._
-import org.scalatest.mock.MockitoSugar
+import org.scalatest.mockito.MockitoSugar
 import peds.commons.V
 import shapeless._
 import spotlight.analysis.outlier._

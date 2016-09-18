@@ -32,7 +32,7 @@ import spotlight.model.timeseries.{DataPoint, TimeSeries}
 /**
  * Created by rolfsd on 10/28/15.
  */
-class OutlierScoringModelSpec extends ParallelAkkaSpec with LazyLogging {
+class OutlierScoringModelSpec extends ParallelAkkaSpec {
   import OutlierScoringModelSpec._
 
   class Fixture extends AkkaFixture { fixture =>
