@@ -6,9 +6,11 @@ import akka.actor.ActorRef
 import scalaz._
 import Scalaz._
 import com.typesafe.config.{Config, ConfigFactory}
+import demesne.CommandLike
 import org.apache.commons.math3.ml.distance.{DistanceMeasure, EuclideanDistance}
 import peds.archetype.domain.model.core.EntityIdentifying
 import peds.commons.Valid
+import peds.commons.identifier.TaggedID
 import peds.commons.math.MahalanobisDistance
 import spotlight.analysis.outlier.algorithm.{AlgorithmModule, AlgorithmProtocol}
 import spotlight.model.outlier.OutlierPlan
@@ -19,15 +21,17 @@ import spotlight.model.timeseries.{TimeSeries, TimeSeriesBase, TimeSeriesCohort,
  * Created by rolfsd on 10/4/15.
  */
 package object outlier {
-  sealed trait OutlierDetectionMessage extends AlgorithmProtocol.Command {
-    override def targetId: TID = identifying.tag( OutlierPlan.Scope(plan, topic) )
+  sealed trait OutlierDetectionMessage extends CommandLike {
+    override type ID = OutlierPlan.Scope
+    //todo: detect message is routed to many algorithms, each with own tag. This targetId is set to a dummy tag knowing that
+    // aggregate routing uses id portion only and ignores tag.
+    override def targetId: TID = TaggedID( 'detect, OutlierPlan.Scope(plan, topic) )
     def topic: Topic
     type Source <: TimeSeriesBase
     def evSource: ClassTag[Source]
     def source: Source
     def plan: OutlierPlan
     def subscriber: ActorRef
-    final protected val identifying: EntityIdentifying[AlgorithmModule.AnalysisState] = AlgorithmModule.identifying
     lazy val scope: OutlierPlan.Scope = OutlierPlan.Scope( plan, topic )
   }
 

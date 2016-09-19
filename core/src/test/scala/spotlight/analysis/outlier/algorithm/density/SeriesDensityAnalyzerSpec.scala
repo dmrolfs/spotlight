@@ -302,10 +302,10 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       val start = joda.DateTime.now
       val rnd = new RandomDataGenerator()
 
-      @tailrec def loop( i: Int, left: Int, previous: Option[(TimeSeries, HistoricalStatistics)] = None ): Unit = {
-        log.info( ">>>>>>>>>  TEST-LOOP( i:[{}] left:[{}]", i, left )
+      @tailrec def loop( i: Int, remaining: Int, previous: Option[(TimeSeries, HistoricalStatistics)] = None ): Unit = {
+        log.info( ">>>>>>>>>  TEST-LOOP( i:[{}] left:[{}]", i, remaining )
         val dt = start plusSeconds (10 * i)
-        val v = if ( left == 0 ) 1000.0 else rnd.nextUniform( 0.99, 1.01, true )
+        val v = if ( remaining == 0 ) 1000.0 else rnd.nextUniform( 0.999, 1.001, true )
         val s = TimeSeries( topic, Seq( DataPoint(dt, v) ) )
         val h = {
           previous
@@ -315,8 +315,9 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
         analyzer receive detectUsing( s, h )
 
         val expected: PartialFunction[Any, Unit] = {
-          if ( left == 0 ) {
+          if ( remaining == 0 ) {
             case m: SeriesOutliers => {
+              Option(m.plan) mustBe defined
               m.algorithms mustBe Set( algoS )
               m.source mustBe s
               m.hasAnomalies mustBe true
@@ -324,6 +325,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
             }
           } else {
             case m: NoOutliers => {
+              Option(m.plan) mustBe defined
               m.algorithms mustBe Set( algoS )
               m.source mustBe s
               m.hasAnomalies mustBe false
@@ -333,7 +335,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
 
         aggregator.expectMsgPF( 2.seconds.dilated, s"point-$i" )( expected )
 
-        if ( left == 0 ) () else loop( i + 1, left - 1, Some( (s, h) ) )
+        if ( remaining == 0 ) () else loop( i + 1, remaining - 1, Some( (s, h) ) )
       }
 
       loop( 0, 30 )

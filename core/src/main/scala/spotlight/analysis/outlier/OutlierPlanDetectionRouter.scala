@@ -47,6 +47,7 @@ object OutlierPlanDetectionRouter extends LazyLogging {
       }
 
       val addSubscriber = b.add( Flow[TimeSeriesScope] map { tss => StreamMessage(tss, outletRef) } )
+      val viewSubscriber = b.add( Flow[StreamMessage[TimeSeriesScope]].map{ m => logger.debug("TEST: view stream msg:[{}]", m); m } )
       val workStage = b.add(
 //todo: BAD discontinuity between orig (ts, plan) and new (ts, scope).
 //todo: Will be fixed by ultimate removal of OutlierPlanDetectionRouter
@@ -54,11 +55,12 @@ object OutlierPlanDetectionRouter extends LazyLogging {
         .actorRef[StreamMessage[TimeSeriesScope]]( planDetectionRouter, ActorSubscriberMessage.OnComplete )
         .named( "plan-router-inlet")
       )
-      addSubscriber ~> workStage
+      addSubscriber ~> viewSubscriber ~> workStage
 
       val outletStage = b.add( Source fromPublisher[DetectionResult] outlet )
+      val viewOutlet = b.add( Flow[DetectionResult].map{ m => logger.debug("TEST: view detection result:[{}]", m); m } )
       val extractOutliers = b.add( Flow[DetectionResult]  map { _.outliers } )
-      outletStage ~> extractOutliers
+      outletStage ~> viewOutlet ~> extractOutliers
 
       FlowShape( addSubscriber.in, extractOutliers.out )
     }
@@ -163,40 +165,45 @@ class OutlierPlanDetectionRouter extends Actor with InstrumentedActor with Actor
   val Payload = TypeCase[(TimeSeries, OutlierPlan)]
 
   val route: Receive = {
-    case StreamMessage( Payload((ts, p)), subscriber ) => {
-      streamIngressFor( p, subscriber ) forward StreamMessage[TimeSeries]( ts, subscriber )
-    }
-
-    case ActorSubscriberMessage.OnComplete => {
-      log.info( "OutlierPlanDetectionRouter[{}]: notified that stream is completed", self.path )
-      if ( planStreams.isEmpty ) {
-        log.info( "OutlierPlanDetectionRouter[{}] is not waiting on sub-streams. Stopping.", self.path )
-        context stop self
-      } else {
-        outer.detector ! ActorSubscriberMessage.OnComplete
-        context become LoggingReceive { around( waitingToCompleteDetector(scheduleCompletion()) orElse manageComplete ) }
-      }
-    }
-
-    case Terminated( actor ) if actor == outer.detector => {
-      log.error(
-        "OutlierPlanDetectionRouter[{}] notified of outlier-detector termination [{}]. erroring plan sub-streams",
-        self.path,
-        actor.path
-      )
-
-      val cause = new IllegalStateException( s"outlier-detector[${actor.path}] terminated" )
-      planStreams foreach { case (_, stream) => stream.ingressRef ! ActorSubscriberMessage.OnError( cause ) }
-    }
-
-    case Terminated( actor ) => {
-      log.warning(
-        "OutlierPlanDetectionRouter[{}] notified of actor termination outside of complete: [{}]",
-        self.path,
-        actor.path
-      )
-      clearTerminatedPlanStream( actor )
-    }
+    Actor.emptyBehavior
+//    case StreamMessage( Payload((ts, p)), subscriber ) => {
+//      log.debug( "TEST: handling stream message..." )
+//      val ingress = streamIngressFor( p, subscriber )
+//      log.debug( "TEST: stream ingress for [{}] = [{}]", p, ingress )
+//      ingress forward StreamMessage[TimeSeries]( ts, subscriber )
+//      log.debug( "TEST: ... handled stream message" )
+//    }
+//
+//    case ActorSubscriberMessage.OnComplete => {
+//      log.info( "OutlierPlanDetectionRouter[{}]: notified that stream is completed", self.path )
+//      if ( planStreams.isEmpty ) {
+//        log.info( "OutlierPlanDetectionRouter[{}] is not waiting on sub-streams. Stopping.", self.path )
+//        context stop self
+//      } else {
+//        outer.detector ! ActorSubscriberMessage.OnComplete
+//        context become LoggingReceive { around( waitingToCompleteDetector(scheduleCompletion()) orElse manageComplete ) }
+//      }
+//    }
+//
+//    case Terminated( actor ) if actor == outer.detector => {
+//      log.error(
+//        "OutlierPlanDetectionRouter[{}] notified of outlier-detector termination [{}]. erroring plan sub-streams",
+//        self.path,
+//        actor.path
+//      )
+//
+//      val cause = new IllegalStateException( s"outlier-detector[${actor.path}] terminated" )
+//      planStreams foreach { case (_, stream) => stream.ingressRef ! ActorSubscriberMessage.OnError( cause ) }
+//    }
+//
+//    case Terminated( actor ) => {
+//      log.warning(
+//        "OutlierPlanDetectionRouter[{}] notified of actor termination outside of complete: [{}]",
+//        self.path,
+//        actor.path
+//      )
+//      clearTerminatedPlanStream( actor )
+//    }
   }
 
   case object CompleteTimedOut
@@ -304,6 +311,7 @@ class OutlierPlanDetectionRouter extends Actor with InstrumentedActor with Actor
         .map { _.payload }
         .named( s"${plan.name}-detect-streamlet" )
       )
+      val view = b.add( Flow[TimeSeries].map { m => log.debug("TEST: view msg in plan stream:[{}]", m); m } )
       val batch = plan.grouping map { g => b.add( batchSeries( g ) ) }
       val detect = b.add(
         Flow[TimeSeries]
@@ -312,9 +320,9 @@ class OutlierPlanDetectionRouter extends Actor with InstrumentedActor with Actor
       )
 
       if ( batch.isDefined ) {
-        ingressPublisher ~> batch.get ~> detect
+        ingressPublisher ~> view ~> batch.get ~> detect
       } else {
-        ingressPublisher ~> detect
+        ingressPublisher ~> view ~> detect
       }
 
       ClosedShape

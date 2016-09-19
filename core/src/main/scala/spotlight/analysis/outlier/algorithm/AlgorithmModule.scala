@@ -19,10 +19,9 @@ import peds.akka.metrics.InstrumentedActor
 import peds.akka.publish.{EventPublisher, StackableStreamPublisher}
 import peds.archetype.domain.model.core.{Entity, EntityIdentifying}
 import peds.commons.{KOp, TryV, Valid}
-import peds.commons.identifier.TaggedID
+import peds.commons.identifier.{Identifying, TaggedID}
 import peds.commons.log.Trace
 import demesne._
-import demesne.module.entity.messages.EntityProtocol
 import demesne.repository.StartProtocol.Loaded
 import demesne.repository.{AggregateRootRepository, EnvelopingAggregateRootRepository}
 import demesne.repository.AggregateRootRepository.{ClusteredAggregateContext, LocalAggregateContext}
@@ -31,12 +30,13 @@ import spotlight.model.outlier.{NoOutliers, OutlierPlan, Outliers}
 import spotlight.model.timeseries._
 
 
-object AlgorithmProtocol extends EntityProtocol[AlgorithmModule.AnalysisState] {
+object AlgorithmProtocol extends AggregateProtocol[AlgorithmModule.AnalysisState#ID] {
   sealed trait AlgorithmMessage
   abstract class AlgorithmCommand extends Command with AlgorithmMessage
   abstract class AlgorithmEvent extends Event with AlgorithmMessage
 
-//  case class AddAlgorithm( override val targetId: AddAlgorithm#TID ) extends AlgorithmCommand
+
+  //  case class AddAlgorithm( override val targetId: AddAlgorithm#TID ) extends AlgorithmCommand
 
 //  case class AlgorithmAdded( override val sourceId: AlgorithmAdded#TID ) extends AlgorithmEvent
 
@@ -55,7 +55,7 @@ object AlgorithmProtocol extends EntityProtocol[AlgorithmModule.AnalysisState] {
     point: DataPoint,
     isOutlier: Boolean,
     threshold: ThresholdBoundary
-  ) extends Event
+  ) extends AlgorithmEvent
 
   case class AlgorithmUsedBeforeRegistrationError(
     sourceId: AnalysisState#TID,
@@ -97,7 +97,7 @@ object AlgorithmModule {
         41 * (
           41 * (
             41 * (
-              41 + id.##
+              41 + id.id.##
               ) + name.##
             ) + topic.##
           ) + algorithm.##
@@ -111,7 +111,7 @@ object AlgorithmModule {
           else {
             ( that.## == this.## ) &&
             ( that canEqual this ) &&
-            ( this.id == that.id ) &&
+            ( this.id.id == that.id.id ) &&
             ( this.name == that.name) &&
             ( this.topic == that.topic) &&
             ( this.algorithm == that.algorithm ) &&
@@ -132,6 +132,8 @@ object AlgorithmModule {
     }
   }
 
+
+
   /**
     *  approximate number of points in a one day window size @ 1 pt per 10s
     */
@@ -144,13 +146,13 @@ object AlgorithmModule {
 }
 
 abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmModule.ModuleConfiguration =>
-  import AlgorithmModule.AnalysisState
+  import AlgorithmModule.{ AnalysisState, identifying }
 
   private val trace = Trace[AlgorithmModule]
 
   override type ID = AlgorithmModule.ID
   val IdType = TypeCase[TID]
-  override def nextId: TryV[TID] = AlgorithmModule.identifying.nextIdAs[TID]
+  override def nextId: TryV[TID] = identifying.nextIdAs[TID]
   val AdvancedType = TypeCase[AlgorithmProtocol.Advanced]
 
 
@@ -158,7 +160,8 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
 
   class RootType extends AggregateRootType {
     override lazy val name: String = module.shardName
-    override def repositoryProps( implicit model: DomainModel ): Props = Repository clusteredProps model
+    override lazy val identifying: Identifying[_] = AlgorithmModule.identifying
+    override def repositoryProps( implicit model: DomainModel ): Props = Repository localProps model
     override def maximumNrClusterNodes: Int = module.maximumNrClusterNodes
     override def aggregateIdFor: ShardRegion.ExtractEntityId = super.aggregateIdFor orElse {
       case AdvancedType( a ) => {
@@ -170,10 +173,12 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
 
 
   object Repository {
-    def localProps( model: DomainModel ): Props = Props( new Repository(model) with LocalAggregateContext )
-    def clusteredProps( model: DomainModel ): Props = Props( new Repository(model) with ClusteredAggregateContext )
-
+    def localProps( model: DomainModel ): Props = Props( new LocalRepository(model) )
+    def clusteredProps( model: DomainModel ): Props = Props( new ClusteredRepository(model) )
   }
+
+  class LocalRepository( model: DomainModel ) extends Repository( model ) with LocalAggregateContext
+  class ClusteredRepository( model: DomainModel ) extends Repository( model ) with ClusteredAggregateContext
 
   class Repository( model: DomainModel )
   extends EnvelopingAggregateRootRepository( model, module.rootType ) { actor: AggregateRootRepository.AggregateContext =>
@@ -284,7 +289,8 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
 
   class AlgorithmActor( override val model: DomainModel, override val rootType: AggregateRootType )
   extends AggregateRoot[State, ID]
-  with InstrumentedActor { publisher: EventPublisher =>
+  with InstrumentedActor {
+    publisher: EventPublisher =>
 
     override def parseId( idstr: String ): TID = {
       val identifying = AlgorithmModule.identifying

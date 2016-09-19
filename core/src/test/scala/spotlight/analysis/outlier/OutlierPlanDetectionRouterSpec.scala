@@ -1,26 +1,28 @@
 package spotlight.analysis.outlier
 
 import java.util.concurrent.atomic.AtomicInteger
-import akka.NotUsed
+import scala.concurrent.{Await, ExecutionContext}
 import scala.concurrent.duration._
+import akka.NotUsed
 import akka.actor.{ActorRef, Props}
 import akka.stream.scaladsl._
 import akka.stream.testkit.scaladsl.{TestSink, TestSource}
 import akka.testkit.TestActor.AutoPilot
 import akka.testkit._
+import akka.util.Timeout
 import com.typesafe.config.ConfigFactory
 import org.scalatest.Tag
-import com.typesafe.scalalogging.LazyLogging
 import org.apache.commons.math3.random.RandomDataGenerator
 import org.joda.{time => joda}
 import com.github.nscala_time.time.Imports.{richDateTime, richSDuration}
+import demesne.{AggregateRootType, BoundedContext, DomainModel}
 import peds.commons.log.Trace
 import spotlight.analysis.outlier.OutlierDetection.DetectionResult
 import spotlight.analysis.outlier.algorithm.skyline.SimpleMovingAverageAnalyzer
 import spotlight.testkit.ParallelAkkaSpec
 import spotlight.model.outlier._
-import spotlight.model.timeseries.{ThresholdBoundary, DataPoint, TimeSeries}
-import spotlight.stream.{OutlierScoringModel}
+import spotlight.model.timeseries.{DataPoint, ThresholdBoundary, TimeSeries}
+import spotlight.stream.OutlierScoringModel
 
 
 /**
@@ -35,6 +37,21 @@ class OutlierPlanDetectionRouterSpec extends ParallelAkkaSpec {
     }
 
     val algo = SimpleMovingAverageAnalyzer.Algorithm
+
+//    def rootTypes: Set[AggregateRootType] = Set( AnalysisPlanModule.module.rootType )
+//    lazy val boundedContext: BoundedContext = trace.block( "boundedContext" ) {
+//      import ExecutionContext.Implicits.global
+//      implicit val actorTimeout = Timeout( 5.seconds.dilated )
+//      val bc = {
+//        for {
+//          made <- BoundedContext.make( Symbol(s"Parallel-${fixtureId}"), config, rootTypes )
+//          started <- made.start()
+//        } yield started
+//      }
+//      Await.result( bc, 5.seconds )
+//    }
+//
+//    implicit lazy val model: DomainModel = trace.block( "model" ) { Await.result( boundedContext.futureModel, 5.seconds ) }
 
     val detector = TestProbe( "detector-probe" )
     detector.setAutoPilot(
@@ -74,7 +91,7 @@ class OutlierPlanDetectionRouterSpec extends ParallelAkkaSpec {
       window map { w => OutlierPlan.Grouping( limit = 10000, w ) }
     }
 
-    val plan = makePlan( "fixture-plan", grouping )
+    val plan = makePlan( "MyFixturePlan", grouping )
 
     val plans = Set( plan )
 
@@ -89,7 +106,7 @@ class OutlierPlanDetectionRouterSpec extends ParallelAkkaSpec {
 //            override def plans: Set[OutlierPlan] = ps
           }
         ),
-        "fixture-plan-router"
+        "FixturePlanRouter"
       )
     }
 
@@ -240,7 +257,7 @@ class OutlierPlanDetectionRouterSpec extends ParallelAkkaSpec {
 
       val p1 = makePlan( "p1", None )
       val p2 = makePlan( "p2", None )
-      val testPlans = Set( p1, p2 )
+      val testPlans = Set( p1 /*, p2*/ )
 
       val planRouterRef = system.actorOf(
         OutlierPlanDetectionRouter.props(
@@ -249,15 +266,17 @@ class OutlierPlanDetectionRouterSpec extends ParallelAkkaSpec {
           bufferSize = 100,
           maxInDetectionCpuFactor = 1.0
         ),
-        "plan-router"
+        "PlanRouter"
       )
+      logger.debug( "TEST: planRouterRef=[{}]", planRouterRef)
 
       val planDetectionFlow = OutlierPlanDetectionRouter.flow( planRouterRef )
+      logger.debug( "TEST: planDetectionFlow=[{}]", planDetectionFlow )
 
       val preFlow = {
         Flow[TimeSeries]
         .map { ts =>
-          logger.debug( "PLAN NAMES:[{}]", plans.map{_.name}.mkString(",") )
+          logger.debug( "PLAN NAMES:[{}]", testPlans.map{_.name}.mkString(",") )
           testPlans collect { case p if p appliesTo ts =>
             logger.debug( "plan [{}] applies to ts [{}]", p.name, ts.topic )
             (ts, OutlierPlan.Scope(p, ts.topic))
@@ -289,9 +308,9 @@ class OutlierPlanDetectionRouterSpec extends ParallelAkkaSpec {
       val ps = pub.expectSubscription()
       val ss = sub.expectSubscription()
 
-      data foreach { ps.sendNext }
-
       ss.request( 2 )
+
+      data foreach { ps.sendNext }
 
       val a1 = sub.expectNext()
       testPlans.contains( a1.plan ) mustBe true

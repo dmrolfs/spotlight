@@ -25,7 +25,6 @@ import spotlight.model.timeseries.Topic
 class PlanCatalogSpec extends ParallelAkkaSpec with ScalaFutures with StrictLogging { outer =>
   class Fixture( config: Config = PlanCatalogSpec.config ) extends AkkaFixture( config = config ) with StrictLogging { fixture =>
     import ExecutionContext.Implicits.global
-
     def rootTypes: Set[AggregateRootType] = Set( AnalysisPlanModule.module.rootType )
     lazy val boundedContext: BoundedContext = trace.block( "boundedContext" ) {
       val bc = {

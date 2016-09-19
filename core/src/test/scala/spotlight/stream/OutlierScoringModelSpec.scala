@@ -249,7 +249,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
       sub.expectNext() mustBe (ts2, OutlierPlan.Scope(p2, ts2.topic))
     }
 
-    "batch series by plan with merging if backpressured" taggedAs (WIP) in { f: Fixture =>
+    "batch series by plan with merging if backpressured" in { f: Fixture =>
       import f._
       import OutlierScoringModelSpec._
 
@@ -304,7 +304,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
       sub.expectNext() mustBe (expectedTs, OutlierPlan.Scope(p2, expectedTs.topic))
     }
 
-    "detect Outliers" in { f: Fixture =>
+    "detect Outliers" taggedAs WIP in { f: Fixture =>
       import f._
       import system.dispatcher
       import com.github.nscala_time.time.OrderingImplicits._

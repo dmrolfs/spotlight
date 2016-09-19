@@ -86,16 +86,17 @@ object AnalysisScopeProxy {
     implicit def timeout: Timeout = Timeout( 15.seconds )
 
     def makeRouter()( implicit context: ActorContext ): ActorRef = trace.block( "makeRouter" ){
-      val algoId = AlgorithmModule.identifying tag scope
-      log.debug( "TEST: scope:[{}] algoId:[{}]", scope, algoId )
+//      val algoId = AlgorithmModule.identifying tag scope
+//      log.debug( "TEST: scope:[{}] algoId:[{}]", scope, algoId )
 
       val algorithmRefs = for {
         name <- plan.algorithms.toSeq
       _ = log.debug( "TEST: plan algorithm name:[{}]", name )
         rt <- rootTypeFor( name ).toSeq
+        algoId <- rt.identifying.castIntoTID( scope )
       _ = log.debug( "TEST: root type for [{}] = [{}]", name, rt )
       _ = log.debug( "TEST: algoId [{}]", algoId )
-        ref = model.aggregateOf( rt, algoId )
+        ref = model( rt, algoId )
       _ = log.debug( "TEST: aggregate for [{}]:[{}] = [{}]", name, rt.name, ref)
       } yield ( name, ref )
 

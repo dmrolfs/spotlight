@@ -118,7 +118,7 @@ class SimpleMovingAverageModuleSpec extends AlgorithmModuleSpec[SimpleMovingAver
       }
     }
 
-    "happy path process two batches" taggedAs WIP in { f: Fixture =>
+    "happy path process two batches" in { f: Fixture =>
       import f._
 
       val destination = TestProbe()
@@ -186,7 +186,6 @@ class SimpleMovingAverageModuleSpec extends AlgorithmModuleSpec[SimpleMovingAver
         }
 
         import akka.pattern.ask
-        implicit val to = f.timeout
 
         val actual = ( aggregate ? P.GetStateSnapshot( id ) ).mapTo[P.StateSnapshot]
         whenReady( actual ) { a =>
@@ -197,7 +196,7 @@ class SimpleMovingAverageModuleSpec extends AlgorithmModuleSpec[SimpleMovingAver
           as mustBe defined
           as.value mustBe an [module.State]
           val sas = as.value.asInstanceOf[module.State]
-          sas.id mustBe id
+          sas.id.id mustBe id.id
           sas.algorithm.name mustBe module.algorithm.label.name
           sas.tolerance mustBe 3.0
           sas.thresholds.size mustBe ( history.N )

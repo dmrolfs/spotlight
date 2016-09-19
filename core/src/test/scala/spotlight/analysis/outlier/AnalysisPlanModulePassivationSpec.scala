@@ -98,8 +98,6 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[OutlierPlan] { 
 
     "must not respond before add" in { f: Fixture =>
       import f._
-
-      implicit val to = Timeout( 2.seconds )
       val info = ( entity ?+ P.UseAlgorithms( tid, Set( 'foo, 'bar ), ConfigFactory.empty() ) ).mapTo[P.PlanInfo]
       bus.expectNoMsg()
     }

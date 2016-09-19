@@ -69,9 +69,10 @@ object Dependencies {
       val classic = module( "classic" )
     }
 
-    val slf4j = "org.slf4j" % "slf4j-api" % "1.7.21"
+    val slf4j = "org.slf4j" % "slf4j-api" % "1.7.21" intransitive
+    val log4jOverSlf4j = "org.slf4j" % "log4j-over-slf4j" % "1.7.21"
 
-    def all = Seq( typesafe, logback.core, logback.classic, slf4j )
+    def all = Seq( typesafe, logback.core, logback.classic, slf4j, log4jOverSlf4j )
   }
 
   object metrics {
@@ -117,7 +118,7 @@ object Dependencies {
     val pyrolite = "net.razorvine" % "pyrolite" % "4.10"
     val msgpack = "org.velvia" % "msgpack4s_2.11" % "0.5.2"
 
-    val hadoopClient = "org.apache.hadoop" % "hadoop-client" % "2.7.1"
+    val hadoopClient = "org.apache.hadoop" % "hadoop-client" % "2.7.1" intransitive // exclude( "log4j", "log4j" )
 
     object avro {
       val version = "1.8.1"

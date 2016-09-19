@@ -37,16 +37,20 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
 
   type Module <: AlgorithmModule
   val defaultModule: Module
-  val identifying: EntityIdentifying[AlgorithmModule.AnalysisState] = AlgorithmModule.identifying
+  lazy val identifying: EntityIdentifying[AlgorithmModule.AnalysisState] = AlgorithmModule.identifying
 
   override type Fixture <: AlgorithmFixture
   abstract class AlgorithmFixture extends AggregateFixture { fixture =>
-    logger.info( "Fixture: DomainModel=[{}]", model )
-
     val subscriber = TestProbe()
 
+
+    override def before(test: OneArgTest): Unit = {
+      super.before( test )
+      logger.info( "Fixture: DomainModel=[{}]", model )
+    }
+
     type Module = outer.Module
-    override val module: Module = outer.defaultModule
+    override lazy val module: Module = outer.defaultModule
     override def rootTypes: Set[AggregateRootType] = Set( module.rootType )
 
 
@@ -68,7 +72,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
         e <- expected
       } {
         logger.debug( "TEST: actualVsExpectedState:\n  Actual:[{}]\nExpected:[{}]", a, e )
-        a.id mustBe e.id
+        a.id.id mustBe e.id.id
         a.name mustBe e.name
         a.algorithm.name mustBe e.algorithm.name
         a.tolerance mustBe e.tolerance
@@ -204,21 +208,20 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
 
   def bootstrapSuite(): Unit = {
     s"${defaultModule.algorithm.label.name} entity" should {
-      "have zero state before advance" in { f: Fixture =>
+      "have zero state before advance" taggedAs WIP in { f: Fixture =>
         import f._
 
-        implicit val to = f.timeout
+        logger.debug( "aggregate = [{}]", aggregate )
         val actual = ( aggregate ? P.GetStateSnapshot( id ) ).mapTo[P.StateSnapshot]
-        whenReady( actual ) { a =>
-          a.sourceId mustBe id
+        whenReady( actual, timeout(5.seconds) ) { a =>
+          a.sourceId.id mustBe id.id
           a.snapshot mustBe None
         }
       }
 
       "advance for datapoint processing" in { f: Fixture =>
-        import f.{ timeout => _, _ }
+        import f._
 
-        implicit val to = f.timeout
         val pt = DataPoint( nowTimestamp, 3.14159 )
         val t = ThresholdBoundary( nowTimestamp, Some(1.1), Some(2.2), Some(3.3) )
         val adv = P.Advanced( id, pt, true, t )

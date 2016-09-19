@@ -6,10 +6,9 @@ import com.typesafe.config.Config
 import com.typesafe.scalalogging.LazyLogging
 import demesne.module.entity.EntityAggregateModule
 import demesne.module.entity.EntityAggregateModule.MakeIndexSpec
-import demesne.module.entity.messages.EntityProtocol
 import demesne.module.entity.{messages => EntityMessages}
 import demesne.index.local.IndexLocalAgent
-import demesne.{AggregateRootType, DomainModel}
+import demesne.{AggregateProtocol, AggregateRootType, DomainModel}
 import demesne.index.{Directive, IndexBusSubscription, StackableIndexBusPublisher}
 import peds.akka.envelope._
 import peds.akka.publish.{EventPublisher, StackableStreamPublisher}
@@ -20,7 +19,7 @@ import spotlight.model.outlier.{IsQuorum, OutlierPlan, ReduceOutliers}
 import spotlight.model.timeseries.{TimeSeries, Topic}
 
 
-object AnalysisPlanProtocol extends EntityProtocol[OutlierPlan] {
+object AnalysisPlanProtocol extends AggregateProtocol[OutlierPlan#ID]{
   sealed trait AnalysisPlanMessage
   sealed abstract class AnalysisPlanCommand extends AnalysisPlanMessage with CommandMessage
   sealed abstract class AnalysisPlanEvent extends AnalysisPlanMessage with EventMessage
