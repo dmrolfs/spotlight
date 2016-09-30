@@ -44,7 +44,7 @@ class CohortDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
   override def createAkkaFixture( test: OneArgTest ): Fixture = new Fixture
 
   "CohortDensityAnalyzer" should  {
-    "register with router upon create" in { f: Fixture =>
+    "register with router upon create" taggedAs WIP in { f: Fixture =>
       import f._
       val analyzer = TestActorRef[CohortDensityAnalyzer]( CohortDensityAnalyzer.props(router.ref) )
       router.expectMsgPF( 1.second.dilated, "register" ) {
@@ -60,8 +60,7 @@ class CohortDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       analyzer.receive(
         DetectUsing(
           algoS,
-          aggregator.ref,
-          DetectOutliersInSeries( TimeSeries("series", points), plan, subscriber.ref ),
+          DetectOutliersInSeries( TimeSeries("series", points), plan, subscriber.ref, Set() ),
           HistoricalStatistics(2, false ),
           ConfigFactory.parseString(
             s"""
@@ -73,7 +72,7 @@ class CohortDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       )
     }
 
-    "detect outlying series in cohort" taggedAs (WIP) in { f: Fixture =>
+    "detect outlying series in cohort" in { f: Fixture =>
       import f._
       val analyzer = TestActorRef[CohortDensityAnalyzer]( CohortDensityAnalyzer.props(router.ref) )
       val series1 = TimeSeries( "series.one", pointsA )
@@ -91,15 +90,14 @@ class CohortDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       )
 
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoC ) )
-      analyzer.receive(
-        DetectUsing(
-          algoC,
-          aggregator.ref,
-          DetectOutliersInCohort( cohort, plan, subscriber.ref ),
-          HistoricalStatistics(2, false ),
-          algProps
-        )
+      implicit val sender = aggregator.ref
+      analyzer ! DetectUsing(
+        algoC,
+        DetectOutliersInCohort( cohort, plan, subscriber.ref, Set() ),
+        HistoricalStatistics(2, false ),
+        algProps
       )
+
       aggregator.expectMsgPF( 2.seconds.dilated, "detect" ) {
         //todo stream envelope
         //        case Envelope(CohortOutliers(alg, source, outliers), hdr) => {
@@ -139,15 +137,14 @@ class CohortDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       )
 
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoC ) )
-      analyzer.receive(
-        DetectUsing(
-          algoC,
-          aggregator.ref,
-          DetectOutliersInCohort( cohort, plan, subscriber.ref ),
-          HistoricalStatistics(2, false ),
-          algProps
-        )
+      implicit val sender = aggregator.ref
+      analyzer ! DetectUsing(
+        algoC,
+        DetectOutliersInCohort( cohort, plan, subscriber.ref, Set() ),
+        HistoricalStatistics(2, false ),
+        algProps
       )
+
       aggregator.expectMsgPF( 2.seconds.dilated, "detect" ) {
         //todo stream envelope
         //        case Envelope(CohortOutliers(alg, source, outliers), hdr) => {
@@ -204,12 +201,12 @@ class CohortDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
 
       val expected = DetectUsing(
         algoS,
-        aggregator.ref,
-        DetectOutliersInSeries(series, plan, subscriber.ref),
+        DetectOutliersInSeries(series, plan, subscriber.ref, Set()),
         HistoricalStatistics(2, false ),
         algProps
       )
-      analyzer.receive( expected )
+      implicit val sender = aggregator.ref
+      analyzer ! expected
       aggregator.expectMsgPF( 2.seconds.dilated, "detect" ) {
         case UnrecognizedPayload( alg, actual ) => {
           alg.name mustBe algoC.name

@@ -30,7 +30,9 @@ trait DBSCANAnalyzer extends AlgorithmActor {
 
 
   override val detect: Receive = LoggingReceive {
-    case s @ DetectUsing( _, aggregator, payload: DetectOutliersInSeries, history, algorithmConfig ) => {
+    case s @ DetectUsing( _, payload: DetectOutliersInSeries, history, algorithmConfig ) => {
+      val aggregator = sender()
+
       val start = System.currentTimeMillis()
 
       ( algorithmContext >=> cluster >=> findOutliers ).run( s ) match {

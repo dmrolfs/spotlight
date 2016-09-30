@@ -7,23 +7,22 @@ import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 import scala.util.Failure
 import akka.{NotUsed, pattern}
-import akka.stream.OverflowStrategy
+import akka.stream.{ActorMaterializer, Materializer, OverflowStrategy}
 import akka.stream.testkit.scaladsl.{TestSink, TestSource}
 import akka.stream.scaladsl._
 import akka.util.ByteString
 import akka.testkit._
-
 import com.typesafe.config.ConfigFactory
 import org.scalatest.Tag
-import com.typesafe.scalalogging.LazyLogging
 import org.apache.commons.math3.random.RandomDataGenerator
 import org.joda.{time => joda}
 import com.github.nscala_time.time.Imports.{richDateTime, richSDuration}
+import demesne.{AggregateRootType, BoundedContext, DomainModel}
 import peds.commons.log.Trace
-import spotlight.analysis.outlier.algorithm.density.SeriesDensityAnalyzer
+import spotlight.analysis.outlier.algorithm.skyline.SimpleMovingAverageModule
 import spotlight.protocol.PythonPickleProtocol
 import spotlight.testkit.ParallelAkkaSpec
-import spotlight.analysis.outlier.{DetectionAlgorithmRouter, OutlierDetection, OutlierPlanDetectionRouter}
+import spotlight.analysis.outlier.{AnalysisPlanModule, PlanCatalog}
 import spotlight.model.outlier._
 import spotlight.model.timeseries.TimeSeriesBase.Merging
 import spotlight.model.timeseries.{DataPoint, TimeSeries}
@@ -36,12 +35,17 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
   import OutlierScoringModelSpec._
 
   class Fixture extends AkkaFixture { fixture =>
+//    logger.debug( "config:: akka.actor.provider=[{}] origin:[{}]", config.getValue("akka.actor.provider"), config.getValue("akka.actor.provider").origin() )
+
+    implicit val materializer: Materializer = ActorMaterializer()
+
     val protocol = new PythonPickleProtocol
     val stringFlow: Flow[ByteString, ByteString, NotUsed] = Flow[ByteString].via( protocol.framingFlow() )
 
-    val configurationReloader = Configuration.reloader( Array.empty[String] )()()
+//    val configurationReloader = Configuration.reloader( Array.empty[String] )()()
 
-    val algo = SeriesDensityAnalyzer.Algorithm
+//    val algo = SeriesDensityAnalyzer.Algorithm
+    val algo = SimpleMovingAverageModule.algorithm.label
     val algoRef = TestProbe()
     val routingTable = Map( algo -> algoRef.ref )
 
@@ -64,6 +68,21 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
         """.stripMargin
       )
     )
+
+    def rootTypes: Set[AggregateRootType] = Set( AnalysisPlanModule.module.rootType, SimpleMovingAverageModule.rootType )
+    lazy val boundedContext: BoundedContext = trace.block( "boundedContext" ) {
+      implicit val actorTimeout = akka.util.Timeout( 5.seconds.dilated )
+      import scala.concurrent.ExecutionContext.Implicits.global
+      val bc = {
+        for {
+          made <- BoundedContext.make( Symbol(s"Parallel-${fixtureId}"), config, rootTypes )
+          started <- made.start()
+        } yield started
+      }
+      Await.result( bc, 5.seconds )
+    }
+
+    implicit lazy val model: DomainModel = trace.block( "model" ) { Await.result( boundedContext.futureModel, 5.seconds ) }
 
     def makePlan( name: String, g: Option[OutlierPlan.Grouping] ): OutlierPlan = {
       OutlierPlan.default(
@@ -206,11 +225,13 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
         .map { ts =>
           myPlans collect { case p if p appliesTo ts =>
             logger.debug( "plan [{}] applies to ts [{}]", p.name, ts.topic )
-            (ts, OutlierPlan.Scope(p, ts.topic))
+//            (ts, OutlierPlan.Scope(p, ts.topic))
+            ts
           }
         }
         .mapConcat { identity }
-        .via( OutlierScoringModel.batchSeriesByPlan(100) )
+//        .via( OutlierScoringModel.batchSeriesByPlan(100) )
+        .via( OutlierScoringModel.regulateByTopic(100) )
         .map { m =>
           logger.info( "passing message onto plan router: [{}]", m )
           m
@@ -229,12 +250,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
 
       val data = Seq( ts1, ts2 )
 
-      val (pub, sub) = {
-        TestSource.probe[TimeSeries]
-        .via( flowUnderTest )
-        .toMat( TestSink.probe[(TimeSeries, OutlierPlan.Scope)] )( Keep.both )
-        .run()
-      }
+      val (pub, sub) = TestSource.probe[TimeSeries].via( flowUnderTest ).toMat( TestSink.probe[TimeSeries] )( Keep.both ).run()
 
       val ps = pub.expectSubscription()
       val ss = sub.expectSubscription()
@@ -243,10 +259,8 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
 
       data foreach { ps.sendNext }
 
-      sub.expectNext() mustBe (ts1, OutlierPlan.Scope(p1, ts1.topic))
-      sub.expectNext() mustBe (ts1, OutlierPlan.Scope(p2, ts1.topic))
-      sub.expectNext() mustBe (ts2, OutlierPlan.Scope(p1, ts2.topic))
-      sub.expectNext() mustBe (ts2, OutlierPlan.Scope(p2, ts2.topic))
+      sub.expectNext() mustBe ts1
+      sub.expectNext() mustBe ts2
     }
 
     "batch series by plan with merging if backpressured" in { f: Fixture =>
@@ -263,11 +277,13 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
         .map { ts =>
           myPlans collect { case p if p appliesTo ts =>
             logger.debug( "plan [{}] applies to ts [{}]", p.name, ts.topic )
-            (ts, OutlierPlan.Scope(p, ts.topic))
+//            (ts, OutlierPlan.Scope(p, ts.topic))
+            ts
           }
         }
         .mapConcat { identity }
-        .via( OutlierScoringModel.batchSeriesByPlan(100) )
+//        .via( OutlierScoringModel.batchSeriesByPlan(100) )
+        .via( OutlierScoringModel.regulateByTopic(100) )
         .map { m =>
           logger.info( "passing message onto plan router: [{}]", m )
           m
@@ -286,12 +302,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
 
       val data = Seq( ts1, ts2 )
 
-      val (pub, sub) = {
-        TestSource.probe[TimeSeries]
-        .via( flowUnderTest )
-        .toMat( TestSink.probe[(TimeSeries, OutlierPlan.Scope)] )( Keep.both )
-        .run()
-      }
+      val (pub, sub) = TestSource.probe[TimeSeries].via( flowUnderTest ).toMat( TestSink.probe[TimeSeries] )( Keep.both ).run()
 
       val ps = pub.expectSubscription()
       val ss = sub.expectSubscription()
@@ -300,8 +311,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
 
       ss.request( 2 ) // request after sendNext creates backpressure
 
-      sub.expectNext() mustBe (expectedTs, OutlierPlan.Scope(p1, expectedTs.topic))
-      sub.expectNext() mustBe (expectedTs, OutlierPlan.Scope(p2, expectedTs.topic))
+      sub.expectNext() mustBe expectedTs
     }
 
     "detect Outliers" taggedAs WIP in { f: Fixture =>
@@ -338,18 +348,15 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
         )
       )
 
-      val routerRef = system.actorOf( DetectionAlgorithmRouter.props(routingTable), "router" )
-      val dbscan = system.actorOf( SeriesDensityAnalyzer.props( routerRef ), "dbscan" )
-      val detector = system.actorOf( OutlierDetection.props( routerRef = routerRef ), "detectOutliers" )
-      val planRouter = system.actorOf(
-        OutlierPlanDetectionRouter.props(
-          detectorRef = detector,
-          detectionBudget = 2.minutes,
-          bufferSize = 1000,
-          maxInDetectionCpuFactor = 1
-        ),
-        "planRouter"
-      )
+      val catalogProps = {
+        PlanCatalog.props(
+          configuration = ConfigFactory.empty(),
+          maxInFlightCpuFactor = 1.0,
+          applicationDetectionBudget = Some(2.minutes),
+          applicationPlans = Set( defaultPlan )
+        )
+      }
+
       val now = new joda.DateTime( 2016, 3, 25, 10, 38, 40, 81 ) // new joda.DateTime( joda.DateTime.now.getMillis / 1000L * 1000L )
       logger.debug( "USE NOW = {}", now )
 
@@ -357,8 +364,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
 //      val dp2 = makeDataPoints( pointsA, start = joda.DateTime.now )
 //      val dp3 = makeDataPoints( pointsB, start = joda.DateTime.now )
 
-      val expectedValues = Set( 31.5, 39.2 )
-      val expectedPoints = dp1 filter { expectedValues contains _.value } sortBy { _.timestamp }
+      val expectedPoints = Seq( 1, 30 ).map{ dp1.apply }.sortBy{ _.timestamp }
 
       val expected = SeriesOutliers(
         algorithms = algos,
@@ -368,12 +374,14 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
       )
 //      val expected = TimeSeries( "foo", (dp1 ++ dp3).sortBy( _.timestamp ) )
 
-      val graphiteFlow = OutlierScoringModel.batchSeriesByPlan( max = 1000 )
-      val detectFlow = OutlierPlanDetectionRouter.flow( planRouter )
+//      val graphiteFlow = OutlierScoringModel.batchSeriesByPlan( max = 1000 )
+      val graphiteFlow = OutlierScoringModel.regulateByTopic( max = 1000 )
+//      val detectFlow = OutlierPlanDetectionRouter.flow( planRouter )
+      val detectFlow = PlanCatalog.flow( catalogProps )
 
       val flowUnderTest = {
         Flow[TimeSeries]
-        .map{ ts => (ts, OutlierPlan.Scope(defaultPlan, ts.topic)) }
+//        .map{ ts => (ts, OutlierPlan.Scope(defaultPlan, ts.topic)) }
         .via( graphiteFlow )
         .via( detectFlow )
       }
@@ -393,6 +401,9 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
       val topics = List( "foo", "bar", "foo" )
       val data: List[TimeSeries] = topics.zip(List(dp1)).map{ case (t,p) => TimeSeries(t, p) }
 
+      logger.debug( "waiting to start.....")
+      Thread.sleep( 200 )
+      logger.debug( "....starting")
       data foreach { ps.sendNext }
       val actual = sub.expectNext()
       actual.algorithms mustBe expected.algorithms
@@ -404,36 +415,6 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
       actual.source mustBe expected.source
       actual.topic mustBe expected.topic
       actual mustBe expected
-////////////////////////////////////////////////////
-//      pub.sendNext( data(0) )
-//
-//      Source( data )
-//      .via( flowUnderTest )
-//      .runWith( TestSink.probe[Outliers] )
-//      .request( 1 )
-//      .expectEventPF[Outliers] {
-//        case OnNext( actual ) => {
-//          val foo: Int = actual
-//        }
-//      }
-//      .expectNext( )
-
-//      val future: Int = Source( data )
-//                   .via( flowUnderTest )
-//                   .runWith( sinkProbe )
-//      logger.debug( "STREAM future = {}", future )
-//      val result = Await.result( future, 2.seconds.dilated )
-//      trace( s"result class   [${result.hashCode}] = ${result.getClass}")
-//      trace( s"expected class [${expected.hashCode}] = ${expected.getClass}")
-//      result.algorithms mustBe expected.algorithms
-//      result mustBe a [SeriesOutliers]
-//      result.asInstanceOf[SeriesOutliers].outliers mustBe expected.outliers
-//      result.anomalySize mustBe expected.anomalySize
-//      result.hasAnomalies mustBe expected.hasAnomalies
-//      result.size mustBe expected.size
-//      result.source mustBe expected.source
-//      result.topic mustBe expected.topic
-//      result mustBe expected
     }
 
     "grouped Example" in { f: Fixture =>

@@ -3,6 +3,7 @@ package spotlight.analysis.outlier
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
 import akka.actor.ActorRef
+import akka.stream.{ActorMaterializer, Materializer}
 import akka.testkit._
 import akka.util.Timeout
 import com.typesafe.config.{Config, ConfigFactory}
@@ -25,6 +26,9 @@ import spotlight.model.timeseries.Topic
 class PlanCatalogSpec extends ParallelAkkaSpec with ScalaFutures with StrictLogging { outer =>
   class Fixture( config: Config = PlanCatalogSpec.config ) extends AkkaFixture( config = config ) with StrictLogging { fixture =>
     import ExecutionContext.Implicits.global
+
+    implicit val materializer: Materializer = ActorMaterializer()
+
     def rootTypes: Set[AggregateRootType] = Set( AnalysisPlanModule.module.rootType )
     lazy val boundedContext: BoundedContext = trace.block( "boundedContext" ) {
       val bc = {
@@ -149,7 +153,7 @@ class PlanCatalogSpec extends ParallelAkkaSpec with ScalaFutures with StrictLogg
       whenReady( index.futureEntries, timeout(3.seconds.dilated) ) { _ mustBe empty }
 
       logger.info( "TEST: ==============  CREATING CATALOG  ==============")
-      val catalog = system.actorOf( PlanCatalog.props( model, config ) )
+      val catalog = system.actorOf( PlanCatalog.props( config ) )
       val foo = (catalog ? P.WaitingForStart).mapTo[P.Started.type]
       Await.ready( foo, 15.seconds.dilated )
 
@@ -241,10 +245,10 @@ object PlanCatalogSpec extends StrictLogging {
     )
 
     val result: Config = catalogConfig.resolve() withFallback spotlight.testkit.config( "core" )
-    logger.info(
-      "TEST CONFIGURATION:[\n{}\n]",
-      result.root().render( com.typesafe.config.ConfigRenderOptions.defaults().setFormatted(true))
-    )
+//    logger.info(
+//      "TEST CONFIGURATION:[\n{}\n]",
+//      result.root().render( com.typesafe.config.ConfigRenderOptions.defaults().setFormatted(true))
+//    )
     result
   }
 }

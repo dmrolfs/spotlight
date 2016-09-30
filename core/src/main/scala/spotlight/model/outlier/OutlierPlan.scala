@@ -3,14 +3,14 @@ package spotlight.model.outlier
 import scala.concurrent.duration._
 import scala.reflect._
 import scala.util.matching.Regex
-import scalaz.{ Ordering => _, _}
+import scalaz.{Ordering => _, _}
 import Scalaz._
 import com.typesafe.config.{Config, ConfigFactory}
 import peds.archetype.domain.model.core._
 import peds.commons._
 import peds.commons.identifier._
 import peds.commons.util._
-import spotlight.model.timeseries.Topic
+import spotlight.model.timeseries.{TimeSeriesBase, Topic}
 
 
 /**
@@ -69,6 +69,7 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
 
   object Scope {
     def apply( plan: OutlierPlan, topic: Topic ): Scope = Scope( plan = plan.name, topic = topic /*, planId = plan.id*/ )
+    def apply( plan: OutlierPlan, ts: TimeSeriesBase ): Scope = apply( plan, ts.topic )
 
     trait ScopeIdentifying[T] { self: Identifying[T] =>
       override type ID = Scope

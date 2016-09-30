@@ -50,12 +50,13 @@ object OutlierDetection extends StrictLogging with Instrumented {
   }
 
   sealed trait DetectionProtocol
-  case class DetectionResult( outliers: Outliers ) extends DetectionProtocol
+  case class DetectionResult( outliers: Outliers, workIds: Set[WorkId] ) extends DetectionProtocol
   case class UnrecognizedTopic( topic: Topic ) extends DetectionProtocol
   case class DetectionTimedOut( topic: Topic, plan: OutlierPlan ) extends DetectionProtocol
 
 
   val extractOutlierDetectionTopic: OutlierPlan.ExtractTopic = {
+    case e @ Envelope( payload, _ ) if extractOutlierDetectionTopic isDefinedAt payload => extractOutlierDetectionTopic( payload )
     case m: OutlierDetectionMessage => Some(m.topic)
     case ts: TimeSeriesBase => Some(ts.topic)
     case t: Topic => Some(t)
@@ -65,8 +66,22 @@ object OutlierDetection extends StrictLogging with Instrumented {
     def router: ActorRef
   }
 
-
-  case class DetectionSubscriber( ref: ActorRef, startNanos: Long = System.nanoTime( ) )
+  case class DetectionRequest private[OutlierDetection](
+    subscriber: ActorRef,
+    workIds: Set[WorkId],
+    startNanos: Long = System.nanoTime()
+  )
+  private[OutlierDetection] object DetectionRequest {
+    private val trace = Trace[DetectionResult.type]
+    def from( m: OutlierDetectionMessage )( implicit wid: WorkId ): DetectionRequest = trace.block( "from" ) {
+      logger.debug( "req = [{}]", m )
+      logger.debug( "req.workIds = [{}]", m.workIds )
+      logger.debug( "workId:[{}]", wid )
+      val wids = if ( m.workIds.nonEmpty ) m.workIds else Set( wid )
+      logger.debug( "wids = [{}]", wids )
+      DetectionRequest( m.subscriber, wids )
+    }
+  }
 }
 
 
@@ -104,38 +119,47 @@ with ActorLogging {
     )
   }
 
-  type AggregatorSubscribers = Map[ActorRef, DetectionSubscriber]
-  var outstanding: AggregatorSubscribers = Map.empty[ActorRef, DetectionSubscriber]
+  type AggregatorSubscribers = Map[ActorRef, DetectionRequest]
+  var outstanding: AggregatorSubscribers = Map.empty[ActorRef, DetectionRequest]
 
   override def receive: Receive = LoggingReceive { around( detection() ) }
 
   def detection( isWaitingToComplete: Boolean = false ): Receive = {
-    case result: Outliers if outstanding.contains( sender() ) => {
-      log.debug( "OutlierDetection results: [{}:{}]", result.topic, result.plan )
-      val aggregator = sender()
-      val subscriber = outstanding( aggregator )
-      log.debug( "OutlierDetecion sending results to subscriber:[{}]", subscriber.ref )
-      subscriber.ref ! DetectionResult( result )
-      outstanding -= aggregator
-      detectionTimer.update( System.nanoTime() - subscriber.startNanos, scala.concurrent.duration.NANOSECONDS )
-      updateScore( result )
-    }
-
     case m: OutlierDetectionMessage => {
-      log.debug( "OutlierDetection request: [{}:{}]", m.topic, m.plan )
-      val requester = m.subscriber
+      log.debug( "OutlierDetection received detection request[{}]: [{}:{}] subscriber=[{}]", workId, m.topic, m.plan, m.subscriber.path.name )
       dispatch( m, m.plan )( context.dispatcher ) match {
         case \/-( aggregator ) => {
-          outstanding += aggregator -> DetectionSubscriber( ref = requester )
+          log.debug( "TEST: OutlierDetection aggregator:[{}] for subscriber:[{}]", aggregator.path.name, m.subscriber.path.name )
+          outstanding += ( aggregator -> DetectionRequest.from( m ) )
           stopIfFullyComplete( isWaitingToComplete )
         }
         case -\/( ex ) => log.error( ex, "OutlierDetector failed to create aggregator for topic:[{}]", m.topic )
       }
     }
 
+    case result: Outliers if outstanding.contains( sender() ) => {
+      log.debug( "OutlierDetection[{}} results: [{}:{}]", workId, result.topic, result.plan )
+      val aggregator = sender()
+      val request = outstanding( aggregator )
+      log.debug( "OutlierDetection sending results for [{}] to subscriber:[{}]", workId, request.subscriber )
+      log.debug( "TEST: OutlierDetection AFTER send [{}] subscriber.workIds=[{}]", workId, request.workIds )
+      request.subscriber !+ DetectionResult( result, request.workIds )
+      outstanding -= aggregator
+      detectionTimer.update( System.nanoTime() - request.startNanos, scala.concurrent.duration.NANOSECONDS )
+      updateScore( result )
+    }
+
     case timedOut @ OutlierQuorumAggregator.AnalysisTimedOut( topic, plan ) => {
       log.error( "quorum was not reached in time: [{}]", timedOut )
-      outstanding -= sender()
+      val aggregator = sender()
+
+      outstanding
+      .get( aggregator )
+      .foreach { request =>
+        request.subscriber !+ timedOut
+        outstanding -= aggregator
+      }
+
       stopIfFullyComplete( isWaitingToComplete )
     }
 
@@ -146,42 +170,8 @@ with ActorLogging {
   }
 
 
-  private def stopIfFullyComplete( isWaitingToComplete: Boolean ): Unit = {
-    if ( isWaitingToComplete && outstanding.isEmpty ) {
-      log.info( "OutlierDetection[{}] finished outstanding work. stopping for completion", self.path )
-      context stop self
-    }
-  }
-
-  val fullExtractTopic: OutlierPlan.ExtractTopic = OutlierDetection.extractOutlierDetectionTopic orElse { case _ => None }
-
-  def aggregatorNameForMessage( m: OutlierDetectionMessage, p: OutlierPlan ): String = {
-    val extractedTopic = fullExtractTopic( m ) getOrElse {
-      log.warning( "OutlierDetection failed to extract ID from message:[{}] and plan:[{}]", m, p )
-      "__UNKNOWN_ID__"
-    }
-
-    val uuid = ShortUUID()
-    val name = s"""quorum-${p.name}-${extractedTopic.toString}-${uuid.toString}"""
-
-    if ( ActorPath isValidPathElement name ) name
-    else {
-      val blunted = new URI( "akka.tcp", name, null ).getSchemeSpecificPart.replaceAll( """[\.\[\];/?:@&=+$,]""", "_" )
-      log.debug(
-        "OutlierDetection attempting to dispatch to invalid aggregator\n" +
-        " + (plan-name, extractedTopic, uuid):[{}]\n" +
-        " + attempted name:{}\n" +
-        " + blunted name:{}", 
-        (p.name, extractedTopic.toString, uuid.toString),
-        name,
-        blunted
-      )
-      blunted
-    }
-  }
-
   def dispatch( m: OutlierDetectionMessage, p: OutlierPlan )( implicit ec: ExecutionContext ): TryV[ActorRef] = {
-    log.debug( "OutlierDetection disptaching: [{}][{}:{}]", m.topic, m.plan, m.plan.id )
+    log.debug( "OutlierDetection [{}] dispatching: [{}][{}:{}]", workId, m.topic, m.plan, m.plan.id )
 
     for {
       aggregator <- \/ fromTryCatchNonFatal {
@@ -189,21 +179,8 @@ with ActorLogging {
       }
     } yield {
       val history = updateHistory( m.source, p )
-
-      p.algorithms foreach { a =>
-        val detect = {
-          DetectUsing(
-            algorithm = a,
-            aggregator = aggregator,
-            payload = m,
-            history = history,
-            properties = p.algorithmConfig
-          )
-        }
-
-        router !+ detect
-      }
-
+//      p.algorithms foreach { algo => router !+ DetectUsing(algo, aggregator, m, history, p.algorithmConfig) }
+      p.algorithms foreach { algo => router.sendEnvelope( DetectUsing(algo, m, history, p.algorithmConfig) )( aggregator )}
       aggregator
     }
   }
@@ -242,5 +219,39 @@ with ActorLogging {
       (s._1.toString, s._2.toString),
       os.thresholdBoundaries
     )
+  }
+
+  private def stopIfFullyComplete( isWaitingToComplete: Boolean ): Unit = {
+    if ( isWaitingToComplete && outstanding.isEmpty ) {
+      log.info( "OutlierDetection[{}] finished outstanding work. stopping for completion", self.path )
+      context stop self
+    }
+  }
+
+  val fullExtractTopic: OutlierPlan.ExtractTopic = OutlierDetection.extractOutlierDetectionTopic orElse { case _ => None }
+
+  def aggregatorNameForMessage( m: OutlierDetectionMessage, p: OutlierPlan ): String = {
+    val extractedTopic = fullExtractTopic( m ) getOrElse {
+      log.warning( "OutlierDetection failed to extract ID from message:[{}] and plan:[{}]", m, p )
+      "__UNKNOWN_ID__"
+    }
+
+    val uuid = ShortUUID()
+    val name = s"""quorum-${p.name}-${extractedTopic.toString}-${uuid.toString}"""
+
+    if ( ActorPath isValidPathElement name ) name
+    else {
+      val blunted = new URI( "akka.tcp", name, null ).getSchemeSpecificPart.replaceAll( """[\.\[\];/?:@&=+$,]""", "_" )
+      log.debug(
+        "OutlierDetection attempting to dispatch to invalid aggregator\n" +
+        " + (plan-name, extractedTopic, uuid):[{}]\n" +
+        " + attempted name:{}\n" +
+        " + blunted name:{}", 
+        (p.name, extractedTopic.toString, uuid.toString),
+        name,
+        blunted
+      )
+      blunted
+    }
   }
 }

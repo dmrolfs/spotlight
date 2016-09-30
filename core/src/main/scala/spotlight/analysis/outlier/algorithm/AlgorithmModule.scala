@@ -194,7 +194,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
   override lazy val aggregateIdTag: Symbol = algorithm.label
 
   trait Algorithm {
-    def label: Symbol
+    val label: Symbol
     def prepareContext( algorithmContext: Context ): Context = identity( algorithmContext )
     def prepareData( algorithmContext: Context ): TryV[Seq[DoublePoint]]
     def step( point: PointT )( implicit s: State, algorithmContext: Context ): (Boolean, ThresholdBoundary)
@@ -322,13 +322,14 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
     override def receiveCommand: Receive = LoggingReceive { around( active orElse stateReceiver ) }
 
     val active: Receive = {
-      case msg @ DetectUsing( algo, aggregator, payload: DetectOutliersInSeries, history, algorithmConfig ) => {
+      case msg @ DetectUsing( algo, payload: DetectOutliersInSeries, history, algorithmConfig ) => {
+        val aggregator = sender()
         val toOutliers = kleisli[TryV, (Outliers, Context), Outliers] { case (o, _) => o.right }
 
         val start = System.currentTimeMillis()
         ( algorithmContext >=> findOutliers >=> toOutliers ).run( msg ) match {
           case \/-( r ) => {
-            log.debug( "sending detect result to aggregator[{}]: [{}]", aggregator.path, r )
+            log.debug( "[{}] sending detect result to aggregator[{}]: [{}]", workId, aggregator.path.name, r )
             algorithmTimer.update( System.currentTimeMillis() - start, scala.concurrent.duration.MILLISECONDS )
             aggregator !+ r
           }
@@ -336,7 +337,8 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
           case -\/( ex ) => {
             log.error(
               ex,
-              "failed [{}] analysis on [{}] @ [{}] - no outliers marked for interval",
+              "[{}] failed [{}] analysis on [{}] @ [{}] - no outliers marked for interval",
+              workId,
               algo.name,
               payload.plan.name + "][" + payload.topic,
               payload.source.interval
@@ -353,7 +355,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
       }
 
       case AdvancedType( adv ) => {
-        log.info( "TEST:[{}]: Algorithm[{}] HANDLING Advanced msg: [{}]", self.path, algorithm.label.name, adv )
+        log.debug( "RECEIVE ADAANCED - TEST:[{}]: Algorithm[{}] HANDLING Advanced msg: [{}]", self.path, algorithm.label.name, adv )
         accept( adv )
       } //todo: what to do here persist?
 //
@@ -382,7 +384,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
 
         case m: DetectUsing => {
           log.error( "algorithm [{}] does not recognize requested payload: [{}]", algorithm, m )
-          m.aggregator !+ UnrecognizedPayload( algorithm.label, m )
+          sender() !+ UnrecognizedPayload( algorithm.label, m )
         }
 
         case AdvancedType(m) => {
@@ -409,7 +411,9 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
         ctx <- ask[TryV, Context]
         data <- kleisli[TryV, Context, Seq[DoublePoint]] { c => algorithm.prepareData( c ) }
         events <- collectOutlierPoints( data )
+      _ = log.debug( "TEST: findOutliers: events-isOutliers:[{}]", events.map{ _.isOutlier }.mkString(", ") )
         o <- makeOutliers( events )
+      _ = log.debug( "TEST: findOutliers: outliers:[{}]", o )
       } yield ( o, ctx )
     }
 

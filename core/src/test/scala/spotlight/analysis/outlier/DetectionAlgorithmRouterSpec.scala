@@ -66,11 +66,11 @@ class DetectionAlgorithmRouterSpec extends ParallelAkkaSpec with MockitoSugar {
       val plan = mock[OutlierPlan]
       val msg = DetectUsing(
         'foo,
-        aggregator.ref,
-        DetectOutliersInSeries(series, plan, subscriber.ref),
+        DetectOutliersInSeries(series, plan, subscriber.ref, Set()),
         HistoricalStatistics(2, false)
       )
 
+      implicit val sender = aggregator.ref
       router.receive( msg )
       algorithm.expectMsgPF( 2.seconds.dilated, "route" ) {
         case Envelope( actual, _ ) => actual mustBe msg

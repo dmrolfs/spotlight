@@ -1,25 +1,29 @@
 package spotlight.analysis.outlier
 
-import java.util.ServiceConfigurationError
 import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
 import scala.util.matching.Regex
-import akka.Done
-import akka.actor.{Actor, ActorLogging, Props}
+import akka.{Done, NotUsed}
+import akka.actor.{ActorLogging, ActorRef, ActorSystem, Props}
 import akka.event.LoggingReceive
+import akka.stream.actor.ActorSubscriberMessage.{OnComplete, OnError, OnNext}
+import akka.stream.{FlowShape, Materializer}
+import akka.stream.actor.{ActorSubscriber, ActorSubscriberMessage, MaxInFlightRequestStrategy, RequestStrategy}
+import akka.stream.scaladsl.{Flow, GraphDSL, Keep, Sink, Source}
 import akka.util.Timeout
-import scalaz._
-import Scalaz._
+import scalaz.{-\/, \/-}
 import com.typesafe.config.{Config, ConfigObject}
 import com.typesafe.scalalogging.LazyLogging
 import nl.grons.metrics.scala.MetricName
 import peds.akka.envelope._
 import peds.akka.envelope.pattern.ask
 import peds.akka.metrics.InstrumentedActor
-import peds.commons.Valid
+import peds.akka.stream.StreamMonitor._
 import peds.commons.log.Trace
 import demesne.DomainModel
-import spotlight.model.outlier.{IsQuorum, OutlierPlan, ReduceOutliers}
+import peds.akka.stream.CommonActorPublisher
+import spotlight.analysis.outlier.OutlierDetection.DetectionResult
+import spotlight.model.outlier.{IsQuorum, OutlierPlan, Outliers, ReduceOutliers}
 import spotlight.model.timeseries.{TimeSeries, Topic}
 
 
@@ -36,40 +40,94 @@ object PlanCatalogProtocol {
 
 
 object PlanCatalog extends LazyLogging {
-  def props(model: DomainModel, configuration: Config): Props = {
-    Default.checkConfiguration( configuration ).disjunction match {
-      case \/-( c ) => Props( new Default( model, c ) )
-      case -\/( exs ) => {
-        exs foreach { ex => logger.error( "PlanCatalog failed to make actor Props", ex ) }
-        throw exs.head
+  def props(
+    configuration: Config,
+    maxInFlightCpuFactor: Double = 8.0,
+    applicationDetectionBudget: Option[FiniteDuration] = None,
+    applicationPlans: Set[OutlierPlan] = Set.empty[OutlierPlan]
+  )(
+    implicit model: DomainModel
+  ): Props = Props( Default(model, configuration, maxInFlightCpuFactor, applicationDetectionBudget, applicationPlans) )
+
+  def flow(
+    catalogProps: Props
+  )(
+    implicit system: ActorSystem,
+    materializer: Materializer
+  ): Flow[TimeSeries, Outliers, NotUsed] = {
+    val outletProps = CommonActorPublisher.props[DetectionResult]
+
+    val g = GraphDSL.create() { implicit b =>
+      import akka.stream.scaladsl.GraphDSL.Implicits._
+
+      val (outletRef, outlet) = {
+        Source
+        .actorPublisher[DetectionResult]( outletProps ).named( "PlanCatalogFlowOutlet" )
+        .toMat( Sink.asPublisher(false) )( Keep.both )
+        .run()
       }
+
+      val zipWithSubscriber = b.add(
+        Flow[TimeSeries]
+        .map { ts => StreamMessage( ts, outletRef ) }
+        .map { m => logger.debug( "TEST: view stream msg:[{}]", m ); m }
+      )
+
+      val router = b.add( Sink.actorSubscriber[StreamMessage[TimeSeries]]( catalogProps ).named( "PlanCatalog" ) )
+
+      zipWithSubscriber ~> router
+
+      val receiveOutliers = b.add(
+        Source
+        .fromPublisher[DetectionResult]( outlet ).named( "ResultCollector" )
+        .map { m => logger.debug("TEST: view detection result:[{}]", m); m }
+      )
+
+      val getOutliers = b.add(
+        Flow[DetectionResult]
+        .map { m => logger.debug( "received result from collector: [{}]", m ); m }
+        .map { _.outliers }
+      )
+
+      receiveOutliers ~> getOutliers
+
+      FlowShape( zipWithSubscriber.in, getOutliers.out )
     }
+
+    Flow.fromGraph( g ).named( "PlanCatalogFlow" ).watchFlow( Symbol("CatalogDetection") )
   }
+
+  private[outlier] case class StreamMessage[P]( payload: P, subscriber: ActorRef )
 
 
   trait Provider {
     def detectionBudget: FiniteDuration
     def specifiedPlans: Set[OutlierPlan]
+    def maxInFlight: Int
   }
 
 
   object Default {
     val DetectionBudgetPath = "spotlight.workflow.detect.timeout"
     val OutlierPlansPath = "spotlight.detection-plans"
-
-    def checkConfiguration(configuration: Config): Valid[Config] = {
-      if ( configuration hasPath OutlierPlansPath ) configuration.successNel
-      else Validation.failureNel( new ServiceConfigurationError( s"configuration does not have path: ${OutlierPlansPath}" ) )
-    }
   }
 
-  final class Default private[PlanCatalog]( model: DomainModel, configuration: Config )
-  extends PlanCatalog( model ) with Provider {
+  final case class Default private[PlanCatalog](
+    model: DomainModel,
+    configuration: Config,
+    maxInFlightCpuFactor: Double = 8.0,
+    applicationDetectionBudget: Option[FiniteDuration] = None,
+    applicationPlans: Set[OutlierPlan] = Set.empty[OutlierPlan]
+  ) extends PlanCatalog( model ) with Provider {
     private val trace = Trace[Default]
 
-    override lazy val detectionBudget: FiniteDuration = specifyDetectionBudget( configuration ) getOrElse 10.seconds
+    override val maxInFlight: Int = ( Runtime.getRuntime.availableProcessors() * maxInFlightCpuFactor ).toInt
 
-    private def specifyDetectionBudget(specification: Config): Option[FiniteDuration] = trace.block( "specifyDetectionBudget" ) {
+    override lazy val detectionBudget: FiniteDuration = {
+      applicationDetectionBudget getOrElse { loadDetectionBudget( configuration ) getOrElse 10.seconds }
+    }
+
+    private def loadDetectionBudget( specification: Config ): Option[FiniteDuration] = trace.block( "specifyDetectionBudget" ) {
       import Default.DetectionBudgetPath
       if ( specification hasPath DetectionBudgetPath ) {
         Some( FiniteDuration( specification.getDuration( DetectionBudgetPath, NANOSECONDS ), NANOSECONDS ) )
@@ -78,9 +136,10 @@ object PlanCatalog extends LazyLogging {
       }
     }
 
-    override lazy val specifiedPlans: Set[OutlierPlan] = specifyPlans( configuration )
+    //todo also load from plan index?
+    override lazy val specifiedPlans: Set[OutlierPlan] = trace.block( "specifiedPlans" ) { applicationPlans ++ loadPlans( configuration ) }
 
-    private def specifyPlans( specification: Config ): Set[OutlierPlan] = trace.block( "specifyPlans" ) {
+    private def loadPlans( specification: Config ): Set[OutlierPlan] = {
       import Default.OutlierPlansPath
 
       if ( specification hasPath OutlierPlansPath ) {
@@ -95,11 +154,10 @@ object PlanCatalog extends LazyLogging {
         .map { case (name, spec) => makePlan( name, spec )( detectionBudget ) }
         .flatten
       } else {
-        log.warning( "PlanCatalog[{}]: no plan specifications found", self.path)
+        log.warning( "PlanCatalog[{}]: no plan specifications found at configuration path:[{}]", self.path, OutlierPlansPath )
         Set.empty[OutlierPlan]
       }
     }
-
 
     private def makePlan( name: String, planSpecification: Config )( budget: FiniteDuration ): Option[OutlierPlan] = {
       logger.info( "PlanCatalog plan speclet: [{}]", planSpecification )
@@ -229,7 +287,9 @@ object PlanCatalog extends LazyLogging {
   }
 }
 
-class PlanCatalog(model: DomainModel ) extends Actor with InstrumentedActor with ActorLogging { outer: PlanCatalog.Provider =>
+class PlanCatalog( model: DomainModel ) extends ActorSubscriber with EnvelopingActor with InstrumentedActor with ActorLogging {
+  outer: PlanCatalog.Provider =>
+
   import spotlight.analysis.outlier.{ PlanCatalogProtocol => P }
   import spotlight.analysis.outlier.{ AnalysisPlanProtocol => AP }
 
@@ -250,11 +310,17 @@ class PlanCatalog(model: DomainModel ) extends Actor with InstrumentedActor with
     }
   }
 
+  var workSubscribers: Map[WorkId, ActorRef] = Map.empty[WorkId, ActorRef]
+
+  override protected def requestStrategy: RequestStrategy = new MaxInFlightRequestStrategy( outer.maxInFlight ) {
+    override def inFlightInternally: Int = workSubscribers.size
+  }
+
   case object Initialize extends P.CatalogMessage
 
   override def preStart(): Unit = self ! Initialize
 
-  override def receive: Receive = quiescent
+  override def receive: Receive = LoggingReceive { around( quiescent ) }
 
 
   val quiescent: Receive = {
@@ -262,27 +328,95 @@ class PlanCatalog(model: DomainModel ) extends Actor with InstrumentedActor with
       implicit val ec = context.system.dispatcher //todo: consider moving off actor threadpool
       postStartInitialization() foreach { _ =>
         log.info( "PlanCatalog[{}] initialization completed" )
-        context become LoggingReceive { around( active ) }
+        context become LoggingReceive { around( stream orElse active orElse admin ) }
       }
     }
   }
 
+  import PlanCatalog.StreamMessage
+
   val active: Receive = {
-    case ts: TimeSeries if planIndex.entries.values exists { _ appliesTo ts } => {
-      // forwarding to retain publisher sender
-      for {
-        p <- planIndex.entries.values if p appliesTo ts
-        pref = model( AnalysisPlanModule.module.rootType, p.id )
-      } {
-        log.debug( "PlanCatalog[{}]: forwarding data[{}] to plan-module[{}]", self.path, ts.topic, pref.path )
-        pref forwardEnvelope AP.AcceptTimeSeries( p.id, ts )
-      }
+    case m @ StreamMessage( ts: TimeSeries, subscriber ) if plansApplyToSeries( ts ) => {
+      log.debug(
+        "PlanCatalog[{}] dispatching stream message for detection and result will go to subscriber[{}]: [{}]",
+        workId,
+        subscriber.path.name,
+        m
+      )
+      dispatch( ts, subscriber )
     }
 
-    case ts: TimeSeries => {
+    case msg @ StreamMessage( ts: TimeSeries, subscriber ) => {
+      //todo log or route unrecogonized ts
       log.warning( "PlanCatalog[{}]: no plan on record that applies to time-series:[{}]", self.path, ts.topic )
     }
 
+    case ts: TimeSeries if planIndex.entries.values exists { _ appliesTo ts } => {
+      log.debug( "PlanCatalog[{}] dispatching time series to sender[{}]: [{}]", workId, sender().path.name, ts )
+      dispatch( ts, sender() )
+    }
+
+    case ts: TimeSeries => {
+      //todo log or route unrecogonized ts
+      log.warning( "PlanCatalog[{}]: no plan on record that applies to time-series:[{}]", self.path, ts.topic )
+    }
+
+    case result: DetectionResult if workSubscribers.keySet.intersect( result.workIds ).isEmpty => {
+      log.error(
+        "PlanCatalog[{}]: ignoring received result for UNKNOWN workId:[{}] all-ids:[{}]: [{}]",
+        self.path.name,
+        workId,
+        workSubscribers.keySet.mkString(", "),
+        result
+      )
+    }
+
+    case result @ DetectionResult( outliers, workIds ) => {
+      log.debug(
+        "PlanCatalog[{}]: received outlier result[{}] for workId:[{}] subscriber:[{}]",
+        self.path,
+        outliers.hasAnomalies,
+        workId,
+        workSubscribers.get( workId ).map{ _.path.name }
+      )
+      log.debug( "PlanCatalog: received (workId:[{}] -> subscriber:[{}])  all:[{}]", workId, workSubscribers.get(workId), workSubscribers.mkString(", ") )
+
+      val (known, unknown) = result.workIds partition { workSubscribers.contains }
+      if ( unknown.nonEmpty ) {
+        log.error(
+          "PlanCatalog received topic:[{}] algorithms:[{}] results for unrecognized workIds:[{}]",
+          result.outliers.topic,
+          result.outliers.algorithms.map{ _.name }.mkString( ", " ),
+          unknown.mkString(", ")
+        )
+      }
+
+      known
+      .map { workSubscribers.apply }
+      .foreach { _ ! result }
+
+      workSubscribers --= result.workIds
+    }
+  }
+
+  val stream: Receive = {
+    case OnNext( message ) if active isDefinedAt message => {
+      log.debug( "PlanCatalog: evaluating OnNext( {} )", message )
+      active( message )
+    }
+
+    case OnComplete => {
+      log.info( "PlanCatalog[{}] closing on completed stream", self.path.name )
+      context stop self
+    }
+
+    case OnError( ex ) => {
+      log.error( ex, "PlanCatalog closing on errored stream" )
+      context stop self
+    }
+  }
+
+  val admin: Receive = {
     case req @ P.GetPlansForTopic( topic ) => {
       import peds.akka.envelope.pattern.pipe
 
@@ -300,6 +434,29 @@ class PlanCatalog(model: DomainModel ) extends Actor with InstrumentedActor with
 
     case P.WaitingForStart => sender() ! P.Started
   }
+
+
+  // could optimize via bloomfilter if necessary
+  private def plansApplyToSeries( ts: TimeSeries ): Boolean = planIndex.entries.values exists { _ appliesTo ts }
+
+  private def dispatch( ts: TimeSeries, subscriber: ActorRef ): Unit = {
+    for {
+      plan <- planIndex.entries.values if plan appliesTo ts
+    } {
+      val planRef = model( AnalysisPlanModule.module.rootType, plan.id )
+      log.debug(
+        "PlanCatalog[{}]: sending topic[{}] to plan-module[{}] with sender:[{}]",
+        s"${self.path.name}:${workId}",
+        ts.topic,
+        planRef.path,
+        subscriber.path
+      )
+      workSubscribers += ( workId -> subscriber )
+      planRef !+ AP.AcceptTimeSeries( plan.id, ts )
+    }
+  }
+
+
 
   private def postStartInitialization(): Future[Done] = {
     implicit val ec = context.system.dispatcher

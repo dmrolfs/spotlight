@@ -3,6 +3,7 @@ package spotlight.analysis.outlier
 import scala.concurrent.duration._
 import akka.NotUsed
 import akka.actor.{Actor, ActorContext, ActorLogging, ActorRef, Props}
+import akka.stream.{ActorMaterializer, Materializer}
 import akka.stream.scaladsl.{Flow, Keep, Sink}
 import akka.stream.testkit.scaladsl.{TestSink, TestSource}
 import akka.testkit.TestActor.AutoPilot
@@ -41,6 +42,8 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
       }
     )
 
+    implicit val materializer: Materializer = ActorMaterializer()
+
     val subscriber = TestProbe()
 
     val pid = OutlierPlan.outlierPlanIdentifying.safeNextId
@@ -59,6 +62,8 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
 
     val algorithmActor = TestProbe()
     val detector = TestProbe()
+
+    val workId = WorkId()
 
     trait TestProxyProvider extends AnalysisScopeProxy.Provider { provider: Actor with ActorLogging =>
       override def scope: Scope = fixture.scope
@@ -89,7 +94,8 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
                     source = m.source,
                     outliers = extractOutliers( m ),
                     thresholdBoundaries = Map.empty[Symbol, Seq[ThresholdBoundary]]
-                  ).toOption.get
+                  ).toOption.get,
+                  m.workIds
                 )
 
                 log.info( "Detector AutoPilot\n + received: [{}]\n + sending:[{}]\n", m, results )
@@ -207,22 +213,23 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
         TimeSeries( "bar", Seq( DataPoint(now.plusSeconds(6), 3.3), DataPoint(now.plusSeconds(7), 2.2), DataPoint(now.plusSeconds(8), 1.1) ) )
       )
 
-      val flowUnderTest: Flow[TimeSeries, TimeSeries, NotUsed] = testActorRef.underlyingActor.batchSeries( testGrouping )
+      val workIds = Seq.fill( data.size ){ Set( WorkId() ) }
+      val flowUnderTest = testActorRef.underlyingActor.batchSeries( testGrouping )
 
       val (pub, sub) = {
-        TestSource.probe[TimeSeries]
+        TestSource.probe[IdentifiedTimeSeries]
         .via( flowUnderTest )
-        .toMat( TestSink.probe[TimeSeries] )( Keep.both )
+        .toMat( TestSink.probe[IdentifiedTimeSeries] )( Keep.both )
         .run()
       }
       val ps = pub.expectSubscription()
       val ss = sub.expectSubscription()
 
-      data foreach { ps.sendNext }
+      data.zip( workIds ) foreach { ps.sendNext }
 
       ss.request( 2 )
 
-      val e1: Map[String, Seq[DataPoint]] = Map(
+      val expectedData1: Map[String, Seq[DataPoint]] = Map(
         "foo" -> Seq(
                       DataPoint(now, 1.1), DataPoint(now.plusSeconds(1), 2.2), DataPoint(now.plusSeconds(2), 3.3),
                       DataPoint(now.plusSeconds(3), 4.4), DataPoint(now.plusSeconds(4), 5.5), DataPoint(now.plusSeconds(5), 6.6)
@@ -233,26 +240,38 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
                     )
       )
 
-      Seq.fill( 2 ){ sub.expectNext() } foreach { actual =>
+
+      val expectedWorkIds1: Map[Topic, Set[WorkId]] = Map(
+        "foo".toTopic -> (workIds(0) ++ workIds(3)),
+        "bar".toTopic -> (workIds(1) ++ workIds(2))
+      )
+
+      Seq.fill( 2 ){ sub.expectNext() } foreach { case (actual, wids) =>
+        wids mustBe expectedWorkIds1( actual.topic )
         actual.topic match {
-          case Topic(t) => (t, actual.points) mustBe (t, e1(t))
+          case Topic(t) => (t, actual.points) mustBe (t, expectedData1(t))
         }
       }
 
       ss.request( 2 )
 
-      val e2: Map[String, Seq[DataPoint]] = Map(
+      val expectedData2: Map[String, Seq[DataPoint]] = Map(
         "foo" -> Seq( DataPoint(now.plusSeconds(6), 7.7), DataPoint(now.plusSeconds(7), 8.8), DataPoint(now.plusSeconds(8), 9.9) ),
         "bar" -> Seq( DataPoint(now.plusSeconds(6), 3.3), DataPoint(now.plusSeconds(7), 2.2), DataPoint(now.plusSeconds(8), 1.1) )
       )
-      Seq.fill( 2 ){ sub.expectNext() } foreach { actual =>
+
+      val expectedWorkIds2: Map[Topic, Set[WorkId]] = Map( "foo".toTopic -> workIds(4), "bar".toTopic -> workIds(5) )
+
+      Seq.fill( 2 ){ sub.expectNext() } foreach { case (actual, wids) =>
+        wids mustBe expectedWorkIds2( actual.topic )
+        wids.size mustBe 1
         actual.topic match {
-          case Topic(t) => (t, actual.points) mustBe (t, e2(t))
+          case Topic(t) => (t, actual.points) mustBe (t, expectedData2(t))
         }
       }
     }
 
-    "detect in flow" taggedAs WIP in { f: Fixture =>
+    "detect in flow" in { f: Fixture =>
       import f._
       import scala.concurrent.ExecutionContext.Implicits.global
 
@@ -264,6 +283,8 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
         TimeSeries( "foo", Seq( DataPoint(now.plusSeconds(6), 7.7), DataPoint(now.plusSeconds(7), 8.8), DataPoint(now.plusSeconds(8), 9.9) ) )
       )
 
+      val workIds = Seq.fill( data.size ){ Set( WorkId() ) }
+
       val findAndExtract: OutlierDetectionMessage => Seq[DataPoint] = (m: OutlierDetectionMessage) => {
         val i = data indexOf m.source
         data( i ).points.take( i )
@@ -272,30 +293,34 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
       addDetectorAutoPilot( detector, findAndExtract )
       val workers = testActorRef.underlyingActor.makeTopicWorkers( topic )
 
-      val sinkUnderTest: Sink[TimeSeries, NotUsed] = testActorRef.underlyingActor.detectionFlow( plan, subscriber.ref, workers )
+      val sinkUnderTest = testActorRef.underlyingActor.detectionFlow( plan, subscriber.ref, workers )
 
       val probe = {
-        TestSource.probe[TimeSeries]
+        TestSource.probe[IdentifiedTimeSeries]
         .toMat( sinkUnderTest )( Keep.left )
         .run()
       }
 
-      data foreach { probe.sendNext }
+//      data.zip(workIds) foreach { probe.sendNext }
 
-      def validateNext( ts: TimeSeries, i: Int ): Unit = {
-        probe.sendNext( ts )
+      def validateNext( ts: TimeSeries, wids: Set[WorkId], i: Int ): Unit = {
+        log.info( "validateNext: i:[{}] wids:[{}] ts:[{}]", i, wids.mkString(", "), ts )
+        probe.sendNext( (ts, wids) )
         detector.expectMsgType[OutlierDetectionMessage]
         subscriber.expectMsgPF( hint = s"detect-${i}" ) {
-          case DetectionResult(NoOutliers(as, s, p, tbs)) => {
-            log.info( "TEST: NO-OUTLIERS" )
+          case DetectionResult(NoOutliers(as, s, p, tbs), wids) => {
+            log.info( "TEST: NO-OUTLIERS[{}] all-wids:[{}]", i.toString, workIds.mkString(", ") )
+            log.info( "TEST: wids=[{}] workIds({})=[{}] match=[{}]", wids.mkString(", "), i, workIds(i).mkString(", "), wids == workIds(i))
+            wids mustBe workIds( i )
             i mustBe 0
             as mustBe Set( algo )
             s mustBe data( i )
             p mustBe plan
           }
 
-          case DetectionResult(SeriesOutliers( as, s, p, os, _ )) => {
-            log.info( "TEST: SERIES-OUTLIERS" )
+          case DetectionResult(SeriesOutliers( as, s, p, os, _ ), wids) => {
+            log.info( "TEST: SERIES-OUTLIERS[{}] all-wids:[{}]", i.toString, workIds.mkString(", ") )
+            wids mustBe workIds( i )
             i must not be (0)
             as mustBe Set( algo )
             s mustBe data(i)
@@ -306,7 +331,10 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
         }
       }
 
-      data.zipWithIndex foreach { case (ts, i) => validateNext( ts, i ) }
+      data.zip(workIds).zipWithIndex foreach { case ((ts, wids), i) =>
+        log.debug( "TEST: validating workIds:[{}]", wids )
+        validateNext( ts, wids, i )
+      }
     }
 
     "make functioning plan stream" in { f: Fixture =>
@@ -314,7 +342,7 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
       val actual = testActorRef.underlyingActor.makePlanStream( subscriber.ref )
       log.info( "actual = [{}]", actual )
       addDetectorAutoPilot( detector )
-      actual.ingressRef ! TimeSeries( "dummy", Seq() )
+      actual.ingressRef ! (TimeSeries("dummy", Seq()), Set.empty[WorkId])
       detector.expectMsgClass( classOf[DetectOutliersInSeries] )
       subscriber.expectMsgClass( classOf[DetectionResult] )
     }
@@ -325,7 +353,7 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
       val a1 = testActorRef.underlyingActor.streamIngressFor( subscriber.ref )
       log.info( "first actual = [{}]", a1 )
       val msg1 = TimeSeries( "dummy", Seq() )
-      a1 ! msg1
+      a1 ! (msg1, Set.empty[WorkId])
       detector.expectMsgClass( classOf[DetectOutliersInSeries] )
       subscriber.expectMsgClass( classOf[DetectionResult] )
 
@@ -334,7 +362,7 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
       val now = joda.DateTime.now
       val msg2 = TimeSeries( "dummy", Seq(DataPoint(now, 3.14159), DataPoint(now.plusSeconds(1), 2.191919)) )
       a1 mustBe a2
-      a2 ! msg2
+      a2 ! (msg2, Set.empty[WorkId])
       detector.expectMsgClass( classOf[DetectOutliersInSeries] )
       subscriber.expectMsgClass( classOf[DetectionResult] )
     }
@@ -374,7 +402,7 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
       val a1 = proxy1.underlyingActor.streamIngressFor( subscriber.ref )
       log.info( "first actual ingress = [{}]", a1 )
       log.info( "first actual graph = [{}]", proxy1.underlyingActor.streams( subscriber.ref ) )
-      a1 ! m1
+      a1 ! (m1, Set.empty[WorkId])
       detector.expectNoMsg( 1.second.dilated ) // due to empty timeseries
       subscriber.expectNoMsg( 1.second.dilated ) //dur to empty timeseries
 
@@ -382,7 +410,7 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
       log.info( "second actual ingress = [{}]", a2 )
       log.info( "second actual graph = [{}]", proxy2.underlyingActor.streams( subscriber.ref ) )
       a1 must not be a2
-      a2 ! m2
+      a2 ! (m2, Set.empty[WorkId])
       detector.expectMsgClass( 1.second.dilated, classOf[DetectOutliersInSeries] )
       subscriber.expectMsgClass( 1.second.dilated, classOf[DetectionResult] )
     }
@@ -467,7 +495,7 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
       proxy.tell( m1p, subscriber.ref )
       detector.expectMsgClass( 5.seconds.dilated, classOf[DetectOutliersInSeries] )
       subscriber.expectMsgPF( 5.seconds.dilated, "results" ) {
-        case DetectionResult( m ) => m mustBe a [SeriesOutliers]
+        case DetectionResult( m, _ ) => m mustBe a [SeriesOutliers]
         case m => m mustBe a [SeriesOutliers]
       }
 

@@ -42,7 +42,7 @@ object OutlierQuorumAggregator {
  * Created by rolfsd on 9/28/15.
  */
 class OutlierQuorumAggregator( plan: OutlierPlan, source: TimeSeriesBase )
-extends Actor with InstrumentedActor with ActorLogging { outer: ConfigurationProvider =>
+extends EnvelopingActor with InstrumentedActor with ActorLogging { outer: ConfigurationProvider =>
   import OutlierQuorumAggregator._
 
   override lazy val metricBaseName: MetricName = MetricName( classOf[OutlierQuorumAggregator] )
@@ -78,6 +78,7 @@ extends Actor with InstrumentedActor with ActorLogging { outer: ConfigurationPro
     case m: Outliers => {
       val source = sender()
       _fulfilled ++= m.algorithms map { _ -> m }
+      log.debug( "TEST: Quorum received [{}] from [{}] fulfilled:[{}] of total:[{}]", m.getClass.getSimpleName, source, _fulfilled.size, plan.algorithms.size )
       if ( _fulfilled.size == plan.algorithms.size ) publishAndStop( _fulfilled )
     }
 
@@ -103,7 +104,7 @@ extends Actor with InstrumentedActor with ActorLogging { outer: ConfigurationPro
       }
 
       scheduleWhistle()
-      context become around( quorum(retriesLeft) )
+      context become LoggingReceive { around( quorum(retriesLeft) ) }
     }
 
     case timeout: AnalysisTimedOut => {

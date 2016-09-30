@@ -8,6 +8,7 @@ import peds.akka.envelope._
 import peds.akka.envelope.pattern.ask
 import akka.actor.{ActorContext, ActorRef, PoisonPill, Props}
 import akka.util.Timeout
+import demesne.index.StackableIndexBusPublisher
 import demesne.module.{AggregateEnvironment, LocalAggregate}
 import demesne.{AggregateRootType, DomainModel}
 import demesne.repository.AggregateRootProps
@@ -18,6 +19,8 @@ import peds.commons.V
 import peds.commons.identifier.{ShortUUID, TaggedID}
 import peds.commons.log.Trace
 import shapeless.Lens
+import spotlight.analysis.outlier.AnalysisPlanModule.AggregateRoot.OutlierPlanActor
+import spotlight.analysis.outlier.AnalysisPlanModule.AggregateRoot.OutlierPlanActor.ProxyProvider
 import spotlight.analysis.outlier.algorithm.skyline.SimpleMovingAverageModule
 import spotlight.model.outlier._
 import spotlight.testkit.EntityModuleSpec
@@ -33,25 +36,21 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] { outer =>
   override type Protocol = AnalysisPlanProtocol.type
   override val protocol: Protocol = AnalysisPlanProtocol
 
-  val standardModule: EntityAggregateModule[OutlierPlan] = AnalysisPlanModule.module
+  abstract class FixtureModule extends EntityAggregateModule[OutlierPlan] { testModule =>
+    private val trace: Trace[_] = Trace[FixtureModule]
+    override val idLens: Lens[OutlierPlan, TaggedID[ShortUUID]] = OutlierPlan.idLens
+    override val nameLens: Lens[OutlierPlan, String] = OutlierPlan.nameLens
+//      override def aggregateRootPropsOp: AggregateRootProps = testProps( _, _ )( proxy )
+    override def environment: AggregateEnvironment = LocalAggregate
+  }
 
-  class Fixture extends EntityFixture( config = AnalysisPlanModuleSpec.config ) {
-    private val trace = Trace[Fixture]
-
-    override type Module = EntityAggregateModule[OutlierPlan]
-    override val module: Module = outer.standardModule
+  abstract class Fixture extends EntityFixture( config = AnalysisPlanModuleSpec.config ) {
+    protected val trace: Trace[_]
 
     val identifying = AnalysisPlanModule.identifying
     override def nextId(): module.TID = identifying.safeNextId
     lazy val plan = makePlan( "TestPlan", None )
     override lazy val tid: TID = plan.id
-
-
-    override def rootTypes: Set[AggregateRootType] = trace.block( "rootTypes" ) {
-      super.rootTypes ++ Set( SimpleMovingAverageModule.rootType )
-    }
-
-    lazy val algo: Symbol = SimpleMovingAverageModule.algorithm.label
 
     def makePlan( name: String, g: Option[OutlierPlan.Grouping] ): OutlierPlan = {
       OutlierPlan.default(
@@ -63,12 +62,19 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] { outer =>
         reduce = ReduceOutliers.byCorroborationPercentage(50),
         planSpecification = ConfigFactory.parseString(
           s"""
-          |algorithm-config.${algo.name}.seedEps: 5.0
-          |algorithm-config.${algo.name}.minDensityConnectedPoints: 3
+             |algorithm-config.${algo.name}.seedEps: 5.0
+             |algorithm-config.${algo.name}.minDensityConnectedPoints: 3
           """.stripMargin
         )
       )
     }
+
+    override def rootTypes: Set[AggregateRootType] = trace.block( "rootTypes" ) {
+      super.rootTypes ++ Set( SimpleMovingAverageModule.rootType )
+    }
+
+    lazy val algo: Symbol = SimpleMovingAverageModule.algorithm.label
+
 
     def stateFrom( ar: ActorRef, tid: module.TID ): OutlierPlan = {
       import scala.concurrent.ExecutionContext.Implicits.global
@@ -90,7 +96,41 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] { outer =>
     }
   }
 
+  class DefaultFixture extends Fixture {
+    override protected val trace = Trace[DefaultFixture]
+
+    val proxyProbe = TestProbe()
+
+    def testProps( model: DomainModel, rootType: AggregateRootType )( proxy: ActorRef ): Props = {
+      Props( new TestOutlierPlanActor( model, rootType, proxy ) )
+    }
+
+    class TestOutlierPlanActor( model: DomainModel, rootType: AggregateRootType, proxy: ActorRef )
+    extends OutlierPlanActor( model, rootType )
+    with ProxyProvider
+    with StackableStreamPublisher
+    with StackableIndexBusPublisher {
+      override def makeProxy(
+        topic: Topic,
+        plan: OutlierPlan
+      )(
+        implicit model: DomainModel,
+        context: ActorContext
+      ): ActorRef = {
+        proxy
+      }
+    }
+
+    class Module extends FixtureModule {
+      override def aggregateRootPropsOp: AggregateRootProps = testProps( _, _ )( proxyProbe.ref )
+    }
+
+    override val module: Module = new Module
+  }
+
   class WorkflowFixture extends Fixture {
+    override protected val trace = Trace[WorkflowFixture]
+
     var proxyProbes = Map.empty[Topic, TestProbe]
 
     class FixtureOutlierPlanActor( model: DomainModel, rootType: AggregateRootType)
@@ -120,20 +160,27 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] { outer =>
       }
     }
 
-    override val module: Module = new EntityAggregateModule[OutlierPlan] {
-      override val environment: AggregateEnvironment = LocalAggregate
-      override def idLens: Lens[OutlierPlan, TaggedID[ShortUUID]] = OutlierPlan.idLens
-      override def nameLens: Lens[OutlierPlan, String] = OutlierPlan.nameLens
+    class Module extends FixtureModule {
       override def aggregateRootPropsOp: AggregateRootProps = {
-        ( model: DomainModel, rootType: AggregateRootType ) => Props( new FixtureOutlierPlanActor( model, rootType ) )
+        ( m: DomainModel,rt: AggregateRootType ) => Props( new FixtureOutlierPlanActor( m, rt ) )
       }
     }
+
+    override val module: Module = new Module
+//    new EntityAggregateModule[OutlierPlan] {
+//      override val environment: AggregateEnvironment = LocalAggregate
+//      override def idLens: Lens[OutlierPlan, TaggedID[ShortUUID]] = OutlierPlan.idLens
+//      override def nameLens: Lens[OutlierPlan, String] = OutlierPlan.nameLens
+//      override def aggregateRootPropsOp: AggregateRootProps = {
+//        ( model: DomainModel, rootType: AggregateRootType ) => Props( new FixtureOutlierPlanActor( model, rootType ) )
+//      }
+//    }
   }
 
   override def createAkkaFixture( test: OneArgTest ): Fixture = {
     test.tags match {
       case ts if ts.contains( WORKFLOW.name ) => new WorkflowFixture
-      case _ => new Fixture
+      case _ => new DefaultFixture
     }
   }
 
@@ -154,7 +201,7 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] { outer =>
       actual must be theSameInstanceAs a2
     }
 
-    "dead proxy must be cleared" taggedAs WIP in { f: Fixture =>
+    "dead proxy must be cleared" in { f: Fixture =>
       import f._
 
       entity ! EntityMessages.Add( tid, Some(plan) )
@@ -343,6 +390,41 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] { outer =>
       actual mustBe plan
       actual.isQuorum must be theSameInstanceAs isq
       actual.reduce must be theSameInstanceAs reduce
+    }
+
+    "accept time series" taggedAs WIP in { f: Fixture =>
+      val df = f.asInstanceOf[DefaultFixture]
+      import df._
+
+      import demesne.module.entity.{ messages => EntityMessages }
+
+      val p = makePlan( "TestPlan", None )
+      val t = Topic( "test-topic" )
+      val planTid = p.id
+      entity !+ EntityMessages.Add( p.id, Some(p) )
+
+      val flatline = makeDataPoints( values = Seq.fill( 5 ){ 1.0 }, timeWiggle = (0.97, 1.03) )
+      val series = spike( t, flatline, 1000 )()
+
+      val accepted = entity ?+ P.AcceptTimeSeries( planTid, series )
+//todo removed since unnecessary
+//      whenReady( accepted ) { actual =>
+//        actual match {
+//          case Envelope( a, _ ) => a mustBe P.Accepted
+//          case a => a mustBe P.Accepted
+//        }
+//      }
+      proxyProbe.expectMsgPF( 1.second.dilated, "proxy received" ) {
+        case Envelope( (ts, scope), _ ) => {
+          ts mustBe series
+          scope mustBe OutlierPlan.Scope( p, t )
+        }
+
+        case (ts, scope) => {
+          ts mustBe series
+          scope mustBe OutlierPlan.Scope( p, t )
+        }
+      }
     }
   }
 }

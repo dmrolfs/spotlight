@@ -6,19 +6,25 @@ import akka.testkit._
 import com.typesafe.config.{Config, ConfigFactory}
 import peds.akka.envelope._
 import peds.akka.envelope.pattern.ask
-import akka.actor.ActorRef
+import akka.actor.{ActorContext, ActorRef, Props}
 import akka.util.Timeout
+import demesne.index.StackableIndexBusPublisher
+import demesne.{AggregateRootType, DomainModel}
 import demesne.module.{AggregateEnvironment, LocalAggregate}
 import demesne.module.entity.{EntityAggregateModule, messages => EntityMessages}
 import demesne.repository.AggregateRootProps
+import peds.akka.publish.StackableStreamPublisher
 import peds.archetype.domain.model.core.EntityIdentifying
 import peds.commons.identifier.{ShortUUID, TaggedID}
 import peds.commons.log.Trace
 import shapeless.Lens
+import spotlight.analysis.outlier.AnalysisPlanModule.AggregateRoot.OutlierPlanActor
+import spotlight.analysis.outlier.AnalysisPlanModule.AggregateRoot.OutlierPlanActor.ProxyProvider
 import spotlight.analysis.outlier.algorithm.skyline.SimpleMovingAverageModule
 import spotlight.model.outlier.{IsQuorum, OutlierPlan, ReduceOutliers}
 import spotlight.testkit.EntityModuleSpec
 import spotlight.analysis.outlier.{AnalysisPlanProtocol => P}
+import spotlight.model.timeseries.Topic
 
 
 /**
@@ -37,11 +43,34 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[OutlierPlan] { 
       private val trace: Trace[_] = Trace[Module]
       override val idLens: Lens[OutlierPlan, TaggedID[ShortUUID]] = OutlierPlan.idLens
       override val nameLens: Lens[OutlierPlan, String] = OutlierPlan.nameLens
-      override def aggregateRootPropsOp: AggregateRootProps = AnalysisPlanModule.AggregateRoot.OutlierPlanActor.props( _, _ )
+      override def aggregateRootPropsOp: AggregateRootProps = testProps( _, _ )
       override def environment: AggregateEnvironment = LocalAggregate
     }
 
     override val module: Module = new Module
+
+    def testProps( model: DomainModel, rootType: AggregateRootType ): Props = {
+      Props( new TestAnalysisPlanModule( model, rootType ) )
+    }
+
+    val proxyProbe = TestProbe()
+
+    private class TestAnalysisPlanModule( model: DomainModel, rootType: AggregateRootType )
+    extends OutlierPlanActor( model, rootType )
+    with ProxyProvider
+    with StackableStreamPublisher
+    with StackableIndexBusPublisher {
+      override def makeProxy(
+        topic: Topic,
+        plan: OutlierPlan
+      )(
+        implicit model: DomainModel,
+        context: ActorContext
+      ): ActorRef = {
+        proxyProbe.ref
+      }
+    }
+
 
     override val identifying: EntityIdentifying[OutlierPlan] = AnalysisPlanModule.identifying
     override def nextId(): module.TID = identifying.safeNextId
@@ -65,7 +94,7 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[OutlierPlan] { 
       )
     }
 
-    def stateFrom(ar: ActorRef, tid: module.TID ): OutlierPlan = trace.block( s"stateFrom($ar)" ) {
+    def stateFrom( ar: ActorRef, tid: module.TID ): OutlierPlan = trace.block( s"stateFrom($ar)" ) {
       import scala.concurrent.ExecutionContext.Implicits.global
       import akka.pattern.ask
       Await.result(

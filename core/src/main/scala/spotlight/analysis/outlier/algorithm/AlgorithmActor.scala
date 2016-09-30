@@ -73,7 +73,7 @@ trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
     message match {
       case m: DetectUsing => {
         log.warning( "algorithm [{}] does not recognize requested payload: [{}]", algorithm, m )
-        m.aggregator ! UnrecognizedPayload( algorithm, m )
+        sender() ! UnrecognizedPayload( algorithm, m )
       }
 
       case m => super.unhandled( m )

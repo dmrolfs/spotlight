@@ -26,6 +26,7 @@ object AnalysisPlanProtocol extends AggregateProtocol[OutlierPlan#ID]{
 
   case class AcceptTimeSeries( override val targetId: AcceptTimeSeries#TID, data: TimeSeries ) extends AnalysisPlanCommand
 
+
   //todo add info change commands
   //todo reify algorithm
   //      case class AddAlgorithm( override val targetId: OutlierPlan#TID, algorithm: Symbol ) extends Command with AnalysisPlanMessage
@@ -161,7 +162,7 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
               highWatermark = provider.highWatermark,
               bufferSize = provider.bufferSize
             ),
-            name = "analysis-scope-proxy-"+scope.toString
+            name = scope.toString+"-AnalysisScopeProxy"
           )
         }
       }
@@ -192,26 +193,6 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
           proxy
         }
       }
-
-      ///// TEST
-//      override def entityAcceptance: Acceptance = {
-//        case (demesne.module.entity.messages.Added(_, info), s) => {
-//          log.info( "ACCEPTED ADDED: info=[{}]", info )
-//          context become LoggingReceive{ around( active ) }
-//          module.triedToEntity( info ) getOrElse s
-//        }
-//        case (demesne.module.entity.messages.Renamed(_, _, newName), s ) => module.nameLens.set( s )( newName )
-//        case (demesne.module.entity.messages.Reslugged(_, _, newSlug), s ) => module.slugLens map { _.set( s )( newSlug ) } getOrElse s
-//        case (_: demesne.module.entity.messages.Disabled, s) => {
-//          context become LoggingReceive { around( disabled ) }
-//          module.isActiveLens map { _.set( s )( false ) } getOrElse s
-//        }
-//        case (_: demesne.module.entity.messages.Enabled, s) => {
-//          context become LoggingReceive { around( active ) }
-//          module.isActiveLens map { _.set( s )( true ) } getOrElse s
-//        }
-//      }
-      /////
 
       override def acceptance: Acceptance = entityAcceptance orElse {
         case (e: ScopeChanged, s) => {
@@ -248,8 +229,13 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
         }
 
         case EntityMessages.Add( targetId, info ) => {
-          log.info( "AnalysisPlanModule caught Add message but unsure targetId[{}] matches aggregateId:[{}] => [{}][{}]",
-                    (targetId, targetId.id.getClass), (aggregateId, aggregateId.id.getClass), targetId == aggregateId, targetId.id == aggregateId.id )
+          log.info(
+            "AnalysisPlanModule caught Add message but unsure targetId[{}] matches aggregateId:[{}] => [{}][{}]",
+            (targetId, targetId.id.getClass),
+            (aggregateId, aggregateId.id.getClass),
+            targetId == aggregateId,
+            targetId.id == aggregateId.id
+          )
         }
         case a => {
           log.info( "AnalysisPlanModule caught generic message: [{}]", a )
@@ -261,10 +247,12 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
       }
 
       def workflow: Receive = {
-        // forward to retain publisher sender
-        case AcceptTimeSeries( _, ts ) => {
-          log.info( "[{}] routing date for topic:[{}]", self.path, ts.topic )
-          proxyFor( ts.topic ) forwardEnvelope (ts, OutlierPlan.Scope(plan = state, topic = ts.topic))
+        case AcceptTimeSeries( id, ts ) => {
+          log.debug(
+            "AnalysisPlanModule[{}] routing data for topic:[{}] sender:[{}]",
+            s"${self.path.name}:${workId}", ts.topic, sender().path.name
+          )
+          proxyFor( ts.topic ) forwardEnvelope ( ts, OutlierPlan.Scope(plan = state, topic = ts.topic) )
         }
       }
 
@@ -300,7 +288,12 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
           "[{}] UNHANDLED: [{}] (workflow,maintenance,planEntity,super):[{}] total:[{}]",
           aggregateId,
           message,
-          (workflow.isDefinedAt(message), maintenance.isDefinedAt(message), planEntity.isDefinedAt(message), super.active.isDefinedAt(message)),
+          (
+            workflow.isDefinedAt(message),
+            maintenance.isDefinedAt(message),
+            planEntity.isDefinedAt(message),
+            super.active.isDefinedAt(message)
+          ),
           total.isDefinedAt(message)
         )
         super.unhandled( message )

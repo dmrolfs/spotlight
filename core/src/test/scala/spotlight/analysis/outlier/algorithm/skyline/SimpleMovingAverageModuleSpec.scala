@@ -135,11 +135,14 @@ class SimpleMovingAverageModuleSpec extends AlgorithmModuleSpec[SimpleMovingAver
         expectedCalculations: Seq[Expected],
         hint: String
       ): Unit = {
-        aggregate !+ DetectUsing(
-          algorithm = module.algorithm.label,
-          aggregator = destination.ref,
-          payload = DetectOutliersInSeries( series, plan, subscriber.ref ),
-          history = history
+        aggregate.sendEnvelope(
+          DetectUsing(
+            algorithm = module.algorithm.label,
+            payload = DetectOutliersInSeries( series, plan, subscriber.ref, Set() ),
+            history = history
+          )
+        )(
+          destination.ref
         )
 
         val expectedAnomalies = expectedCalculations.exists{ e => e.isOutlier }
