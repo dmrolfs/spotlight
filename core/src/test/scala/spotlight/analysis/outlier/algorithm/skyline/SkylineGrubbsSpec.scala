@@ -1,21 +1,19 @@
 package spotlight.analysis.outlier.algorithm.skyline
 
+import scala.annotation.tailrec
 import scala.collection.immutable
 import scala.concurrent.duration._
 import akka.testkit._
 import com.typesafe.config.ConfigFactory
 import org.apache.commons.math3.distribution.TDistribution
-import org.apache.commons.math3.random.{RandomDataGenerator, RandomGenerator}
+import org.apache.commons.math3.random.RandomDataGenerator
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import org.mockito.Mockito._
 import org.joda.{time => joda}
 import spotlight.analysis.outlier.algorithm.CommonAnalyzer
-import spotlight.analysis.outlier.{DetectOutliersInSeries, DetectUsing, DetectionAlgorithmRouter, HistoricalStatistics, OutlierDetectionMessage}
+import spotlight.analysis.outlier._
 import spotlight.model.outlier.{NoOutliers, OutlierPlan, Outliers, SeriesOutliers}
 import spotlight.model.timeseries.{DataPoint, ThresholdBoundary, TimeSeries}
-
-import scala.annotation.tailrec
-
 
 
 /**
@@ -34,9 +32,9 @@ class SkylineGrubbsSpec extends SkylineBaseSpec {
     def fillDataFromHistory(
       original: Seq[DataPoint],
       history: HistoricalStatistics,
-      targetSize: Int = HistoricalStatistics.LastN
+      targetSize: Int = RecentHistory.LastN
     ): Seq[DataPoint] = {
-      val minPoints = HistoricalStatistics.LastN
+      val minPoints = RecentHistory.LastN
       if ( minPoints < original.size ) original
       else {
         val inHistory = history.lastPoints.size

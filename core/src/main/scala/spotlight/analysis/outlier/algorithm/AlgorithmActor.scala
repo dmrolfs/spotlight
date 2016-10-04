@@ -2,7 +2,6 @@ package spotlight.analysis.outlier.algorithm
 
 import akka.actor.{Actor, ActorLogging, ActorPath, ActorRef}
 import akka.event.LoggingReceive
-
 import scalaz._
 import Scalaz._
 import scalaz.Kleisli.{ask, kleisli}
@@ -15,7 +14,7 @@ import org.apache.commons.math3.ml.clustering.DoublePoint
 import peds.akka.metrics.InstrumentedActor
 import peds.commons.{KOp, TryV}
 import peds.commons.math.MahalanobisDistance
-import spotlight.analysis.outlier.{DetectUsing, DetectionAlgorithmRouter, HistoricalStatistics, UnrecognizedPayload}
+import spotlight.analysis.outlier.{DetectUsing, DetectionAlgorithmRouter, HistoricalStatistics, RecentHistory, UnrecognizedPayload}
 import spotlight.model.outlier.OutlierPlan
 import spotlight.model.timeseries._
 
@@ -97,7 +96,7 @@ trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
     * @param minimalSize of the data grouping
     * @return
     */
-  def fillDataFromHistory( minimalSize: Int = HistoricalStatistics.LastN ): KOp[AlgorithmContext, Seq[DoublePoint]] = {
+  def fillDataFromHistory( minimalSize: Int = RecentHistory.LastN ): KOp[AlgorithmContext, Seq[DoublePoint]] = {
     for {
       ctx <- ask[TryV, AlgorithmContext]
     } yield {

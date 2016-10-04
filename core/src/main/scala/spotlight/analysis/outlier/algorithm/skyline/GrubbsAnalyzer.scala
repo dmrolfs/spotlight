@@ -2,7 +2,6 @@ package spotlight.analysis.outlier.algorithm.skyline
 
 import scala.reflect.ClassTag
 import akka.actor.{ActorRef, Props}
-
 import scalaz._
 import Scalaz._
 import scalaz.Kleisli.kleisli
@@ -13,7 +12,7 @@ import peds.commons.util._
 import spotlight.analysis.outlier.algorithm.AlgorithmActor.AlgorithmContext
 import spotlight.analysis.outlier.algorithm.CommonAnalyzer
 import CommonAnalyzer.WrappingContext
-import spotlight.analysis.outlier.HistoricalStatistics
+import spotlight.analysis.outlier.RecentHistory
 import spotlight.model.outlier.Outliers
 import spotlight.model.timeseries._
 
@@ -63,7 +62,7 @@ class GrubbsAnalyzer( override val router: ActorRef ) extends CommonAnalyzer[Gru
   }
 
   def makeStatistics( ctx: AlgorithmContext ): Valid[DescriptiveStatistics] = {
-    new DescriptiveStatistics( HistoricalStatistics.LastN ).successNel
+    new DescriptiveStatistics( RecentHistory.LastN ).successNel
   }
 
   /**

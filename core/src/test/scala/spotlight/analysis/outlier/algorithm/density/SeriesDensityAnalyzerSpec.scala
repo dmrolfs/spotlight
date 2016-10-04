@@ -425,7 +425,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
         DetectUsing( algorithm = algoS, payload = message, history, properties = config )
       }
 
-      val PointsForLast = HistoricalStatistics.LastN
+      val PointsForLast = RecentHistory.LastN
 
       implicit val sender = aggregator.ref
 

@@ -31,10 +31,10 @@ trait HistoricalStatistics extends Serializable {
 
 
 object HistoricalStatistics {
-  val LastN: Int = 6 * 60 * 24 // 6pts / sec for 1-day    // 3
+//  val LastN: Int = 6 * 60 * 24 // 6pts / sec for 1-day    // 3
 
   def apply( k: Int, isCovarianceBiasCorrected: Boolean ): HistoricalStatistics = {
-    ApacheMath3HistoricalStatistics( new MultivariateSummaryStatistics(k, isCovarianceBiasCorrected) )
+    ApacheMath3HistoricalStatistics( new MultivariateSummaryStatistics(k, isCovarianceBiasCorrected), RecentHistory() )
   }
 
   def fromActivePoints( points: Seq[DoublePoint], isCovarianceBiasCorrected: Boolean ): HistoricalStatistics = {
@@ -44,17 +44,17 @@ object HistoricalStatistics {
 
   final case class ApacheMath3HistoricalStatistics private[outlier](
     all: MultivariateSummaryStatistics,
-    override val lastPoints: Seq[PointA] = Seq.empty[PointA]
+    recent: RecentHistory
   ) extends HistoricalStatistics {
     override def :+( point: PointA ): HistoricalStatistics = {
       all addValue point
       this
     }
 
-    override def recordLastPoints( points: Seq[PointA] ): HistoricalStatistics = {
-      val recorded = points drop ( points.size - LastN )
-      this.copy( lastPoints = this.lastPoints.drop(this.lastPoints.size - LastN + recorded.size) ++ recorded )
-    }
+
+    override def recordLastPoints( points: Seq[PointA] ): HistoricalStatistics = this.copy( recent = recent withPoints points )
+
+    override def lastPoints: Seq[PointA] = recent.lastPoints
 
     override def N: Long = all.getN
     override def mean: PointA = all.getMean
@@ -71,8 +71,8 @@ object HistoricalStatistics {
     override def toString: String = {
       s"""
          |allStatistics: [${all.toString}]
-         |lastPoints = [${lastPoints.map{_.mkString("(",",",")")}.mkString(",")}]
        """.stripMargin
+//      lastPoints = [${lastPoints.map{_.mkString("(",",",")")}.mkString(",")}]
     }
 
     //todo underlying serializable ops

@@ -35,15 +35,6 @@ object AlgorithmProtocol extends AggregateProtocol[AlgorithmModule.AnalysisState
   abstract class AlgorithmCommand extends Command with AlgorithmMessage
   abstract class AlgorithmEvent extends Event with AlgorithmMessage
 
-
-  //  case class AddAlgorithm( override val targetId: AddAlgorithm#TID ) extends AlgorithmCommand
-
-//  case class AlgorithmAdded( override val sourceId: AlgorithmAdded#TID ) extends AlgorithmEvent
-
-//  case class Register( override val targetId: Register#TID, routerRef: ActorRef ) extends AlgorithmCommand
-//
-//  case class Registered( override val sourceId: Registered#TID ) extends AlgorithmEvent
-
   import AlgorithmModule.AnalysisState
 
   case class GetStateSnapshot( override val targetId: GetStateSnapshot#TID ) extends AlgorithmCommand
@@ -215,7 +206,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
 
     def data: Seq[DoublePoint]
 
-    def fillData( minimalSize: Int = HistoricalStatistics.LastN ): (Seq[DoublePoint]) => Seq[DoublePoint] = { original =>
+    def fillData( minimalSize: Int = RecentHistory.LastN ): (Seq[DoublePoint]) => Seq[DoublePoint] = { original =>
       if ( minimalSize <= original.size ) original
       else {
         val historicalSize = history.lastPoints.size
