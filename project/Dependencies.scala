@@ -21,7 +21,7 @@ object Dependencies {
   }
 
   object akka {
-    val version = "2.4.10"
+    val version = "2.4.11"
     def module( id: String ) = "com.typesafe.akka" %% s"akka-$id" % version
     val all = Seq( actor, stream, agent, cluster, clusterSharding, contrib, persistence, remote, slf4j )
 
