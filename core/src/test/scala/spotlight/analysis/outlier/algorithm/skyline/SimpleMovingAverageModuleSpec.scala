@@ -93,7 +93,6 @@ class SimpleMovingAverageModuleSpec extends AlgorithmModuleSpec[SimpleMovingAver
       val testHistory: module.State.History = module.State.History.empty
 
       implicit val testState = mock[module.State]
-      when( testState.tolerance ).thenReturn( 3.0 )
       when( testState.history ).thenReturn( testHistory )
 
       def advanceWith( v: Double ): Unit = testHistory.movingStatistics addValue v
@@ -201,7 +200,6 @@ class SimpleMovingAverageModuleSpec extends AlgorithmModuleSpec[SimpleMovingAver
           val sas = as.value.asInstanceOf[module.State]
           sas.id.id mustBe id.id
           sas.algorithm.name mustBe module.algorithm.label.name
-          sas.tolerance mustBe 3.0
           sas.thresholds.size mustBe ( history.N )
           logger.info( "{}: history size = {}", hint, sas.history.movingStatistics.getN.toString )
           sas.history.movingStatistics.getN mustBe ( history.N )

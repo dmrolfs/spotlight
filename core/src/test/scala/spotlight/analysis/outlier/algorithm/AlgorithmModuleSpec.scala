@@ -75,7 +75,6 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
         a.id.id mustBe e.id.id
         a.name mustBe e.name
         a.algorithm.name mustBe e.algorithm.name
-        a.tolerance mustBe e.tolerance
         a.thresholds mustBe e.thresholds
         a.## mustBe e.##
       }

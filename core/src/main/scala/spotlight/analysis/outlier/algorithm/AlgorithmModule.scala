@@ -81,18 +81,14 @@ object AlgorithmModule {
     def thresholds: Seq[ThresholdBoundary]
     def addThreshold( threshold: ThresholdBoundary ): Self
 
-    def tolerance: Double
-
     override def hashCode: Int = {
       41 * (
         41 * (
           41 * (
-            41 * (
-              41 + id.id.##
-              ) + name.##
-            ) + topic.##
-          ) + algorithm.##
-        ) + tolerance.##
+            41 + id.id.##
+          ) + name.##
+        ) + topic.##
+      ) + algorithm.##
     }
 
     override def equals( rhs: Any ): Boolean = {
@@ -105,8 +101,7 @@ object AlgorithmModule {
             ( this.id.id == that.id.id ) &&
             ( this.name == that.name) &&
             ( this.topic == that.topic) &&
-            ( this.algorithm == that.algorithm ) &&
-            ( this.tolerance == that.tolerance )
+            ( this.algorithm == that.algorithm )
           }
         }
 
@@ -193,12 +188,20 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
 
 
   type Context <: AlgorithmContext
-  def makeContext( message: DetectUsing ): Context
+
+  object Context {
+    val TolerancePath = "tolerance"
+  }
+
+
+  def makeContext( message: DetectUsing ): TryV[Context]
 
   trait AlgorithmContext extends LazyLogging {
     def message: DetectUsing
 
     def plan: OutlierPlan = message.payload.plan
+
+    def tolerance: Double
 
     def recent: RecentHistory
 
@@ -257,6 +260,15 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
   }
 
 
+  class CommonContext( override val message: DetectUsing ) extends AlgorithmContext {
+    override def tolerance: Double = {
+      if ( message.properties hasPath Context.TolerancePath ) message.properties.getDouble( Context.TolerancePath ) else 3.0
+    }
+    override def recent: RecentHistory = message.recent
+    override def data: Seq[DoublePoint] = message.payload.source.points
+  }
+
+
   type State <: AnalysisState
   implicit def evState: ClassTag[State]
 
@@ -264,6 +276,9 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
   trait AnalysisStateCompanion {
     def zero( id: State#TID ): State
 
+    /**
+      * History represents the culminated value of applying the algorithm over the time series data for this ID.
+      */
     type History
     def updateHistory( history: History, event: AlgorithmProtocol.Advanced ): History
     def historyLens: Lens[State, History]
@@ -395,7 +410,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
     }
 
     // -- algorithm functional elements --
-    val algorithmContext: KOp[DetectUsing, Context] = kleisli[TryV, DetectUsing, Context] { m => module.makeContext( m ).right }
+    val algorithmContext: KOp[DetectUsing, Context] = kleisli[TryV, DetectUsing, Context] { module.makeContext }
 
     def findOutliers: KOp[Context, (Outliers, Context)] = {
       for {

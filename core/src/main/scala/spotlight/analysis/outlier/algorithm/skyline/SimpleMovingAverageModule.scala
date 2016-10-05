@@ -30,35 +30,28 @@ object SimpleMovingAverageModule extends AlgorithmModule with AlgorithmModule.Mo
       val stddev = moving.getStandardDeviation
       logger.debug(
         "Stddev from simple moving Average N[{}]: mean[{}]\tstdev[{}]\ttolerance[{}]",
-        moving.getN.toString, mean.toString, stddev.toString, state.tolerance.toString
+        moving.getN.toString, mean.toString, stddev.toString, algorithmContext.tolerance.toString
       )
 
       val threshold = ThresholdBoundary.fromExpectedAndDistance(
         timestamp = point.timestamp.toLong,
         expected = mean,
-        distance = state.tolerance * stddev
+        distance = algorithmContext.tolerance * stddev
       )
 
       ( threshold isOutlier point.value, threshold )
     }
   }
 
-  case class Context(
-    override val message: DetectUsing
-  ) extends AlgorithmContext {
 
-    override def recent: RecentHistory = RecentHistory( message.history.lastPoints )
-    //    override def history: HistoricalStatistics = message.history
-    override def data: Seq[DoublePoint] = message.payload.source.points
-  }
+  override type Context = CommonContext
+  override def makeContext( message: DetectUsing ): TryV[Context] = new CommonContext( message ).right
 
-  override def makeContext( message: DetectUsing ): Context = Context( message )
 
   case class State(
     override val id: TID,
     override val name: String,
     history: State.History = State.History.empty,
-    override val tolerance: Double = 3.0,
     override val thresholds: Seq[ThresholdBoundary] = Seq.empty[ThresholdBoundary]
   ) extends AlgorithmModule.AnalysisState with AlgorithmModule.StrictSelf[State] {
     override type Self = State
@@ -70,7 +63,6 @@ object SimpleMovingAverageModule extends AlgorithmModule with AlgorithmModule.Mo
     override def toString: String = {
       s"${ClassUtils.getAbbreviatedName(getClass, 15)}( " +
         s"id:[${id}]; "+
-        s"tolerance:[${tolerance}]; "+
         s"history:[${history}]; "+
         s"""thresholds:[${thresholds.mkString(",")}]""" +
       " )"
