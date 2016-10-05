@@ -13,7 +13,7 @@ import spotlight.model.timeseries._
   */
 trait HistoricalStatistics extends Serializable {
   def :+( point: PointA ): HistoricalStatistics
-  def recordLastPoints( points: Seq[PointA] ): HistoricalStatistics
+  @deprecated("replace with RecentHistory", "20161004") def recordLastPoints( points: Seq[PointA] ): HistoricalStatistics
 
   def covariance: RealMatrix
   def dimension: Int
@@ -26,7 +26,7 @@ trait HistoricalStatistics extends Serializable {
   def sum: PointA
   def sumLog: PointA
   def sumOfSquares: PointA
-  def lastPoints: Seq[PointA]
+  @deprecated("replace with RecentHistory", "20161004") def lastPoints: Seq[PointA]
 }
 
 
@@ -34,7 +34,7 @@ object HistoricalStatistics {
 //  val LastN: Int = 6 * 60 * 24 // 6pts / sec for 1-day    // 3
 
   def apply( k: Int, isCovarianceBiasCorrected: Boolean ): HistoricalStatistics = {
-    ApacheMath3HistoricalStatistics( new MultivariateSummaryStatistics(k, isCovarianceBiasCorrected), RecentHistory() )
+    ApacheMath3HistoricalStatistics( new MultivariateSummaryStatistics(k, isCovarianceBiasCorrected), RecentHistory.apply() )
   }
 
   def fromActivePoints( points: Seq[DoublePoint], isCovarianceBiasCorrected: Boolean ): HistoricalStatistics = {
@@ -52,9 +52,8 @@ object HistoricalStatistics {
     }
 
 
-    override def recordLastPoints( points: Seq[PointA] ): HistoricalStatistics = this.copy( recent = recent withPoints points )
-
-    override def lastPoints: Seq[PointA] = recent.lastPoints
+    @deprecated("replace with RecentHistory", "20161004") override def recordLastPoints( points: Seq[PointA] ): HistoricalStatistics = this.copy( recent = recent withPoints points )
+    @deprecated("replace with RecentHistory", "20161004") override def lastPoints: Seq[PointA] = recent.points
 
     override def N: Long = all.getN
     override def mean: PointA = all.getMean

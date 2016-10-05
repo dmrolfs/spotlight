@@ -200,7 +200,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
 
     def plan: OutlierPlan = message.payload.plan
 
-    def history: HistoricalStatistics
+    def recent: RecentHistory
 
     def source: TimeSeriesBase = message.source
 
@@ -209,9 +209,9 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
     def fillData( minimalSize: Int = RecentHistory.LastN ): (Seq[DoublePoint]) => Seq[DoublePoint] = { original =>
       if ( minimalSize <= original.size ) original
       else {
-        val historicalSize = history.lastPoints.size
+        val historicalSize = recent.points.size
         val needed = minimalSize + 1 - original.size
-        val historical = history.lastPoints.drop( historicalSize - needed )
+        val historical = recent.points.drop( historicalSize - needed )
         historical.toDoublePoints ++ original
       }
     }
@@ -222,11 +222,11 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
       val values = points map { _.value }
       val lastPos = {
         points.headOption
-        .map { h => history.lastPoints indexWhere { _.timestamp == h.timestamp } }
-        .getOrElse { history.lastPoints.size }
+        .map { h => recent.points indexWhere { _.timestamp == h.timestamp } }
+        .getOrElse { recent.points.size }
       }
 
-      val last = history.lastPoints.drop( lastPos - tailLength + 1 ) map { _.value }
+      val last = recent.points.drop( lastPos - tailLength + 1 ) map { _.value }
       logger.debug( "tail-average: last[{}]", last.mkString(",") )
 
       points

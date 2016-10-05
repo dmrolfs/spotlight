@@ -81,13 +81,14 @@ final case class DetectUsing private[outlier](
   algorithm: Symbol,
 //  aggregator: ActorRef,
   payload: OutlierDetectionMessage,
-  history: HistoricalStatistics,
+  @deprecated("???replace with RecentHistory or remove or ???", "20161004") history: HistoricalStatistics,
   properties: Config = ConfigFactory.empty()
 ) extends OutlierDetectionMessage {
   override def topic: Topic = payload.topic
   override type Source = payload.Source
   override def evSource: ClassTag[Source] = payload.evSource
 
+  def recent: RecentHistory = RecentHistory( history.lastPoints )
   override def source: Source = payload.source
   override def plan: OutlierPlan = payload.plan
   override def subscriber: ActorRef = payload.subscriber

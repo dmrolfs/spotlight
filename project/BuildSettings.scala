@@ -22,11 +22,11 @@ object BuildSettings {
       "-unchecked",
       "-deprecation",
       "-language:implicitConversions",
-      "-Xlog-reflective-calls",
       // "-Xlog-implicits",
       // "-Ymacro-debug-verbose",
       // "-Ywarn-adapted-args",
-      "-Xfatal-warnings"
+//      "-Xfatal-warnings",
+      "-Xlog-reflective-calls"
     ),
     javacOptions ++= Seq(
       "-source", "1.8",

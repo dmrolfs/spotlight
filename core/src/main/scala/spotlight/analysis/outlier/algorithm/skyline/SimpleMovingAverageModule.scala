@@ -7,7 +7,7 @@ import org.apache.commons.math3.ml.clustering.DoublePoint
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import org.apache.commons.lang3.ClassUtils
 import peds.commons.TryV
-import spotlight.analysis.outlier.{DetectUsing, HistoricalStatistics}
+import spotlight.analysis.outlier.{DetectUsing, HistoricalStatistics, RecentHistory}
 import spotlight.analysis.outlier.algorithm.{AlgorithmModule, AlgorithmProtocol}
 import spotlight.model.timeseries._
 
@@ -46,7 +46,9 @@ object SimpleMovingAverageModule extends AlgorithmModule with AlgorithmModule.Mo
   case class Context(
     override val message: DetectUsing
   ) extends AlgorithmContext {
-    override def history: HistoricalStatistics = message.history
+
+    override def recent: RecentHistory = RecentHistory( message.history.lastPoints )
+    //    override def history: HistoricalStatistics = message.history
     override def data: Seq[DoublePoint] = message.payload.source.points
   }
 
