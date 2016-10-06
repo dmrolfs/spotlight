@@ -7,7 +7,7 @@ import org.apache.commons.math3.ml.clustering.DoublePoint
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import org.apache.commons.lang3.ClassUtils
 import peds.commons.TryV
-import spotlight.analysis.outlier.{DetectUsing, HistoricalStatistics, RecentHistory}
+import spotlight.analysis.outlier.DetectUsing
 import spotlight.analysis.outlier.algorithm.{AlgorithmModule, AlgorithmProtocol}
 import spotlight.model.timeseries._
 
@@ -15,7 +15,7 @@ import spotlight.model.timeseries._
 /**
   * Created by rolfsd on 6/8/16.
   */
-object SimpleMovingAverageModule extends AlgorithmModule with AlgorithmModule.ModuleConfiguration { outer =>
+object SimpleMovingAverageAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfiguration { outer =>
   override lazy val algorithm: Algorithm = new Algorithm {
     override val label: Symbol = Symbol( "SimpleMovingAverage" )
 

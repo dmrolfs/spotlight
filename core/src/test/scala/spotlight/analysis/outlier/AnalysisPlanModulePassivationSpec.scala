@@ -20,7 +20,7 @@ import peds.commons.log.Trace
 import shapeless.Lens
 import spotlight.analysis.outlier.AnalysisPlanModule.AggregateRoot.OutlierPlanActor
 import spotlight.analysis.outlier.AnalysisPlanModule.AggregateRoot.OutlierPlanActor.ProxyProvider
-import spotlight.analysis.outlier.algorithm.skyline.SimpleMovingAverageModule
+import spotlight.analysis.outlier.algorithm.skyline.SimpleMovingAverageAlgorithm
 import spotlight.model.outlier.{IsQuorum, OutlierPlan, ReduceOutliers}
 import spotlight.testkit.EntityModuleSpec
 import spotlight.analysis.outlier.{AnalysisPlanProtocol => P}
@@ -75,7 +75,7 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[OutlierPlan] { 
     override val identifying: EntityIdentifying[OutlierPlan] = AnalysisPlanModule.identifying
     override def nextId(): module.TID = identifying.safeNextId
 
-    val algo: Symbol = SimpleMovingAverageModule.algorithm.label
+    val algo: Symbol = SimpleMovingAverageAlgorithm.algorithm.label
 
     def makePlan( name: String, g: Option[OutlierPlan.Grouping] ): OutlierPlan = {
       OutlierPlan.default(

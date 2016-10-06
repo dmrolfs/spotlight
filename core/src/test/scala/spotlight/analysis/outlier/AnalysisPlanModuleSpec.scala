@@ -21,7 +21,7 @@ import peds.commons.log.Trace
 import shapeless.Lens
 import spotlight.analysis.outlier.AnalysisPlanModule.AggregateRoot.OutlierPlanActor
 import spotlight.analysis.outlier.AnalysisPlanModule.AggregateRoot.OutlierPlanActor.ProxyProvider
-import spotlight.analysis.outlier.algorithm.skyline.SimpleMovingAverageModule
+import spotlight.analysis.outlier.algorithm.skyline.SimpleMovingAverageAlgorithm
 import spotlight.model.outlier._
 import spotlight.testkit.EntityModuleSpec
 import spotlight.analysis.outlier.{AnalysisPlanProtocol => P}
@@ -70,10 +70,10 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] { outer =>
     }
 
     override def rootTypes: Set[AggregateRootType] = trace.block( "rootTypes" ) {
-      super.rootTypes ++ Set( SimpleMovingAverageModule.rootType )
+      super.rootTypes ++ Set( SimpleMovingAverageAlgorithm.rootType )
     }
 
-    lazy val algo: Symbol = SimpleMovingAverageModule.algorithm.label
+    lazy val algo: Symbol = SimpleMovingAverageAlgorithm.algorithm.label
 
 
     def stateFrom( ar: ActorRef, tid: module.TID ): OutlierPlan = {

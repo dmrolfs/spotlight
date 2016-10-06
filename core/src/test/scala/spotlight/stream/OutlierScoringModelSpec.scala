@@ -19,7 +19,7 @@ import org.joda.{time => joda}
 import com.github.nscala_time.time.Imports.{richDateTime, richSDuration}
 import demesne.{AggregateRootType, BoundedContext, DomainModel}
 import peds.commons.log.Trace
-import spotlight.analysis.outlier.algorithm.skyline.SimpleMovingAverageModule
+import spotlight.analysis.outlier.algorithm.skyline.SimpleMovingAverageAlgorithm
 import spotlight.protocol.PythonPickleProtocol
 import spotlight.testkit.ParallelAkkaSpec
 import spotlight.analysis.outlier.{AnalysisPlanModule, PlanCatalog}
@@ -45,7 +45,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
 //    val configurationReloader = Configuration.reloader( Array.empty[String] )()()
 
 //    val algo = SeriesDensityAnalyzer.Algorithm
-    val algo = SimpleMovingAverageModule.algorithm.label
+    val algo = SimpleMovingAverageAlgorithm.algorithm.label
     val algoRef = TestProbe()
     val routingTable = Map( algo -> algoRef.ref )
 
@@ -69,7 +69,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
       )
     )
 
-    def rootTypes: Set[AggregateRootType] = Set( AnalysisPlanModule.module.rootType, SimpleMovingAverageModule.rootType )
+    def rootTypes: Set[AggregateRootType] = Set( AnalysisPlanModule.module.rootType, SimpleMovingAverageAlgorithm.rootType )
     lazy val boundedContext: BoundedContext = trace.block( "boundedContext" ) {
       implicit val actorTimeout = akka.util.Timeout( 5.seconds.dilated )
       import scala.concurrent.ExecutionContext.Implicits.global

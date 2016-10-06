@@ -17,10 +17,10 @@ import spotlight.analysis.outlier.algorithm.AlgorithmModuleSpec
 /**
   * Created by rolfsd on 6/9/16.
   */
-class SimpleMovingAverageModuleSpec extends AlgorithmModuleSpec[SimpleMovingAverageModuleSpec] {
+class SimpleMovingAverageAlgorithmSpec extends AlgorithmModuleSpec[SimpleMovingAverageAlgorithmSpec] {
 
-  override type Module = SimpleMovingAverageModule.type
-  override val defaultModule: Module = SimpleMovingAverageModule
+  override type Module = SimpleMovingAverageAlgorithm.type
+  override val defaultModule: Module = SimpleMovingAverageAlgorithm
 
   class Fixture extends AlgorithmFixture {
     val testScope: module.TID = identifying tag OutlierPlan.Scope(plan = "TestPlan", topic = "TestTopic")
@@ -28,7 +28,7 @@ class SimpleMovingAverageModuleSpec extends AlgorithmModuleSpec[SimpleMovingAver
 
     override def expectedUpdatedState( state: module.State, event: P.Advanced ): module.State = {
       val historicalStatsLens = module.State.History.statsLens compose module.State.historyLens
-      val s = super.expectedUpdatedState( state, event ).asInstanceOf[SimpleMovingAverageModule.State]
+      val s = super.expectedUpdatedState( state, event ).asInstanceOf[SimpleMovingAverageAlgorithm.State]
       val h = s.history
       val stats = h.movingStatistics.copy
       stats addValue event.point.value

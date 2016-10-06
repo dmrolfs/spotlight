@@ -26,7 +26,7 @@ import peds.akka.supervision.OneForOneStrategyFactory
 import peds.akka.metrics.{Instrumented, Reporter}
 import peds.commons.V
 import peds.akka.stream.StreamMonitor
-import spotlight.analysis.outlier.algorithm.skyline.SimpleMovingAverageModule
+import spotlight.analysis.outlier.algorithm.skyline.SimpleMovingAverageAlgorithm
 import spotlight.analysis.outlier.{AnalysisPlanModule, PlanCatalog}
 import spotlight.model.outlier._
 import spotlight.model.timeseries.Topic
@@ -125,7 +125,7 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
   def rootTypes: Set[AggregateRootType] = {
     Set(
       AnalysisPlanModule.module.rootType,
-      SimpleMovingAverageModule.rootType
+         SimpleMovingAverageAlgorithm.rootType
     )
   }
 

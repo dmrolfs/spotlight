@@ -61,7 +61,7 @@ object AnalysisScopeProxy {
         case LeastSquaresAnalyzer.Algorithm => ??? // LeastSquaresAnalyzer.props( router ),
         case MeanSubtractionCumulationAnalyzer.Algorithm => ??? // MeanSubtractionCumulationAnalyzer.props( router ),
         case MedianAbsoluteDeviationAnalyzer.Algorithm => ??? // MedianAbsoluteDeviationAnalyzer.props( router ),
-        case SimpleMovingAverageModule.algorithm.label => Some( SimpleMovingAverageModule.rootType )
+        case SimpleMovingAverageAlgorithm.algorithm.label => Some( SimpleMovingAverageAlgorithm.rootType )
         case SeasonalExponentialMovingAverageAnalyzer.Algorithm => ??? // SeasonalExponentialMovingAverageAnalyzer.props( router )
         case _ => None
       }
