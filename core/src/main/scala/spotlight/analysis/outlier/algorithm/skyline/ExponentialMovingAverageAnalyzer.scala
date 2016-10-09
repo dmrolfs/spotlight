@@ -84,7 +84,7 @@ class ExponentialMovingAverageAnalyzer(
               stats.ewmsd,
               tol
             )
-            //            math.abs( v - stats.ewma ) > ( tol * stats.ewmsd )
+            //            math.abs( v - statistics.ewma ) > ( tol * statistics.ewmsd )
             val threshold = ThresholdBoundary.fromExpectedAndDistance(
               timestamp = pt.timestamp.toLong,
               expected = stats.ewma,

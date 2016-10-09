@@ -58,7 +58,7 @@ object FirstHourAverageAnalyzer {
         }
         val updated = firstHourPoints.foldLeft( firstHour.copy ) { (s, v) => s.addValue( v ); s }
         if ( underlying.source.topic == DebugTopic ) {
-          logger.info( s"context: updated first-hour stats: mean=[${updated.getMean}] stddev=[${updated.getStandardDeviation}]" )
+          logger.info( s"context: updated first-hour statistics: mean=[${updated.getMean}] stddev=[${updated.getStandardDeviation}]" )
         }
         copy( firstHour = updated )
       } else {
@@ -80,7 +80,7 @@ class FirstHourAverageAnalyzer( override val router: ActorRef ) extends CommonAn
   override def algorithm: Symbol = FirstHourAverageAnalyzer.Algorithm
 
   override def wrapContext(c: AlgorithmContext ): Valid[WrappingContext] = {
-//todo: bad recreating summary stats for each pt!!!  need to retain and build incrementally (is this the case in other algos?)
+//todo: bad recreating summary statistics for each pt!!!  need to retain and build incrementally (is this the case in other algos?)
     makeFirstHourStatistics( c ) map { firstHour => Context( underlying = c, firstHour = firstHour ) }
   }
 

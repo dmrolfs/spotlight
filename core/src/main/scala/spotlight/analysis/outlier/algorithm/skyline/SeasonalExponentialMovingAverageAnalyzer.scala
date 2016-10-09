@@ -240,7 +240,7 @@ class SeasonalExponentialMovingAverageAnalyzer(
             )
 
             ( threshold isOutlier p.value, threshold )
-            //            math.abs( v - stats.ewma ) > ( tol * stats.ewmsd )
+            //            math.abs( v - statistics.ewma ) > ( tol * statistics.ewmsd )
           } getOrElse {
             ( false, ThresholdBoundary.empty( p.timestamp.toLong ) )
           }

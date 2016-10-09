@@ -92,7 +92,7 @@ trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
 
   /**
     * Some algorithms require a minimum number of points in order to determine an anomaly. To address this circumstance, these
-    * algorithms can use fillDataFromHistory to draw from history the points necessary to create an appropriate group.
+    * algorithms can use fillDataFromHistory to draw from shape the points necessary to create an appropriate group.
     * @param minimalSize of the data grouping
     * @return
     */
@@ -156,7 +156,7 @@ object AlgorithmActor {
         def makeMahalanobisDistance: TryV[DistanceMeasure] = {
           val mahal = if ( message.history.N > 0 ) {
             logger.debug(
-              "DISTANCE_MEASURE message.history.covariance = [{}] determinant:[{}]",
+              "DISTANCE_MEASURE message.shape.covariance = [{}] determinant:[{}]",
               message.history.covariance,
               new EigenDecomposition(message.history.covariance).getDeterminant.toString
             )

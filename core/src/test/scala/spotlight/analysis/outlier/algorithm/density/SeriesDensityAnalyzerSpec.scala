@@ -409,7 +409,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
     }
 
 
-    "history is updated with each detect request" in { f: Fixture =>
+    "shape is updated with each detect request" in { f: Fixture =>
       import f._
 
       def detectUsing( message: OutlierDetectionMessage, history: HistoricalStatistics ): DetectUsing = {
@@ -522,11 +522,11 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
 //        }
       }
 //      router.expectMsgPF( 2.seconds.dilated, "default-routed-bar-A" ) {
-//        case m @ DetectUsing( algo, _, payload, history, properties ) => {
+//        case m @ DetectUsing( algo, _, payload, shape, properties ) => {
 //          m.topic mustBe metric
 //          algo must equal('bar)
-//          history.get.n mustBe pointsA.size
-//          assertHistoricalStats( history.get, expectedA )
+//          shape.get.n mustBe pointsA.size
+//          assertHistoricalStats( shape.get, expectedA )
 //        }
 //      }
 //
@@ -538,21 +538,21 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
 //      detect receive msgB
 //
 //      router.expectMsgPF( 2.seconds.dilated, "default-routed-foo-AB" ) {
-//        case m @ DetectUsing( algo, _, payload, history, properties ) => {
-//          trace( s"history = $history" )
+//        case m @ DetectUsing( algo, _, payload, shape, properties ) => {
+//          trace( s"shape = $shape" )
 //          m.topic mustBe metric
 //          algo must equal('foo)
-//          history.get.n mustBe (pointsA.size + pointsB.size)
-//          assertHistoricalStats( history.get, expectedAB )
+//          shape.get.n mustBe (pointsA.size + pointsB.size)
+//          assertHistoricalStats( shape.get, expectedAB )
 //        }
 //      }
 //
 //      router.expectMsgPF( 2.seconds.dilated, "default-routed-bar-AB" ) {
-//        case m @ DetectUsing( algo, _, payload, history, properties ) => {
+//        case m @ DetectUsing( algo, _, payload, shape, properties ) => {
 //          m.topic mustBe metric
 //          algo must equal('bar)
-//          history.get.n mustBe (pointsA.size + pointsB.size)
-//          assertHistoricalStats( history.get, expectedAB )
+//          shape.get.n mustBe (pointsA.size + pointsB.size)
+//          assertHistoricalStats( shape.get, expectedAB )
 //        }
 //      }
     }

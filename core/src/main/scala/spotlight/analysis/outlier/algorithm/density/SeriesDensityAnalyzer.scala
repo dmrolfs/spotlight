@@ -55,7 +55,7 @@ object SeriesDensityAnalyzer {
     }
 
     override def toString: String = {
-      s"""${getClass.safeSimpleName}(distance-stats:[${distanceStatistics}])"""
+      s"""${getClass.safeSimpleName}(distance-statistics:[${distanceStatistics}])"""
     }
   }
 
@@ -118,7 +118,7 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
           if ( !d.isNaN ) stats addValue d
           stats
         }
-        log.debug( "updated distance m:[{}] sd:[{}] stats: [{}]", updatedStats.getMean, updatedStats.getStandardDeviation, updatedStats )
+        log.debug( "updated distance m:[{}] sd:[{}] statistics: [{}]", updatedStats.getMean, updatedStats.getStandardDeviation, updatedStats )
         ctx.copy( distanceStatistics = updatedStats ).asInstanceOf[AlgorithmContext]
       }
     }
@@ -142,7 +142,7 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
     } yield {
       log.debug( "DBSCAN eps = [{}]", e )
       log.debug( "DBSCAN filled orig:[{}] past:[{}] points=[{}]", ctx.data.size, filled.size - ctx.data.size, filled.mkString(",") )
-//      log.debug( "cluster: context dist-stats=[{}]", ctx.distanceStatistics )
+//      log.debug( "cluster: context dist-statistics=[{}]", ctx.distanceStatistics )
       import scala.collection.JavaConverters._
 
       sourceSizeHistogram += ctx.data.size
@@ -169,7 +169,7 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
     kleisli[TryV, Context, Double] { ctx =>
       val config = ctx.messageConfig
       val distanceStatistcs = ctx.distanceStatistics
-      log.debug( "distance-stats=[{}]", distanceStatistcs )
+      log.debug( "distance-statistics=[{}]", distanceStatistcs )
 
       val calculatedEps = {
         for {

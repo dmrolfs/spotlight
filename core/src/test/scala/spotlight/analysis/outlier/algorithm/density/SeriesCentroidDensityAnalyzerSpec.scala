@@ -73,7 +73,7 @@ class SeriesCentroidDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSug
       )
     }
 
-    "detect outlying points in series centroids without history" in { f: Fixture =>
+    "detect outlying points in series centroids without shape" in { f: Fixture =>
       import f._
       val analyzer = TestActorRef[SeriesCentroidDensityAnalyzer]( SeriesCentroidDensityAnalyzer.props(router.ref) )
       val series = TimeSeries( "series", points )
@@ -109,7 +109,7 @@ class SeriesCentroidDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSug
       }
     }
 
-    "detect outlying points in series centroids with history" taggedAs (WIP)  in { f: Fixture =>
+    "detect outlying points in series centroids with shape" taggedAs (WIP)  in { f: Fixture =>
       import f._
       val analyzer = TestActorRef[SeriesCentroidDensityAnalyzer]( SeriesCentroidDensityAnalyzer.props(router.ref) )
       val series = TimeSeries( "series", points )
@@ -126,7 +126,7 @@ class SeriesCentroidDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSug
       )
 
       val history = HistoricalStatistics.fromActivePoints( points, false )
-      trace( s"history = $history" )
+      trace( s"shape = $history" )
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
       implicit val sender = aggregator.ref
       analyzer ! DetectUsing(

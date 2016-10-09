@@ -27,7 +27,7 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmModuleSpec[SimpleMovingA
     override def nextId(): module.TID = testScope
 
     override def expectedUpdatedState( state: module.State, event: P.Advanced ): module.State = {
-      val historicalStatsLens = module.State.History.statsLens compose module.State.historyLens
+      val historicalStatsLens = module.State.Shape.statsLens compose module.State.shapeLens
       val s = super.expectedUpdatedState( state, event ).asInstanceOf[SimpleMovingAverageAlgorithm.State]
       val h = s.history
       val stats = h.movingStatistics.copy
@@ -90,7 +90,7 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmModuleSpec[SimpleMovingA
       logger.info( "************** TEST NOW ************" )
       val algorithm = module.algorithm
       implicit val testContext = mock[module.Context]
-      val testHistory: module.State.History = module.State.History.empty
+      val testHistory: module.State.Shape = module.State.Shape.empty
 
       implicit val testState = mock[module.State]
       when( testState.history ).thenReturn( testHistory )
@@ -201,7 +201,7 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmModuleSpec[SimpleMovingA
           sas.id.id mustBe id.id
           sas.algorithm.name mustBe module.algorithm.label.name
           sas.thresholds.size mustBe ( history.N )
-          logger.info( "{}: history size = {}", hint, sas.history.movingStatistics.getN.toString )
+          logger.info( "{}: shape size = {}", hint, sas.history.movingStatistics.getN.toString )
           sas.history.movingStatistics.getN mustBe ( history.N )
           sas.history.movingStatistics.getMean mustBe history.mean(1)
 

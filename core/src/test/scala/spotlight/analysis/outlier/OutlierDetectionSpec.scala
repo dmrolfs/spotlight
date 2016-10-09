@@ -224,7 +224,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
       router expectNoMsg 1.second.dilated
     }
 
-    "history is updated with each detect request" in { f: Fixture =>
+    "shape is updated with each detect request" in { f: Fixture =>
       import f._
 
 
@@ -347,11 +347,11 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
 
       router.expectMsgPF( 2.seconds.dilated, "default-routed-foo-AB" ) {
         case Envelope( m @ DetectUsing(algo, payload, history, properties), _ ) => {
-          trace( s"history = $history" )
+          trace( s"shape = $history" )
           m.topic mustBe metric
           algo must equal('foo)
           history.N mustBe ( pointsA.size + pointsB.size)
-          trace( s"""   history LAST= [${history.lastPoints.toPointTs.mkString(",")}]""" )
+          trace( s"""   shape LAST= [${history.lastPoints.toPointTs.mkString(",")}]""" )
           trace( s"""expectedAB LAST= [${expectedAB.lastPoints.toPointTs.mkString(",")}]""" )
           assertHistoricalStats( history, expectedAB )
         }

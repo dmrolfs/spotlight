@@ -277,11 +277,11 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
     def zero( id: State#TID ): State
 
     /**
-      * History represents the culminated value of applying the algorithm over the time series data for this ID.
+      * Shape represents the culminated value of applying the algorithm over the time series data for this ID.
       */
-    type History
-    def updateHistory( history: History, event: AlgorithmProtocol.Advanced ): History
-    def historyLens: Lens[State, History]
+    type Shape
+    def updateShape( shape: Shape, event: AlgorithmProtocol.Advanced ): Shape
+    def shapeLens: Lens[State, Shape]
     def thresholdLens: Lens[State, Seq[ThresholdBoundary]]
   }
 
@@ -308,8 +308,8 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
 
     override var state: State = _
 
-    import analysisStateCompanion.{ historyLens, thresholdLens, updateHistory }
-    val advanceLens: Lens[State, (analysisStateCompanion.History, Seq[ThresholdBoundary])] = historyLens ~ thresholdLens
+    import analysisStateCompanion.{ shapeLens, thresholdLens, updateShape }
+    val advanceLens: Lens[State, (analysisStateCompanion.Shape, Seq[ThresholdBoundary])] = shapeLens ~ thresholdLens
 
 
     override val acceptance: Acceptance = {
@@ -319,7 +319,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
           log.debug( "AlgorithmModule[{}]: processed first data. creating initial state", self.path )
           analysisStateCompanion zero aggregateId
         }
-        val result = advanceLens.modify( currentState ){ case (h, ts) => ( updateHistory( h, event ), ts :+ event.threshold ) }
+        val result = advanceLens.modify( currentState ){ case (h, ts) => (updateShape( h, event ), ts :+ event.threshold ) }
         log.debug( "TEST:[{}]: resultingState=[{}] aggregateId:[{}]", self.path, result, aggregateId )
         result
       }

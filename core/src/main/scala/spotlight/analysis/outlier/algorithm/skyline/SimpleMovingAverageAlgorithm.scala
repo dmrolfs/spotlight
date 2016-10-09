@@ -51,7 +51,7 @@ object SimpleMovingAverageAlgorithm extends AlgorithmModule with AlgorithmModule
   case class State(
     override val id: TID,
     override val name: String,
-    history: State.History = State.History.empty,
+    history: State.Shape = State.Shape.empty,
     override val thresholds: Seq[ThresholdBoundary] = Seq.empty[ThresholdBoundary]
   ) extends AlgorithmModule.AnalysisState with AlgorithmModule.StrictSelf[State] {
     override type Self = State
@@ -63,7 +63,7 @@ object SimpleMovingAverageAlgorithm extends AlgorithmModule with AlgorithmModule
     override def toString: String = {
       s"${ClassUtils.getAbbreviatedName(getClass, 15)}( " +
         s"id:[${id}]; "+
-        s"history:[${history}]; "+
+        s"shape:[${history}]; "+
         s"""thresholds:[${thresholds.mkString(",")}]""" +
       " )"
     }
@@ -75,12 +75,12 @@ object SimpleMovingAverageAlgorithm extends AlgorithmModule with AlgorithmModule
   object State extends AnalysisStateCompanion {
     override def zero( id: State#TID ): State = State( id = id, name = "" )
 
-    case class History( movingStatistics: DescriptiveStatistics ) extends Equals {
-      override def canEqual( rhs: Any ): Boolean = rhs.isInstanceOf[History]
+    case class Shape( movingStatistics: DescriptiveStatistics ) extends Equals {
+      override def canEqual( rhs: Any ): Boolean = rhs.isInstanceOf[Shape]
 
       override def equals( rhs: Any ): Boolean = {
         rhs match {
-          case that: History => {
+          case that: Shape => {
             if ( this eq that ) true
             else {
               ( that.## == this.## ) &&
@@ -104,20 +104,20 @@ object SimpleMovingAverageAlgorithm extends AlgorithmModule with AlgorithmModule
       }
     }
 
-    object History {
-      def statsLens: Lens[History, DescriptiveStatistics] = lens[History] >> 'movingStatistics
-      def empty: History = History( new DescriptiveStatistics( AlgorithmModule.ApproximateDayWindow ) )
+    object Shape {
+      def statsLens: Lens[Shape, DescriptiveStatistics] = lens[Shape] >> 'movingStatistics
+      def empty: Shape = Shape( new DescriptiveStatistics( AlgorithmModule.ApproximateDayWindow ) )
     }
 
-    override def updateHistory( h: History, event: AlgorithmProtocol.Advanced ): History = {
-      History.statsLens.modify( h ){ stats =>
+    override def updateShape(h: Shape, event: AlgorithmProtocol.Advanced ): Shape = {
+      Shape.statsLens.modify( h ){ stats =>
         val ms = stats.copy
         ms addValue event.point.value
         ms
       }
     }
 
-    override def historyLens: Lens[State, History] = lens[State] >> 'history
+    override def shapeLens: Lens[State, Shape] = lens[State] >> 'history
     override def thresholdLens: Lens[State, Seq[ThresholdBoundary]] = lens[State] >> 'thresholds
   }
 }

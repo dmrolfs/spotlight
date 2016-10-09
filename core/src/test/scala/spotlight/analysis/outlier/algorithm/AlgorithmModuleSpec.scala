@@ -56,7 +56,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
 
     type TestState = module.State
     type TestAdvanced = P.Advanced
-    type TestHistory = module.analysisStateCompanion.History
+    type TestHistory = module.analysisStateCompanion.Shape
     val thresholdLens = module.analysisStateCompanion.thresholdLens
 
     def expectedUpdatedState( state: TestState, event: TestAdvanced ): TestState = {
@@ -165,10 +165,10 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
     logger.info( "series:{}", series)
     logger.info( "prior={}", prior )
     prior map { h =>
-      logger.info( "Adding series to prior history")
+      logger.info( "Adding series to prior shape")
       series.points.foldLeft( h ){ _ :+ _ }
     } getOrElse {
-      logger.info( "Creating new history from series")
+      logger.info( "Creating new shape from series")
       HistoricalStatistics.fromActivePoints( series.points, false )
     }
   }
@@ -240,19 +240,19 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
 
   def analysisStateSuite(): Unit = {
     s"${defaultModule.algorithm.label.name} state" should {
-      "advance history" in { f: Fixture =>
+      "advance shape" in { f: Fixture =>
         import f._
 
         val zero = module.analysisStateCompanion.zero( id )
         val pt = DataPoint( nowTimestamp, 3.14159 )
         val t = ThresholdBoundary( nowTimestamp, Some(1.1), Some(2.2), Some(3.3) )
         val adv = P.Advanced( id, pt, false, t )
-        val hlens = module.analysisStateCompanion.historyLens
+        val hlens = module.analysisStateCompanion.shapeLens
         val zeroAdded = thresholdLens.modify( zero ){ _ :+ t }
-        val actualState = hlens.modify( zeroAdded ){ h => module.analysisStateCompanion.updateHistory(h, adv) }
+        val actualState = hlens.modify( zeroAdded ){ h => module.analysisStateCompanion.updateShape( h, adv ) }
         val expectedState = expectedUpdatedState( zero, adv )
         val zeroHistory = hlens.get( zero )
-        val actualHistory = module.analysisStateCompanion.updateHistory( zeroHistory, adv )
+        val actualHistory = module.analysisStateCompanion.updateShape( zeroHistory, adv )
         actualVsExpectedState( Option(actualState), Option(expectedState) )
         actualVsExpectedHistory( actualHistory, hlens.get(expectedState) )
       }

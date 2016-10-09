@@ -56,7 +56,7 @@ class SkylineFirstHourAverageSpec extends SkylineBaseSpec {
     ): Seq[ThresholdBoundary] = {
       val effective = ( lastPoints ++ points ).filter{ p => FirstHourAverageAnalyzer.Context.FirstHour.contains(p.timestamp) }
       val stats = new DescriptiveStatistics( effective.map{ _.value }.toArray )
-      logger.debug( "expected threshold stats=[{}]", stats)
+      logger.debug( "expected threshold statistics=[{}]", stats)
       points.map { p =>
         ThresholdBoundary.fromExpectedAndDistance(
           timestamp = p.timestamp,

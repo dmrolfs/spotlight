@@ -71,7 +71,6 @@ object HistoricalStatistics {
       s"""
          |allStatistics: [${all.toString}]
        """.stripMargin
-//      lastPoints = [${lastPoints.map{_.mkString("(",",",")")}.mkString(",")}]
     }
 
     //todo underlying serializable ops
@@ -85,8 +84,8 @@ public LinkedList EMA(int dperiods, double alpha)
             throws IOException {
         String line;
         int i = 0;
-        DescriptiveStatistics stats = new SynchronizedDescriptiveStatistics();
-        stats.setWindowSize(dperiods);
+        DescriptiveStatistics statistics = new SynchronizedDescriptiveStatistics();
+        statistics.setWindowSize(dperiods);
         File f = new File("");
         BufferedReader in = new BufferedReader(new FileReader(f));
         LinkedList<Double> ema1 = new LinkedList<Double>();
@@ -95,21 +94,21 @@ public LinkedList EMA(int dperiods, double alpha)
             double sum = 0;
             double den = 0;
             System.out.println("line: " + " " + line);
-            stats.addValue(Double.parseDouble(line.trim()));
+            statistics.addValue(Double.parseDouble(line.trim()));
             i++;
             if (i > dperiods)
                 for (int j = 0; j < dperiods; j++) {
                     double var = Math.pow((1 - alpha), j);
                     den += var;
-                    sum += stats.getElement(j) * var;
-                    System.out.println("elements:"+stats.getElement(j));
+                    sum += statistics.getElement(j) * var;
+                    System.out.println("elements:"+statistics.getElement(j));
                     System.out.println("sum:"+sum);
                 }
             else
                 for (int j = 0; j < i; j++) {
                     double var = Math.pow((1 - alpha), j);
                     den += var;
-                    sum += stats.getElement(j) * var;
+                    sum += statistics.getElement(j) * var;
                 }
             ema1.add(sum / den);
             System.out.println("EMA: " + sum / den);

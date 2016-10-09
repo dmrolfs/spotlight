@@ -79,7 +79,7 @@ class SkylineGrubbsSpec extends SkylineBaseSpec {
       val mean = stats.getMean
       val stddev = stats.getStandardDeviation
       log.debug( "expected: combined:[{}]", combined.mkString(",") )
-      log.debug( "expected stats-N:[{}] size:[{}] mean:[{}] sttdev:[{}]", stats.getN.toString, N.toString, mean.toString, stddev.toString)
+      log.debug( "expected statistics-N:[{}] size:[{}] mean:[{}] sttdev:[{}]", stats.getN.toString, N.toString, mean.toString, stddev.toString)
 
       val tdist = new TDistribution( math.max( N - 2, 1 ) )
       val threshold = tdist.inverseCumulativeProbability( 0.05 / (2.0 * N) )

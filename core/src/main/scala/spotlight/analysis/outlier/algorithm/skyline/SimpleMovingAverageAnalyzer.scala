@@ -41,7 +41,7 @@ object SimpleMovingAverageAnalyzer {
     }
 
     override def toString: String = {
-      s"""${getClass.safeSimpleName}(moving-stats:[${movingStatistics}])"""
+      s"""${getClass.safeSimpleName}(moving-statistics:[${movingStatistics}])"""
     }
   }
 }
