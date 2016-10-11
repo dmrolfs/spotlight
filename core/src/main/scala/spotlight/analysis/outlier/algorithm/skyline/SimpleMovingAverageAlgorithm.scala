@@ -45,7 +45,7 @@ object SimpleMovingAverageAlgorithm extends AlgorithmModule with AlgorithmModule
 
 
   override type Context = CommonContext
-  override def makeContext( message: DetectUsing ): TryV[Context] = new CommonContext( message ).right
+  override def makeContext( message: DetectUsing, state: Option[State] ): TryV[Context] = new CommonContext( message ).right
 
 
   case class State(

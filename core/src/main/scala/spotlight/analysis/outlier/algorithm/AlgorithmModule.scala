@@ -189,12 +189,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
 
   type Context <: AlgorithmContext
 
-  object Context {
-    val TolerancePath = "tolerance"
-  }
-
-
-  def makeContext( message: DetectUsing ): TryV[Context]
+  def makeContext( message: DetectUsing, state: Option[State] ): TryV[Context]
 
   trait AlgorithmContext extends LazyLogging {
     def message: DetectUsing
@@ -256,16 +251,18 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
   }
 
   object AlgorithmContext {
+    val TolerancePath = "tolerance"
     val DefaultTailAverageLength: Int = 3
   }
 
 
   class CommonContext( override val message: DetectUsing ) extends AlgorithmContext {
-    override def tolerance: Double = {
-      if ( message.properties hasPath Context.TolerancePath ) message.properties.getDouble( Context.TolerancePath ) else 3.0
-    }
-    override def recent: RecentHistory = message.recent
     override def data: Seq[DoublePoint] = message.payload.source.points
+    override def recent: RecentHistory = message.recent
+    override def tolerance: Double = {
+      import AlgorithmContext.TolerancePath
+      if ( message.properties hasPath TolerancePath ) message.properties.getDouble( TolerancePath ) else 3.0
+    }
   }
 
 
@@ -404,7 +401,9 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
     }
 
     // -- algorithm functional elements --
-    val algorithmContext: KOp[DetectUsing, Context] = kleisli[TryV, DetectUsing, Context] { module.makeContext }
+    val algorithmContext: KOp[DetectUsing, Context] = kleisli[TryV, DetectUsing, Context] { message =>
+      module.makeContext( message, Option(state) )
+    }
 
     def findOutliers: KOp[Context, (Outliers, Context)] = {
       for {
