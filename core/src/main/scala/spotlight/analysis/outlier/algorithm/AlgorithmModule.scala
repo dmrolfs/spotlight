@@ -364,12 +364,6 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
         log.debug( "RECEIVE ADAANCED - TEST:[{}]: Algorithm[{}] HANDLING Advanced msg: [{}]", self.path, algorithm.label.name, adv )
         accept( adv )
       } //todo: what to do here persist?
-//
-//      case m => {
-//        log.info( "TEST-ACTIVE[{}]: working on Advanced...", self.path )
-//        log.info( "TEST: m = [{}]", m )
-//        log.info( "TEST: AdvancedType:[ {} ]\tAdvancedType(m)=[{}]", AdvancedType.toString, AdvancedType.unapply(m) )
-//      }
     }
 
     val stateReceiver: Receive = {
@@ -425,61 +419,64 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
 
     private def collectOutlierPoints( points: Seq[DoublePoint] ): KOp[Context, Seq[AlgorithmProtocol.Advanced]] = {
       kleisli[TryV, Context, Seq[AlgorithmProtocol.Advanced]] { implicit analysisContext =>
-        val currentTimestamps = points.map{ _.timestamp }.toSet
-
-        @inline def isCurrentPoint( pt: PointT ): Boolean = currentTimestamps contains pt.timestamp
-
         @tailrec def loop(
-          pts: List[DoublePoint],
-          acc: Seq[AlgorithmProtocol.Advanced]
+          points: List[DoublePoint],
+          accumlated: TryV[Seq[AlgorithmProtocol.Advanced]]
         )(
-          implicit loopState: State
-        ): Seq[AlgorithmProtocol.Advanced] = {
-          pts match {
-            case Nil => acc
+          implicit loopState: TryV[State]
+        ): TryV[Seq[AlgorithmProtocol.Advanced]] = {
+          points match {
+            case Nil => accumlated
 
             case pt :: tail => {
-              val ts = pt.timestamp
-              val (isOutlier, threshold) = algorithm step pt
-              val (updatedAcc, updatedState) = {
-                analysisContext.data
-                .find { _.timestamp == pt.timestamp }
-                .map { original =>
-                  log.debug( "PT:[{}] ORIGINAL:[{}]", (pt._1.toLong, pt._2), (original._1.toLong, original._2) )
-                  val event = AlgorithmProtocol.Advanced(
-                    sourceId = aggregateId,
-                    point = original.toDataPoint,
-                    isOutlier = isOutlier,
-                    threshold = threshold
-                  )
+              val updatedAccAndState: TryV[(Seq[AlgorithmProtocol.Advanced], State)] = {
+                for {
+                  acc <- accumlated
+                  ls <- loopState
+                  ot <- \/ fromTryCatchNonFatal {
+                    implicit val state = ls
+                    algorithm step pt
+                  }
+                  (isOutlier, threshold) = ot
+                } yield {
+                  analysisContext.data
+                  .find { _.timestamp == pt.timestamp }
+                  .map { original =>
+                    log.debug( "PT:[{}] ORIGINAL:[{}]", (pt._1.toLong, pt._2), (original._1.toLong, original._2) )
+                    val event = AlgorithmProtocol.Advanced(
+                      sourceId = aggregateId,
+                      point = original.toDataPoint,
+                      isOutlier = isOutlier,
+                      threshold = threshold
+                    )
 
-                  log.debug(
-                    "LOOP-{}[{}]: AnalysisState.Advanced:[{}]",
-                    if ( isOutlier ) "HIT" else "MISS",
-                    (pt._1.toLong, pt._2),
-                    event
-                  )
+                    log.debug(
+                      "LOOP-{}[{}]: AnalysisState.Advanced:[{}]",
+                      if ( isOutlier ) "HIT" else "MISS",
+                      (pt._1.toLong, pt._2),
+                      event
+                    )
 
-                  ( acc :+ event, acceptance(event, loopState) )
-                }
-                .getOrElse {
-                  log.debug( "NOT ORIGINAL PT:[{}]", (pt._1.toLong, pt._2) )
-                  ( acc, loopState )
+                    ( acc :+ event, acceptance(event, ls) )
+                  }
+                  .getOrElse {
+                    log.debug( "NOT ORIGINAL PT:[{}]", (pt._1.toLong, pt._2) )
+                    ( acc, ls )
+                  }
                 }
               }
 
-              loop( tail, updatedAcc )( updatedState )
+              val newAcc = updatedAccAndState map { _._1 }
+              val newState = updatedAccAndState map { _._2 }
+              loop( tail, newAcc )( newState )
             }
           }
         }
 
         val effState = Option( state ) getOrElse { analysisStateCompanion zero aggregateId }
-        val events = loop( points.toList, Seq.empty[AlgorithmProtocol.Advanced] )( effState )
-        persistAll( events.to[collection.immutable.Seq] ){ e =>
-          log.debug( "{} persisting Advanced:[{}]", aggregateId, e )
-          accept( e )
-        }
-        events.right
+        val events = loop( points.toList, Seq.empty[AlgorithmProtocol.Advanced].right )( effState.right )
+        events foreach { es => persistAll( es.to[collection.immutable.Seq] ){ accept } }
+        events
       }
     }
 

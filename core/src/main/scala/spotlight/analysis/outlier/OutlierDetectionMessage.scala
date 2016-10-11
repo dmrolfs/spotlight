@@ -93,6 +93,8 @@ final case class DetectUsing private[outlier](
   override def plan: OutlierPlan = payload.plan
   override def subscriber: ActorRef = payload.subscriber
   override def workIds: Set[WorkId] = payload.workIds
+
+  override def toString: String = s"DetectUsing(algorithm:[${algorithm}] payload:[${payload}] properties:[${properties}])"
 }
 
 
