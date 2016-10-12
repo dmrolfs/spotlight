@@ -1,7 +1,7 @@
 package spotlight.analysis.outlier.algorithm.skyline
 
 import scala.reflect.ClassTag
-import scalaz.{Validation, -\/, \/, \/-}
+import scalaz.{-\/, Validation, \/, \/-}
 import scalaz.syntax.either._
 import scalaz.syntax.validation._
 import shapeless.{Lens, lens}
@@ -10,6 +10,7 @@ import org.apache.commons.math3.ml.clustering.DoublePoint
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import org.apache.commons.lang3.ClassUtils
 import org.apache.commons.math3.distribution.TDistribution
+import peds.commons.log.Trace
 import peds.commons.{TryV, Valid}
 import spotlight.analysis.outlier.{DetectUsing, RecentHistory}
 import spotlight.analysis.outlier.algorithm.AlgorithmModule
@@ -115,13 +116,17 @@ object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfig
   override implicit def evState: ClassTag[State] = ClassTag( classOf[State] )
 
   object State extends AnalysisStateCompanion {
+    private val trace = Trace[State.type]
+
     override type Shape = DescriptiveStatistics
 
     override def zero( id: State#TID ): State = State( id, name = "", movingStatistics = makeStatistics() )
 
     def makeStatistics(): DescriptiveStatistics = new DescriptiveStatistics( RecentHistory.LastN )
 
-    override def updateShape(statistics: Shape, event: Advanced ): Shape = {
+    override def updateShape( statistics: Shape, event: Advanced ): Shape = trace.block( "State.updateShape" ) {
+      logger.debug( "TEST: statistics shape = [{}]", statistics )
+      logger.debug( "TEST: advanced event  = [{}]", event )
       val newStats = statistics.copy()
       newStats addValue event.point.value
       newStats

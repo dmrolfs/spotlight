@@ -56,11 +56,25 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
 
     type TestState = module.State
     type TestAdvanced = P.Advanced
-    type TestHistory = module.analysisStateCompanion.Shape
+    type TestShape = module.analysisStateCompanion.Shape
+    val shapeLens = module.analysisStateCompanion.shapeLens
     val thresholdLens = module.analysisStateCompanion.thresholdLens
+    val advancedLens = shapeLens ~ thresholdLens
 
-    def expectedUpdatedState( state: TestState, event: TestAdvanced ): TestState = {
-      thresholdLens.modify( state ){ tbs => tbs :+ event.threshold }
+    def expectedUpdatedState( state: TestState, event: TestAdvanced ): TestState = trace.block( s"expectedUpdatedState" ) {
+      logger.debug( "TEST: argument state=[{}]", state )
+      val result = advancedLens.modify( state ){ case (shape, thresholds) =>
+        logger.debug( "TEST: in advancedLens: BEFORE shape=[{}]", shape )
+        val newShape = module.analysisStateCompanion.updateShape( shape, event )
+        logger.debug( "TEST: in advancedLens: AFTER shape=[{}]", newShape )
+
+        (
+          newShape,
+          thresholds :+ event.threshold
+        )
+      }
+      logger.debug( "TEST: MODIFIED State Shape:[{}]", shapeLens get result )
+      result
     }
 
     import AlgorithmModule.AnalysisState
@@ -71,7 +85,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
         a <- actual
         e <- expected
       } {
-        logger.debug( "TEST: actualVsExpectedState:\n  Actual:[{}]\nExpected:[{}]", a, e )
+        logger.debug( "TEST: actualVsExpected STATE:\n  Actual:[{}]\nExpected:[{}]", a, e )
         a.id.id mustBe e.id.id
         a.name mustBe e.name
         a.algorithm.name mustBe e.algorithm.name
@@ -83,9 +97,12 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
       expected mustEqual actual
     }
 
-    def actualVsExpectedHistory( actual: TestHistory, expected: TestHistory ): Unit = {
-      actual mustEqual expected
-      expected mustEqual actual
+    implicit val shapeOrdering: Ordering[TestShape]
+
+    def actualVsExpectedShape( actual: TestShape, expected: TestShape )( implicit ordering: Ordering[TestShape] ): Unit = {
+      logger.debug( "TEST: actualVsExpected SHAPE:\n  Actual:[{}]\nExpected:[{}]", actual.toString, expected.toString )
+      assert( ordering.equiv(actual, expected) )
+      assert( ordering.equiv(expected, actual) )
     }
 
     val appliesToAll: OutlierPlan.AppliesTo = {
@@ -207,7 +224,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
 
   def bootstrapSuite(): Unit = {
     s"${defaultModule.algorithm.label.name} entity" should {
-      "have zero state before advance" taggedAs WIP in { f: Fixture =>
+      "have zero state before advance" in { f: Fixture =>
         import f._
 
         logger.debug( "aggregate = [{}]", aggregate )
@@ -240,21 +257,39 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
 
   def analysisStateSuite(): Unit = {
     s"${defaultModule.algorithm.label.name} state" should {
-      "advance shape" in { f: Fixture =>
+      "advance state" taggedAs WIP in { f: Fixture =>
         import f._
 
         val zero = module.analysisStateCompanion.zero( id )
         val pt = DataPoint( nowTimestamp, 3.14159 )
         val t = ThresholdBoundary( nowTimestamp, Some(1.1), Some(2.2), Some(3.3) )
         val adv = P.Advanced( id, pt, false, t )
-        val hlens = module.analysisStateCompanion.shapeLens
-        val zeroAdded = thresholdLens.modify( zero ){ _ :+ t }
-        val actualState = hlens.modify( zeroAdded ){ h => module.analysisStateCompanion.updateShape( h, adv ) }
-        val expectedState = expectedUpdatedState( zero, adv )
-        val zeroHistory = hlens.get( zero )
-        val actualHistory = module.analysisStateCompanion.updateShape( zeroHistory, adv )
-        actualVsExpectedState( Option(actualState), Option(expectedState) )
-        actualVsExpectedHistory( actualHistory, hlens.get(expectedState) )
+        val zeroWithThreshold = thresholdLens.modify( zero ){ _ :+ t }
+        val actual = shapeLens.modify( zeroWithThreshold ){ s => module.analysisStateCompanion.updateShape(s, adv) }
+        val expected = expectedUpdatedState( zero, adv )
+        logger.debug( "TEST: expectedState=[{}]", expected )
+        actualVsExpectedState( Option(actual), Option(expected) )
+      }
+
+      "advance shape" taggedAs WIP in { f: Fixture =>
+        import f._
+
+        val zero = module.analysisStateCompanion.zero( id )
+        logger.debug( "TEST: zero=[{}]", zero)
+        val pt = DataPoint( nowTimestamp, 3.14159 )
+        val t = ThresholdBoundary( nowTimestamp, Some(1.1), Some(2.2), Some(3.3) )
+        val adv = P.Advanced( id, pt, false, t )
+        val expected = advancedLens.modify( zero ){ case (shape, thresholds) =>
+          (
+            module.analysisStateCompanion.updateShape( shape, adv ),
+            thresholds :+ adv.threshold
+          )
+        }
+        logger.debug( "TEST: expectedState=[{}]", expected )
+
+        val zeroShape = shapeLens.get( zero )
+        val actualShape = module.analysisStateCompanion.updateShape( zeroShape, adv )
+        actualVsExpectedShape( actualShape, shapeLens get expected )
       }
     }
   }

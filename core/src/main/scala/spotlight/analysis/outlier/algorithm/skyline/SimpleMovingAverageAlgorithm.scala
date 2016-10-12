@@ -7,6 +7,7 @@ import org.apache.commons.math3.ml.clustering.DoublePoint
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import org.apache.commons.lang3.ClassUtils
 import peds.commons.TryV
+import peds.commons.log.Trace
 import spotlight.analysis.outlier.DetectUsing
 import spotlight.analysis.outlier.algorithm.{AlgorithmModule, AlgorithmProtocol}
 import spotlight.model.timeseries._
@@ -73,6 +74,7 @@ object SimpleMovingAverageAlgorithm extends AlgorithmModule with AlgorithmModule
   override implicit def evState: ClassTag[State] = ClassTag( classOf[State] )
 
   object State extends AnalysisStateCompanion {
+    private val trace = Trace[State.type]
     override def zero( id: State#TID ): State = State( id = id, name = "" )
 
     case class Shape( movingStatistics: DescriptiveStatistics ) extends Equals {
@@ -109,10 +111,13 @@ object SimpleMovingAverageAlgorithm extends AlgorithmModule with AlgorithmModule
       def empty: Shape = Shape( new DescriptiveStatistics( AlgorithmModule.ApproximateDayWindow ) )
     }
 
-    override def updateShape(h: Shape, event: AlgorithmProtocol.Advanced ): Shape = {
+    override def updateShape( h: Shape, event: AlgorithmProtocol.Advanced ): Shape = trace.block( "updateShape" ) {
+      logger.debug( "TEST: history shape = [{}]", h )
+      logger.debug( "TEST: advanced event  = [{}]", event )
       Shape.statsLens.modify( h ){ stats =>
-        val ms = stats.copy
+        val ms = stats.copy()
         ms addValue event.point.value
+        logger.debug( "TEST:" )
         ms
       }
     }

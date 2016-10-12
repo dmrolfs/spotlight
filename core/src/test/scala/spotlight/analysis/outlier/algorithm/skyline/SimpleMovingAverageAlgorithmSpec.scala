@@ -26,6 +26,18 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmModuleSpec[SimpleMovingA
     val testScope: module.TID = identifying tag OutlierPlan.Scope(plan = "TestPlan", topic = "TestTopic")
     override def nextId(): module.TID = testScope
 
+
+    override implicit val shapeOrdering: Ordering[TestShape] = new Ordering[TestShape] {
+      override def compare( lhs: TestShape, rhs: TestShape ): Int = {
+        if ( lhs == rhs ) 0
+        else {
+          val l = lhs.asInstanceOf[SimpleMovingAverageAlgorithm.State.Shape]
+          val r = rhs.asInstanceOf[SimpleMovingAverageAlgorithm.State.Shape]
+          ( l.movingStatistics.getN - r.movingStatistics.getN ).toInt
+        }
+      }
+    }
+
     override def expectedUpdatedState( state: module.State, event: P.Advanced ): module.State = {
       val historicalStatsLens = module.State.Shape.statsLens compose module.State.shapeLens
       val s = super.expectedUpdatedState( state, event ).asInstanceOf[SimpleMovingAverageAlgorithm.State]
