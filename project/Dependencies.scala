@@ -139,6 +139,7 @@ object Dependencies {
 
   object quality {
     val scalatest = "org.scalatest" %% "scalatest" % "3.0.0"
+    val scalazMatchers = "org.typelevel" %% "scalaz-scalatest" % "1.1.0"
 
     object mockito {
       val version = "1.10.19"
@@ -165,6 +166,7 @@ object Dependencies {
   ) ++ Scope.test(
     akka.testkit,
     quality.scalatest,
+    quality.scalazMatchers,
     quality.mockito.core
   )
 

@@ -257,7 +257,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
 
   def analysisStateSuite(): Unit = {
     s"${defaultModule.algorithm.label.name} state" should {
-      "advance state" taggedAs WIP in { f: Fixture =>
+      "advance state" in { f: Fixture =>
         import f._
 
         val zero = module.analysisStateCompanion.zero( id )
@@ -271,7 +271,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
         actualVsExpectedState( Option(actual), Option(expected) )
       }
 
-      "advance shape" taggedAs WIP in { f: Fixture =>
+      "advance shape" in { f: Fixture =>
         import f._
 
         val zero = module.analysisStateCompanion.zero( id )

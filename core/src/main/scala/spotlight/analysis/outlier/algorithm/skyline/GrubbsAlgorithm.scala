@@ -22,6 +22,8 @@ import spotlight.model.timeseries._
   * Created by rolfsd on 10/5/16.
   */
 object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfiguration { outer =>
+  private val trace = Trace[GrubbsAlgorithm.type]
+
   override lazy val algorithm: Algorithm = new Algorithm {
     override val label: Symbol = 'Grubbs
 
@@ -29,65 +31,68 @@ object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfig
       algorithmContext.tailAverage()( algorithmContext.data ).right
     }
 
-    override def step( point: PointT )( implicit state: State, algorithmContext: Context ): (Boolean, ThresholdBoundary) = {
+    override def step( point: PointT )( implicit state: State, algorithmContext: Context ): (Boolean, ThresholdBoundary) = trace.block( s"step($point)" ) {
       // original version set expected at context stats mean and stddev
-      val threshold = ThresholdBoundary.fromExpectedAndDistance(
-        timestamp = point.timestamp.toLong,
-        expected = state.movingStatistics.getMean,
-        distance = algorithmContext.tolerance * algorithmContext.grubbsScore * state.movingStatistics.getStandardDeviation
-      )
+      val result = {
+        logger.debug( "TEST: state=[{}]", state )
+        Option( state )
+        .map { s =>
+          val r1 = s
+          .grubbsScore
 
-      ( threshold isOutlier point.value, threshold )
+          logger.debug( "TEST: step r1=[{}]", r1)
+
+            r1
+          .map { grubbs =>
+            val threshold = ThresholdBoundary.fromExpectedAndDistance(
+              timestamp = point.timestamp.toLong,
+              expected = state.movingStatistics.getMean,
+              distance = algorithmContext.tolerance * grubbs * state.movingStatistics.getStandardDeviation
+            )
+
+            ( threshold isOutlier point.value, threshold )
+          }
+        }
+      }
+
+      result match {
+        case Some( \/-(r) ) => r
+
+        case None => {
+          import spotlight.model.timeseries._
+          logger.debug( s"skipping point[{}] until history is established", point)
+          ( false, ThresholdBoundary empty point.timestamp.toLong )
+        }
+
+        case Some( -\/( ex: AlgorithmModule.InsufficientDataSize ) ) => {
+          import spotlight.model.timeseries._
+          logger.debug( "skipping point[{}]: {}", point, ex.getMessage )
+          ( false, ThresholdBoundary empty point.timestamp.toLong )
+        }
+
+        case Some( -\/(ex) ) => {
+          logger.warn( "issue in step calculation", ex )
+          throw ex
+        }
+      }
     }
-
   }
 
 
-  case class Context( override val message: DetectUsing, grubbsScore: Double ) extends CommonContext( message )
+  case class Context( override val message: DetectUsing, alpha: Double ) extends CommonContext( message )
 
   object GrubbsContext {
     val AlphaPath = "alpha"
-    def checkAlpha( conf: Config ): Valid[Double] = {
+    def getAlpha( conf: Config ): TryV[Double] = trace.block( "getAlpha" ) {
+      logger.debug( "configuration:[{}]", conf )
+      logger.debug( "configuration[{}] getDouble = [{}]", AlphaPath, conf.getDouble(AlphaPath).toString )
       val alpha = if ( conf hasPath AlphaPath ) conf getDouble AlphaPath else 0.05
-      alpha.successNel
-    }
-
-    def criticalValueFor( alpha: Double, size: Long ): Valid[Double] = {
-      Validation
-      .fromTryCatchNonFatal {
-        val degreesOfFreedom = math.max( size - 2, 1 ) //todo: not a great idea but for now avoiding error if size <= 2
-        new TDistribution( degreesOfFreedom ).inverseCumulativeProbability( alpha / (2.0 * size) )
-      }
-      .toValidationNel
-    }
-
-    def grubbsScore( critical: Double, statistics: DescriptiveStatistics ): Double = {
-      val size = statistics.getN
-      val mean = statistics.getMean
-      val stddev = statistics.getStandardDeviation
-      logger.debug( "Grubbs movingStatistics: N:[{}] mean:[{}] stddev:[{}]", size.toString, mean.toString, stddev.toString )
-
-      val thresholdSquared = math.pow( critical, 2 )
-      logger.debug( "Grubbs threshold^2:[{}]", thresholdSquared )
-      ((size - 1) / math.sqrt(size)) * math.sqrt( thresholdSquared / (size - 2 + thresholdSquared) )
+      alpha.right
     }
   }
 
   override def makeContext( message: DetectUsing, state: Option[State] ): TryV[Context] = {
-    val statistics = state map { _.movingStatistics } getOrElse State.makeStatistics()
-    val context = {
-      for {
-        alpha <- GrubbsContext.checkAlpha( message.properties ).disjunction
-        critical <- GrubbsContext.criticalValueFor( alpha, statistics.getN ).disjunction
-      } yield {
-        Context( message, grubbsScore = GrubbsContext.grubbsScore(critical, statistics) )
-      }
-    }
-
-    context.leftMap { exs =>
-      exs foreach { ex => logger.error( "failed to make Grubbs algorithm context", ex ) }
-      exs.head
-    }
+    GrubbsContext.getAlpha( message.properties ) map { Context( message, _ ) }
   }
 
 
@@ -102,11 +107,48 @@ object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfig
     override def algorithm: Symbol = outer.algorithm.label
     override def addThreshold( threshold: ThresholdBoundary ): State = this.copy( thresholds = this.thresholds :+ threshold )
 
+    def grubbsScore( implicit context: Context ): TryV[Double] = trace.block( "grubbsScore" ) {
+      for {
+        size <- checkSize( movingStatistics.getN )
+        critical <- criticalValue( context.alpha )
+      } yield {
+        val mean = movingStatistics.getMean
+        val sd = movingStatistics.getStandardDeviation
+        logger.debug( "Grubbs movingStatistics: N:[{}] mean:[{}] stddev:[{}]", size.toString, mean.toString, sd.toString )
+
+        val thresholdSquared = math.pow( critical, 2 )
+        logger.debug( "Grubbs threshold^2:[{}]", thresholdSquared )
+        ((size - 1) / math.sqrt(size)) * math.sqrt( thresholdSquared / (size - 2 + thresholdSquared) )
+      }
+    }
+
+    def criticalValue( alpha: Double ): TryV[Double] = trace.block( s"criticalValue($alpha)" ){
+      def calculateCritical( size: Long ): TryV[Double] = trace.briefBlock( s"calculateCritical($size)" ){
+        \/ fromTryCatchNonFatal {
+          val degreesOfFreedom = math.max( size - 2, 1 ) //todo: not a great idea but for now avoiding error if size <= 2
+          new TDistribution( degreesOfFreedom ).inverseCumulativeProbability( alpha / (2.0 * size) )
+        }
+      }
+
+      for {
+        size <- checkSize( movingStatistics.getN )
+        critical <- calculateCritical( size )
+      } yield critical
+    }
+
+
+    private def checkSize( size: Long ): TryV[Long] = trace.briefBlock( s"checkSize($size)" ){
+      size match {
+        case s if s < 3 => AlgorithmModule.InsufficientDataSize( algorithm, s, 3 ).left
+        case s => s.right
+      }
+    }
+
     override def canEqual( that: Any ): Boolean = that.isInstanceOf[State]
     override def toString: String = {
       s"${ClassUtils.getAbbreviatedName(getClass, 15)}( " +
         s"id:[${id}]; "+
-        s"movingStatistics:[mean:${movingStatistics.getMean} stddev:${movingStatistics.getStandardDeviation}]; " +
+        s"movingStatistics:[N:${movingStatistics.getN} mean:${movingStatistics.getMean} stddev:${movingStatistics.getStandardDeviation}]; " +
         s"""thresholds:[${thresholds.mkString(",")}]""" +
         " )"
     }
@@ -120,9 +162,9 @@ object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfig
 
     override type Shape = DescriptiveStatistics
 
-    override def zero( id: State#TID ): State = State( id, name = "", movingStatistics = makeStatistics() )
+    override def zero( id: State#TID ): State = State( id, name = "", movingStatistics = makeShape() )
 
-    def makeStatistics(): DescriptiveStatistics = new DescriptiveStatistics( RecentHistory.LastN )
+    def makeShape(): Shape = new DescriptiveStatistics( RecentHistory.LastN )
 
     override def updateShape( statistics: Shape, event: Advanced ): Shape = trace.block( "State.updateShape" ) {
       logger.debug( "TEST: statistics shape = [{}]", statistics )

@@ -52,7 +52,7 @@ object SimpleMovingAverageAlgorithm extends AlgorithmModule with AlgorithmModule
   case class State(
     override val id: TID,
     override val name: String,
-    history: State.Shape = State.Shape.empty,
+    history: State.Shape = State.makeShape(),
     override val thresholds: Seq[ThresholdBoundary] = Seq.empty[ThresholdBoundary]
   ) extends AlgorithmModule.AnalysisState with AlgorithmModule.StrictSelf[State] {
     override type Self = State
@@ -106,9 +106,10 @@ object SimpleMovingAverageAlgorithm extends AlgorithmModule with AlgorithmModule
       }
     }
 
+    def makeShape(): Shape = Shape( new DescriptiveStatistics( AlgorithmModule.ApproximateDayWindow ) )
+
     object Shape {
       def statsLens: Lens[Shape, DescriptiveStatistics] = lens[Shape] >> 'movingStatistics
-      def empty: Shape = Shape( new DescriptiveStatistics( AlgorithmModule.ApproximateDayWindow ) )
     }
 
     override def updateShape( h: Shape, event: AlgorithmProtocol.Advanced ): Shape = trace.block( "updateShape" ) {

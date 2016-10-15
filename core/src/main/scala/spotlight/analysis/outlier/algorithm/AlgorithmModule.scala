@@ -129,6 +129,15 @@ object AlgorithmModule {
   trait ModuleConfiguration {
     def maximumNrClusterNodes: Int = 6
   }
+
+
+  case class InsufficientDataSize (
+    algorithm: Symbol,
+    size: Long,
+    required: Long
+  ) extends IllegalArgumentException(
+    s"${size} data points is insufficient to perform ${algorithm.name} test, which requires at least ${required} points"
+  )
 }
 
 abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmModule.ModuleConfiguration =>
@@ -277,6 +286,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
       * Shape represents the culminated value of applying the algorithm over the time series data for this ID.
       */
     type Shape
+//todo: require algo to define?    def zeroShape: Shape
     def updateShape( shape: Shape, event: AlgorithmProtocol.Advanced ): Shape
     def shapeLens: Lens[State, Shape]
     def thresholdLens: Lens[State, Seq[ThresholdBoundary]]
@@ -335,6 +345,25 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
             log.debug( "[{}] sending detect result to aggregator[{}]: [{}]", workId, aggregator.path.name, r )
             algorithmTimer.update( System.currentTimeMillis() - start, scala.concurrent.duration.MILLISECONDS )
             aggregator !+ r
+          }
+
+          case -\/( ex: AlgorithmModule.InsufficientDataSize ) => {
+            log.error(
+              ex,
+              "[{}] skipped [{}] analysis on [{}] @ [{}] due to insufficient data - no outliers marked for interval",
+              workId,
+              algo.name,
+              payload.plan.name + "][" + payload.topic,
+              payload.source.interval
+            )
+
+            // don't let aggregator time out just due to error in algorithm
+            aggregator !+ NoOutliers(
+              algorithms = Set(algorithm.label),
+              source = payload.source,
+              plan = payload.plan,
+              thresholdBoundaries = Map.empty[Symbol, Seq[ThresholdBoundary]]
+            )
           }
 
           case -\/( ex ) => {

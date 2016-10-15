@@ -102,7 +102,7 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmModuleSpec[SimpleMovingA
       logger.info( "************** TEST NOW ************" )
       val algorithm = module.algorithm
       implicit val testContext = mock[module.Context]
-      val testHistory: module.State.Shape = module.State.Shape.empty
+      val testHistory: module.State.Shape = module.State.makeShape()
 
       implicit val testState = mock[module.State]
       when( testState.history ).thenReturn( testHistory )
