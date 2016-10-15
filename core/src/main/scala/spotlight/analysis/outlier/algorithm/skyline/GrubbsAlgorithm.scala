@@ -18,6 +18,9 @@ import spotlight.model.timeseries._
 
 
 /**
+  * Grubbs' test is used to detect a single outlier in a univariate data set that follows an approximately normal distribution.
+  * This implementation applies Grubbs to each point individually considering its prior neighbors.
+  *
   * Created by rolfsd on 10/5/16.
   */
 object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfiguration { outer =>
@@ -132,9 +135,15 @@ object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfig
     }
 
 
+    /**
+      * The test should not be used for sample sizes of six or fewer since it frequently tags most of the points as outliers.
+      * @param size
+      * @return
+      */
     private def checkSize( size: Long ): TryV[Long] = {
+      val MinimumDataPoints = 7
       size match {
-        case s if s < 3 => AlgorithmModule.InsufficientDataSize( algorithm, s, 3 ).left
+        case s if s < MinimumDataPoints => AlgorithmModule.InsufficientDataSize( algorithm, s, MinimumDataPoints ).left
         case s => s.right
       }
     }

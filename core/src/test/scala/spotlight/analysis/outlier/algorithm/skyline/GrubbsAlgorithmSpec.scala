@@ -182,14 +182,12 @@ with DisjunctionValues {
         GrubbsAlgorithm.State( null, null, new DescriptiveStatistics(d take size) )
       }
 
-      val d1 = Array( 199.31, 199.53, 200.19, 200.82, 201.92, 201.95, 202.18, 245.57 )
+      for ( i <- 0 until 6 ) caller( i ).grubbsScore.isLeft mustBe true
+      caller( 7 ).grubbsScore.value mustBe ( 2.0199684174 +- 0.00001 )
       caller( 8 ).grubbsScore.value mustBe ( 2.1266465543 +- 0.00001 )
-
-      val d2 = Array( 199.31, 199.53, 200.19 )
-      caller( 3 ).grubbsScore.value mustBe ( 1.1543048509 +- 0.00001 )
     }
 
-    "step to find anomalies from flat signal" in { f: Fixture =>
+    "step to find anomalies from flat signal" taggedAs WIP in { f: Fixture =>
       import f._
 
       val algorithm = module.algorithm
@@ -200,17 +198,20 @@ with DisjunctionValues {
       implicit val testState = stateFor( Seq() )
       val testShape = testState.movingStatistics
 
-      def advanceWith( v: Double ): Unit = testShape addValue v
+      def advanceWith( v: Double ): Unit = {
+        logger.debug( "Advancing with [{}]", v.toString )
+        testShape addValue v
+      }
 
       val data = Seq[Double]( 1, 1, 1, 1, 1, 1, 1, 1, 1, 1000 )
       val expected = Seq(
         Expected( false, None, None, None ),
         Expected( false, None, None, None ),
         Expected( false, None, None, None ),
-        Expected( false, Some(1.0), Some(1.0), Some(1.0) ),
-        Expected( false, Some(1.0), Some(1.0), Some(1.0) ),
-        Expected( false, Some(1.0), Some(1.0), Some(1.0) ),
-        Expected( false, Some(1.0), Some(1.0), Some(1.0) ),
+        Expected( false, None, None, None ),
+        Expected( false, None, None, None ),
+        Expected( false, None, None, None ),
+        Expected( false, None, None, None ),
         Expected( false, Some(1.0), Some(1.0), Some(1.0) ),
         Expected( false, Some(1.0), Some(1.0), Some(1.0) ),
         Expected( true, Some(1.0), Some(1.0), Some(1.0) )
@@ -229,7 +230,7 @@ with DisjunctionValues {
       }
     }
 
-    "find outliers across two batches" taggedAs WIP in { f: Fixture =>
+    "find outliers across two batches" in { f: Fixture =>
       import f._
 
       val algorithm = module.algorithm
