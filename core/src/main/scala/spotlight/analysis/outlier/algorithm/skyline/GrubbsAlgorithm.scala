@@ -1,9 +1,8 @@
 package spotlight.analysis.outlier.algorithm.skyline
 
 import scala.reflect.ClassTag
-import scalaz.{-\/, Validation, \/, \/-}
+import scalaz.{-\/, \/, \/-}
 import scalaz.syntax.either._
-import scalaz.syntax.validation._
 import shapeless.{Lens, lens}
 import com.typesafe.config.Config
 import org.apache.commons.math3.ml.clustering.DoublePoint
@@ -11,7 +10,7 @@ import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import org.apache.commons.lang3.ClassUtils
 import org.apache.commons.math3.distribution.TDistribution
 import peds.commons.log.Trace
-import peds.commons.{TryV, Valid}
+import peds.commons.TryV
 import spotlight.analysis.outlier.{DetectUsing, RecentHistory}
 import spotlight.analysis.outlier.algorithm.AlgorithmModule
 import spotlight.analysis.outlier.algorithm.AlgorithmProtocol.Advanced
@@ -37,12 +36,8 @@ object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfig
         logger.debug( "TEST: state=[{}]", state )
         Option( state )
         .map { s =>
-          val r1 = s
+          s
           .grubbsScore
-
-          logger.debug( "TEST: step r1=[{}]", r1)
-
-            r1
           .map { grubbs =>
             val threshold = ThresholdBoundary.fromExpectedAndDistance(
               timestamp = point.timestamp.toLong,
@@ -83,7 +78,7 @@ object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfig
 
   object GrubbsContext {
     val AlphaPath = "alpha"
-    def getAlpha( conf: Config ): TryV[Double] = trace.block( "getAlpha" ) {
+    def getAlpha( conf: Config ): TryV[Double] = {
       logger.debug( "configuration:[{}]", conf )
       logger.debug( "configuration[{}] getDouble = [{}]", AlphaPath, conf.getDouble(AlphaPath).toString )
       val alpha = if ( conf hasPath AlphaPath ) conf getDouble AlphaPath else 0.05
@@ -122,8 +117,8 @@ object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfig
       }
     }
 
-    def criticalValue( alpha: Double ): TryV[Double] = trace.block( s"criticalValue($alpha)" ){
-      def calculateCritical( size: Long ): TryV[Double] = trace.briefBlock( s"calculateCritical($size)" ){
+    def criticalValue( alpha: Double ): TryV[Double] = trace.briefBlock( s"criticalValue($alpha)" ) {
+      def calculateCritical( size: Long ): TryV[Double] = {
         \/ fromTryCatchNonFatal {
           val degreesOfFreedom = math.max( size - 2, 1 ) //todo: not a great idea but for now avoiding error if size <= 2
           new TDistribution( degreesOfFreedom ).inverseCumulativeProbability( alpha / (2.0 * size) )
@@ -137,7 +132,7 @@ object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfig
     }
 
 
-    private def checkSize( size: Long ): TryV[Long] = trace.briefBlock( s"checkSize($size)" ){
+    private def checkSize( size: Long ): TryV[Long] = {
       size match {
         case s if s < 3 => AlgorithmModule.InsufficientDataSize( algorithm, s, 3 ).left
         case s => s.right

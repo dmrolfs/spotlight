@@ -55,10 +55,6 @@ with DisjunctionValues {
     tolerance: Double,
     lastPoints: Seq[DataPoint]
   ): Seq[ThresholdBoundary] = {
-//    val stats = ( lastPoints ++ points ).foldLeft( new DescriptiveStatistics(RecentHistory.LastN) ){ (acc, pt) =>
-//      acc addValue pt.value
-//      acc
-//    }
     implicit val context = mock[GrubbsAlgorithm.Context]
     when( context.alpha ) thenReturn 0.05
 
@@ -79,8 +75,8 @@ with DisjunctionValues {
             expected = mean,
             distance = math.abs( tolerance * score * stddev )
           )
-          logger
-          .debug( "EXPECTED for point:[{}] Control [{}] = [{}]", (p.timestamp.getMillis, p.value), acc.size.toString, control )
+
+          logger.debug( "EXPECTED for point:[{}] Control [{}] = [{}]", (p.timestamp.getMillis, p.value), acc.size.toString, control )
           loop( tail, history :+ p.value, acc :+ control )
         }
       }
@@ -153,20 +149,17 @@ with DisjunctionValues {
               sttdev <- if ( stats.getStandardDeviation.isNaN ) None else Some( stats.getStandardDeviation )
               score <- state.grubbsScore.toOption
             } yield {
-              logger.debug( "Grubbs: N:[{}] score:[{}]", stats.getN.toString, score.toString )
               val height = math.abs( context.tolerance * score * sttdev )
-              logger.debug( "Grubbs[{}]: height:[{}] tol:[{}] score:[{}] sttdev:[{}]", stats.getN.toString, height.toString, context.tolerance.toString, score.toString, sttdev.toString )
               ( mean - height, ( mean, mean + height ) )
             }
 
             import scalaz.std.option._
             Unzip[Option].unzip3( threshold )
           }
-          logger.debug( "Grubbs[{}]: floor:[{}] expected:[{}] ceiling:[{}]", stats.getN.toString, floor, expected, ceiling )
 
           stats addValue v
           val e = Expected( isOutlier = o, floor = floor, expected = expected, ceiling = ceiling )
-          logger.debug( "Grubbs[{}]: expected:[{}]", (data.size - t.size - 1).toString, e )
+          logger.debug( "Grubbs[{}]: expected:[{}]", stats.getN.toString, e )
 
           loop( t, acc :+ e )
         }
@@ -199,7 +192,6 @@ with DisjunctionValues {
     "step to find anomalies from flat signal" in { f: Fixture =>
       import f._
 
-      logger.info( "************** TEST NOW ************" )
       val algorithm = module.algorithm
       implicit val testContext = mock[module.Context]
       when( testContext.alpha ) thenReturn 0.05
