@@ -58,20 +58,22 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
     type TestAdvanced = P.Advanced
     type TestShape = module.analysisStateCompanion.Shape
     val shapeLens = module.analysisStateCompanion.shapeLens
-    val thresholdLens = module.analysisStateCompanion.thresholdLens
-    val advancedLens = shapeLens ~ thresholdLens
+//    val thresholdLens = module.analysisStateCompanion.thresholdLens
+//    val advancedLens = shapeLens ~ thresholdLens
+    val advancedLens = shapeLens
 
     def expectedUpdatedState( state: TestState, event: TestAdvanced ): TestState = trace.block( s"expectedUpdatedState" ) {
       logger.debug( "TEST: argument state=[{}]", state )
-      val result = advancedLens.modify( state ){ case (shape, thresholds) =>
+      val result = advancedLens.modify( state ){ case shape =>
         logger.debug( "TEST: in advancedLens: BEFORE shape=[{}]", shape )
         val newShape = module.analysisStateCompanion.updateShape( shape, event )
         logger.debug( "TEST: in advancedLens: AFTER shape=[{}]", newShape )
 
-        (
-          newShape,
-          thresholds :+ event.threshold
-        )
+        newShape
+//        (
+//          newShape,
+//          thresholds :+ event.threshold
+//        )
       }
       logger.debug( "TEST: MODIFIED State Shape:[{}]", shapeLens get result )
       result
@@ -89,7 +91,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
         a.id.id mustBe e.id.id
         a.name mustBe e.name
         a.algorithm.name mustBe e.algorithm.name
-        a.thresholds mustBe e.thresholds
+//        a.thresholds mustBe e.thresholds
         a.## mustBe e.##
       }
 
@@ -264,7 +266,8 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
         val pt = DataPoint( nowTimestamp, 3.14159 )
         val t = ThresholdBoundary( nowTimestamp, Some(1.1), Some(2.2), Some(3.3) )
         val adv = P.Advanced( id, pt, false, t )
-        val zeroWithThreshold = thresholdLens.modify( zero ){ _ :+ t }
+//        val zeroWithThreshold = thresholdLens.modify( zero ){ _ :+ t }
+        val zeroWithThreshold = zero
         val actual = shapeLens.modify( zeroWithThreshold ){ s => module.analysisStateCompanion.updateShape(s, adv) }
         val expected = expectedUpdatedState( zero, adv )
         logger.debug( "TEST: expectedState=[{}]", expected )
@@ -279,11 +282,12 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
         val pt = DataPoint( nowTimestamp, 3.14159 )
         val t = ThresholdBoundary( nowTimestamp, Some(1.1), Some(2.2), Some(3.3) )
         val adv = P.Advanced( id, pt, false, t )
-        val expected = advancedLens.modify( zero ){ case (shape, thresholds) =>
-          (
-            module.analysisStateCompanion.updateShape( shape, adv ),
-            thresholds :+ adv.threshold
-          )
+        val expected = advancedLens.modify( zero ){ case shape =>
+//          (
+//            module.analysisStateCompanion.updateShape( shape, adv ),
+//            thresholds :+ adv.threshold
+//          )
+          module.analysisStateCompanion.updateShape( shape, adv )
         }
         logger.debug( "TEST: expectedState=[{}]", expected )
 

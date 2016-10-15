@@ -52,20 +52,20 @@ object SimpleMovingAverageAlgorithm extends AlgorithmModule with AlgorithmModule
   case class State(
     override val id: TID,
     override val name: String,
-    history: State.Shape = State.makeShape(),
-    override val thresholds: Seq[ThresholdBoundary] = Seq.empty[ThresholdBoundary]
+    history: State.Shape = State.makeShape() //,
+//    override val thresholds: Seq[ThresholdBoundary] = Seq.empty[ThresholdBoundary]
   ) extends AlgorithmModule.AnalysisState with AlgorithmModule.StrictSelf[State] {
     override type Self = State
 
     override def algorithm: Symbol = outer.algorithm.label
 
     override def canEqual( that: Any ): Boolean = that.isInstanceOf[State]
-    override def addThreshold( threshold: ThresholdBoundary ): Self = copy( thresholds = thresholds :+ threshold )
+//    override def addThreshold( threshold: ThresholdBoundary ): Self = copy( thresholds = thresholds :+ threshold )
     override def toString: String = {
       s"${ClassUtils.getAbbreviatedName(getClass, 15)}( " +
         s"id:[${id}]; "+
         s"shape:[${history}]; "+
-        s"""thresholds:[${thresholds.mkString(",")}]""" +
+//        s"""thresholds:[${thresholds.mkString(",")}]""" +
       " )"
     }
   }
@@ -124,6 +124,6 @@ object SimpleMovingAverageAlgorithm extends AlgorithmModule with AlgorithmModule
     }
 
     override def shapeLens: Lens[State, Shape] = lens[State] >> 'history
-    override def thresholdLens: Lens[State, Seq[ThresholdBoundary]] = lens[State] >> 'thresholds
+//    override def thresholdLens: Lens[State, Seq[ThresholdBoundary]] = lens[State] >> 'thresholds
   }
 }

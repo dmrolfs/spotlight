@@ -78,8 +78,8 @@ object AlgorithmModule {
     def algorithm: Symbol
     def topic: Topic = scope.topic
 
-    def thresholds: Seq[ThresholdBoundary]
-    def addThreshold( threshold: ThresholdBoundary ): Self
+//    def thresholds: Seq[ThresholdBoundary]
+//    def addThreshold( threshold: ThresholdBoundary ): Self
 
     override def hashCode: Int = {
       41 * (
@@ -289,7 +289,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
 //todo: require algo to define?    def zeroShape: Shape
     def updateShape( shape: Shape, event: AlgorithmProtocol.Advanced ): Shape
     def shapeLens: Lens[State, Shape]
-    def thresholdLens: Lens[State, Seq[ThresholdBoundary]]
+//    def thresholdLens: Lens[State, Seq[ThresholdBoundary]]
   }
 
 
@@ -315,8 +315,9 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
 
     override var state: State = _
 
-    import analysisStateCompanion.{ shapeLens, thresholdLens, updateShape }
-    val advanceLens: Lens[State, (analysisStateCompanion.Shape, Seq[ThresholdBoundary])] = shapeLens ~ thresholdLens
+    import analysisStateCompanion.{ shapeLens, /*thresholdLens,*/ updateShape }
+//    val advanceLens: Lens[State, (analysisStateCompanion.Shape, Seq[ThresholdBoundary])] = shapeLens ~ thresholdLens
+    val advanceLens: Lens[State, analysisStateCompanion.Shape] = shapeLens
 
 
     override val acceptance: Acceptance = {
@@ -326,7 +327,8 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
           log.debug( "AlgorithmModule[{}]: processed first data. creating initial state", self.path )
           analysisStateCompanion zero aggregateId
         }
-        val result = advanceLens.modify( currentState ){ case (h, ts) => (updateShape( h, event ), ts :+ event.threshold ) }
+//        val result = advanceLens.modify( currentState ){ case (h, ts) => (updateShape( h, event ), ts :+ event.threshold ) }
+        val result = advanceLens.modify( currentState ){ case h  => updateShape( h, event ) }
         log.debug( "TEST:[{}]: resultingState=[{}] aggregateId:[{}]", self.path, result, aggregateId )
         result
       }

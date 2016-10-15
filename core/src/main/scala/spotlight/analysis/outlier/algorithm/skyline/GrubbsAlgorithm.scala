@@ -94,13 +94,13 @@ object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfig
   case class State(
     override val id: TID,
     override val name: String,
-    movingStatistics: DescriptiveStatistics,
-    override val thresholds: Seq[ThresholdBoundary] = Seq.empty[ThresholdBoundary]
+    movingStatistics: DescriptiveStatistics //,
+//    override val thresholds: Seq[ThresholdBoundary] = Seq.empty[ThresholdBoundary]
   ) extends AlgorithmModule.AnalysisState with AlgorithmModule.StrictSelf[State] {
     override type Self = State
 
     override def algorithm: Symbol = outer.algorithm.label
-    override def addThreshold( threshold: ThresholdBoundary ): State = this.copy( thresholds = this.thresholds :+ threshold )
+//    override def addThreshold( threshold: ThresholdBoundary ): State = this.copy( thresholds = this.thresholds :+ threshold )
 
     def grubbsScore( implicit context: Context ): TryV[Double] = trace.block( "grubbsScore" ) {
       for {
@@ -144,7 +144,7 @@ object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfig
       s"${ClassUtils.getAbbreviatedName(getClass, 15)}( " +
         s"id:[${id}]; "+
         s"movingStatistics:[N:${movingStatistics.getN} mean:${movingStatistics.getMean} stddev:${movingStatistics.getStandardDeviation}]; " +
-        s"""thresholds:[${thresholds.mkString(",")}]""" +
+//        s"""thresholds:[${thresholds.mkString(",")}]""" +
         " )"
     }
   }
@@ -170,6 +170,6 @@ object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfig
     }
 
     override def shapeLens: Lens[State, Shape] = lens[State] >> 'movingStatistics
-    override def thresholdLens: Lens[State, Seq[ThresholdBoundary]] = lens[State] >> 'thresholds
+//    override def thresholdLens: Lens[State, Seq[ThresholdBoundary]] = lens[State] >> 'thresholds
   }
 }

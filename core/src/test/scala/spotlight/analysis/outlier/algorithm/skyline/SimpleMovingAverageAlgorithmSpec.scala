@@ -212,35 +212,35 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmModuleSpec[SimpleMovingA
           val sas = as.value.asInstanceOf[module.State]
           sas.id.id mustBe id.id
           sas.algorithm.name mustBe module.algorithm.label.name
-          sas.thresholds.size mustBe ( history.N )
+//          sas.thresholds.size mustBe ( history.N )
           logger.info( "{}: shape size = {}", hint, sas.history.movingStatistics.getN.toString )
           sas.history.movingStatistics.getN mustBe ( history.N )
           sas.history.movingStatistics.getMean mustBe history.mean(1)
 
-          sas.thresholds
-          .drop( sas.thresholds.size - expectedCalculations.size )
-          .zip( expectedCalculations )
-          .zipWithIndex
-          .foreach { case ( ((actual, expected), i) ) =>
-            logger.info( "{}: evaluating expectation: {}", hint, i.toString )
-            actual.floor.isDefined mustBe expected.floor.isDefined
-            for {
-              af <- actual.floor
-              ef <- expected.floor
-            } { af mustBe ef +- 0.000001 }
-
-            actual.expected.isDefined mustBe expected.expected.isDefined
-            for {
-              ae <- actual.expected
-              ee <- expected.expected
-            } { ae mustBe ee +- 0.000001 }
-
-            actual.ceiling.isDefined mustBe expected.ceiling.isDefined
-            for {
-              ac <- actual.ceiling
-              ec <- expected.ceiling
-            } { ac mustBe ec +- 0.000001 }
-          }
+//          sas.thresholds
+//          .drop( sas.thresholds.size - expectedCalculations.size )
+//          .zip( expectedCalculations )
+//          .zipWithIndex
+//          .foreach { case ( ((actual, expected), i) ) =>
+//            logger.info( "{}: evaluating expectation: {}", hint, i.toString )
+//            actual.floor.isDefined mustBe expected.floor.isDefined
+//            for {
+//              af <- actual.floor
+//              ef <- expected.floor
+//            } { af mustBe ef +- 0.000001 }
+//
+//            actual.expected.isDefined mustBe expected.expected.isDefined
+//            for {
+//              ae <- actual.expected
+//              ee <- expected.expected
+//            } { ae mustBe ee +- 0.000001 }
+//
+//            actual.ceiling.isDefined mustBe expected.ceiling.isDefined
+//            for {
+//              ac <- actual.ceiling
+//              ec <- expected.ceiling
+//            } { ac mustBe ec +- 0.000001 }
+//          }
         }
       }
 
