@@ -192,7 +192,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
     val label: Symbol
     def prepareContext( algorithmContext: Context ): Context = identity( algorithmContext )
     def prepareData( algorithmContext: Context ): TryV[Seq[DoublePoint]]
-    def step( point: PointT )( implicit s: State, algorithmContext: Context ): (Boolean, ThresholdBoundary)
+    def step( point: PointT )( implicit state: State, algorithmContext: Context ): (Boolean, ThresholdBoundary)
   }
 
 

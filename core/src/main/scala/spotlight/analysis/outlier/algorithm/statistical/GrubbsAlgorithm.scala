@@ -78,20 +78,30 @@ object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfig
   }
 
 
-  case class Context( override val message: DetectUsing, alpha: Double ) extends CommonContext( message )
+  case class Context( override val message: DetectUsing, alpha: Double, sampleSize: Long ) extends CommonContext( message )
 
   object GrubbsContext {
     val AlphaPath = "alpha"
+    val SampleSizePath = "sample-size"
+
     def getAlpha( conf: Config ): TryV[Double] = {
-      logger.debug( "configuration:[{}]", conf )
       logger.debug( "configuration[{}] getDouble = [{}]", AlphaPath, conf.getDouble(AlphaPath).toString )
       val alpha = if ( conf hasPath AlphaPath ) conf getDouble AlphaPath else 0.05
       alpha.right
     }
+
+    def getSamplesize( conf: Config ): TryV[Long] = {
+      logger.debug( "configuration[{}] getLong= [{}]", SampleSizePath, conf.getLong(SampleSizePath).toString )
+      val sampleSize = if ( conf hasPath SampleSizePath ) conf getLong SampleSizePath else RecentHistory.LastN
+      sampleSize.right
+    }
   }
 
   override def makeContext( message: DetectUsing, state: Option[State] ): TryV[Context] = {
-    GrubbsContext.getAlpha( message.properties ) map { Context( message, _ ) }
+    for {
+      alpha <- GrubbsContext getAlpha message.properties
+      sampleSize <- GrubbsContext getSamplesize message.properties
+    } yield Context( message, alpha = alpha, sampleSize = sampleSize )
   }
 
 
