@@ -1,20 +1,21 @@
-package spotlight.analysis.outlier.algorithm.skyline
+package spotlight.analysis.outlier.algorithm.statistical
 
-import scala.reflect.ClassTag
-import scalaz.{-\/, \/, \/-}
-import scalaz.syntax.either._
-import shapeless.{Lens, lens}
 import com.typesafe.config.Config
-import org.apache.commons.math3.ml.clustering.DoublePoint
-import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import org.apache.commons.lang3.ClassUtils
 import org.apache.commons.math3.distribution.TDistribution
-import peds.commons.log.Trace
+import org.apache.commons.math3.ml.clustering.DoublePoint
+import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import peds.commons.TryV
-import spotlight.analysis.outlier.{DetectUsing, RecentHistory}
+import peds.commons.log.Trace
+import shapeless.{Lens, lens}
 import spotlight.analysis.outlier.algorithm.AlgorithmModule
 import spotlight.analysis.outlier.algorithm.AlgorithmProtocol.Advanced
+import spotlight.analysis.outlier.{DetectUsing, RecentHistory}
 import spotlight.model.timeseries._
+
+import scala.reflect.ClassTag
+import scalaz.syntax.either._
+import scalaz.{-\/, \/, \/-}
 
 
 /**

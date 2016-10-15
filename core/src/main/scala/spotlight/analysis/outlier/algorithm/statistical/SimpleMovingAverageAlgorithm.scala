@@ -1,16 +1,17 @@
-package spotlight.analysis.outlier.algorithm.skyline
+package spotlight.analysis.outlier.algorithm.statistical
 
-import scala.reflect.ClassTag
-import scalaz.syntax.either._
-import shapeless.{Lens, lens}
+import org.apache.commons.lang3.ClassUtils
 import org.apache.commons.math3.ml.clustering.DoublePoint
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
-import org.apache.commons.lang3.ClassUtils
 import peds.commons.TryV
 import peds.commons.log.Trace
+import shapeless.{Lens, lens}
 import spotlight.analysis.outlier.DetectUsing
 import spotlight.analysis.outlier.algorithm.{AlgorithmModule, AlgorithmProtocol}
 import spotlight.model.timeseries._
+
+import scala.reflect.ClassTag
+import scalaz.syntax.either._
 
 
 /**

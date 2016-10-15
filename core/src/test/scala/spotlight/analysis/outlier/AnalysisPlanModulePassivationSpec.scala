@@ -20,7 +20,7 @@ import peds.commons.log.Trace
 import shapeless.Lens
 import spotlight.analysis.outlier.AnalysisPlanModule.AggregateRoot.OutlierPlanActor
 import spotlight.analysis.outlier.AnalysisPlanModule.AggregateRoot.OutlierPlanActor.ProxyProvider
-import spotlight.analysis.outlier.algorithm.skyline.SimpleMovingAverageAlgorithm
+import spotlight.analysis.outlier.algorithm.statistical.SimpleMovingAverageAlgorithm
 import spotlight.model.outlier.{IsQuorum, OutlierPlan, ReduceOutliers}
 import spotlight.testkit.EntityModuleSpec
 import spotlight.analysis.outlier.{AnalysisPlanProtocol => P}

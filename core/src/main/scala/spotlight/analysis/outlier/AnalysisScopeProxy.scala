@@ -17,6 +17,7 @@ import demesne.{AggregateRootType, DomainModel}
 import peds.commons.log.Trace
 import spotlight.analysis.outlier.algorithm.density.{CohortDensityAnalyzer, SeriesCentroidDensityAnalyzer, SeriesDensityAnalyzer}
 import spotlight.analysis.outlier.algorithm.skyline._
+import spotlight.analysis.outlier.algorithm.statistical.SimpleMovingAverageAlgorithm
 import spotlight.model.outlier.OutlierPlan.Scope
 import spotlight.model.outlier.OutlierPlan
 import spotlight.model.timeseries.TimeSeriesBase.Merging

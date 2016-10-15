@@ -1,17 +1,17 @@
-package spotlight.analysis.outlier.algorithm.skyline
+package spotlight.analysis.outlier.algorithm.statistical
+
+import akka.testkit._
+import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
+import org.joda.{time => joda}
+import org.mockito.Mockito._
+import peds.akka.envelope._
+import spotlight.analysis.outlier.algorithm.{AlgorithmModuleSpec, AlgorithmProtocol => P}
+import spotlight.analysis.outlier.{DetectOutliersInSeries, DetectUsing, HistoricalStatistics}
+import spotlight.model.outlier.{NoOutliers, OutlierPlan, SeriesOutliers}
+import spotlight.model.timeseries.{DataPoint, ThresholdBoundary, TimeSeries}
 
 import scala.annotation.tailrec
 import scala.concurrent.duration._
-import akka.testkit._
-import org.mockito.Mockito._
-import org.joda.{time => joda}
-import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
-import peds.akka.envelope._
-import spotlight.model.outlier.{NoOutliers, OutlierPlan, SeriesOutliers}
-import spotlight.model.timeseries.{DataPoint, ThresholdBoundary, TimeSeries}
-import spotlight.analysis.outlier.{DetectOutliersInSeries, DetectUsing, HistoricalStatistics}
-import spotlight.analysis.outlier.algorithm.{ AlgorithmProtocol => P}
-import spotlight.analysis.outlier.algorithm.AlgorithmModuleSpec
 
 
 /**

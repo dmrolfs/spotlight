@@ -26,7 +26,7 @@ import peds.akka.supervision.OneForOneStrategyFactory
 import peds.akka.metrics.{Instrumented, Reporter}
 import peds.commons.V
 import peds.akka.stream.StreamMonitor
-import spotlight.analysis.outlier.algorithm.skyline.SimpleMovingAverageAlgorithm
+import spotlight.analysis.outlier.algorithm.statistical.SimpleMovingAverageAlgorithm
 import spotlight.analysis.outlier.{AnalysisPlanModule, PlanCatalog}
 import spotlight.model.outlier._
 import spotlight.model.timeseries.Topic

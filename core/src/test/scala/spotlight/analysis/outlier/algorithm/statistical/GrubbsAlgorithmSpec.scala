@@ -1,11 +1,11 @@
-package spotlight.analysis.outlier.algorithm.skyline
+package spotlight.analysis.outlier.algorithm.statistical
 
 import scala.annotation.tailrec
 import scalaz.Unzip
 import com.typesafe.config.ConfigFactory
-import org.mockito.Mockito._
-import org.joda.{time => joda}
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
+import org.joda.{time => joda}
+import org.mockito.Mockito._
 import org.typelevel.scalatest.{DisjunctionMatchers, DisjunctionValues}
 import peds.commons.log.Trace
 import spotlight.analysis.outlier.RecentHistory

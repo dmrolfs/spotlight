@@ -19,7 +19,7 @@ import org.joda.{time => joda}
 import com.github.nscala_time.time.Imports.{richDateTime, richSDuration}
 import demesne.{AggregateRootType, BoundedContext, DomainModel}
 import peds.commons.log.Trace
-import spotlight.analysis.outlier.algorithm.skyline.SimpleMovingAverageAlgorithm
+import spotlight.analysis.outlier.algorithm.statistical.SimpleMovingAverageAlgorithm
 import spotlight.protocol.PythonPickleProtocol
 import spotlight.testkit.ParallelAkkaSpec
 import spotlight.analysis.outlier.{AnalysisPlanModule, PlanCatalog}
