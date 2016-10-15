@@ -388,8 +388,8 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
 
       case AdvancedType( adv ) => {
         log.debug( "RECEIVE ADAANCED - TEST:[{}]: Algorithm[{}] HANDLING Advanced msg: [{}]", self.path, algorithm.label.name, adv )
-        accept( adv )
-      } //todo: what to do here persist?
+        persist( adv ) { accept }
+      }
     }
 
     val stateReceiver: Receive = {
