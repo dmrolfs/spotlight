@@ -30,8 +30,8 @@ object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfig
   override lazy val algorithm: Algorithm = new Algorithm {
     override val label: Symbol = 'Grubbs
 
-    override def prepareData( algorithmContext: Context ): TryV[Seq[DoublePoint]] = {
-      algorithmContext.tailAverage()( algorithmContext.data ).right
+    override def prepareData( algorithmContext: Context ): Seq[DoublePoint] = {
+      algorithmContext.tailAverage()( algorithmContext.data )
     }
 
     override def step( point: PointT )( implicit state: State, algorithmContext: Context ): (Boolean, ThresholdBoundary) = trace.block( s"step($point)" ) {
@@ -78,32 +78,34 @@ object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfig
   }
 
 
-  case class Context( override val message: DetectUsing, alpha: Double, sampleSize: Long ) extends CommonContext( message )
+  case class Context( override val message: DetectUsing, alpha: Double ) extends CommonContext( message )
 
   object GrubbsContext {
     val AlphaPath = "alpha"
-    val SampleSizePath = "sample-size"
+//    val SampleSizePath = "sample-size"
+//    def getSamplesize( conf: Config ): TryV[Int] = {
+//      logger.debug( "configuration[{}] getLong= [{}]", SampleSizePath, conf.getLong(SampleSizePath).toString )
+//      val sampleSize = if ( conf hasPath SampleSizePath ) conf getInt SampleSizePath else RecentHistory.LastN
+//      sampleSize.right
+//    }
 
     def getAlpha( conf: Config ): TryV[Double] = {
       logger.debug( "configuration[{}] getDouble = [{}]", AlphaPath, conf.getDouble(AlphaPath).toString )
       val alpha = if ( conf hasPath AlphaPath ) conf getDouble AlphaPath else 0.05
       alpha.right
     }
+  }
 
-    def getSamplesize( conf: Config ): TryV[Long] = {
-      logger.debug( "configuration[{}] getLong= [{}]", SampleSizePath, conf.getLong(SampleSizePath).toString )
-      val sampleSize = if ( conf hasPath SampleSizePath ) conf getLong SampleSizePath else RecentHistory.LastN
-      sampleSize.right
+  override def makeContext( message: DetectUsing, state: Option[State] ): Context = {
+    val context = GrubbsContext.getAlpha( message.properties ) map { alpha => Context( message, alpha ) }
+    context match {
+      case \/-( c ) => c
+      case -\/( ex ) => throw ex
     }
   }
 
-  override def makeContext( message: DetectUsing, state: Option[State] ): TryV[Context] = {
-    for {
-      alpha <- GrubbsContext getAlpha message.properties
-      sampleSize <- GrubbsContext getSamplesize message.properties
-    } yield Context( message, alpha = alpha, sampleSize = sampleSize )
-  }
 
+  override type Shape = DescriptiveStatistics
 
   case class State(
     override val id: TID,
@@ -169,27 +171,27 @@ object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfig
     }
   }
 
-  override val analysisStateCompanion: AnalysisStateCompanion = State
-  override implicit def evState: ClassTag[State] = ClassTag( classOf[State] )
-
   object State extends AnalysisStateCompanion {
     private val trace = Trace[State.type]
 
-    override type Shape = DescriptiveStatistics
+    override def zero( id: State#TID ): State = {
+      State( id, name = "", movingStatistics = makeShape() )
+    }
 
-    override def zero( id: State#TID ): State = State( id, name = "", movingStatistics = makeShape() )
+    def makeShape(): Shape = new DescriptiveStatistics( RecentHistory.LastN ) //todo: move sample size to repository config?
 
-    def makeShape(): Shape = new DescriptiveStatistics( RecentHistory.LastN )
-
-    override def updateShape( statistics: Shape, event: Advanced ): Shape = trace.block( "State.updateShape" ) {
+    override def advanceShape( statistics: Shape, advanced: Advanced ): Shape = trace.block( "State.advanceShape" ) {
       logger.debug( "TEST: statistics shape = [{}]", statistics )
-      logger.debug( "TEST: advanced event  = [{}]", event )
+      logger.debug( "TEST: advanced event  = [{}]", advanced )
       val newStats = statistics.copy()
-      newStats addValue event.point.value
+      newStats addValue advanced.point.value
       newStats
     }
 
     override def shapeLens: Lens[State, Shape] = lens[State] >> 'movingStatistics
 //    override def thresholdLens: Lens[State, Seq[ThresholdBoundary]] = lens[State] >> 'thresholds
   }
+
+  override val analysisStateCompanion: AnalysisStateCompanion = State
+  override implicit val evState: ClassTag[State] = ClassTag( classOf[State] )
 }

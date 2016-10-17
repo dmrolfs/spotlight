@@ -31,18 +31,17 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmModuleSpec[SimpleMovingA
       override def compare( lhs: TestShape, rhs: TestShape ): Int = {
         if ( lhs == rhs ) 0
         else {
-          val l = lhs.asInstanceOf[SimpleMovingAverageAlgorithm.State.Shape]
-          val r = rhs.asInstanceOf[SimpleMovingAverageAlgorithm.State.Shape]
-          ( l.movingStatistics.getN - r.movingStatistics.getN ).toInt
+          val l = lhs.asInstanceOf[SimpleMovingAverageAlgorithm.Shape]
+          val r = rhs.asInstanceOf[SimpleMovingAverageAlgorithm.Shape]
+          ( l.getN - r.getN ).toInt
         }
       }
     }
 
     override def expectedUpdatedState( state: module.State, event: P.Advanced ): module.State = {
-      val historicalStatsLens = module.State.Shape.statsLens compose module.State.shapeLens
+      val historicalStatsLens = module.State.shapeLens
       val s = super.expectedUpdatedState( state, event ).asInstanceOf[SimpleMovingAverageAlgorithm.State]
-      val h = s.history
-      val stats = h.movingStatistics.copy
+      val stats = s.statistics.copy()
       stats addValue event.point.value
       historicalStatsLens.set( s )( stats )
     }
@@ -102,12 +101,12 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmModuleSpec[SimpleMovingA
       logger.info( "************** TEST NOW ************" )
       val algorithm = module.algorithm
       implicit val testContext = mock[module.Context]
-      val testHistory: module.State.Shape = module.State.makeShape()
+      val testHistory: module.Shape = module.makeShape()
 
       implicit val testState = mock[module.State]
-      when( testState.history ).thenReturn( testHistory )
+      when( testState.statistics ).thenReturn( testHistory )
 
-      def advanceWith( v: Double ): Unit = testHistory.movingStatistics addValue v
+      def advanceWith( v: Double ): Unit = testHistory addValue v
 
       val data = Seq[Double](1, 1, 1, 1, 1000)
       val expected = Seq(
@@ -122,7 +121,7 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmModuleSpec[SimpleMovingA
       for {
         ( (value, expected), i ) <- dataAndExpected.zipWithIndex
       } {
-        testHistory.movingStatistics.getN mustBe i
+        testHistory.getN mustBe i
         val ts = nowTimestamp.plusSeconds( 10 * i )
         algorithm.step( ts.getMillis.toDouble, value ) mustBe expected.stepResult( i )
         advanceWith( value )
@@ -213,9 +212,9 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmModuleSpec[SimpleMovingA
           sas.id.id mustBe id.id
           sas.algorithm.name mustBe module.algorithm.label.name
 //          sas.thresholds.size mustBe ( history.N )
-          logger.info( "{}: shape size = {}", hint, sas.history.movingStatistics.getN.toString )
-          sas.history.movingStatistics.getN mustBe ( history.N )
-          sas.history.movingStatistics.getMean mustBe history.mean(1)
+          logger.info( "{}: shape size = {}", hint, sas.statistics.getN.toString )
+          sas.statistics.getN mustBe ( history.N )
+          sas.statistics.getMean mustBe history.mean(1)
 
 //          sas.thresholds
 //          .drop( sas.thresholds.size - expectedCalculations.size )

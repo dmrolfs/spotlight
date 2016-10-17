@@ -17,7 +17,7 @@ import org.scalatest.OptionValues
 import peds.archetype.domain.model.core.EntityIdentifying
 import peds.commons.V
 import peds.commons.log.Trace
-import spotlight.analysis.outlier.HistoricalStatistics
+import spotlight.analysis.outlier.{DetectUsing, HistoricalStatistics}
 import spotlight.analysis.outlier.algorithm.{AlgorithmProtocol => P}
 import spotlight.model.outlier._
 import spotlight.model.timeseries._
@@ -44,7 +44,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
     val subscriber = TestProbe()
 
 
-    override def before(test: OneArgTest): Unit = {
+    override def before( test: OneArgTest ): Unit = {
       super.before( test )
       logger.info( "Fixture: DomainModel=[{}]", model )
     }
@@ -56,7 +56,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
 
     type TestState = module.State
     type TestAdvanced = P.Advanced
-    type TestShape = module.analysisStateCompanion.Shape
+    type TestShape = module.Shape
     val shapeLens = module.analysisStateCompanion.shapeLens
 //    val thresholdLens = module.analysisStateCompanion.thresholdLens
 //    val advancedLens = shapeLens ~ thresholdLens
@@ -66,7 +66,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
       logger.debug( "TEST: argument state=[{}]", state )
       val result = advancedLens.modify( state ){ case shape =>
         logger.debug( "TEST: in advancedLens: BEFORE shape=[{}]", shape )
-        val newShape = module.analysisStateCompanion.updateShape( shape, event )
+        val newShape = module.analysisStateCompanion.advanceShape( shape, event )
         logger.debug( "TEST: in advancedLens: AFTER shape=[{}]", newShape )
 
         newShape
@@ -237,7 +237,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
         }
       }
 
-      "advance for datapoint processing" in { f: Fixture =>
+      "advance for datapoint processing" taggedAs WIP in { f: Fixture =>
         import f._
 
         val pt = DataPoint( nowTimestamp, 3.14159 )
@@ -261,14 +261,13 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
     s"${defaultModule.algorithm.label.name} state" should {
       "advance state" in { f: Fixture =>
         import f._
-
         val zero = module.analysisStateCompanion.zero( id )
         val pt = DataPoint( nowTimestamp, 3.14159 )
         val t = ThresholdBoundary( nowTimestamp, Some(1.1), Some(2.2), Some(3.3) )
         val adv = P.Advanced( id, pt, false, t )
 //        val zeroWithThreshold = thresholdLens.modify( zero ){ _ :+ t }
         val zeroWithThreshold = zero
-        val actual = shapeLens.modify( zeroWithThreshold ){ s => module.analysisStateCompanion.updateShape(s, adv) }
+        val actual = shapeLens.modify( zeroWithThreshold ){ s => module.analysisStateCompanion.advanceShape(s, adv) }
         val expected = expectedUpdatedState( zero, adv )
         logger.debug( "TEST: expectedState=[{}]", expected )
         actualVsExpectedState( Option(actual), Option(expected) )
@@ -276,7 +275,6 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
 
       "advance shape" in { f: Fixture =>
         import f._
-
         val zero = module.analysisStateCompanion.zero( id )
         logger.debug( "TEST: zero=[{}]", zero)
         val pt = DataPoint( nowTimestamp, 3.14159 )
@@ -287,12 +285,12 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
 //            module.analysisStateCompanion.updateShape( shape, adv ),
 //            thresholds :+ adv.threshold
 //          )
-          module.analysisStateCompanion.updateShape( shape, adv )
+          module.analysisStateCompanion.advanceShape( shape, adv )
         }
         logger.debug( "TEST: expectedState=[{}]", expected )
 
         val zeroShape = shapeLens.get( zero )
-        val actualShape = module.analysisStateCompanion.updateShape( zeroShape, adv )
+        val actualShape = module.analysisStateCompanion.advanceShape( zeroShape, adv )
         actualVsExpectedShape( actualShape, shapeLens get expected )
       }
     }

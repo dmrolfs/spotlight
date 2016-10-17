@@ -141,48 +141,27 @@ object AlgorithmModule {
 }
 
 abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmModule.ModuleConfiguration =>
-  import AlgorithmModule.{ AnalysisState, identifying }
-
   private val trace = Trace[AlgorithmModule]
 
-  override type ID = AlgorithmModule.ID
-  val IdType = TypeCase[TID]
-  override def nextId: TryV[TID] = identifying.nextIdAs[TID]
-  val AdvancedType = TypeCase[AlgorithmProtocol.Advanced]
 
+  type State <: AlgorithmModule.AnalysisState
 
-  override lazy val rootType: AggregateRootType = new RootType
+  /**
+    * Shape represents the culminated value of applying the algorithm over the time series data for this ID.
+    */
+  type Shape
 
-  class RootType extends AggregateRootType {
-    override lazy val name: String = module.shardName
-    override lazy val identifying: Identifying[_] = AlgorithmModule.identifying
-    override def repositoryProps( implicit model: DomainModel ): Props = Repository localProps model
-    override def maximumNrClusterNodes: Int = module.maximumNrClusterNodes
-    override def aggregateIdFor: ShardRegion.ExtractEntityId = super.aggregateIdFor orElse {
-      case AdvancedType( a ) => {
-        logger.debug( "TEST: aggregateIdFor( {} ) = [{}]", a, a.sourceId.id.toString )
-        (a.sourceId.id.toString, a )
-      }
-    }
+  implicit def evState: ClassTag[State]
+
+  val analysisStateCompanion: AnalysisStateCompanion
+  trait AnalysisStateCompanion {
+    def zero( id: State#TID ): State
+    def shapeLens: Lens[State, Shape]
+    //todo: require algo to define?    def zeroShape: Shape
+    def advanceShape( shape: Shape, advanced: AlgorithmProtocol.Advanced ): Shape
   }
 
 
-  object Repository {
-    def localProps( model: DomainModel ): Props = Props( new LocalRepository(model) )
-    def clusteredProps( model: DomainModel ): Props = Props( new ClusteredRepository(model) )
-  }
-
-  class LocalRepository( model: DomainModel ) extends Repository( model ) with LocalAggregateContext
-  class ClusteredRepository( model: DomainModel ) extends Repository( model ) with ClusteredAggregateContext
-
-  class Repository( model: DomainModel )
-  extends EnvelopingAggregateRootRepository( model, module.rootType ) { actor: AggregateRootRepository.AggregateContext =>
-    override def aggregateProps: Props = AlgorithmActor.props( model, rootType )
-
-    //todo    import demesne.repository.{ StartProtocol => SP }
-    override def doLoad(): Loaded = super.doLoad()
-    override def doInitialize(resources: Map[Symbol, Any]): Valid[Done] = super.doInitialize( resources )
-  }
 
 
   def algorithm: Algorithm
@@ -191,14 +170,13 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
   trait Algorithm {
     val label: Symbol
     def prepareContext( algorithmContext: Context ): Context = identity( algorithmContext )
-    def prepareData( algorithmContext: Context ): TryV[Seq[DoublePoint]]
+    def prepareData( algorithmContext: Context ): Seq[DoublePoint]
     def step( point: PointT )( implicit state: State, algorithmContext: Context ): (Boolean, ThresholdBoundary)
   }
 
 
   type Context <: AlgorithmContext
-
-  def makeContext( message: DetectUsing, state: Option[State] ): TryV[Context]
+  def makeContext( message: DetectUsing, state: Option[State] ): Context
 
   trait AlgorithmContext extends LazyLogging {
     def message: DetectUsing
@@ -275,21 +253,43 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
   }
 
 
-  type State <: AnalysisState
-  implicit def evState: ClassTag[State]
+  override type ID = AlgorithmModule.ID
+  val IdType = TypeCase[TID]
+  override def nextId: TryV[TID] = AlgorithmModule.identifying.nextIdAs[TID]
+  val AdvancedType = TypeCase[AlgorithmProtocol.Advanced]
 
-  val analysisStateCompanion: AnalysisStateCompanion
-  trait AnalysisStateCompanion {
-    def zero( id: State#TID ): State
 
-    /**
-      * Shape represents the culminated value of applying the algorithm over the time series data for this ID.
-      */
-    type Shape
-//todo: require algo to define?    def zeroShape: Shape
-    def updateShape( shape: Shape, event: AlgorithmProtocol.Advanced ): Shape
-    def shapeLens: Lens[State, Shape]
-//    def thresholdLens: Lens[State, Seq[ThresholdBoundary]]
+  override lazy val rootType: AggregateRootType = new RootType
+
+  class RootType extends AggregateRootType {
+    override lazy val name: String = module.shardName
+    override lazy val identifying: Identifying[_] = AlgorithmModule.identifying
+    override def repositoryProps( implicit model: DomainModel ): Props = Repository localProps model
+    override def maximumNrClusterNodes: Int = module.maximumNrClusterNodes
+    override def aggregateIdFor: ShardRegion.ExtractEntityId = super.aggregateIdFor orElse {
+      case AdvancedType( a ) => {
+        logger.debug( "TEST: aggregateIdFor( {} ) = [{}]", a, a.sourceId.id.toString )
+        (a.sourceId.id.toString, a )
+      }
+    }
+  }
+
+
+  object Repository {
+    def localProps( model: DomainModel ): Props = Props( new LocalRepository(model) )
+    def clusteredProps( model: DomainModel ): Props = Props( new ClusteredRepository(model) )
+  }
+
+  class LocalRepository( model: DomainModel ) extends Repository( model ) with LocalAggregateContext
+  class ClusteredRepository( model: DomainModel ) extends Repository( model ) with ClusteredAggregateContext
+
+  class Repository( model: DomainModel )
+  extends EnvelopingAggregateRootRepository( model, module.rootType ) { actor: AggregateRootRepository.AggregateContext =>
+    override def aggregateProps: Props = AlgorithmActor.props( model, rootType )
+
+    //todo    import demesne.repository.{ StartProtocol => SP }
+    override def doLoad(): Loaded = super.doLoad()
+    override def doInitialize( resources: Map[Symbol, Any] ): Valid[Done] = super.doInitialize( resources )
   }
 
 
@@ -314,10 +314,11 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
     lazy val algorithmTimer: Timer = metrics timer algorithm.label.name
 
     override var state: State = _
+    var algorithmContext: Context = _
 
-    import analysisStateCompanion.{ shapeLens, /*thresholdLens,*/ updateShape }
+    import analysisStateCompanion.{ shapeLens, advanceShape }
 //    val advanceLens: Lens[State, (analysisStateCompanion.Shape, Seq[ThresholdBoundary])] = shapeLens ~ thresholdLens
-    val advanceLens: Lens[State, analysisStateCompanion.Shape] = shapeLens
+    val advanceLens: Lens[State, Shape] = shapeLens
 
 
     override val acceptance: Acceptance = {
@@ -328,7 +329,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
           analysisStateCompanion zero aggregateId
         }
 //        val result = advanceLens.modify( currentState ){ case (h, ts) => (updateShape( h, event ), ts :+ event.threshold ) }
-        val result = advanceLens.modify( currentState ){ case h  => updateShape( h, event ) }
+        val result = advanceLens.modify( currentState ){ case h => advanceShape( h, event ) }
         log.debug( "TEST:[{}]: resultingState=[{}] aggregateId:[{}]", self.path, result, aggregateId )
         result
       }
@@ -342,7 +343,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
         val toOutliers = kleisli[TryV, (Outliers, Context), Outliers] { case (o, _) => o.right }
 
         val start = System.currentTimeMillis()
-        ( algorithmContext >=> findOutliers >=> toOutliers ).run( msg ) match {
+        ( makeAlgorithmContext >=> findOutliers >=> toOutliers ).run( msg ) match {
           case \/-( r ) => {
             log.debug( "[{}] sending detect result to aggregator[{}]: [{}]", workId, aggregator.path.name, r )
             algorithmTimer.update( System.currentTimeMillis() - start, scala.concurrent.duration.MILLISECONDS )
@@ -432,14 +433,17 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
     }
 
     // -- algorithm functional elements --
-    val algorithmContext: KOp[DetectUsing, Context] = kleisli[TryV, DetectUsing, Context] { message =>
-      module.makeContext( message, Option(state) )
+    val makeAlgorithmContext: KOp[DetectUsing, Context] = kleisli[TryV, DetectUsing, Context] { message =>
+      \/ fromTryCatchNonFatal {
+        algorithmContext = module.makeContext( message, Option( state ) )
+        algorithmContext
+      }
     }
 
     def findOutliers: KOp[Context, (Outliers, Context)] = {
       for {
         ctx <- ask[TryV, Context]
-        data <- kleisli[TryV, Context, Seq[DoublePoint]] { c => algorithm.prepareData( c ) }
+        data <- kleisli[TryV, Context, Seq[DoublePoint]] { c => \/ fromTryCatchNonFatal { algorithm prepareData c } }
         events <- collectOutlierPoints( data )
       _ = log.debug( "TEST: findOutliers: events-isOutliers:[{}]", events.map{ _.isOutlier }.mkString(", ") )
         o <- makeOutliers( events )
