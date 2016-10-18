@@ -2,22 +2,20 @@ package spotlight.analysis.outlier.algorithm
 
 import scala.concurrent.duration._
 import scala.reflect.ClassTag
-import akka.actor.ActorSystem
 import akka.pattern.ask
 import akka.testkit._
 
 import scalaz.{-\/, \/-}
-import shapeless.syntax.typeable._
 import org.scalatest.concurrent.ScalaFutures
 import org.joda.{time => joda}
-import demesne.{AggregateRootModule, AggregateRootType}
+import demesne.AggregateRootType
 import demesne.testkit.AggregateRootSpec
 import org.apache.commons.math3.random.RandomDataGenerator
 import org.scalatest.OptionValues
 import peds.archetype.domain.model.core.EntityIdentifying
 import peds.commons.V
 import peds.commons.log.Trace
-import spotlight.analysis.outlier.{DetectUsing, HistoricalStatistics}
+import spotlight.analysis.outlier.HistoricalStatistics
 import spotlight.analysis.outlier.algorithm.{AlgorithmProtocol => P}
 import spotlight.model.outlier._
 import spotlight.model.timeseries._
@@ -97,6 +95,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
 
       actual mustEqual expected
       expected mustEqual actual
+      actual.## mustEqual expected.##
     }
 
     implicit val shapeOrdering: Ordering[TestShape]
@@ -237,7 +236,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
         }
       }
 
-      "advance for datapoint processing" taggedAs WIP in { f: Fixture =>
+      "advance for datapoint processing" in { f: Fixture =>
         import f._
 
         val pt = DataPoint( nowTimestamp, 3.14159 )

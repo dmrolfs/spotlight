@@ -1,5 +1,7 @@
 package spotlight.analysis.outlier.algorithm.statistical
 
+import com.typesafe.config.Config
+
 import scala.reflect.ClassTag
 import org.apache.commons.lang3.ClassUtils
 import org.apache.commons.math3.ml.clustering.DoublePoint
@@ -56,6 +58,8 @@ object SimpleMovingAverageAlgorithm extends AlgorithmModule with AlgorithmModule
     override type Self = State
 
     override def algorithm: Symbol = outer.algorithm.label
+
+    override def withConfiguration( configuration: Config ): State = this
 
     override def canEqual( that: Any ): Boolean = that.isInstanceOf[State]
 //    override def addThreshold( threshold: ThresholdBoundary ): Self = copy( thresholds = thresholds :+ threshold )

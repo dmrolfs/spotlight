@@ -6,6 +6,7 @@ import akka.Done
 import akka.actor.{ActorPath, Props}
 import akka.cluster.sharding.ShardRegion
 import akka.event.LoggingReceive
+import com.typesafe.config.Config
 
 import scalaz._
 import Scalaz._
@@ -37,8 +38,10 @@ object AlgorithmProtocol extends AggregateProtocol[AlgorithmModule.AnalysisState
 
   import AlgorithmModule.AnalysisState
 
-  case class GetStateSnapshot( override val targetId: GetStateSnapshot#TID ) extends AlgorithmCommand
+  case class ChangeConfiguration( override val targetId: ChangeConfiguration#TID, configuration: Config ) extends AlgorithmCommand
+  case class ConfigurationChanged( override val sourceId: ConfigurationChanged#TID, configuration: Config ) extends AlgorithmEvent
 
+  case class GetStateSnapshot( override val targetId: GetStateSnapshot#TID ) extends AlgorithmCommand
   case class StateSnapshot( sourceId: StateSnapshot#TID, snapshot: Option[AnalysisState] ) extends AlgorithmEvent
 
   private[algorithm] case class Advanced(
@@ -77,6 +80,8 @@ object AlgorithmModule {
     def scope: OutlierPlan.Scope = id
     def algorithm: Symbol
     def topic: Topic = scope.topic
+
+    def withConfiguration( configuration: Config ): Self
 
 //    def thresholds: Seq[ThresholdBoundary]
 //    def addThreshold( threshold: ThresholdBoundary ): Self
@@ -320,6 +325,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
 //    val advanceLens: Lens[State, (analysisStateCompanion.Shape, Seq[ThresholdBoundary])] = shapeLens ~ thresholdLens
     val advanceLens: Lens[State, Shape] = shapeLens
 
+    import AlgorithmProtocol.ConfigurationChanged
 
     override val acceptance: Acceptance = {
       case ( AdvancedType(event), s ) => {
@@ -329,9 +335,14 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
           analysisStateCompanion zero aggregateId
         }
 //        val result = advanceLens.modify( currentState ){ case (h, ts) => (updateShape( h, event ), ts :+ event.threshold ) }
-        val result = advanceLens.modify( currentState ){ case h => advanceShape( h, event ) }
-        log.debug( "TEST:[{}]: resultingState=[{}] aggregateId:[{}]", self.path, result, aggregateId )
-        result
+        val newState = advanceLens.modify( currentState ){ case shape => advanceShape(shape, event) }
+        log.debug( "TEST:[{}]: resultingState=[{}] aggregateId:[{}]", self.path, newState, aggregateId )
+        newState
+      }
+
+      case ( event: ConfigurationChanged, s ) => {
+        val currentState = Option(s) getOrElse { analysisStateCompanion zero aggregateId }
+        currentState.withConfiguration( event.configuration ).asInstanceOf[State]
       }
     }
 
@@ -395,9 +406,13 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
       }
     }
 
+    import AlgorithmProtocol.{ ChangeConfiguration, ConfigurationChanged, GetStateSnapshot, StateSnapshot }
+
     val stateReceiver: Receive = {
-      case _: AlgorithmProtocol.GetStateSnapshot => {
-        val snapshot = AlgorithmProtocol.StateSnapshot( aggregateId, Option(state) )
+      case ChangeConfiguration( tid, config ) => persist( ConfigurationChanged(aggregateId, config) ) { accept }
+
+      case _: GetStateSnapshot => {
+        val snapshot = StateSnapshot( aggregateId, Option(state) )
         log.debug( "TEST:[{}]: Algorithm[{}] returning state snapshot: [{}]", self.path, algorithm.label.name, snapshot )
         sender() ! snapshot
       }

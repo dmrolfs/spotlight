@@ -10,6 +10,7 @@ import org.typelevel.scalatest.{DisjunctionMatchers, DisjunctionValues}
 import peds.commons.log.Trace
 import spotlight.analysis.outlier.RecentHistory
 import spotlight.analysis.outlier.algorithm.AlgorithmModuleSpec
+import spotlight.analysis.outlier.algorithm.{AlgorithmProtocol => P}
 import spotlight.model.outlier.OutlierPlan
 import spotlight.model.timeseries.{DataPoint, ThresholdBoundary, TimeSeries}
 
@@ -172,6 +173,33 @@ with DisjunctionValues {
 
 
   s"${defaultModule.algorithm.label.name} algorithm" should {
+    "change configuration" taggedAs WIP in { f: Fixture =>
+      import f._
+      import akka.pattern.ask
+      import scala.concurrent.duration._
+      import akka.testkit._
+
+      whenReady( ( aggregate ? P.GetStateSnapshot(id) ).mapTo[P.StateSnapshot], timeout(5.seconds.dilated) ){ actual =>
+        actualVsExpectedState( actual.snapshot, None )
+      }
+
+      val c1 = ConfigFactory.parseString( "Grubbs { sample-size = 7 }" )
+      aggregate ! P.ChangeConfiguration( id, c1 )
+      whenReady( ( aggregate ? P.GetStateSnapshot(id) ).mapTo[P.StateSnapshot], timeout(5.seconds.dilated) ){ actual =>
+        val expected = module.State( id, "", new DescriptiveStatistics(), 7 )
+        actualVsExpectedState( actual.snapshot, Some(expected) )
+        actual.snapshot.get.asInstanceOf[GrubbsAlgorithm.State].sampleSize mustBe 7
+      }
+
+      val c2 = ConfigFactory.parseString( "Grubbs { sample-size = 13 }" )
+      aggregate ! P.ChangeConfiguration( id, c2 )
+      whenReady( ( aggregate ? P.GetStateSnapshot(id) ).mapTo[P.StateSnapshot], timeout(5.seconds.dilated) ){ actual =>
+        val expected = module.State( id, "", new DescriptiveStatistics(), 13 )
+        actualVsExpectedState( actual.snapshot, Some(expected) )
+        actual.snapshot.get.asInstanceOf[GrubbsAlgorithm.State].sampleSize mustBe 13
+      }
+    }
+
     //todo define and use smaller fixture
     "calculate grubbs score" in { f: Fixture =>
       implicit val ctx = mock[GrubbsAlgorithm.Context]
@@ -187,7 +215,7 @@ with DisjunctionValues {
       caller( 8 ).grubbsScore.value mustBe ( 2.1266465543 +- 0.00001 )
     }
 
-    "step to find anomalies from flat signal" taggedAs WIP in { f: Fixture =>
+    "step to find anomalies from flat signal" in { f: Fixture =>
       import f._
 
       val algorithm = module.algorithm

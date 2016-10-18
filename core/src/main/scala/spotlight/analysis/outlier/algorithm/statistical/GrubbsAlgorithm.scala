@@ -82,12 +82,6 @@ object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfig
 
   object GrubbsContext {
     val AlphaPath = "alpha"
-//    val SampleSizePath = "sample-size"
-//    def getSamplesize( conf: Config ): TryV[Int] = {
-//      logger.debug( "configuration[{}] getLong= [{}]", SampleSizePath, conf.getLong(SampleSizePath).toString )
-//      val sampleSize = if ( conf hasPath SampleSizePath ) conf getInt SampleSizePath else RecentHistory.LastN
-//      sampleSize.right
-//    }
 
     def getAlpha( conf: Config ): TryV[Double] = {
       logger.debug( "configuration[{}] getDouble = [{}]", AlphaPath, conf.getDouble(AlphaPath).toString )
@@ -110,8 +104,9 @@ object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfig
   case class State(
     override val id: TID,
     override val name: String,
-    movingStatistics: DescriptiveStatistics //,
+    movingStatistics: DescriptiveStatistics,
 //    override val thresholds: Seq[ThresholdBoundary] = Seq.empty[ThresholdBoundary]
+    sampleSize: Int = RecentHistory.LastN
   ) extends AlgorithmModule.AnalysisState with AlgorithmModule.StrictSelf[State] {
     override type Self = State
 
@@ -161,11 +156,63 @@ object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfig
       }
     }
 
+    override def withConfiguration( configuration: Config ): State = {
+      State.getSamplesize( configuration ) match {
+        case \/-( newSampleSize ) => {
+          if ( newSampleSize == sampleSize ) this
+          else {
+            val newStats = new DescriptiveStatistics( newSampleSize )
+            DescriptiveStatistics.copy( this.movingStatistics, newStats )
+            this.copy( sampleSize = newSampleSize, movingStatistics = newStats )
+          }
+        }
+
+        case -\/( ex ) => {
+          logger.info(
+            "ignoring configuration provided without properties relevant to {} algorithm: [{}]",
+            outer.algorithm.label,
+            configuration
+          )
+          this
+        }
+      }
+    }
+
     override def canEqual( that: Any ): Boolean = that.isInstanceOf[State]
+
+    override def equals( rhs: Any ): Boolean = {
+      def optionalNaN( n: Double ): Option[Double] = if ( n.isNaN ) None else Some( n )
+
+      rhs match {
+        case that: State => {
+          super.equals( that ) &&
+          ( this.movingStatistics.getN == that.movingStatistics.getN ) &&
+          ( optionalNaN(this.movingStatistics.getMean) == optionalNaN(that.movingStatistics.getMean) ) &&
+          ( optionalNaN(this.movingStatistics.getStandardDeviation) == optionalNaN(that.movingStatistics.getStandardDeviation) ) &&
+          ( this.sampleSize == that.sampleSize )
+        }
+
+        case _ => false
+      }
+    }
+
+    override def hashCode: Int = {
+      41 * (
+        41 * (
+          41 * (
+            41 * (
+              41 + super.hashCode
+            ) + movingStatistics.getN.##
+          )  + movingStatistics.getMean.##
+        ) + movingStatistics.getStandardDeviation.##
+      ) + sampleSize.##
+    }
+
     override def toString: String = {
       s"${ClassUtils.getAbbreviatedName(getClass, 15)}( " +
         s"id:[${id}]; "+
-        s"movingStatistics:[N:${movingStatistics.getN} mean:${movingStatistics.getMean} stddev:${movingStatistics.getStandardDeviation}]; " +
+        s"movingStatistics:[N:${movingStatistics.getN} mean:${movingStatistics.getMean} stddev:${movingStatistics.getStandardDeviation}]" +
+        s"sampleSize:[${sampleSize}]" +
 //        s"""thresholds:[${thresholds.mkString(",")}]""" +
         " )"
     }
@@ -190,6 +237,14 @@ object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfig
 
     override def shapeLens: Lens[State, Shape] = lens[State] >> 'movingStatistics
 //    override def thresholdLens: Lens[State, Seq[ThresholdBoundary]] = lens[State] >> 'thresholds
+
+    val RootPath = algorithm.label.name
+    val SampleSizePath = RootPath + ".sample-size"
+    def getSamplesize( conf: Config ): TryV[Int] = {
+      logger.debug( "configuration[{}] getLong= [{}]", SampleSizePath, conf.getLong(SampleSizePath).toString )
+      val sampleSize = if ( conf hasPath SampleSizePath ) conf getInt SampleSizePath else RecentHistory.LastN
+      sampleSize.right
+    }
   }
 
   override val analysisStateCompanion: AnalysisStateCompanion = State
