@@ -149,7 +149,7 @@ object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfig
       * @return
       */
     private def checkSize( size: Long ): TryV[Long] = {
-      val MinimumDataPoints = 7
+      import State.MinimumDataPoints
       size match {
         case s if s < MinimumDataPoints => AlgorithmModule.InsufficientDataSize( algorithm, s, MinimumDataPoints ).left
         case s => s.right
@@ -157,16 +157,16 @@ object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfig
     }
 
     override def withConfiguration( configuration: Config ): Option[State] = {
-      State.getSamplesize( configuration ) match {
-        case \/-( newSampleSize ) => {
-          if ( newSampleSize == sampleSize ) {
-            logger.debug( "ignoring duplicate configuration: sample-size:[{}]", sampleSize )
-            None
-          } else {
-            val newStats = new DescriptiveStatistics( newSampleSize )
-            DescriptiveStatistics.copy( this.movingStatistics, newStats )
-            Some( this.copy(sampleSize = newSampleSize, movingStatistics = newStats) )
-          }
+      State.getSampleSize( configuration ) match {
+        case \/-( newSampleSize ) if newSampleSize != sampleSize => {
+          val newStats = new DescriptiveStatistics( newSampleSize )
+          DescriptiveStatistics.copy( this.movingStatistics, newStats )
+          Some( this.copy(sampleSize = newSampleSize, movingStatistics = newStats) )
+        }
+
+        case \/-( _ ) => {
+          logger.debug( "ignoring duplicate configuration: sample-size:[{}]", sampleSize )
+          None
         }
 
         case -\/( ex ) => {
@@ -223,6 +223,8 @@ object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfig
   object State extends AnalysisStateCompanion {
     private val trace = Trace[State.type]
 
+    val MinimumDataPoints = 7
+
     override def zero( id: State#TID ): State = {
       State( id, name = "", movingStatistics = makeShape() )
     }
@@ -242,10 +244,17 @@ object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfig
 
     val RootPath = algorithm.label.name
     val SampleSizePath = RootPath + ".sample-size"
-    def getSamplesize( conf: Config ): TryV[Int] = {
-      logger.debug( "configuration[{}] getLong= [{}]", SampleSizePath, conf.getLong(SampleSizePath).toString )
+    def getSampleSize( conf: Config ): TryV[Int] = {
+      logger.debug( "configuration[{}] getInt=[{}]", SampleSizePath, conf.getInt(SampleSizePath).toString )
       val sampleSize = if ( conf hasPath SampleSizePath ) conf getInt SampleSizePath else RecentHistory.LastN
-      sampleSize.right
+      if ( MinimumDataPoints <= sampleSize ) sampleSize.right
+      else {
+        AlgorithmModule.InvalidAlgorithmConfiguration(
+          algorithm.label,
+          SampleSizePath,
+          s"integer greater than or equals to ${MinimumDataPoints}"
+        ).left
+      }
     }
   }
 

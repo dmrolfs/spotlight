@@ -6,12 +6,13 @@ import akka.Done
 import akka.actor.{ActorPath, Props}
 import akka.cluster.sharding.ShardRegion
 import akka.event.LoggingReceive
-import com.typesafe.config.Config
 
 import scalaz._
 import Scalaz._
 import scalaz.Kleisli.{ask, kleisli}
 import shapeless.{Lens, TypeCase}
+import com.typesafe.config.Config
+import com.typesafe.config.ConfigException.BadValue
 import com.typesafe.scalalogging.LazyLogging
 import org.apache.commons.math3.ml.clustering.DoublePoint
 import nl.grons.metrics.scala.{MetricName, Timer}
@@ -136,13 +137,20 @@ object AlgorithmModule {
   }
 
 
-  case class InsufficientDataSize (
+  case class InsufficientDataSize(
     algorithm: Symbol,
     size: Long,
     required: Long
   ) extends IllegalArgumentException(
     s"${size} data points is insufficient to perform ${algorithm.name} test, which requires at least ${required} points"
   )
+
+
+  case class InvalidAlgorithmConfiguration(
+    algorithm: Symbol,
+    path: String,
+    requirement: String
+  ) extends BadValue( path, s"For algorithm, ${algorithm.name}, ${path} must: ${requirement}" )
 }
 
 abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmModule.ModuleConfiguration =>
