@@ -156,14 +156,16 @@ object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfig
       }
     }
 
-    override def withConfiguration( configuration: Config ): State = {
+    override def withConfiguration( configuration: Config ): Option[State] = {
       State.getSamplesize( configuration ) match {
         case \/-( newSampleSize ) => {
-          if ( newSampleSize == sampleSize ) this
-          else {
+          if ( newSampleSize == sampleSize ) {
+            logger.debug( "ignoring duplicate configuration: sample-size:[{}]", sampleSize )
+            None
+          } else {
             val newStats = new DescriptiveStatistics( newSampleSize )
             DescriptiveStatistics.copy( this.movingStatistics, newStats )
-            this.copy( sampleSize = newSampleSize, movingStatistics = newStats )
+            Some( this.copy(sampleSize = newSampleSize, movingStatistics = newStats) )
           }
         }
 
@@ -173,7 +175,7 @@ object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfig
             outer.algorithm.label,
             configuration
           )
-          this
+          None
         }
       }
     }

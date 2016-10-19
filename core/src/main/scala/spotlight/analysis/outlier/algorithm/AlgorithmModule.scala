@@ -38,7 +38,7 @@ object AlgorithmProtocol extends AggregateProtocol[AlgorithmModule.AnalysisState
 
   import AlgorithmModule.AnalysisState
 
-  case class UseConfiguration(override val targetId: UseConfiguration#TID, configuration: Config ) extends AlgorithmCommand
+  case class UseConfiguration( override val targetId: UseConfiguration#TID, configuration: Config ) extends AlgorithmCommand
   case class ConfigurationChanged( override val sourceId: ConfigurationChanged#TID, configuration: Config ) extends AlgorithmEvent
 
   case class GetStateSnapshot( override val targetId: GetStateSnapshot#TID ) extends AlgorithmCommand
@@ -81,7 +81,7 @@ object AlgorithmModule {
     def algorithm: Symbol
     def topic: Topic = scope.topic
 
-    def withConfiguration( configuration: Config ): Self
+    def withConfiguration( configuration: Config ): Option[Self] = None
 
 //    def thresholds: Seq[ThresholdBoundary]
 //    def addThreshold( threshold: ThresholdBoundary ): Self
@@ -162,7 +162,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
   trait AnalysisStateCompanion {
     def zero( id: State#TID ): State
     def shapeLens: Lens[State, Shape]
-    //todo: require algo to define?    def zeroShape: Shape
+    //todo: require algo to define?    def makeShape(): Shape
     def advanceShape( shape: Shape, advanced: AlgorithmProtocol.Advanced ): Shape
   }
 
@@ -342,7 +342,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
 
       case ( event: ConfigurationChanged, s ) => {
         val currentState = Option(s) getOrElse { analysisStateCompanion zero aggregateId }
-        currentState.withConfiguration( event.configuration ).asInstanceOf[State]
+        currentState.withConfiguration( event.configuration ) map { _.asInstanceOf[State] } getOrElse s
       }
     }
 
@@ -409,7 +409,11 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
     import AlgorithmProtocol.{ UseConfiguration, ConfigurationChanged, GetStateSnapshot, StateSnapshot }
 
     val stateReceiver: Receive = {
-      case UseConfiguration( tid, config ) => persist( ConfigurationChanged( aggregateId, config ) ) {accept }
+      case UseConfiguration( _, config ) => {
+        if ( Option(state).fold( true )( _.withConfiguration(config).isDefined ) ) {
+          persist( ConfigurationChanged(aggregateId, config) ) { accept }
+        }
+      }
 
       case _: GetStateSnapshot => {
         val snapshot = StateSnapshot( aggregateId, Option(state) )

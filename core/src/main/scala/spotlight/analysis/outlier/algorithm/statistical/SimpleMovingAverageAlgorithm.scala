@@ -59,8 +59,6 @@ object SimpleMovingAverageAlgorithm extends AlgorithmModule with AlgorithmModule
 
     override def algorithm: Symbol = outer.algorithm.label
 
-    override def withConfiguration( configuration: Config ): State = this
-
     override def canEqual( that: Any ): Boolean = that.isInstanceOf[State]
 //    override def addThreshold( threshold: ThresholdBoundary ): Self = copy( thresholds = thresholds :+ threshold )
     override def toString: String = {
