@@ -54,7 +54,7 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
     when( plan.appliesTo ).thenReturn( appliesToAll )
     when( plan.grouping ).thenReturn( None )
 
-    val testActorRef = TestActorRef( new AnalysisScopeProxy with TestProxyProvider )
+    val testActorRef = TestActorRef( new TestProxy( fixture.plan ) { } )
 
     val model = mock[DomainModel]
 
@@ -65,9 +65,12 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
 
     val workId = WorkId()
 
-    trait TestProxyProvider extends AnalysisScopeProxy.Provider { provider: Actor with ActorLogging =>
+    abstract class TestProxy( override var plan: OutlierPlan = fixture.plan )
+    extends AnalysisScopeProxy
+    with AnalysisScopeProxy.Provider {
+      provider: Actor with ActorLogging =>
+
       override def scope: Scope = fixture.scope
-      override def plan: OutlierPlan = fixture.plan
       override def model: DomainModel = fixture.model
       override def highWatermark: Int = 10
       override def bufferSize: Int = 1000
@@ -197,6 +200,8 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
       actual.detector mustBe f.detector.ref
       actual.router mustBe f.router.ref
     }
+
+    "propagate configuration to algorithm constituents" in { f: Fixture => pending }
 
     "batch series" in { f: Fixture =>
       import f._
@@ -383,8 +388,7 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
       addDetectorAutoPilot( detector )
 
       val proxy1 = TestActorRef(
-        new AnalysisScopeProxy with TestProxyProvider {
-          override def plan: OutlierPlan = p1
+        new TestProxy( p1 ) {
           override def scope: Scope = OutlierPlan.Scope( p1, "dummy" )
           override def makeDetector( routerRef: ActorRef )( implicit context: ActorContext ): ActorRef = detector.ref
         }
@@ -392,8 +396,7 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
 
 
       val proxy2 = TestActorRef(
-        new AnalysisScopeProxy with TestProxyProvider {
-          override def plan: OutlierPlan = p2
+        new TestProxy( p2 ) {
           override def scope: Scope = OutlierPlan.Scope( p2, "dummy" )
           override def makeDetector( routerRef: ActorRef )( implicit context: ActorContext ): ActorRef = detector.ref
         }
@@ -426,8 +429,7 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
       addDetectorAutoPilot( detector )
 
       val proxy1 = TestActorRef(
-        new AnalysisScopeProxy with TestProxyProvider {
-          override def plan: OutlierPlan = p1
+        new TestProxy( p1 ) {
           override def scope: Scope = OutlierPlan.Scope( p1, "dummy" )
           override def makeDetector( routerRef: ActorRef )( implicit context: ActorContext ): ActorRef = detector.ref
         }
@@ -449,8 +451,7 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
       subscriber.expectNoMsg( 1.second.dilated )
 
       val proxy2 = TestActorRef(
-        new AnalysisScopeProxy with TestProxyProvider {
-          override def plan: OutlierPlan = p2
+        new TestProxy( p2 ) {
           override def scope: Scope = OutlierPlan.Scope( p2, "dummy" )
           override def makeDetector( routerRef: ActorRef )( implicit context: ActorContext ): ActorRef = detector.ref
         }
@@ -477,8 +478,7 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
       addDetectorAutoPilot( detector )
 
       val proxyProps = Props(
-        new AnalysisScopeProxy with TestProxyProvider {
-          override def plan: OutlierPlan = p1
+        new TestProxy( p1 ) {
           override def scope: Scope = OutlierPlan.Scope( p1, "dummy" )
           override def makeDetector( routerRef: ActorRef )( implicit context: ActorContext ): ActorRef = detector.ref
         }

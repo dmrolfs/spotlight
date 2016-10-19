@@ -38,7 +38,7 @@ object AlgorithmProtocol extends AggregateProtocol[AlgorithmModule.AnalysisState
 
   import AlgorithmModule.AnalysisState
 
-  case class ChangeConfiguration( override val targetId: ChangeConfiguration#TID, configuration: Config ) extends AlgorithmCommand
+  case class UseConfiguration(override val targetId: UseConfiguration#TID, configuration: Config ) extends AlgorithmCommand
   case class ConfigurationChanged( override val sourceId: ConfigurationChanged#TID, configuration: Config ) extends AlgorithmEvent
 
   case class GetStateSnapshot( override val targetId: GetStateSnapshot#TID ) extends AlgorithmCommand
@@ -406,10 +406,10 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
       }
     }
 
-    import AlgorithmProtocol.{ ChangeConfiguration, ConfigurationChanged, GetStateSnapshot, StateSnapshot }
+    import AlgorithmProtocol.{ UseConfiguration, ConfigurationChanged, GetStateSnapshot, StateSnapshot }
 
     val stateReceiver: Receive = {
-      case ChangeConfiguration( tid, config ) => persist( ConfigurationChanged(aggregateId, config) ) { accept }
+      case UseConfiguration( tid, config ) => persist( ConfigurationChanged( aggregateId, config ) ) {accept }
 
       case _: GetStateSnapshot => {
         val snapshot = StateSnapshot( aggregateId, Option(state) )

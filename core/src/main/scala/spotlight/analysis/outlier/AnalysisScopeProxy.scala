@@ -9,15 +9,17 @@ import akka.stream._
 import akka.stream.actor.{ActorSubscriber, ActorSubscriberMessage, RequestStrategy, WatermarkRequestStrategy}
 import akka.stream.scaladsl.{Flow, GraphDSL, Keep, RunnableGraph, Sink, Source}
 import akka.util.Timeout
+import com.typesafe.config.Config
 import nl.grons.metrics.scala.{Meter, MetricName, Timer}
 import peds.akka.envelope._
 import peds.akka.metrics.InstrumentedActor
 import peds.akka.stream._
 import demesne.{AggregateRootType, DomainModel}
 import peds.commons.log.Trace
+import spotlight.analysis.outlier.algorithm.{AlgorithmModule, AlgorithmProtocol}
 import spotlight.analysis.outlier.algorithm.density.{CohortDensityAnalyzer, SeriesCentroidDensityAnalyzer, SeriesDensityAnalyzer}
 import spotlight.analysis.outlier.algorithm.skyline._
-import spotlight.analysis.outlier.algorithm.statistical.SimpleMovingAverageAlgorithm
+import spotlight.analysis.outlier.algorithm.statistical.{GrubbsAlgorithm, SimpleMovingAverageAlgorithm}
 import spotlight.model.outlier.OutlierPlan.Scope
 import spotlight.model.outlier.OutlierPlan
 import spotlight.model.timeseries.TimeSeriesBase.Merging
@@ -40,7 +42,7 @@ object AnalysisScopeProxy {
 
   private class Default(
     override val scope: Scope,
-    override val plan: OutlierPlan,
+    override var plan: OutlierPlan,
     override val model: DomainModel,
     override val highWatermark: Int,
     override val bufferSize: Int
@@ -56,7 +58,7 @@ object AnalysisScopeProxy {
         case CohortDensityAnalyzer.Algorithm => ??? // CohortDensityAnalyzer.props( router ),
         case ExponentialMovingAverageAnalyzer.Algorithm => ??? // ExponentialMovingAverageAnalyzer.props( router ),
         case FirstHourAverageAnalyzer.Algorithm => ??? // FirstHourAverageAnalyzer.props( router ),
-        case GrubbsAnalyzer.Algorithm => ??? // GrubbsAnalyzer.props( router ),
+        case GrubbsAlgorithm.algorithm.label => Some( GrubbsAlgorithm.rootType )
         case HistogramBinsAnalyzer.Algorithm => ??? // HistogramBinsAnalyzer.props( router ),
         case KolmogorovSmirnovAnalyzer.Algorithm => ??? // KolmogorovSmirnovAnalyzer.props( router ),
         case LeastSquaresAnalyzer.Algorithm => ??? // LeastSquaresAnalyzer.props( router ),
@@ -73,6 +75,7 @@ object AnalysisScopeProxy {
   trait Provider { provider: Actor with ActorLogging =>
     def scope: OutlierPlan.Scope
     def plan: OutlierPlan
+    def plan_=( p: OutlierPlan ): Unit
     def model: DomainModel
     def highWatermark: Int
     def bufferSize: Int
@@ -94,7 +97,10 @@ object AnalysisScopeProxy {
       _ = log.debug( "TEST: algoId [{}]", algoId )
         ref = model( rt, algoId )
       _ = log.debug( "TEST: aggregate for [{}]:[{}] = [{}]", name, rt.name, ref)
-      } yield ( name, ref )
+      } yield {
+        ref !+ AlgorithmProtocol.UseConfiguration( AlgorithmModule.identifying.tag(scope), plan.algorithmConfig )
+        ( name, ref )
+      }
 
       log.debug( "TEST: for Router - algorithmRefs=[{}]", algorithmRefs.mkString(", ") )
 
@@ -150,6 +156,8 @@ with InstrumentedActor
 with ActorLogging { outer: AnalysisScopeProxy.Provider =>
   import AnalysisScopeProxy.Workers
 
+  private val trace = Trace[AnalysisScopeProxy]
+
   override lazy val metricBaseName: MetricName = MetricName( classOf[AnalysisScopeProxy] )
   val receiveTimer: Timer = metrics.timer( "receive" )
   val failuresMeter: Meter = metrics.meter( "failures" )
@@ -185,6 +193,22 @@ with ActorLogging { outer: AnalysisScopeProxy.Provider =>
     }
 
     case (ts: TimeSeries, p: OutlierPlan) if workflow isDefinedAt (ts, Scope(p, ts.topic)) => workflow( (ts, Scope(p, ts.topic)) )
+
+    case AnalysisPlanProtocol.AlgorithmsChanged(_, algorithms, config) => {
+      if ( algorithms != outer.plan.algorithms ) updatePlan( algorithms, config )
+      if ( config != outer.plan.algorithmConfig ) updateAlgorithmConfigurations( config )
+    }
+  }
+
+  def updatePlan( algorithms: Set[Symbol], configuration: Config ): Unit = trace.block( "updatePlan" ) {
+    //todo need to update plans
+    log.warning( "#TODO #DMR: NEED TO UPDATE PLAN ON ALGORITHMS_CHANGED -- MORE TO DO HERE WRT DOWNSTREAM")
+    log.info( "updating plan with algorithms for {} scope", outer.scope )
+    outer.plan = OutlierPlan.algorithmsLens.set( outer.plan )( algorithms )
+  }
+
+  def updateAlgorithmConfigurations( configuration: Config ): Unit = trace.block( "updateAlgorithmConfigurations" ) {
+    outer.workers.router !+ AlgorithmProtocol.UseConfiguration( AlgorithmModule.identifying.tag(outer.scope), configuration )
   }
 
   def streamIngressFor( subscriber: ActorRef )( implicit system: ActorSystem, materializer: Materializer ): ActorRef = {

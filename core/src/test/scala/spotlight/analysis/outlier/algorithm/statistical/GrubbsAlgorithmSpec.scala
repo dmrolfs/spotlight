@@ -184,7 +184,7 @@ with DisjunctionValues {
       }
 
       val c1 = ConfigFactory.parseString( "Grubbs { sample-size = 7 }" )
-      aggregate ! P.ChangeConfiguration( id, c1 )
+      aggregate ! P.UseConfiguration( id, c1 )
       whenReady( ( aggregate ? P.GetStateSnapshot(id) ).mapTo[P.StateSnapshot], timeout(5.seconds.dilated) ){ actual =>
         val expected = module.State( id, "", new DescriptiveStatistics(), 7 )
         actualVsExpectedState( actual.snapshot, Some(expected) )
@@ -192,7 +192,7 @@ with DisjunctionValues {
       }
 
       val c2 = ConfigFactory.parseString( "Grubbs { sample-size = 13 }" )
-      aggregate ! P.ChangeConfiguration( id, c2 )
+      aggregate ! P.UseConfiguration( id, c2 )
       whenReady( ( aggregate ? P.GetStateSnapshot(id) ).mapTo[P.StateSnapshot], timeout(5.seconds.dilated) ){ actual =>
         val expected = module.State( id, "", new DescriptiveStatistics(), 13 )
         actualVsExpectedState( actual.snapshot, Some(expected) )

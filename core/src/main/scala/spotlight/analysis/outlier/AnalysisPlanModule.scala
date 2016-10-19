@@ -259,15 +259,17 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
       def planEntity: Receive = {
         case _: GetPlan => sender() !+ PlanInfo( state.id, state )
 
-        case ApplyTo( id, appliesTo ) => persist( ScopeChanged(id, appliesTo) ) { e => acceptAndPublish( e ) }
+        case ApplyTo( id, appliesTo ) => persist( ScopeChanged(id, appliesTo) ) { acceptAndPublish }
 
         case UseAlgorithms( id, algorithms, config ) => {
-          persist( AlgorithmsChanged(id, algorithms, config) ) { e => acceptAndPublish( e ) }
+          persist( AlgorithmsChanged(id, algorithms, config) ) { e =>
+            acceptAndPublish( e )
+            log.info( "notifying {} plan constituents of algorithm change", scopeProxies.keySet.size )
+            scopeProxies foreach { case (_, proxy) => proxy !+ e }
+          }
         }
 
-        case ResolveVia( id, isQuorum, reduce ) => {
-          persist( AnalysisResolutionChanged(id, isQuorum, reduce) ) { e => acceptAndPublish( e ) }
-        }
+        case ResolveVia( id, isQuorum, reduce ) => persist( AnalysisResolutionChanged(id, isQuorum, reduce) ) { acceptAndPublish }
       }
 
       def maintenance: Receive = {

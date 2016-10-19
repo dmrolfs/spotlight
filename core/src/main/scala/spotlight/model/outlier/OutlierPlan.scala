@@ -173,6 +173,25 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
     }
   }
 
+  val algorithmsLens: Lens[OutlierPlan, Set[Symbol]] = new Lens[OutlierPlan, Set[Symbol]] {
+    override def get( p: OutlierPlan ): Set[Symbol] = p.algorithms
+    override def set( p: OutlierPlan )( algos: Set[Symbol] ): OutlierPlan = {
+      SimpleOutlierPlan(
+        id = p.id,
+        name = p.name,
+        appliesTo = p.appliesTo,
+        algorithms = algos,
+        grouping = p.grouping,
+        timeout = p.timeout,
+        isQuorum = p.isQuorum,
+        reduce = p.reduce,
+        algorithmConfig = p.algorithmConfig,
+        typeOrder = p.typeOrder,
+        originLineNumber = p.originLineNumber,
+        isActive = p.isActive
+      )
+    }
+  }
 
   val AlgorithmConfig: String = "algorithm-config"
 
