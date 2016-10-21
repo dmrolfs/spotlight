@@ -121,11 +121,11 @@ with DisjunctionValues {
 
   //todo consider moving to AlgorithmModuleSpec as default impl
   case class Expected( isOutlier: Boolean, floor: Option[Double], expected: Option[Double], ceiling: Option[Double] ) {
-    def stepResult( timestamp: joda.DateTime ): (Boolean, ThresholdBoundary) = {
-      ( isOutlier, ThresholdBoundary(timestamp, floor, expected, ceiling) )
+    def stepResult( timestamp: joda.DateTime ): Option[(Boolean, ThresholdBoundary)] = {
+      Some( (isOutlier, ThresholdBoundary(timestamp, floor, expected, ceiling)) )
     }
 
-    def stepResult( timestamp: Long ): (Boolean, ThresholdBoundary) = stepResult( new joda.DateTime(timestamp) )
+    def stepResult( timestamp: Long ): Option[(Boolean, ThresholdBoundary)] = stepResult( new joda.DateTime(timestamp) )
   }
 
   def makeExpected(

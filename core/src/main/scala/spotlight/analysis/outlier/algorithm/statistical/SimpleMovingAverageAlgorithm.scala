@@ -24,23 +24,23 @@ object SimpleMovingAverageAlgorithm extends AlgorithmModule with AlgorithmModule
       algorithmContext.tailAverage()( algorithmContext.data )
     }
 
-    override def step( point: PointT )( implicit state: State, algorithmContext: Context ): (Boolean, ThresholdBoundary) = {
-      logger.debug( "TEST:step( {} ): state=[{}]", point, state )
-      val moving = state.statistics
+    override def step( point: PointT )( implicit s: State, c: Context ): Option[(Boolean, ThresholdBoundary)] = {
+      logger.debug( "TEST:step( {} ): state=[{}]", point, s )
+      val moving = s.statistics
       val mean = moving.getMean
       val stddev = moving.getStandardDeviation
       logger.debug(
         "Stddev from simple moving Average N[{}]: mean[{}]\tstdev[{}]\ttolerance[{}]",
-        moving.getN.toString, mean.toString, stddev.toString, algorithmContext.tolerance.toString
+        moving.getN.toString, mean.toString, stddev.toString, c.tolerance.toString
       )
 
       val threshold = ThresholdBoundary.fromExpectedAndDistance(
         timestamp = point.timestamp.toLong,
         expected = mean,
-        distance = algorithmContext.tolerance * stddev
+        distance = c.tolerance * stddev
       )
 
-      ( threshold isOutlier point.value, threshold )
+      Some( (threshold isOutlier point.value, threshold) )
     }
   }
 

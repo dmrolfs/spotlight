@@ -81,8 +81,8 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmModuleSpec[SimpleMovingA
   analysisStateSuite()
 
   case class Expected( isOutlier: Boolean, floor: Option[Double], expected: Option[Double], ceiling: Option[Double] ) {
-    def stepResult( i: Int, intervalSeconds: Int = 10 )( implicit start: joda.DateTime ): (Boolean, ThresholdBoundary) = {
-      (
+    def stepResult( i: Int, intervalSeconds: Int = 10 )( implicit start: joda.DateTime ): Option[(Boolean, ThresholdBoundary)] = {
+      Some(
         isOutlier,
         ThresholdBoundary(
           timestamp = start.plusSeconds( i * intervalSeconds ),

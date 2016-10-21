@@ -1,5 +1,8 @@
 package spotlight.analysis.outlier.algorithm.statistical
 
+import scala.reflect.ClassTag
+import scalaz.syntax.either._
+import scalaz.{-\/, \/, \/-}
 import com.typesafe.config.Config
 import org.apache.commons.lang3.ClassUtils
 import org.apache.commons.math3.distribution.TDistribution
@@ -12,10 +15,6 @@ import spotlight.analysis.outlier.algorithm.AlgorithmModule
 import spotlight.analysis.outlier.algorithm.AlgorithmProtocol.Advanced
 import spotlight.analysis.outlier.{DetectUsing, RecentHistory}
 import spotlight.model.timeseries._
-
-import scala.reflect.ClassTag
-import scalaz.syntax.either._
-import scalaz.{-\/, \/, \/-}
 
 
 /**
@@ -34,43 +33,31 @@ object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfig
       algorithmContext.tailAverage()( algorithmContext.data )
     }
 
-    override def step( point: PointT )( implicit state: State, algorithmContext: Context ): (Boolean, ThresholdBoundary) = trace.block( s"step($point)" ) {
+    override def step( point: PointT )( implicit s: State, c: Context ): Option[(Boolean, ThresholdBoundary)] = trace.block( s"step($point)" ) {
       // original version set expected at context stats mean and stddev
-      val result = {
-        logger.debug( "TEST: state=[{}]", state )
-        Option( state )
-        .map { s =>
-          s
-          .grubbsScore
-          .map { grubbs =>
-            val threshold = ThresholdBoundary.fromExpectedAndDistance(
-              timestamp = point.timestamp.toLong,
-              expected = state.movingStatistics.getMean,
-              distance = algorithmContext.tolerance * grubbs * state.movingStatistics.getStandardDeviation
-            )
+      logger.debug( "TEST: state=[{}]", s )
 
-            ( threshold isOutlier point.value, threshold )
-          }
-        }
+      val result = s.grubbsScore map { grubbs =>
+        val threshold = ThresholdBoundary.fromExpectedAndDistance(
+          timestamp = point.timestamp.toLong,
+          expected = s.movingStatistics.getMean,
+          distance = c.tolerance * grubbs * s.movingStatistics.getStandardDeviation
+        )
+
+        ( threshold isOutlier point.value, threshold )
       }
 
       result match {
-        case Some( \/-(r) ) => r
+        case \/-(r) => Some( r )
 
-        case None => {
+        case -\/( ex: AlgorithmModule.InsufficientDataSize ) => {
           import spotlight.model.timeseries._
-          logger.debug( s"skipping point[{}] until history is established", point)
-          ( false, ThresholdBoundary empty point.timestamp.toLong )
+          logger.debug( "skipping point[{}] until sufficient history is established: {}", point, ex.getMessage )
+          Some( (false, ThresholdBoundary empty point.timestamp.toLong) )
         }
 
-        case Some( -\/( ex: AlgorithmModule.InsufficientDataSize ) ) => {
-          import spotlight.model.timeseries._
-          logger.debug( "skipping point[{}]: {}", point, ex.getMessage )
-          ( false, ThresholdBoundary empty point.timestamp.toLong )
-        }
-
-        case Some( -\/(ex) ) => {
-          logger.warn( "issue in step calculation", ex )
+        case -\/(ex) => {
+          logger.warn( s"exception raised in ${algorithm.label} step calculation", ex )
           throw ex
         }
       }

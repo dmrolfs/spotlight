@@ -45,7 +45,7 @@ object AlgorithmProtocol extends AggregateProtocol[AlgorithmModule.AnalysisState
   case class GetStateSnapshot( override val targetId: GetStateSnapshot#TID ) extends AlgorithmCommand
   case class StateSnapshot( sourceId: StateSnapshot#TID, snapshot: Option[AnalysisState] ) extends AlgorithmEvent
 
-  private[algorithm] case class Advanced(
+  case class Advanced(
     override val sourceId: Advanced#TID,
     point: DataPoint,
     isOutlier: Boolean,
@@ -184,7 +184,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
     val label: Symbol
     def prepareContext( algorithmContext: Context ): Context = identity( algorithmContext )
     def prepareData( algorithmContext: Context ): Seq[DoublePoint]
-    def step( point: PointT )( implicit state: State, algorithmContext: Context ): (Boolean, ThresholdBoundary)
+    def step( point: PointT )( implicit state: State, algorithmContext: Context ): Option[(Boolean, ThresholdBoundary)]
   }
 
 
@@ -480,6 +480,17 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
 
     private def collectOutlierPoints( points: Seq[DoublePoint] ): KOp[Context, Seq[AlgorithmProtocol.Advanced]] = {
       kleisli[TryV, Context, Seq[AlgorithmProtocol.Advanced]] { implicit analysisContext =>
+        def tryStep( pt: PointT )( implicit s: State ): TryV[(Boolean, ThresholdBoundary)] = {
+          \/ fromTryCatchNonFatal {
+            algorithm.step( pt )
+            .getOrElse {
+              logger.info( "skipping point[{}] per insufficient history for algorithm {}", pt, algorithm.label )
+              ( false, ThresholdBoundary empty pt.timestamp.toLong )
+            }
+          }
+        }
+
+
         @tailrec def loop(
           points: List[DoublePoint],
           accumlated: TryV[Seq[AlgorithmProtocol.Advanced]]
@@ -494,10 +505,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
                 for {
                   acc <- accumlated
                   ls <- loopState
-                  ot <- \/ fromTryCatchNonFatal {
-                    implicit val state = ls
-                    algorithm step pt
-                  }
+                  ot <- tryStep( pt )( ls )
                   (isOutlier, threshold) = ot
                 } yield {
                   analysisContext.data
