@@ -1,6 +1,7 @@
 package spotlight.testkit
 
 import java.util.concurrent.atomic.AtomicInteger
+
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 import akka.actor.ActorSystem
@@ -8,9 +9,10 @@ import akka.dispatch.Dispatchers
 import akka.event.{Logging, LoggingAdapter}
 import akka.testkit.TestEvent.Mute
 import akka.testkit.{DeadLettersFilter, TestKit}
+
 import scalaz.{-\/, \/, \/-}
 import com.typesafe.config.{Config, ConfigFactory}
-import com.typesafe.scalalogging.StrictLogging
+import com.typesafe.scalalogging.{LazyLogging, StrictLogging}
 import org.scalatest.{MustMatchers, Outcome, ParallelTestExecution, Tag, fixture}
 import peds.commons.log.Trace
 import peds.commons.util._
@@ -19,59 +21,64 @@ import peds.commons.util._
 /**
  * Created by rolfsd on 10/28/15.
  */
-object ParallelAkkaSpec {
+object ParallelAkkaSpec extends LazyLogging {
   val sysId = new AtomicInteger()
 
-  val testConf: Config = ConfigFactory.load.withFallback(
-    ConfigFactory.parseString(
-      """
-        |akka {
-        |  persistence {
-        |    journal.plugin = "inmemory-journal"
-        |    snapshot-store.plugin = "inmemory-snapshot-store"
-        |  }
-        |}
-        |
-        |akka {
-        |  loggers = ["akka.testkit.TestEventListener"]
-        |  logging-filter = "akka.event.DefaultLoggingFilter"
-        |  loglevel = DEBUG
-        |  stdout-loglevel = DEBUG
-        |  log-dead-letters = on
-        |  log-dead-letters-during-shutdown = on
-        |
-        |  actor {
-        |    provider = "akka.cluster.ClusterActorRefProvider"
-        |#    default-dispatcher {
-        |#      executor = "fork-join-executor"
-        |#      fork-join-executor {
-        |#        parallelism-min = 8
-        |#        parallelism-tolerance = 2.0
-        |#        parallelism-max = 8
-        |#      }
-        |#    }
-        |  }
-        |
-        |  remote {
-        |    log-remote-lifecycle-events = off
-        |    netty.tcp {
-        |      hostname = "127.0.0.1"
-        |      port = 0
-        |    }
-        |  }
-        |
-        |  cluster {
-        |    seed-nodes = [
-        |      "akka.tcp://ClusterSystem@127.0.0.1:2551",
-        |      "akka.tcp://ClusterSystem@127.0.0.1:2552"
-        |    ]
-        |
-        |    auto-down-unreachable-after = 10s
-        |  }
-        |}
-      """.stripMargin
+  val testConf: Config = {
+    val c = ConfigFactory.load.withFallback(
+      ConfigFactory.parseString(
+        """
+          |akka {
+          |  persistence {
+          |    journal.plugin = "inmemory-journal"
+          |    snapshot-store.plugin = "inmemory-snapshot-store"
+          |  }
+          |}
+          |
+          |akka {
+          |  loggers = ["akka.testkit.TestEventListener"]
+          |  logging-filter = "akka.event.DefaultLoggingFilter"
+          |  loglevel = DEBUG
+          |  stdout-loglevel = DEBUG
+          |  log-dead-letters = on
+          |  log-dead-letters-during-shutdown = on
+          |
+          |  actor {
+          |    provider = "akka.cluster.ClusterActorRefProvider"
+          |#    default-dispatcher {
+          |#      executor = "fork-join-executor"
+          |#      fork-join-executor {
+          |#        parallelism-min = 8
+          |#        parallelism-tolerance = 2.0
+          |#        parallelism-max = 8
+          |#      }
+          |#    }
+          |  }
+          |
+          |  remote {
+          |    log-remote-lifecycle-events = off
+          |    netty.tcp {
+          |      hostname = "127.0.0.1"
+          |      port = 0
+          |    }
+          |  }
+          |
+          |  cluster {
+          |    seed-nodes = [
+          |      "akka.tcp://ClusterSystem@127.0.0.1:2551",
+          |      "akka.tcp://ClusterSystem@127.0.0.1:2552"
+          |    ]
+          |
+          |    auto-down-unreachable-after = 10s
+          |  }
+          |}
+        """.stripMargin
+      )
     )
-  )
+
+//    logger.debug( "TEST_CONF = {}", c )
+    c
+  }
 
 
   def getCallerName( clazz: Class[_] ): String = {

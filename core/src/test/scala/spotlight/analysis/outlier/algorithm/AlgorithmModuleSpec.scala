@@ -38,7 +38,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
   lazy val identifying: EntityIdentifying[AlgorithmModule.AnalysisState] = AlgorithmModule.identifying
 
   override type Fixture <: AlgorithmFixture
-  abstract class AlgorithmFixture extends AggregateFixture { fixture =>
+  abstract class AlgorithmFixture extends AggregateFixture( config = spotlight.testkit.config() ) { fixture =>
     val subscriber = TestProbe()
 
 
@@ -236,7 +236,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
         }
       }
 
-      "advance for datapoint processing" in { f: Fixture =>
+      "advance for datapoint processing" taggedAs WIP in { f: Fixture =>
         import f._
 
         val pt = DataPoint( nowTimestamp, 3.14159 )
