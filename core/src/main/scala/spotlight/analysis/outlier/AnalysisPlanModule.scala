@@ -2,19 +2,20 @@ package spotlight.analysis.outlier
 
 import scala.reflect._
 import akka.actor.{ActorContext, ActorRef, PoisonPill, Props, Terminated}
+import shapeless.Lens
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.LazyLogging
+import peds.akka.envelope._
+import peds.akka.publish.{EventPublisher, StackableStreamPublisher}
+import peds.archetype.domain.model.core.{EntityIdentifying, EntityLensProvider}
+import peds.commons.identifier.ShortUUID
+import peds.commons.log.Trace
 import demesne.module.entity.EntityAggregateModule
 import demesne.module.entity.EntityAggregateModule.MakeIndexSpec
 import demesne.module.entity.{messages => EntityMessages}
 import demesne.index.local.IndexLocalAgent
 import demesne.{AggregateProtocol, AggregateRootType, DomainModel}
 import demesne.index.{Directive, IndexBusSubscription, StackableIndexBusPublisher}
-import peds.akka.envelope._
-import peds.akka.publish.{EventPublisher, StackableStreamPublisher}
-import peds.archetype.domain.model.core.{EntityIdentifying, EntityLensProvider}
-import peds.commons.identifier.ShortUUID
-import shapeless.Lens
 import spotlight.model.outlier.{IsQuorum, OutlierPlan, ReduceOutliers}
 import spotlight.model.timeseries.{TimeSeries, Topic}
 
@@ -125,9 +126,9 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
 
   object AggregateRoot {
     object OutlierPlanActor {
-      def props( model: DomainModel, rootType: AggregateRootType ): Props = Props( new AggregateRootActor(model, rootType) )
+      def props( model: DomainModel, rootType: AggregateRootType ): Props = Props( new Default(model, rootType) )
 
-      private class AggregateRootActor( model: DomainModel, rootType: AggregateRootType )
+      private class Default( model: DomainModel, rootType: AggregateRootType )
       extends OutlierPlanActor( model, rootType )
       with ProxyProvider
       with StackableStreamPublisher
@@ -169,9 +170,13 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
     }
 
     class OutlierPlanActor( override val model: DomainModel, override val rootType: AggregateRootType )
-    extends module.EntityAggregateActor { outer: OutlierPlanActor.ProxyProvider with EventPublisher =>
-      import AnalysisPlanProtocol._
+    extends module.EntityAggregateActor
+    with demesne.AggregateRoot.Provider {
+      outer: OutlierPlanActor.ProxyProvider with EventPublisher =>
 
+      import spotlight.analysis.outlier.{ AnalysisPlanProtocol => P }
+
+      private val trace = Trace[OutlierPlanActor]
 
       override def preDisable(): Unit = {
         scopeProxies.values foreach { _ ! PoisonPill }
@@ -179,6 +184,7 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
       }
 
       override var state: OutlierPlan = _
+      override val evState: ClassTag[OutlierPlan] = ClassTag( classOf[OutlierPlan] )
 
       var scopeProxies: Map[Topic, ActorRef] = Map.empty[Topic, ActorRef]
 
@@ -195,12 +201,12 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
       }
 
       override def acceptance: Acceptance = entityAcceptance orElse {
-        case (e: ScopeChanged, s) => {
+        case (e: P.ScopeChanged, s) => {
           //todo: cast for expediency. my ideal is to define a Lens in the OutlierPlan trait; minor solace is this module is in the same package
           s.asInstanceOf[OutlierPlan.SimpleOutlierPlan].copy( appliesTo = e.appliesTo )
         }
 
-        case (e: AlgorithmsChanged, s) => {
+        case (e: P.AlgorithmsChanged, s) => {
           //todo: cast for expediency. my ideal is to define a Lens in the OutlierPlan trait; minor solace is this module is in the same package
           s.asInstanceOf[OutlierPlan.SimpleOutlierPlan].copy(
             algorithms = e.algorithms,
@@ -208,7 +214,7 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
           )
         }
 
-        case (e: AnalysisResolutionChanged, s) =>{
+        case (e: P.AnalysisResolutionChanged, s) =>{
           //todo: cast for expediency. my ideal is to define a Lens in the OutlierPlan trait; minor solace is this module is in the same package
           s.asInstanceOf[OutlierPlan.SimpleOutlierPlan].copy(
             isQuorum = e.isQuorum,
@@ -247,7 +253,7 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
       }
 
       def workflow: Receive = {
-        case AcceptTimeSeries( id, ts ) => {
+        case P.AcceptTimeSeries( id, ts ) => {
           log.debug(
             "AnalysisPlanModule[{}] routing data for topic:[{}] sender:[{}]",
             s"${self.path.name}:${workId}", ts.topic, sender().path.name
@@ -257,19 +263,21 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
       }
 
       def planEntity: Receive = {
-        case _: GetPlan => sender() !+ PlanInfo( state.id, state )
+        case _: P.GetPlan => sender() !+ P.PlanInfo( state.id, state )
 
-        case ApplyTo( id, appliesTo ) => persist( ScopeChanged(id, appliesTo) ) { acceptAndPublish }
+        case P.ApplyTo( id, appliesTo ) => persist( P.ScopeChanged(id, appliesTo) ) { acceptAndPublish }
 
-        case UseAlgorithms( id, algorithms, config ) => {
-          persist( AlgorithmsChanged(id, algorithms, config) ) { e =>
+        case P.UseAlgorithms( id, algorithms, config ) => {
+          persist( P.AlgorithmsChanged(id, algorithms, config) ) { e =>
             acceptAndPublish( e )
             log.info( "notifying {} plan constituents of algorithm change", scopeProxies.keySet.size )
             scopeProxies foreach { case (_, proxy) => proxy !+ e }
           }
         }
 
-        case ResolveVia( id, isQuorum, reduce ) => persist( AnalysisResolutionChanged(id, isQuorum, reduce) ) { acceptAndPublish }
+        case P.ResolveVia( id, isQuorum, reduce ) => {
+          persist( P.AnalysisResolutionChanged(id, isQuorum, reduce) ) { acceptAndPublish }
+        }
       }
 
       def maintenance: Receive = {
@@ -281,7 +289,7 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
           }
         }
 
-        case _: GetProxies => sender() ! Proxies( aggregateId, scopeProxies )
+        case _: P.GetProxies => sender() ! P.Proxies( aggregateId, scopeProxies )
       }
 
       override def unhandled( message: Any ): Unit = {

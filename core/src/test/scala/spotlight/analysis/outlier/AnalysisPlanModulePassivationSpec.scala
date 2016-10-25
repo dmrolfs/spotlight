@@ -9,7 +9,7 @@ import peds.akka.envelope.pattern.ask
 import akka.actor.{ActorContext, ActorRef, Props}
 import akka.util.Timeout
 import demesne.index.StackableIndexBusPublisher
-import demesne.{AggregateRootType, DomainModel}
+import demesne.{AggregateRootType, DomainModel, SaveSnapshot}
 import demesne.module.{AggregateEnvironment, LocalAggregate}
 import demesne.module.entity.{EntityAggregateModule, messages => EntityMessages}
 import demesne.repository.AggregateRootProps
@@ -107,7 +107,7 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[OutlierPlan] { 
   override def createAkkaFixture( test: OneArgTest ): Fixture = new Fixture
 
   "AnalysisPlanModule" should {
-    "add OutlierPlan" taggedAs WIP in { f: Fixture =>
+    "add OutlierPlan" in { f: Fixture =>
       import f._
 
       val planInfo = makePlan("TestPlan", None)
@@ -137,8 +137,6 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[OutlierPlan] { 
 
       val p1 = makePlan( "TestPlan", None )
       val planTid = p1.id
-
-      logger.info( "TEST: P1.id=[{}]  planTid:[{}]", p1.id, planTid )
       entity ! EntityMessages.Add( p1.id, Some(p1) )
 
       stateFrom( entity, planTid ) mustBe p1
@@ -159,6 +157,37 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[OutlierPlan] { 
           assert( c.isEmpty )
         }
       }
+    }
+
+    "take and recover from snapshots" taggedAs WIP in { f: Fixture =>
+      import f._
+
+      val p1 = makePlan( "TestPlan", None )
+      entity ! EntityMessages.Add( p1.id, Some(p1) )
+      bus.expectMsgClass( classOf[EntityMessages.Added] )
+      stateFrom( entity, p1.id ) mustBe p1
+
+      logger.info( "TEST:taking Snapshot..." )
+
+      EventFilter.debug( start = "aggregate snapshot successfully saved:", occurrences = 1 ) intercept {
+        module.rootType.snapshot foreach { ss => entity !+ ss.saveSnapshotCommand(p1.id) }
+      }
+
+      entity !+ P.UseAlgorithms( p1.id, Set( 'stella, 'otis, 'apollo ), ConfigFactory.empty() )
+      bus.expectMsgPF( 1.second.dilated, "change algos" ) {
+        case P.AlgorithmsChanged(pid, algos, c) => {
+          pid mustBe p1.id
+          algos mustBe Set( 'stella, 'otis, 'apollo )
+          assert( c.isEmpty )
+        }
+      }
+
+      Thread.sleep( 3000 )
+      logger.info( "TEST:Snapshot done...")
+
+      bus.expectNoMsg()
+
+      stateFrom( entity, p1.id ) mustBe p1
     }
   }
 }

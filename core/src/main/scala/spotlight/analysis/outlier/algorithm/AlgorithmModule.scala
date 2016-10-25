@@ -315,6 +315,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
 
   class AlgorithmActor( override val model: DomainModel, override val rootType: AggregateRootType )
   extends AggregateRoot[State, ID]
+  with AggregateRoot.Provider
   with InstrumentedActor {
     publisher: EventPublisher =>
 
@@ -327,6 +328,8 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
     lazy val algorithmTimer: Timer = metrics timer algorithm.label.name
 
     override var state: State = _
+    override lazy val evState: ClassTag[State] = module.evState
+
     var algorithmContext: Context = _
 
     import analysisStateCompanion.{ shapeLens, advanceShape }
