@@ -1,10 +1,12 @@
 package spotlight.analysis.outlier.algorithm.skyline
 
+import akka.actor.ActorSystem
+
 import scala.annotation.tailrec
 import scala.collection.immutable
 import scala.concurrent.duration._
 import akka.testkit._
-import com.typesafe.config.ConfigFactory
+import com.typesafe.config.{Config, ConfigFactory}
 import org.apache.commons.math3.distribution.TDistribution
 import org.apache.commons.math3.random.RandomDataGenerator
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
@@ -20,7 +22,12 @@ import spotlight.model.timeseries.{DataPoint, ThresholdBoundary, TimeSeries}
   * Created by rolfsd on 3/22/16.
   */
 class SkylineGrubbsSpec extends SkylineBaseSpec {
-  class Fixture extends SkylineFixture {
+
+  override def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture = {
+    new Fixture( config, system, slug )
+  }
+
+  class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends SkylineFixture( _config, _system, _slug ) {
     val algoS = GrubbsAnalyzer.Algorithm
     val algProps = ConfigFactory.parseString( s"""${algoS.name}.tolerance: 3""" )
 
@@ -94,8 +101,6 @@ class SkylineGrubbsSpec extends SkylineBaseSpec {
       .map { case DataPoint(ts, _) => ThresholdBoundary.fromExpectedAndDistance( ts, mean, tolerance * grubbs * stddev ) }
     }
   }
-
-  override def createAkkaFixture( test: OneArgTest ): Fixture = new Fixture
 
 
   "GrubbsAnalyzer" should {

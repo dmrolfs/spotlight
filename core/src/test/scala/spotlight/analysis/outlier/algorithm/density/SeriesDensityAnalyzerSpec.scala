@@ -2,10 +2,11 @@ package spotlight.analysis.outlier.algorithm.density
 
 import java.util.concurrent.atomic.AtomicInteger
 
+import akka.actor.ActorSystem
 import akka.event.EventStream
 import akka.testkit._
 import com.github.nscala_time.time.OrderingImplicits._
-import com.typesafe.config.ConfigFactory
+import com.typesafe.config.{Config, ConfigFactory}
 import org.apache.commons.math3.ml.distance.EuclideanDistance
 import org.apache.commons.math3.random.RandomDataGenerator
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
@@ -28,7 +29,12 @@ import scala.concurrent.duration._
  * Created by damonrolfs on 9/18/14.
  */
 class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
-  import SeriesDensityAnalyzerSpec._
+  import SeriesDensityAnalyzerSpec.{ points, pointsA, pointsB }
+
+
+  override def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture = {
+    new Fixture( config, system, slug )
+  }
 
   object Fixture {
     import scalaz._
@@ -52,7 +58,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
     }
   }
 
-  class Fixture extends AkkaFixture {
+  class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends AkkaFixture( _config, _system, _slug ) {
     val metric = Topic( "metric.a" )
     val algoS = SeriesDensityAnalyzer.Algorithm
     val algoC = CohortDensityAnalyzer.Algorithm
@@ -72,7 +78,11 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       TimeSeries.pointsLens.set( s )( tweaked )
     }
 
-    def makeDensityExpectedHistory(points: Seq[DataPoint], start: Option[DescriptiveStatistics], last: Option[DataPoint] ): DescriptiveStatistics = {
+    def makeDensityExpectedHistory(
+      points: Seq[DataPoint],
+      start: Option[DescriptiveStatistics],
+      last: Option[DataPoint]
+    ): DescriptiveStatistics = {
       val initial = start getOrElse { new DescriptiveStatistics( CommonAnalyzer.ApproximateDayWindow ) }
       val dps = points.toDoublePoints
       val basis = last map { l => dps.zip( l.toDoublePoint +: dps ) } getOrElse { (dps drop 1).zip( dps ) }
@@ -149,8 +159,6 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
     actual.getSumsq mustBe expected.getSumsq
   }
 
-
-  override def createAkkaFixture( test: OneArgTest ): Fixture = new Fixture
 
   "SeriesDensityAnalyzer" should  {
     "register with router upon create" in { f: Fixture =>
@@ -591,7 +599,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
           outliers mustBe expected
 
           actual( algoS ).size mustBe series.points.size - 1
-          actual mustBe expectedControls
+          actual mustBe SeriesDensityAnalyzerSpec.expectedControls
         }
       }
     }

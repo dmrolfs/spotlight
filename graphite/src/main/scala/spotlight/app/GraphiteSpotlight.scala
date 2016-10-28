@@ -1,12 +1,11 @@
 package spotlight.app
 
 import java.net.{InetSocketAddress, Socket}
-
-import scala.concurrent.{ExecutionContext, Future, TimeoutException}
+import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
 import scala.util.{Failure, Success}
 import akka.{Done, NotUsed}
-import akka.actor.{ActorRef, ActorSystem, Props}
+import akka.actor.{ActorPath, ActorRef, ActorSystem, Props}
 import akka.stream.scaladsl._
 import akka.stream._
 import akka.util.{ByteString, Timeout}
@@ -20,9 +19,7 @@ import demesne.BoundedContext.StartTask
 import demesne.{AggregateRootType, BoundedContext, DomainModel}
 import kamon.Kamon
 import nl.grons.metrics.scala.{Meter, MetricName}
-import peds.akka.supervision.IsolatedLifeCycleSupervisor.{ChildStarted, WaitForStart}
 import peds.commons.log.Trace
-import peds.akka.supervision.OneForOneStrategyFactory
 import peds.akka.metrics.{Instrumented, Reporter}
 import peds.commons.V
 import peds.akka.stream.StreamMonitor
@@ -30,7 +27,6 @@ import spotlight.analysis.outlier.algorithm.statistical.SimpleMovingAverageAlgor
 import spotlight.analysis.outlier.{AnalysisPlanModule, PlanCatalog}
 import spotlight.model.outlier._
 import spotlight.model.timeseries.Topic
-import spotlight.protocol.GraphiteSerializationProtocol
 import spotlight.publish.{GraphitePublisher, LogPublisher}
 import spotlight.stream.{Configuration, OutlierScoringModel}
 
@@ -60,7 +56,7 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
   def main( args: Array[String] ): Unit = {
     Configuration( args ).disjunction match {
       case \/-( config ) => {
-        implicit val system = ActorSystem( "Spotlight" )
+        implicit val system = ActorSystem( "Spotlight", config )
         implicit val ec = system.dispatcher
 
         val serverBinding = for {
@@ -125,11 +121,18 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
   def rootTypes: Set[AggregateRootType] = {
     Set(
       AnalysisPlanModule.module.rootType,
-         SimpleMovingAverageAlgorithm.rootType
+       SimpleMovingAverageAlgorithm.rootType
     )
   }
 
-  def startTasks: Set[StartTask] = Set.empty[StartTask]
+  def startTasks( implicit system: ActorSystem ): Set[StartTask] = {
+    Set(
+      SharedLeveldbStore.start(
+        path = ActorPath.fromString( s"akka.tcp://Sportlight@127.0.0.1:2551/user/${SharedLeveldbStore.Name}" ),
+        startStore = true
+      )
+    )
+  }
 
   def startBoundedContext(
     name: Symbol,
@@ -147,7 +150,7 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
     } yield started
   }
 
-  //todo: simplfy use by having "bootstrap" (or better name actor) receive all ts request and forward to detector
+  //todo: simplify use by having "bootstrap" (or better name actor) receive all ts request and forward to detector
   def execute(
     context: BoundedContext,
     conf: Configuration
@@ -273,7 +276,7 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
     Sink.actorSubscriber[Outliers]( props.withDispatcher( "publisher-dispatcher" ) ).named( "graphite" )
   }
 
-  def startPlanWatcher( config: Configuration, listeners: Set[ActorRef] )( implicit system: ActorSystem ): Unit = {
+//  def startPlanWatcher( config: Configuration, listeners: Set[ActorRef] )( implicit system: ActorSystem ): Unit = {
 //    logger info s"Outlier plan origin: [${config.planOrigin}]"
 //    import java.nio.file.{ StandardWatchEventKinds => Events }
 //    import better.files.FileWatcher._
@@ -295,7 +298,7 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
 //        }
 //      }
 //    }
-  }
+//  }
 
   lazy val workflowFailuresMeter: Meter = metrics meter "workflow.failures"
 

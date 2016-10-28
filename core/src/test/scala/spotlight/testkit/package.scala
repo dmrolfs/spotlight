@@ -8,7 +8,7 @@ import peds.commons.identifier.ShortUUID
   * Created by rolfsd on 7/5/16.
   */
 package object testkit {
-  def config( rootDir: String = "." ): Config = {
+  def config( rootDir: String = ".", systemName: String ): Config = {
     val testConfig = ConfigFactory.parseString(
       s"""
         |akka.persistence {
@@ -17,18 +17,18 @@ package object testkit {
         |  journal.leveldb-shared.store {
         |    # DO NOT USE 'native = off' IN PRODUCTION !!!
         |    native = off
-        |    dir = "target/shared-journal"
+        |    dir = "${rootDir}/target/shared-journal"
         |  }
         |  journal.leveldb {
         |    # DO NOT USE 'native = off' IN PRODUCTION !!!
         |    native = off
         |    dir = "${rootDir}/target/journal/${ShortUUID()}"
         |  }
-        |  snapshot-store.local.dir = "target/snapshots"
+        |  snapshot-store.local.dir = "${rootDir}target/snapshots"
         |}
         |
         |akka {
-        |  loggers = ["akka.event.slf4j.Slf4jLogger"]
+        |  loggers = ["akka.event.slf4j.Slf4jLogger", "akka.testkit.TestEventListener"]
         |  logging-filter = "akka.event.DefaultLoggingFilter"
         |  loglevel = DEBUG
         |  stdout-loglevel = "DEBUG"
@@ -49,8 +49,8 @@ package object testkit {
         |
         |  cluster {
         |    seed-nodes = [
-        |      "akka.tcp://ClusterSystem@127.0.0.1:2551",
-        |      "akka.tcp://ClusterSystem@127.0.0.1:2552"
+        |      "akka.tcp://${systemName}@127.0.0.1:2551",
+        |      "akka.tcp://${systemName}@127.0.0.1:2552"
         |    ]
         |
         |    auto-down-unreachable-after = 10s
@@ -101,7 +101,7 @@ package object testkit {
       """.stripMargin
     )
 
-    ConfigFactory.load( "reference.conf" ).withFallback( testConfig )
+    testConfig.withFallback( ConfigFactory.load( "reference.conf" ) )
   }
 //  def config( rootDir: String = "." ): Config = ConfigFactory.parseString(
 //    s"""

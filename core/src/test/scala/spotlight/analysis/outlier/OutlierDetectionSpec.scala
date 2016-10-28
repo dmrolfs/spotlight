@@ -1,12 +1,12 @@
 package spotlight.analysis.outlier
 
 import scala.concurrent.duration._
-import akka.actor.{ActorRef, Props}
+import akka.actor.{ActorRef, ActorSystem, Props}
 import akka.testkit._
 
 import scalaz.Scalaz.{when => _, _}
 import org.scalatest.mockito.MockitoSugar
-import com.typesafe.config.ConfigFactory
+import com.typesafe.config.{Config, ConfigFactory}
 import peds.akka.envelope.Envelope
 import spotlight.model.timeseries._
 import spotlight.model.outlier.{IsQuorum, OutlierPlan, ReduceOutliers}
@@ -17,7 +17,14 @@ import spotlight.testkit.ParallelAkkaSpec
  * Created by rolfsd on 10/20/15.
  */
 class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
-  class Fixture extends AkkaFixture { fixture =>
+
+  override def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture = {
+    new Fixture( config, system, slug )
+  }
+
+  class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends AkkaFixture( _config, _system, _slug ) {
+    fixture =>
+
     val router = TestProbe()
     val subscriber = TestProbe()
     val isQuorumA = mock[IsQuorum]
@@ -72,7 +79,6 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
     actual.lastPoints.flatten mustBe expected.lastPoints.flatten
   }
 
-  override def createAkkaFixture( test: OneArgTest ): Fixture = new Fixture
 
   "OutlierDetection" should {
     "apply default plan if no other plan is assigned" in { f: Fixture =>

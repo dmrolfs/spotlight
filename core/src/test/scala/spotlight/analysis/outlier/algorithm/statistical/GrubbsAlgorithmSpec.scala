@@ -1,8 +1,10 @@
 package spotlight.analysis.outlier.algorithm.statistical
 
+import akka.actor.ActorSystem
+
 import scala.annotation.tailrec
 import scalaz.Unzip
-import com.typesafe.config.ConfigFactory
+import com.typesafe.config.{Config, ConfigFactory}
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import org.joda.{time => joda}
 import org.mockito.Mockito._
@@ -27,7 +29,13 @@ with DisjunctionValues {
   override type Module = GrubbsAlgorithm.type
   override val defaultModule: Module = GrubbsAlgorithm
 
-  class Fixture extends AlgorithmFixture {
+
+  override def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture = {
+    logger.debug( "TEST ActorSystem: {}", system.name )
+    new Fixture( config, system, slug )
+  }
+
+  class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends AlgorithmFixture( _config, _system, _slug ) {
     val testScope: module.TID = identifying tag OutlierPlan.Scope( plan = "TestPlan", topic = "TestTopic" )
 
     override implicit val shapeOrdering: Ordering[TestShape] = new Ordering[TestShape] {
@@ -42,8 +50,6 @@ with DisjunctionValues {
     override def nextId(): module.TID = testScope
   }
 
-
-  override def createAkkaFixture(tags: OneArgTest): Fixture = new Fixture
 
   def stateFor( stats: DescriptiveStatistics ): GrubbsAlgorithm.State = GrubbsAlgorithm.State( null, null, stats )
   def stateFor( values: Seq[Double] ): GrubbsAlgorithm.State = {
@@ -173,7 +179,7 @@ with DisjunctionValues {
 
 
   s"${defaultModule.algorithm.label.name} algorithm" should {
-    "change configuration" taggedAs WIP in { f: Fixture =>
+    "change configuration" in { f: Fixture =>
       import f._
       import akka.pattern.ask
       import scala.concurrent.duration._

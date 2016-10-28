@@ -2,9 +2,9 @@ package spotlight.analysis.outlier.algorithm.skyline
 
 import scala.collection.immutable
 import scala.concurrent.duration._
-import akka.actor.Props
+import akka.actor.{ActorSystem, Props}
 import akka.testkit._
-import com.typesafe.config.ConfigFactory
+import com.typesafe.config.{Config, ConfigFactory}
 import org.joda.{time => joda}
 import org.mockito.Mockito._
 import spotlight.analysis.outlier.{DetectOutliersInSeries, DetectUsing, DetectionAlgorithmRouter, Moment}
@@ -15,9 +15,11 @@ import spotlight.model.outlier._
   * Created by rolfsd on 2/15/16.
   */
 class SkylineSeasonalEWMASpec extends SkylineBaseSpec {
-//  import SkylineBaseSpec._
+  override def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture = {
+    new Fixture( config, system, slug )
+  }
 
-  class Fixture extends SkylineFixture {
+  class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends SkylineFixture( _config, _system, _slug ) {
     val algoS: Symbol = SeasonalExponentialMovingAverageAnalyzer.Algorithm
     val algProps = ConfigFactory.parseString(
       s"""
@@ -31,8 +33,6 @@ class SkylineSeasonalEWMASpec extends SkylineBaseSpec {
     when( plan.appliesTo ).thenReturn( SkylineFixture.appliesToAll )
     when( plan.algorithms ).thenReturn( Set(algoS) )
   }
-
-  override def createAkkaFixture( test: OneArgTest ): Fixture = new Fixture
 
 
   "SeasonalExponentialMovingAverageAnalyzer" should {

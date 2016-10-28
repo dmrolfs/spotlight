@@ -2,7 +2,7 @@ package spotlight.testkit
 
 import scala.concurrent.duration._
 import scala.reflect.ClassTag
-import akka.actor.ActorRef
+import akka.actor.{ActorRef, ActorSystem}
 import com.typesafe.config.Config
 import org.joda.{time => joda}
 import demesne.AggregateRootType
@@ -26,12 +26,13 @@ abstract class EntityModuleSpec[E <: Entity : ClassTag] extends AggregateRootSpe
 
   override type ID = E#ID
 
+
+  override def testConfiguration( test: OneArgTest, slug: String ): Config = spotlight.testkit.config( "core", slug )
+
   override type Fixture <: EntityFixture
 
-  abstract class EntityFixture(
-    override val fixtureId: Int = AggregateRootSpec.sysId.incrementAndGet(),
-    override val config: Config = spotlight.testkit.config( "core" )
-  ) extends AggregateFixture( fixtureId, config ) { fixture =>
+  abstract class EntityFixture( _config: Config, _system: ActorSystem, _slug: String )
+  extends AggregateFixture( _config, _system, _slug ) { fixture =>
 
     type Module <: EntityAggregateModule[E]
     val module: Module

@@ -23,7 +23,7 @@ object Dependencies {
   object akka {
     val version = "2.4.11"
     def module( id: String ) = "com.typesafe.akka" %% s"akka-$id" % version
-    val all = Seq( actor, stream, agent, cluster, clusterSharding, contrib, persistence, remote, slf4j )
+    val all: Seq[ModuleID] = Seq( actor, stream, agent, cluster, clusterSharding, contrib, persistence, remote, slf4j )
 
     val actor = module( "actor" )
     val stream = module( "stream" )
@@ -41,10 +41,11 @@ object Dependencies {
   }
 
   object persistence {
-    val all = Seq( leveldb, leveldbini )
-    val leveldb = "org.iq80.leveldb" % "leveldb" % "0.9"
-    val leveldbini = "org.fusesource.leveldbjni" % "leveldbjni-all" % "1.8"
+    val leveldb = "org.iq80.leveldb" % "leveldb" % "0.7" // "org.iq80.leveldb" % "leveldb" % "0.9"
+    val leveldbjni = "org.fusesource.leveldbjni" % "leveldbjni-all" % "1.8" // "org.fusesource.leveldbjni" % "leveldbjni-all" % "1.8"
+    val all: Seq[ModuleID] = Seq( leveldb, leveldbjni )
   }
+
   object scalaz {
     val version = "7.2.6"
     def module( id: String ) = "org.scalaz" %% s"scalaz-$id" % version
@@ -156,22 +157,29 @@ object Dependencies {
   }
 
 
-  val commonDependencies = log.all ++ peds.all ++ time.all ++ Seq(
-    akka.actor,
-    akka.stream,
-    akka.slf4j,
-    akka.kyro,
-    log.logback.classic,
-    facility.uuid,
-    facility.config,
-    facility.shapeless,
-    scalaz.core
-  ) ++ Scope.test(
-    akka.testkit,
-    quality.scalatest,
-    quality.scalazMatchers,
-    quality.mockito.core
-  )
+  val commonDependencies = {
+    log.all ++
+    peds.all ++
+    time.all ++
+    persistence.all ++
+    Seq(
+      akka.actor,
+      akka.stream,
+      akka.slf4j,
+      akka.kyro,
+      log.logback.classic,
+      facility.uuid,
+      facility.config,
+      facility.shapeless,
+      scalaz.core
+    ) ++
+    Scope.test(
+      akka.testkit,
+      quality.scalatest,
+      quality.scalazMatchers,
+      quality.mockito.core
+    )
+  }
 
   val defaultDependencyOverrides = Set(
     scalaz.core //,

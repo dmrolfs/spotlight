@@ -2,17 +2,17 @@ package spotlight.stream
 
 import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicInteger
-
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 import scala.util.Failure
 import akka.{NotUsed, pattern}
+import akka.actor.ActorSystem
 import akka.stream.{ActorMaterializer, Materializer, OverflowStrategy}
 import akka.stream.testkit.scaladsl.{TestSink, TestSource}
 import akka.stream.scaladsl._
 import akka.util.ByteString
 import akka.testkit._
-import com.typesafe.config.ConfigFactory
+import com.typesafe.config.{Config, ConfigFactory}
 import org.scalatest.Tag
 import org.apache.commons.math3.random.RandomDataGenerator
 import org.joda.{time => joda}
@@ -34,7 +34,14 @@ import spotlight.model.timeseries.{DataPoint, TimeSeries}
 class OutlierScoringModelSpec extends ParallelAkkaSpec {
   import OutlierScoringModelSpec._
 
-  class Fixture extends AkkaFixture { fixture =>
+
+  override def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture = {
+    new Fixture( config, system, slug )
+  }
+
+  class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends AkkaFixture( _config, _system, _slug ) {
+    fixture =>
+
 //    logger.debug( "config:: akka.actor.provider=[{}] origin:[{}]", config.getValue("akka.actor.provider"), config.getValue("akka.actor.provider").origin() )
 
     implicit val materializer: Materializer = ActorMaterializer()
@@ -75,7 +82,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
       import scala.concurrent.ExecutionContext.Implicits.global
       val bc = {
         for {
-          made <- BoundedContext.make( Symbol(s"Parallel-${fixtureId}"), config, rootTypes )
+          made <- BoundedContext.make( Symbol(slug), config, rootTypes )
           started <- made.start()
         } yield started
       }
@@ -113,7 +120,6 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
     }
   }
 
-  override def createAkkaFixture( test: OneArgTest ): Fixture = new Fixture
 
   val NEXT = Tag( "next" )
   val DONE = Tag( "done" )

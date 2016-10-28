@@ -1,7 +1,10 @@
 package spotlight.analysis.outlier.algorithm.skyline
 
+import akka.actor.ActorSystem
+
 import scala.concurrent.duration._
 import akka.testkit._
+import com.typesafe.config.Config
 import com.typesafe.scalalogging.LazyLogging
 import spotlight.analysis.outlier.HistoricalStatistics
 import spotlight.model.outlier._
@@ -42,7 +45,9 @@ abstract class SkylineBaseSpec extends ParallelAkkaSpec with MockitoSugar {
     }
   }
 
-  abstract class SkylineFixture extends AkkaFixture {
+  abstract class SkylineFixture( _config: Config, _system: ActorSystem, _slug: String )
+  extends AkkaFixture( _config, _system, _slug ) {
+
     implicit def scalaDurationToJoda( d: FiniteDuration ): joda.Duration = new joda.Duration( d.toMillis )
 
     val router = TestProbe()

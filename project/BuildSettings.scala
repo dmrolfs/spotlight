@@ -22,6 +22,7 @@ object BuildSettings {
       "-unchecked",
       "-deprecation",
       "-language:implicitConversions",
+//      "-Ylog-classpath",
       // "-Xlog-implicits",
       // "-Ymacro-debug-verbose",
       // "-Ywarn-adapted-args",

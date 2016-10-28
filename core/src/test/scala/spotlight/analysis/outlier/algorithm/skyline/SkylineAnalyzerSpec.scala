@@ -1,10 +1,12 @@
 package spotlight.analysis.outlier.algorithm.skyline
 
+import akka.actor.ActorSystem
+
 import scala.collection.immutable
 import scala.concurrent.duration._
 import akka.testkit._
 import com.github.nscala_time.time.JodaImplicits._
-import com.typesafe.config.ConfigFactory
+import com.typesafe.config.{Config, ConfigFactory}
 import spotlight.analysis.outlier.{DetectOutliersInSeries, DetectUsing, DetectionAlgorithmRouter}
 import spotlight.model.outlier._
 import spotlight.model.timeseries.DataPoint
@@ -18,9 +20,11 @@ import org.scalatest.mock.MockitoSugar
   * Created by rolfsd on 2/15/16.
   */
 class SkylineAnalyzerSpec extends SkylineBaseSpec {
-  import SkylineAnalyzerSpec._
+  override def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture = {
+    new Fixture( config, system, slug )
+  }
 
-  class Fixture extends SkylineFixture {
+  class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends SkylineFixture( _config, _system, _slug ) {
     val plan = mock[OutlierPlan]
     when( plan.name ).thenReturn( "mock-plan" )
     when( plan.appliesTo ).thenReturn( SkylineFixture.appliesToAll )
@@ -38,7 +42,6 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
     )
   }
 
-  override def createAkkaFixture( test: OneArgTest ): Fixture = new Fixture
 
   val NEXT = Tag( "next" )
 
@@ -368,7 +371,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
 
 
       val next3: Seq[DataPoint] = makeDataPoints(
-        values = points.map{ _.value },
+        values = SkylineAnalyzerSpec.points.map{ _.value },
         start = now,
         period = 10.seconds,
         timeWiggle = (0.98, 1.02),

@@ -1,9 +1,11 @@
 package spotlight.analysis.outlier.algorithm.skyline
 
+import akka.actor.ActorSystem
+
 import scala.collection.immutable
 import scala.concurrent.duration._
 import akka.testkit._
-import com.typesafe.config.ConfigFactory
+import com.typesafe.config.{Config, ConfigFactory}
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import org.mockito.Mockito._
 import org.joda.{time => joda}
@@ -18,9 +20,13 @@ import spotlight.model.timeseries.{DataPoint, ThresholdBoundary}
   * Created by rolfsd on 3/22/16.
   */
 class SkylineFirstHourAverageSpec extends SkylineBaseSpec {
-  import SkylineFirstHourAverageSpec._
+  import SkylineFirstHourAverageSpec.points
 
-  class Fixture extends SkylineFixture {
+  override def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture = {
+    new Fixture( config, system, slug )
+  }
+
+  class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends SkylineFixture( _config, _system, _slug ) {
     val algoS = FirstHourAverageAnalyzer.Algorithm
     val algProps = ConfigFactory.parseString( s"""${algoS.name}.tolerance: 3""" )
 
@@ -90,8 +96,6 @@ class SkylineFirstHourAverageSpec extends SkylineBaseSpec {
       } { a mustBe (e +- 0.00001) }
     }
   }
-
-  override def createAkkaFixture( test: OneArgTest ): Fixture = new Fixture
 
 
   "FirstHourAverageAnalyzer" should {

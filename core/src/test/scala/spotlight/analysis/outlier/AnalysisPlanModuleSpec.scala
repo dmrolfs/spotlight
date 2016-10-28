@@ -6,8 +6,7 @@ import akka.testkit._
 import com.typesafe.config.{Config, ConfigFactory}
 import peds.akka.envelope._
 import peds.akka.envelope.pattern.ask
-import akka.actor.{ActorContext, ActorRef, PoisonPill, Props}
-import akka.util.Timeout
+import akka.actor.{ActorContext, ActorRef, ActorSystem, PoisonPill, Props}
 import demesne.index.StackableIndexBusPublisher
 import demesne.module.{AggregateEnvironment, LocalAggregate}
 import demesne.{AggregateRootType, DomainModel}
@@ -36,15 +35,27 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] { outer =>
   override type Protocol = AnalysisPlanProtocol.type
   override val protocol: Protocol = AnalysisPlanProtocol
 
+
   abstract class FixtureModule extends EntityAggregateModule[OutlierPlan] { testModule =>
     private val trace: Trace[_] = Trace[FixtureModule]
     override val idLens: Lens[OutlierPlan, TaggedID[ShortUUID]] = OutlierPlan.idLens
     override val nameLens: Lens[OutlierPlan, String] = OutlierPlan.nameLens
-//      override def aggregateRootPropsOp: AggregateRootProps = testProps( _, _ )( proxy )
+    //      override def aggregateRootPropsOp: AggregateRootProps = testProps( _, _ )( proxy )
     override def environment: AggregateEnvironment = LocalAggregate
   }
 
-  abstract class Fixture extends EntityFixture( config = AnalysisPlanModuleSpec.config ) {
+
+  override def testConfiguration( test: OneArgTest, slug: String ): Config = AnalysisPlanModuleSpec.config( systemName = slug )
+
+  override def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture = {
+    test.tags match {
+      case ts if ts.contains( WORKFLOW.name ) => new WorkflowFixture( config, system, slug )
+      case _ => new DefaultFixture( config, system, slug )
+    }
+  }
+
+  abstract class Fixture( _config: Config, _system: ActorSystem, _slug: String )
+  extends EntityFixture( _config, _system, _slug ) {
     protected val trace: Trace[_]
 
     val identifying = AnalysisPlanModule.identifying
@@ -96,7 +107,7 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] { outer =>
     }
   }
 
-  class DefaultFixture extends Fixture {
+  class DefaultFixture( _config: Config, _system: ActorSystem, _slug: String ) extends Fixture( _config, _system, _slug ) {
     override protected val trace = Trace[DefaultFixture]
 
     val proxyProbe = TestProbe()
@@ -128,7 +139,7 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] { outer =>
     override val module: Module = new Module
   }
 
-  class WorkflowFixture extends Fixture {
+  class WorkflowFixture( _config: Config, _system: ActorSystem, _slug: String ) extends Fixture( _config, _system, _slug ) {
     override protected val trace = Trace[WorkflowFixture]
 
     var proxyProbes = Map.empty[Topic, TestProbe]
@@ -177,12 +188,6 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] { outer =>
 //    }
   }
 
-  override def createAkkaFixture( test: OneArgTest ): Fixture = {
-    test.tags match {
-      case ts if ts.contains( WORKFLOW.name ) => new WorkflowFixture
-      case _ => new DefaultFixture
-    }
-  }
 
   object WORKFLOW extends Tag( "workflow" )
 
@@ -430,7 +435,7 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] { outer =>
 }
 
 object AnalysisPlanModuleSpec {
-  def config: Config = {
+  def config( systemName: String ): Config = {
     val planConfig: Config = ConfigFactory.parseString(
       """
         |in-flight-dispatcher {
@@ -452,6 +457,6 @@ object AnalysisPlanModuleSpec {
       """.stripMargin
     )
 
-    planConfig withFallback spotlight.testkit.config( "core" )
+    planConfig withFallback spotlight.testkit.config( "core", systemName )
   }
 }

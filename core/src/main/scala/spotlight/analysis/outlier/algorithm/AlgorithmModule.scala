@@ -277,7 +277,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
   class RootType extends AggregateRootType {
     override lazy val name: String = module.shardName
     override lazy val identifying: Identifying[_] = AlgorithmModule.identifying
-    override def repositoryProps( implicit model: DomainModel ): Props = Repository localProps model
+    override def repositoryProps( implicit model: DomainModel ): Props = Repository localProps model //todo change to clustered with multi-jvm testing of cluster
     override def maximumNrClusterNodes: Int = module.maximumNrClusterNodes
     override def aggregateIdFor: ShardRegion.ExtractEntityId = super.aggregateIdFor orElse {
       case AdvancedType( a ) => {
@@ -301,8 +301,8 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
     override def aggregateProps: Props = AlgorithmActor.props( model, rootType )
 
     //todo    import demesne.repository.{ StartProtocol => SP }
-    override def doLoad(): Loaded = super.doLoad()
-    override def doInitialize( resources: Map[Symbol, Any] ): Valid[Done] = super.doInitialize( resources )
+//    override def doLoad(): Loaded = super.doLoad()
+//    override def doInitialize( resources: Map[Symbol, Any] ): Valid[Done] = super.doInitialize( resources )
   }
 
 
@@ -547,7 +547,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
 
         val effState = Option( state ) getOrElse { analysisStateCompanion zero aggregateId }
         val events = loop( points.toList, Seq.empty[AlgorithmProtocol.Advanced].right )( effState.right )
-        events foreach { es => persistAll( es.to[collection.immutable.Seq] ){ accept } }
+        events foreach { _ foreach { e => persist( e ){ accept } } }
         events
       }
     }

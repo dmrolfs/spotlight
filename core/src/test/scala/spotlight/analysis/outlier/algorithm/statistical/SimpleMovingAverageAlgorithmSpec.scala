@@ -1,6 +1,8 @@
 package spotlight.analysis.outlier.algorithm.statistical
 
+import akka.actor.ActorSystem
 import akka.testkit._
+import com.typesafe.config.Config
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import org.joda.{time => joda}
 import org.mockito.Mockito._
@@ -22,7 +24,12 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmModuleSpec[SimpleMovingA
   override type Module = SimpleMovingAverageAlgorithm.type
   override val defaultModule: Module = SimpleMovingAverageAlgorithm
 
-  class Fixture extends AlgorithmFixture {
+
+  override def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture = {
+    new Fixture( config, system, slug )
+  }
+
+  class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends AlgorithmFixture( _config, _system, _slug ) {
     val testScope: module.TID = identifying tag OutlierPlan.Scope(plan = "TestPlan", topic = "TestTopic")
     override def nextId(): module.TID = testScope
 
@@ -46,8 +53,6 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmModuleSpec[SimpleMovingA
       historicalStatsLens.set( s )( stats )
     }
   }
-
-  override def createAkkaFixture( test: OneArgTest ): Fixture = new Fixture
 
 
   override def calculateControlBoundaries(

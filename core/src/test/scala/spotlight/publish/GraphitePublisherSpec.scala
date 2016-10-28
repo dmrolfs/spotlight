@@ -6,12 +6,12 @@ import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
 import javax.net._
 import javax.script.{Compilable, ScriptEngineManager, SimpleBindings}
 
-import akka.actor.Props
+import akka.actor.{ActorSystem, Props}
 import akka.testkit.{TestActorRef, TestProbe}
 import akka.util.ByteString
-import com.typesafe.config.ConfigFactory
+import com.typesafe.config.{Config, ConfigFactory}
 import spotlight.model.outlier.{NoOutliers, OutlierPlan, SeriesOutliers}
-import spotlight.model.timeseries.{ThresholdBoundary, DataPoint, TimeSeries, Topic}
+import spotlight.model.timeseries.{DataPoint, ThresholdBoundary, TimeSeries, Topic}
 import spotlight.protocol.PythonPickleProtocol
 import spotlight.testkit.ParallelAkkaSpec
 import org.joda.{time => joda}
@@ -58,7 +58,12 @@ with MockitoSugar {
 
   override val trace = Trace[GraphitePublisherSpec]
 
-  class Fixture extends AkkaFixture { outer =>
+
+  override def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture = {
+    new Fixture( config, system, slug )
+  }
+
+  class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends AkkaFixture( _config, _system, _slug ) { outer =>
     val senderProbe = TestProbe( "test-sender" )
     val connected: AtomicBoolean = new AtomicBoolean( true )
     val closed: AtomicBoolean = new AtomicBoolean( false )
@@ -160,8 +165,6 @@ with MockitoSugar {
       results.toString()
     }
   }
-
-  def createAkkaFixture( test: OneArgTest ): Fixture = new Fixture
 
 
   val DONE = Tag("done")

@@ -6,7 +6,11 @@ name := "spotlight-graphite"
 
 description := "lorem ipsum."
 
-libraryDependencies ++= commonDependencies
+libraryDependencies ++=
+  commonDependencies ++
+  Seq(
+    akka.persistence
+  )
 
 testOptions in Test += Tests.Argument( "-oDF" )
 
@@ -130,7 +134,7 @@ dockerfile in docker := {
 //    env( "CONFIG_HOME", "/etc/spotlight" )
     env( "SPOTLIGHT_CONFIG", "application-prod.conf" )
     expose( 2004 )
-
+    expose( 2551 )
     expose( 22 )
   }
 }

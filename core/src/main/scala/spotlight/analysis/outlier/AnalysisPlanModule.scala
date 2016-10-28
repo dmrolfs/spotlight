@@ -16,6 +16,7 @@ import demesne.module.entity.{messages => EntityMessages}
 import demesne.index.local.IndexLocalAgent
 import demesne.{AggregateProtocol, AggregateRootType, DomainModel}
 import demesne.index.{Directive, IndexBusSubscription, StackableIndexBusPublisher}
+import demesne.module.LocalAggregate
 import spotlight.model.outlier.{IsQuorum, OutlierPlan, ReduceOutliers}
 import spotlight.model.timeseries.{TimeSeries, Topic}
 
@@ -115,6 +116,7 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
     b
     .builder
     .set( BTag, identifying.idTag )
+    .set( Environment, LocalAggregate )
     .set( BProps, AggregateRoot.OutlierPlanActor.props(_, _) )
     .set( Indexes, indexes )
     .set( IdLens, OutlierPlan.idLens )

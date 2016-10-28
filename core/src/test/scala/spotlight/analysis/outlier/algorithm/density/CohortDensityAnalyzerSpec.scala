@@ -2,9 +2,10 @@ package spotlight.analysis.outlier.algorithm.density
 
 import java.util.concurrent.atomic.AtomicInteger
 
+import akka.actor.ActorSystem
 import akka.event.EventStream
 import akka.testkit._
-import com.typesafe.config.ConfigFactory
+import com.typesafe.config.{Config, ConfigFactory}
 import org.apache.commons.math3.random.RandomDataGenerator
 import org.joda.{time => joda}
 import org.scalatest.mockito.MockitoSugar
@@ -22,9 +23,13 @@ import scala.concurrent.duration._
  * Created by damonrolfs on 9/18/14.
  */
 class CohortDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
-  import CohortDensityAnalyzerSpec._
+  import CohortDensityAnalyzerSpec.{ points, pointsA, pointsB }
 
-  class Fixture extends AkkaFixture {
+  override def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture = {
+    new Fixture( config, system, slug )
+  }
+
+  class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends AkkaFixture( _config, _system, _slug ) {
     val algoS = SeriesDensityAnalyzer.Algorithm
     val algoC = CohortDensityAnalyzer.Algorithm
     val plan = mock[OutlierPlan]
@@ -41,7 +46,6 @@ class CohortDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
     }
   }
 
-  override def createAkkaFixture( test: OneArgTest ): Fixture = new Fixture
 
   "CohortDensityAnalyzer" should  {
     "register with router upon create" taggedAs WIP in { f: Fixture =>

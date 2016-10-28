@@ -1,7 +1,10 @@
 package spotlight.analysis.outlier
 
+import akka.actor.ActorSystem
+
 import scala.concurrent.duration._
 import akka.testkit._
+import com.typesafe.config.Config
 import org.joda.{time => joda}
 import org.scalatest.mockito.MockitoSugar
 import peds.akka.envelope.Envelope
@@ -15,14 +18,17 @@ import spotlight.testkit.ParallelAkkaSpec
  */
 class DetectionAlgorithmRouterSpec extends ParallelAkkaSpec with MockitoSugar {
 
-  class Fixture extends AkkaFixture {
+  override def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture = {
+    new Fixture( config, system, slug )
+  }
+
+  class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends AkkaFixture( _config, _system, _slug ) {
     val algo = 'foo
     val algorithm = TestProbe()
     val router = TestActorRef[DetectionAlgorithmRouter]( DetectionAlgorithmRouter.props( Map(algo -> algorithm.ref) ) )
     val subscriber = TestProbe()
   }
 
-  override def createAkkaFixture( test: OneArgTest ): Fixture = new Fixture
 
   "DetectionAlgorithmRouter" should {
     import DetectionAlgorithmRouter.{ AlgorithmRegistered, RegisterDetectionAlgorithm }

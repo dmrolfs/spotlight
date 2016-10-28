@@ -2,7 +2,7 @@ package spotlight.analysis.outlier
 
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
-import akka.actor.ActorRef
+import akka.actor.{ActorRef, ActorSystem}
 import akka.stream.{ActorMaterializer, Materializer}
 import akka.testkit._
 import akka.util.Timeout
@@ -24,7 +24,19 @@ import spotlight.model.timeseries.Topic
   * Created by rolfsd on 8/1/16.
   */
 class PlanCatalogSpec extends ParallelAkkaSpec with ScalaFutures with StrictLogging { outer =>
-  class Fixture( config: Config = PlanCatalogSpec.config ) extends AkkaFixture( config = config ) with StrictLogging { fixture =>
+
+  override def testConfiguration( test: OneArgTest, slug: String ): Config = PlanCatalogSpec.config( slug )
+
+  override def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture = {
+    test.tags match {
+      //      case tags if tags.contains( PASSIVATE.name ) => new PassivationFixture
+      case _ => new Fixture( config, system, slug )
+    }
+  }
+
+  class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends AkkaFixture( _config, _system, _slug ) {
+    fixture =>
+
     import ExecutionContext.Implicits.global
 
     implicit val materializer: Materializer = ActorMaterializer()
@@ -33,7 +45,7 @@ class PlanCatalogSpec extends ParallelAkkaSpec with ScalaFutures with StrictLogg
     lazy val boundedContext: BoundedContext = trace.block( "boundedContext" ) {
       val bc = {
         for {
-          made <- BoundedContext.make( Symbol(s"Parallel-${fixtureId}"), config, rootTypes )
+          made <- BoundedContext.make( Symbol(slug), config, rootTypes )
           started <- made.start()
         } yield started
       }
@@ -135,12 +147,6 @@ class PlanCatalogSpec extends ParallelAkkaSpec with ScalaFutures with StrictLogg
 //    }
 //  }
 
-  override def createAkkaFixture( test: OneArgTest ): Fixture = trace.block( "createAkkaFixture" ) {
-    test.tags match {
-//      case tags if tags.contains( PASSIVATE.name ) => new PassivationFixture
-      case _ => new Fixture
-    }
-  }
 
   "PlanCatalog" should {
     "start Catalog" in { f: Fixture =>
@@ -209,7 +215,7 @@ class PlanCatalogSpec extends ParallelAkkaSpec with ScalaFutures with StrictLogg
 }
 
 object PlanCatalogSpec extends StrictLogging {
-  val config: Config = {
+  def config( systemName: String ): Config = {
     val catalogConfig: Config = ConfigFactory.parseString(
       """
         |spotlight {
@@ -244,7 +250,7 @@ object PlanCatalogSpec extends StrictLogging {
       """.stripMargin
     )
 
-    val result: Config = catalogConfig.resolve() withFallback spotlight.testkit.config( "core" )
+    val result: Config = catalogConfig.resolve() withFallback spotlight.testkit.config( "core", systemName )
 //    logger.info(
 //      "TEST CONFIGURATION:[\n{}\n]",
 //      result.root().render( com.typesafe.config.ConfigRenderOptions.defaults().setFormatted(true))

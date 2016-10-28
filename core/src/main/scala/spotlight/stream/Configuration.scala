@@ -20,6 +20,7 @@ import peds.commons.{V, Valid}
   */
 trait Configuration extends Config {
   def sourceAddress: InetSocketAddress
+  def clusterPort: Int
   def maxFrameLength: Int
   def protocol: GraphiteSerializationProtocol
   def windowDuration: FiniteDuration
@@ -35,6 +36,7 @@ trait Configuration extends Config {
     s"""
       |\nRunning Spotlight using the following configuration:
       |\tsource binding  : ${sourceAddress}
+      |\tcluster port    : ${clusterPort}
       |\tpublish binding : ${graphiteAddress}
       |\tmax frame size  : ${maxFrameLength}
       |\tprotocol        : ${protocol}
@@ -171,6 +173,7 @@ object Configuration {
     }
 
     SimpleConfiguration(
+      clusterPort = usage.clusterPort,
       sourceAddress = new InetSocketAddress( sourceHost, sourcePort ),
       maxFrameLength = maxFrameLength,
       protocol = protocol,
@@ -199,6 +202,7 @@ object Configuration {
 
 
   final case class SimpleConfiguration private[stream](
+    override val clusterPort: Int,
     override val sourceAddress: InetSocketAddress,
     override val maxFrameLength: Int,
     override val protocol: GraphiteSerializationProtocol,
@@ -397,6 +401,7 @@ object Configuration {
   case class UsageConfigurationError private[stream]( usage: String ) extends IllegalArgumentException( usage )
 
   final case class UsageSettings private[stream](
+    clusterPort: Int = 2551,
     sourceHost: Option[InetAddress] = None,
     sourcePort: Option[Int] = None,
     windowSize: Option[FiniteDuration] = None
@@ -418,6 +423,10 @@ object Configuration {
       opt[Int]( 'p', "port" ) action { (e, c) =>
         c.copy( sourcePort = Some(e) )
       } text( "connection port of source server")
+
+      opt[Int]( 'c', "cluster-port" ) action { (e, c) =>
+        c.copy( clusterPort = e )
+      }
 
       opt[Long]( 'w', "window" ) action { (e, c) =>
         c.copy( windowSize = Some(FiniteDuration(e, SECONDS)) )

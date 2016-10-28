@@ -1,9 +1,12 @@
 package spotlight.analysis.outlier.algorithm
 
+import akka.actor.ActorSystem
+
 import scala.concurrent.duration._
 import scala.reflect.ClassTag
 import akka.pattern.ask
 import akka.testkit._
+import com.typesafe.config.Config
 
 import scalaz.{-\/, \/-}
 import org.scalatest.concurrent.ScalaFutures
@@ -37,10 +40,25 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
   val defaultModule: Module
   lazy val identifying: EntityIdentifying[AlgorithmModule.AnalysisState] = AlgorithmModule.identifying
 
-  override type Fixture <: AlgorithmFixture
-  abstract class AlgorithmFixture extends AggregateFixture( config = spotlight.testkit.config() ) { fixture =>
-    val subscriber = TestProbe()
 
+  override def testSlug( test: OneArgTest ): String = {
+    s"Test-${defaultModule.algorithm.label.name}-${testPosition.incrementAndGet()}"
+  }
+
+  override def testConfiguration( test: OneArgTest, slug: String ): Config = {
+    val c = spotlight.testkit.config( systemName = slug )
+    import scala.collection.JavaConversions._
+    logger.debug( "Test Config: akka.cluster.seed-nodes=[{}]", c.getStringList("akka.cluster.seed-nodes").mkString(", "))
+    c
+  }
+
+  override type Fixture <: AlgorithmFixture
+
+  abstract class AlgorithmFixture( _config: Config, _system: ActorSystem, _slug: String )
+  extends AggregateFixture( _config, _system, _slug ) {
+    fixture =>
+
+    val subscriber = TestProbe()
 
     override def before( test: OneArgTest ): Unit = {
       super.before( test )
@@ -246,7 +264,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
         aggregate ! adv
 
         Thread.sleep(1000)
-        logger.warn( "TEST: getting current state of id:[{}]...", id )
+        logger.debug( "TEST: getting current state of id:[{}]...", id )
         whenReady( ( aggregate ? P.GetStateSnapshot(id) ).mapTo[P.StateSnapshot], timeout(15.seconds.dilated) ){ s1 =>
           val zero = module.analysisStateCompanion.zero( id )
           actualVsExpectedState( s1.snapshot, Option(expectedUpdatedState(zero, adv)) )

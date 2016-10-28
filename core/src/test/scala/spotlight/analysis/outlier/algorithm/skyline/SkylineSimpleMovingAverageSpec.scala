@@ -1,9 +1,11 @@
 package spotlight.analysis.outlier.algorithm.skyline
 
+import akka.actor.ActorSystem
+
 import scala.collection.immutable
 import scala.concurrent.duration._
 import akka.testkit._
-import com.typesafe.config.ConfigFactory
+import com.typesafe.config.{Config, ConfigFactory}
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import org.mockito.Mockito._
 import org.joda.{time => joda}
@@ -20,7 +22,11 @@ import scala.annotation.tailrec
   * Created by rolfsd on 3/22/16.
   */
 class SkylineSimpleMovingAverageSpec extends SkylineBaseSpec {
-  class Fixture extends SkylineFixture {
+  override def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture = {
+    new Fixture( config, system, slug )
+  }
+
+  class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends SkylineFixture( _config, _system, _slug ) {
     val algoS = SimpleMovingAverageAnalyzer.Algorithm
     val algProps = ConfigFactory.parseString( s"""${algoS.name}.tolerance: 3""" )
 
@@ -72,8 +78,6 @@ class SkylineSimpleMovingAverageSpec extends SkylineBaseSpec {
       loop( points.toList, lastPoints.map{ _.value }.toArray, Seq.empty[ThresholdBoundary] )
     }
   }
-
-  override def createAkkaFixture( test: OneArgTest ): Fixture = new Fixture
 
 
   "SimpleMovingAverageAnalyzer" should {

@@ -22,12 +22,12 @@ import peds.commons.util._
  * Created by rolfsd on 10/28/15.
  */
 object ParallelAkkaSpec extends LazyLogging {
-  val sysId = new AtomicInteger()
+  val testPosition: AtomicInteger = new AtomicInteger()
 
-  val testConf: Config = {
-    val c = ConfigFactory.load.withFallback(
+  def testConf( systemName: String ): Config = {
+    ConfigFactory.load.withFallback(
       ConfigFactory.parseString(
-        """
+        s"""
           |akka {
           |  persistence {
           |    journal.plugin = "inmemory-journal"
@@ -65,8 +65,8 @@ object ParallelAkkaSpec extends LazyLogging {
           |
           |  cluster {
           |    seed-nodes = [
-          |      "akka.tcp://ClusterSystem@127.0.0.1:2551",
-          |      "akka.tcp://ClusterSystem@127.0.0.1:2552"
+          |      "akka.tcp://${systemName}@127.0.0.1:2551",
+          |      "akka.tcp://${systemName}@127.0.0.1:2552"
           |    ]
           |
           |    auto-down-unreachable-after = 10s
@@ -75,9 +75,6 @@ object ParallelAkkaSpec extends LazyLogging {
         """.stripMargin
       )
     )
-
-//    logger.debug( "TEST_CONF = {}", c )
-    c
   }
 
 
@@ -104,18 +101,20 @@ with StrictLogging {
 
   object WIP extends Tag( "wip" )
 
-  def makeSystem( name: String, config: Config ): ActorSystem = ActorSystem( name, config )
+//  def makeSystem( name: String, config: Config ): ActorSystem = ActorSystem( name, config )
 
   type Fixture <: AkkaFixture
   type FixtureParam = Fixture
-  def createAkkaFixture( test: OneArgTest ): Fixture
 
-  import ParallelAkkaSpec.{ sysId, testConf }
+  def testSlug( test: OneArgTest ): String = "Parallel-" + ParallelAkkaSpec.testPosition.incrementAndGet()
+  def testConfiguration( test: OneArgTest, slug: String ): Config = ParallelAkkaSpec.testConf( systemName = slug )
+  def testSystem( test: OneArgTest, config: Config, slug: String ): ActorSystem = ActorSystem( name = slug, config )
+  def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture
 
-  class AkkaFixture( val fixtureId: Int = sysId.incrementAndGet(), val config: Config = testConf )
-  extends TestKit( makeSystem(s"Parallel-${fixtureId}", config) ) {
-    def before(): Unit = { }
-    def after(): Unit = { }
+
+  class AkkaFixture( val config: Config, _system: ActorSystem, val slug: String ) extends TestKit( _system ) {
+    def before( test: OneArgTest ): Unit = { }
+    def after( test: OneArgTest ): Unit = { }
 
     val log: LoggingAdapter = Logging( system, outer.getClass )
 
@@ -133,19 +132,24 @@ with StrictLogging {
     }
   }
 
-
   override def withFixture( test: OneArgTest ): Outcome = {
-    val fixture = \/ fromTryCatchNonFatal { createAkkaFixture( test ) }
+    val fixture = \/ fromTryCatchNonFatal {
+      val slug = testSlug( test )
+      val config = testConfiguration( test, slug )
+      val system = testSystem( test, config, slug )
+      createAkkaFixture( test, config, system, slug )
+    }
+
     val results = fixture map { f =>
       logger.debug( ".......... before test .........." )
-      f.before()
+      f before test
       logger.debug( "++++++++++ starting test ++++++++++" )
       ( test(f), f )
     }
 
     val outcome = results map { case (outcome, f) =>
       logger.debug( "---------- finished test ------------" )
-      f.after()
+      f after test
       logger.debug( ".......... after test .........." )
 
       Option(f.system) foreach { s =>

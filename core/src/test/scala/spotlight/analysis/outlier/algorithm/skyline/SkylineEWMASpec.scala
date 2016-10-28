@@ -1,9 +1,11 @@
 package spotlight.analysis.outlier.algorithm.skyline
 
+import akka.actor.ActorSystem
+
 import scala.collection.immutable
 import scala.concurrent.duration._
 import akka.testkit._
-import com.typesafe.config.ConfigFactory
+import com.typesafe.config.{Config, ConfigFactory}
 import org.mockito.Mockito._
 import spotlight.analysis.outlier.{DetectOutliersInSeries, DetectUsing, DetectionAlgorithmRouter}
 import spotlight.model.outlier._
@@ -13,7 +15,12 @@ import spotlight.model.outlier._
   * Created by rolfsd on 2/15/16.
   */
 class SkylineEWMASpec extends SkylineBaseSpec {
-  class Fixture extends SkylineFixture {
+
+  override def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture = {
+    new Fixture( config, system, slug )
+  }
+
+  class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends SkylineFixture( _config, _system, _slug ) {
     val algoS = ExponentialMovingAverageAnalyzer.Algorithm
     val algProps = ConfigFactory.parseString( s"""${algoS.name}.tolerance: 3""" )
 
@@ -22,8 +29,6 @@ class SkylineEWMASpec extends SkylineBaseSpec {
     when( plan.appliesTo ).thenReturn( SkylineFixture.appliesToAll )
     when( plan.algorithms ).thenReturn( Set(algoS) )
   }
-
-  override def createAkkaFixture( test: OneArgTest ): Fixture = new Fixture
 
 
   "ExponentialMovingAverageAnalyzer" should {

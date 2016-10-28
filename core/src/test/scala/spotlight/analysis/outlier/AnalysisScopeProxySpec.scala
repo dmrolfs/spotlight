@@ -2,13 +2,13 @@ package spotlight.analysis.outlier
 
 import scala.concurrent.duration._
 import akka.NotUsed
-import akka.actor.{Actor, ActorContext, ActorLogging, ActorRef, Props}
+import akka.actor.{Actor, ActorContext, ActorLogging, ActorRef, ActorSystem, Props}
 import akka.stream.{ActorMaterializer, Materializer}
 import akka.stream.scaladsl.{Flow, Keep, Sink}
 import akka.stream.testkit.scaladsl.{TestSink, TestSource}
 import akka.testkit.TestActor.AutoPilot
 import akka.testkit._
-import com.typesafe.config.ConfigFactory
+import com.typesafe.config.{Config, ConfigFactory}
 import org.joda.{time => joda}
 import com.github.nscala_time.time.Imports.{richDateTime, richSDuration}
 import demesne.{AggregateRootType, DomainModel}
@@ -29,7 +29,14 @@ import spotlight.testkit.ParallelAkkaSpec
   * Created by rolfsd on 6/14/16.
   */
 class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with MockitoSugar {
-  class Fixture extends AkkaFixture { fixture =>
+
+  override def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture = {
+    new Fixture( config, system, slug )
+  }
+
+  class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends AkkaFixture( _config, _system, _slug ) {
+    fixture =>
+
     val algo = 'TestAlgorithm
     val router = TestProbe()
     router.setAutoPilot(
@@ -187,9 +194,6 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
       }
     }
   }
-
-
-  override def createAkkaFixture( test: OneArgTest ): Fixture = new Fixture
 
 
   "AnalysisScopeProxy" should {

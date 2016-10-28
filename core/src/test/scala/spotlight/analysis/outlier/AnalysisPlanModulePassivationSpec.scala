@@ -6,10 +6,9 @@ import akka.testkit._
 import com.typesafe.config.{Config, ConfigFactory}
 import peds.akka.envelope._
 import peds.akka.envelope.pattern.ask
-import akka.actor.{ActorContext, ActorRef, Props}
-import akka.util.Timeout
+import akka.actor.{ActorContext, ActorRef, ActorSystem, Props}
 import demesne.index.StackableIndexBusPublisher
-import demesne.{AggregateRootType, DomainModel, SaveSnapshot}
+import demesne.{AggregateRootType, DomainModel}
 import demesne.module.{AggregateEnvironment, LocalAggregate}
 import demesne.module.entity.{EntityAggregateModule, messages => EntityMessages}
 import demesne.repository.AggregateRootProps
@@ -38,7 +37,16 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[OutlierPlan] { 
   override type Protocol = AnalysisPlanProtocol.type
   override val protocol: Protocol = AnalysisPlanProtocol
 
-  class Fixture extends EntityFixture( config = AnalysisPlanModulePassivationSpec.config ) {
+
+  override def testConfiguration( test: OneArgTest, slug: String ): Config = {
+    AnalysisPlanModulePassivationSpec.config( systemName = slug )
+  }
+
+  override def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture = {
+    new Fixture( config, system, slug )
+  }
+
+  class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends EntityFixture( _config, _system, _slug ) {
     class Module extends EntityAggregateModule[OutlierPlan] { testModule =>
       private val trace: Trace[_] = Trace[Module]
       override val idLens: Lens[OutlierPlan, TaggedID[ShortUUID]] = OutlierPlan.idLens
@@ -104,7 +112,6 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[OutlierPlan] { 
     }
   }
 
-  override def createAkkaFixture( test: OneArgTest ): Fixture = new Fixture
 
   "AnalysisPlanModule" should {
     "add OutlierPlan" in { f: Fixture =>
@@ -193,7 +200,7 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[OutlierPlan] { 
 }
 
 object AnalysisPlanModulePassivationSpec {
-  val config: Config = {
+  def config( systemName: String ): Config = {
     val planConfig: Config = ConfigFactory.parseString(
       """
         |in-flight-dispatcher {
@@ -215,6 +222,6 @@ object AnalysisPlanModulePassivationSpec {
       """.stripMargin
     )
 
-    planConfig withFallback spotlight.testkit.config( "core" )
+    planConfig withFallback spotlight.testkit.config( "core", systemName )
   }
 }
