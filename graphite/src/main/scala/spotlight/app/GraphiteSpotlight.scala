@@ -15,7 +15,7 @@ import Scalaz._
 import org.slf4j.LoggerFactory
 import com.typesafe.scalalogging.{Logger, StrictLogging}
 import com.typesafe.config.Config
-import demesne.BoundedContext.StartTask
+import demesne.StartTask
 import demesne.{AggregateRootType, BoundedContext, DomainModel}
 import kamon.Kamon
 import nl.grons.metrics.scala.{Meter, MetricName}
@@ -43,7 +43,7 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
   override protected val logger: Logger = Logger( LoggerFactory.getLogger("GraphiteSpotlight") )
   val trace = Trace[GraphiteSpotlight.type]
   val PlanConfigPath = "spotlight.detection-plans"
-
+  val ActorSystemName = "Spotlight"
 
   case class BootstrapContext(
     config: Configuration,
@@ -56,7 +56,12 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
   def main( args: Array[String] ): Unit = {
     Configuration( args ).disjunction match {
       case \/-( config ) => {
-        implicit val system = ActorSystem( "Spotlight", config )
+        logger.info( "TEST: akka.persistence journal: [{}]", config.getString("akka.persistence.journal.plugin") )
+        logger.info( "TEST: cluster-port=[{}] akka-remoting:[{}]", config.clusterPort.toString, config.getInt("akka.remote.netty.tcp.port").toString )
+        implicit val system = ActorSystem( ActorSystemName, config )
+        logger.info( "TEST: ActorSystem:[{}]", system )
+//        system.logConfiguration()
+        logger.info( "TEST------------------------------------")
         implicit val ec = system.dispatcher
 
         val serverBinding = for {
@@ -94,7 +99,7 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
 
 //    val reloader = Configuration.reloader( args )()()
 
-    startBoundedContext( 'GraphiteSpotlight, config, rootTypes, startTasks )
+    startBoundedContext( 'GraphiteSpotlight, config, rootTypes, startTasks(config) )
 //    val workflow = startDetection( config, reloader )
 
 //    import akka.pattern.ask
@@ -125,10 +130,13 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
     )
   }
 
-  def startTasks( implicit system: ActorSystem ): Set[StartTask] = {
+  def startTasks( config: Configuration )( implicit system: ActorSystem ): Set[StartTask] = {
+    logger.info( "TEST:akka.persistence.journal.plugin: [{}]", config.getString("akka.persistence.journal.plugin") )
     Set(
       SharedLeveldbStore.start(
-        path = ActorPath.fromString( s"akka.tcp://Sportlight@127.0.0.1:2551/user/${SharedLeveldbStore.Name}" ),
+        path = ActorPath.fromString(
+          s"akka.tcp://${system.name}@127.0.0.1:${config.clusterPort}/user/${SharedLeveldbStore.Name}"
+        ),
         startStore = true
       )
     )

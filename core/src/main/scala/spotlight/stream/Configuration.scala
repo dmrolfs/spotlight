@@ -173,7 +173,6 @@ object Configuration {
     }
 
     SimpleConfiguration(
-      clusterPort = usage.clusterPort,
       sourceAddress = new InetSocketAddress( sourceHost, sourcePort ),
       maxFrameLength = maxFrameLength,
       protocol = protocol,
@@ -184,7 +183,9 @@ object Configuration {
           p <- graphitePort
         } yield new InetSocketAddress( h, p )
       },
-      underlying = config
+      underlying = {
+        ConfigFactory.parseString( SimpleConfiguration.AkkaRemotePortPath + "=" + usage.clusterPort ).withFallback( config )
+      }
     )
   }
 
@@ -201,8 +202,11 @@ object Configuration {
   }
 
 
+  object SimpleConfiguration {
+    val AkkaRemotePortPath = "akka.remote.netty.tcp.port"
+  }
+
   final case class SimpleConfiguration private[stream](
-    override val clusterPort: Int,
     override val sourceAddress: InetSocketAddress,
     override val maxFrameLength: Int,
     override val protocol: GraphiteSerializationProtocol,
@@ -210,6 +214,8 @@ object Configuration {
     override val graphiteAddress: Option[InetSocketAddress],
     underlying: Config
   ) extends Configuration with LazyLogging {
+    override def clusterPort: Int = underlying.getInt( SimpleConfiguration.AkkaRemotePortPath )
+
     override def detectionBudget: FiniteDuration = {
       FiniteDuration( getDuration(Directory.DETECTION_BUDGET, MILLISECONDS), MILLISECONDS )
     }
@@ -401,7 +407,7 @@ object Configuration {
   case class UsageConfigurationError private[stream]( usage: String ) extends IllegalArgumentException( usage )
 
   final case class UsageSettings private[stream](
-    clusterPort: Int = 2551,
+    clusterPort: Int = 2552,
     sourceHost: Option[InetAddress] = None,
     sourcePort: Option[Int] = None,
     windowSize: Option[FiniteDuration] = None

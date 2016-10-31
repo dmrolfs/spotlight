@@ -31,6 +31,8 @@ assemblyMergeStrategy in assembly := {
   case PathList( "META-INF", "maven", "commons-logging", xs @ _* ) => MergeStrategy.discard
   case PathList( "META-INF", "maven", "org.apache.avro", xs @ _* ) => MergeStrategy.discard
 
+  case "reference.conf" => MergeStrategy.concat
+
   case x if Assembly.isConfigFile(x) => MergeStrategy.concat
 
   case PathList(ps @ _*) if Assembly.isReadme(ps.last) || Assembly.isLicenseFile(ps.last) => MergeStrategy.rename
@@ -134,7 +136,7 @@ dockerfile in docker := {
 //    env( "CONFIG_HOME", "/etc/spotlight" )
     env( "SPOTLIGHT_CONFIG", "application-prod.conf" )
     expose( 2004 )
-    expose( 2551 )
+    expose( 2552 )
     expose( 22 )
   }
 }

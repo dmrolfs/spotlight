@@ -7,6 +7,7 @@
 bin/**
 logs/
 training/
+journal/
 .sync.db*
 icon?
 *.class
