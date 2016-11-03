@@ -2,7 +2,6 @@ package spotlight.analysis.outlier.algorithm
 
 import akka.actor.{Actor, ActorLogging, ActorPath, ActorRef}
 import akka.event.LoggingReceive
-
 import scalaz._
 import Scalaz._
 import scalaz.Kleisli.{ask, kleisli}
@@ -15,9 +14,16 @@ import org.apache.commons.math3.ml.clustering.DoublePoint
 import peds.akka.metrics.InstrumentedActor
 import peds.commons.{KOp, TryV}
 import peds.commons.math.MahalanobisDistance
+import spotlight.analysis.outlier.{DetectUsing, DetectionAlgorithmRouter, HistoricalStatistics, RecentHistory, UnrecognizedPayload}
 import spotlight.model.outlier.OutlierPlan
 import spotlight.model.timeseries._
-import spotlight.analysis.outlier._
+
+
+sealed trait AlgorithmProtocolOLD
+object AlgorithmProtocolOLD extends {
+  case class Register( scopeId: OutlierPlan.Scope, routerRef: ActorRef ) extends AlgorithmProtocolOLD
+  case class Registered( scopeId: OutlierPlan.Scope ) extends AlgorithmProtocolOLD
+}
 
 
 trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
@@ -38,6 +44,20 @@ trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
   override def receive: Receive = LoggingReceive{ around( quiescent ) }
 
   def quiescent: Receive = {
+    case AlgorithmProtocolOLD.Register( scopeId, routerRef ) => {
+      import scala.concurrent.duration._
+      import akka.pattern.{ ask, pipe }
+
+      implicit val timeout = akka.util.Timeout( 15.seconds )
+      implicit val ec = context.dispatcher
+
+      val resp = ( routerRef ? DetectionAlgorithmRouter.RegisterDetectionAlgorithm( algorithm, self ) )
+      val registered = resp map { case DetectionAlgorithmRouter.AlgorithmRegistered( a ) if a == algorithm =>
+        AlgorithmProtocolOLD.Registered( scopeId )
+      }
+      registered pipeTo sender()
+    }
+
     case DetectionAlgorithmRouter.AlgorithmRegistered( a ) if a == algorithm => {
       log.info( "registration confirmed for [{}] @ [{}] with {}", algorithm.name, self.path, sender().path )
       context become LoggingReceive{ around( detect ) }
@@ -52,7 +72,7 @@ trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
     message match {
       case m: DetectUsing => {
         log.warning( "algorithm [{}] does not recognize requested payload: [{}]", algorithm, m )
-        m.aggregator ! UnrecognizedPayload( algorithm, m )
+        sender() ! UnrecognizedPayload( algorithm, m )
       }
 
       case m => super.unhandled( m )
@@ -72,11 +92,11 @@ trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
 
   /**
     * Some algorithms require a minimum number of points in order to determine an anomaly. To address this circumstance, these
-    * algorithms can use fillDataFromHistory to draw from history the points necessary to create an appropriate group.
+    * algorithms can use fillDataFromHistory to draw from shape the points necessary to create an appropriate group.
     * @param minimalSize of the data grouping
     * @return
     */
-  def fillDataFromHistory( minimalSize: Int = HistoricalStatistics.LastN ): KOp[AlgorithmContext, Seq[DoublePoint]] = {
+  def fillDataFromHistory( minimalSize: Int = RecentHistory.LastN ): KOp[AlgorithmContext, Seq[DoublePoint]] = {
     for {
       ctx <- ask[TryV, AlgorithmContext]
     } yield {
@@ -93,13 +113,14 @@ trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
 }
 
 object AlgorithmActor {
+
   trait AlgorithmContext {
     def message: DetectUsing
     def data: Seq[DoublePoint]
     def algorithm: Symbol
     def topic: Topic
     def plan: OutlierPlan
-    def historyKey: HistoryKey
+    def historyKey: OutlierPlan.Scope
     def history: HistoricalStatistics
     def source: TimeSeriesBase
     def thresholdBoundaries: Seq[ThresholdBoundary]
@@ -127,7 +148,7 @@ object AlgorithmActor {
       override val algorithm: Symbol = message.algorithm
       override val topic: Topic = message.topic
       override def plan: OutlierPlan = message.plan
-      override val historyKey: HistoryKey = HistoryKey( plan, topic )
+      override val historyKey: OutlierPlan.Scope = OutlierPlan.Scope( plan, topic )
       override def history: HistoricalStatistics = message.history
       override def messageConfig: Config = message.properties
 
@@ -135,7 +156,7 @@ object AlgorithmActor {
         def makeMahalanobisDistance: TryV[DistanceMeasure] = {
           val mahal = if ( message.history.N > 0 ) {
             logger.debug(
-              "DISTANCE_MEASURE message.history.covariance = [{}] determinant:[{}]",
+              "DISTANCE_MEASURE message.shape.covariance = [{}] determinant:[{}]",
               message.history.covariance,
               new EigenDecomposition(message.history.covariance).getDeterminant.toString
             )

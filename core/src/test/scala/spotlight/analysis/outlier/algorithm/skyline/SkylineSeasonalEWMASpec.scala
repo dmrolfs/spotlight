@@ -2,9 +2,9 @@ package spotlight.analysis.outlier.algorithm.skyline
 
 import scala.collection.immutable
 import scala.concurrent.duration._
-import akka.actor.Props
+import akka.actor.{ActorSystem, Props}
 import akka.testkit._
-import com.typesafe.config.ConfigFactory
+import com.typesafe.config.{Config, ConfigFactory}
 import org.joda.{time => joda}
 import org.mockito.Mockito._
 import spotlight.analysis.outlier.{DetectOutliersInSeries, DetectUsing, DetectionAlgorithmRouter, Moment}
@@ -15,9 +15,11 @@ import spotlight.model.outlier._
   * Created by rolfsd on 2/15/16.
   */
 class SkylineSeasonalEWMASpec extends SkylineBaseSpec {
-//  import SkylineBaseSpec._
+  override def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture = {
+    new Fixture( config, system, slug )
+  }
 
-  class Fixture extends SkylineFixture {
+  class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends SkylineFixture( _config, _system, _slug ) {
     val algoS: Symbol = SeasonalExponentialMovingAverageAnalyzer.Algorithm
     val algProps = ConfigFactory.parseString(
       s"""
@@ -31,8 +33,6 @@ class SkylineSeasonalEWMASpec extends SkylineBaseSpec {
     when( plan.appliesTo ).thenReturn( SkylineFixture.appliesToAll )
     when( plan.algorithms ).thenReturn( Set(algoS) )
   }
-
-  override def makeAkkaFixture(): Fixture = new Fixture
 
 
   "SeasonalExponentialMovingAverageAnalyzer" should {
@@ -57,13 +57,15 @@ class SkylineSeasonalEWMASpec extends SkylineBaseSpec {
       val today = joda.LocalDate.now
       val tomorrow = today plus joda.Days.ONE
       val weekFromToday = today plus joda.Weeks.ONE
+      val endOfMonth = new joda.DateTime( 2016, 10, 31, 7, 0, 0, 1 )
       val model = SeasonalModel( reference = startOfToday, waveLength = joda.Days.ONE.toStandardDuration, bins = 24 ).toOption.get
       model.seasonStartFor( today.toDateTime( new joda.LocalTime(0, 0, 0) ) ) mustBe startOfToday
       model.seasonStartFor( today.toDateTime( new joda.LocalTime(1, 0, 37, 746) ) ) mustBe startOfToday
       model.seasonStartFor( today.toDateTime( new joda.LocalTime(23, 59, 37, 746) ) ) mustBe startOfToday
       model.seasonStartFor( today.toDateTime( new joda.LocalTime(23, 59, 59, 999) ) ) mustBe startOfToday
       model.seasonStartFor( tomorrow.toDateTime( new joda.LocalTime(13, 37, 59, 999) ) ) mustBe (startOfToday plus joda.Days.ONE)
-      model.seasonStartFor( weekFromToday.toDateTime( new joda.LocalTime(7, 0, 0, 1) ) ) mustBe (startOfToday plus joda.Weeks.ONE)
+//      model.seasonStartFor( weekFromToday.toDateTime( new joda.LocalTime(7, 0, 0, 1) ) ) mustBe (startOfToday plus joda.Weeks.ONE)
+      model.seasonStartFor( endOfMonth plus joda.Weeks.ONE ) mustBe (startOfToday plus joda.Weeks.ONE)
     }
 
     "identifies bin start for date" in { f: Fixture =>
@@ -176,6 +178,8 @@ class SkylineSeasonalEWMASpec extends SkylineBaseSpec {
       val offset = new joda.Duration(1.hour.toMillis)
       val referencePoint = now minus offset
 
+      implicit val sender = aggregator.ref
+
       val analyzer = TestActorRef[SeasonalExponentialMovingAverageAnalyzer](
         Props {
           new SeasonalExponentialMovingAverageAnalyzer( router.ref )
@@ -196,9 +200,16 @@ class SkylineSeasonalEWMASpec extends SkylineBaseSpec {
       val series = spike( full )()
       trace( s"test series = $series" )
 
-      analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS) )
+      analyzer ! DetectionAlgorithmRouter.AlgorithmRegistered( algoS)
       val history1 = historyWith( None, series )
-      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series, plan), history1, algProps ) )
+
+      analyzer ! DetectUsing(
+        algoS,
+        DetectOutliersInSeries(series, plan, subscriber.ref, Set()),
+        history1,
+        algProps
+      )
+
       aggregator.expectMsgPF( 2.seconds.dilated, "stddev from seasonal ewma" ) {
         case m @ SeriesOutliers(alg, source, plan, outliers, control) => {
           alg mustBe Set( algoS )
@@ -220,7 +231,13 @@ class SkylineSeasonalEWMASpec extends SkylineBaseSpec {
       val series2 = spike( full2 )( 0 )
       val history2 = historyWith( Option(history1 recordLastPoints series.points), series2 )
 
-      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
+      analyzer ! DetectUsing(
+        algoS,
+        DetectOutliersInSeries(series2, plan, subscriber.ref, Set()),
+        history2,
+        algProps
+      )
+
       aggregator.expectMsgPF( 2.seconds.dilated, "stddev from seasonal ewma again" ) {
         case m @ SeriesOutliers(alg, source, plan, outliers, control) => {
           alg mustBe Set(algoS)

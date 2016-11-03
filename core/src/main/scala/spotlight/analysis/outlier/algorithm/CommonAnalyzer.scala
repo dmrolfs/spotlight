@@ -32,7 +32,7 @@ object CommonAnalyzer {
     override def algorithm: Symbol = underlying.algorithm
     override def topic: Topic = underlying.topic
     override def plan: OutlierPlan = underlying.plan
-    override def historyKey: HistoryKey = underlying.historyKey
+    override def historyKey: OutlierPlan.Scope = underlying.historyKey
     override def history: HistoricalStatistics = underlying.history
     override def source: TimeSeriesBase = underlying.source
     override def messageConfig: Config = underlying.messageConfig
@@ -40,6 +40,9 @@ object CommonAnalyzer {
     override def tolerance: TryV[Option[Double]] = underlying.tolerance
     override def thresholdBoundaries: Seq[ThresholdBoundary] = underlying.thresholdBoundaries
   }
+
+
+  val DefaultTailAverageLength: Int = 1
 
 
   final case class SimpleWrappingContext private[algorithm]( override val underlying: AlgorithmContext ) extends WrappingContext {
@@ -84,7 +87,9 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
   }
 
   override def detect: Receive = {
-    case msg @ DetectUsing( algo, aggregator, payload: DetectOutliersInSeries, history, algorithmConfig ) => {
+    case msg @ DetectUsing( algo, payload: DetectOutliersInSeries, history, algorithmConfig ) => {
+      val aggregator = sender()
+      log.info( "TEST: AGGREGATOR=[{}]", aggregator )
       val toOutliers = kleisli[TryV, (Outliers, AlgorithmContext), Outliers] { case (o, _) =>
 //        logOutlierToDebug( o )
         o.right
@@ -120,7 +125,7 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
   def findOutliers: KOp[AlgorithmContext, (Outliers, AlgorithmContext)]
 
   //todo dmr place into Agent for use & concurrency *across* actor instances?
-  var _scopedContexts: Map[HistoryKey, WrappingContext] = Map.empty[HistoryKey, WrappingContext]
+  var _scopedContexts: Map[OutlierPlan.Scope, WrappingContext] = Map.empty[OutlierPlan.Scope, WrappingContext]
 
   def setScopedContext( c: WrappingContext ): Unit = {_scopedContexts += c.historyKey -> c }
   def wrapContext(c: AlgorithmContext ): Valid[WrappingContext]
@@ -146,7 +151,10 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
 
   def toConcreteContextK: KOp[AlgorithmContext, C] = kleisli { toConcreteContext }
 
-  def tailAverage( data: Seq[DoublePoint], tailLength: Int = 3 ): KOp[AlgorithmContext, Seq[PointT]] = {
+  def tailAverage(
+    data: Seq[DoublePoint],
+    tailLength: Int = CommonAnalyzer.DefaultTailAverageLength
+  ): KOp[AlgorithmContext, Seq[PointT]] = {
     kleisli[TryV, AlgorithmContext, Seq[PointT]] { ctx =>
       val values = data map { _.value }
       val lastPos: Int = {
@@ -208,6 +216,7 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
             ctx.data
             .find { _.timestamp == timestamp }
             .map { original =>
+              log.debug( "PT:[{}] ORIGINAL:[{}]", pt, original )
               val uacc = if ( isOutlier ) acc :+ original.toDataPoint else acc
               val uctx = update( ctx.addThresholdBoundary( threshold ).asInstanceOf[CTX], pt )
               ( uacc, uctx )
@@ -215,6 +224,7 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
             .getOrElse {
               //todo since pt is not in ctx.data do not add threshold boundary to context but update is okay as long as permanent
               // histories are not modified for past points
+              log.debug( "NOT ORIGINAL PT:[{}]", pt )
               ( acc, update(ctx, pt) )
             }
           }

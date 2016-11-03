@@ -9,6 +9,7 @@ import peds.commons.{KOp, Valid}
 import spotlight.analysis.outlier.algorithm.AlgorithmActor.AlgorithmContext
 import spotlight.analysis.outlier.algorithm.CommonAnalyzer
 import CommonAnalyzer.WrappingContext
+import peds.commons.log.Trace
 import spotlight.model.outlier.Outliers
 import spotlight.model.timeseries._
 
@@ -58,7 +59,8 @@ class HistogramBinsAnalyzer( override val router: ActorRef ) extends CommonAnaly
     override val findOutliers: KOp[AlgorithmContext, (Outliers, AlgorithmContext)] = {
     val outliers = for {
       ctx <- toConcreteContextK
-      taverages <- tailAverage( ctx.data )
+      filled <- fillDataFromHistory( 6 * 60 )
+//      taverages <- tailAverage( ctx.data )
       tolerance <- tolerance
     } yield {
       val tol = tolerance getOrElse 3D
@@ -69,16 +71,17 @@ class HistogramBinsAnalyzer( override val router: ActorRef ) extends CommonAnaly
 
       //todo: not sure why skyline creates a histogram from raw data then compares 3-pt average against histogram
       // easy case of 3-pt avg falling into a 0-size bin
-      val h = histogram( ctx.data )()
+      val h = histogram( filled )()
 
+      log.info( "POINTS[{}]: [{}]", filled.size, filled.mkString(","))
       collectOutlierPoints(
-        points = taverages,
+        points = filled,
         analysisContext = ctx,
         evaluateOutlier = (p: PointT, c: Context) => {
           val isOutlier = {
             h.binFor( p )
             .map { bin =>
-              log.debug( "histogram-bins: identified bin[{}] :: size:{} < {}: [{}]", h.binIndexFor(p), bin.size, minimumBinSize, bin )
+              log.debug( "histogram-bins: pt-identified-bin:[{}] & size:{} < {}: [{}]", s"${p} -> ${h.binIndexFor(p)}", bin.size, minimumBinSize, bin )
               bin.size < minimumBinSize
             }
             .getOrElse { p.value < h.min }
@@ -99,10 +102,12 @@ class HistogramBinsAnalyzer( override val router: ActorRef ) extends CommonAnaly
   )(
     numBins: Int = 15,
     min: Double = data.map{ _.value }.min,
-    max: Double = data.map{ _.value }.max
+    max: Double = data.map{ _.value }.max + 1E-13
   ): Histogram = {
+    log.info( "histogram:(min, max) = {}", (min, max))
     val binSize = ( max - min ) / ( numBins + 1 ).toDouble
     val binData = data groupBy { d => ( ( d.value - min ) / binSize ).toInt }
+    log.debug( "BINDATA-sz: [{}]", binData.map{bd => (bd._1, bd._2.size)}.mkString(","))
     val bins = ( 0 to numBins ) map { i =>
       val binPoints = binData.get( i ) map { pts => Map( pts:_* ) }
 

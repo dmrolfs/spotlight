@@ -5,11 +5,12 @@ import sbt._
 import spray.revolver.RevolverPlugin._
 
 object BuildSettings {
-  val VERSION = "1.2.4"
+  val VERSION = "2.0.0-SNAPSHOT"
 
   val defaultBuildSettings = Defaults.coreDefaultSettings ++ Format.settings ++ Revolver.settings ++ Seq(
     version := VERSION,
-    organization := "cdkglobal",
+    organization := "com.github.dmrolfs",
+    licenses += ("MIT", url("http://opensource.org/licenses/MIT")),
     crossScalaVersions := Seq( "2.11.8" ),
     scalaVersion <<= crossScalaVersions { (vs: Seq[String]) => vs.head },
     // updateOptions := updateOptions.value.withCachedResolution(true),
@@ -21,11 +22,12 @@ object BuildSettings {
       "-unchecked",
       "-deprecation",
       "-language:implicitConversions",
-      "-Xlog-reflective-calls",
+//      "-Ylog-classpath",
       // "-Xlog-implicits",
       // "-Ymacro-debug-verbose",
       // "-Ywarn-adapted-args",
-      "-Xfatal-warnings"
+//      "-Xfatal-warnings",
+      "-Xlog-reflective-calls"
     ),
     javacOptions ++= Seq(
       "-source", "1.8",
@@ -34,7 +36,7 @@ object BuildSettings {
     javaOptions ++= Seq(
       "-Dconfig.trace=loads"
     ),
-    homepage := Some( url("http://github.com/dmrolfs/bellwether") ),
+    homepage := Some( url("http://github.com/dmrolfs/spotlight") ),
     // licenses := Seq("Apache 2.0" -> url("http://www.apache.org/licenses/LICENSE-2.0.html")),
     conflictManager := ConflictManager.latestRevision,
     dependencyOverrides := Dependencies.defaultDependencyOverrides,
@@ -51,9 +53,12 @@ object BuildSettings {
     resolvers += "eaio releases" at "http://eaio.com/maven2",
     resolvers += "Sonatype OSS Releases"  at "http://oss.sonatype.org/content/repositories/releases/",
     resolvers += "Scalaz Bintray Repo" at "http://dl.bintray.com/scalaz/releases",
+    resolvers += "velvia maven" at "http://dl.bintray.com/velvia/maven",
 //    resolvers += "Numerical Method's Repository" at "http://repo.numericalmethod.com/maven/",  // don't want to use due to $$$
+    resolvers += Resolver.jcenterRepo,
     resolvers += Resolver.sonatypeRepo( "snapshots" ),
     resolvers += Classpaths.sbtPluginReleases,
+    resolvers += "OSS JFrog Artifactory" at "http://oss.jfrog.org/artifactory/oss-snapshot-local",
 
     // SLF4J initializes itself upon the first logging call.  Because sbt
     // runs tests in parallel it is likely that a second thread will
@@ -75,6 +80,7 @@ object BuildSettings {
         .getMethod( "getLogger", classLoader.loadClass("java.lang.String") )
         .invoke( null, "ROOT" )
     ),
+    testOptions in Test += Tests.Argument( TestFrameworks.ScalaTest, "-oDFT" ),
     triggeredMessage in ThisBuild := Watched.clearWhenTriggered,
     cancelable in Global := true
   )
@@ -82,9 +88,11 @@ object BuildSettings {
   def doNotPublishSettings = Seq( publish := {} )
 
   def publishSettings = {
-    if ( (version in ThisBuild).toString.endsWith("-SNAPSHOT") ) {
+//    if ( (version in ThisBuild).toString.endsWith("-SNAPSHOT") ) {
+    if ( VERSION.toString.endsWith("-SNAPSHOT") ) {
       Seq(
         publishTo := Some("Artifactory Realm" at "http://oss.jfrog.org/artifactory/oss-snapshot-local"),
+        publishMavenStyle := true,
         // Only setting the credentials file if it exists (#52)
         credentials := List(Path.userHome / ".bintray" / ".artifactory").filter(_.exists).map(Credentials(_))
       )

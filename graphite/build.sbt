@@ -6,7 +6,11 @@ name := "spotlight-graphite"
 
 description := "lorem ipsum."
 
-libraryDependencies ++= commonDependencies
+libraryDependencies ++=
+  commonDependencies ++
+  Seq(
+    akka.persistence
+  )
 
 testOptions in Test += Tests.Argument( "-oDF" )
 
@@ -26,6 +30,8 @@ assemblyMergeStrategy in assembly := {
   case PathList( "META-INF", "maven", "com.fasterxml.jackson.core", xs @ _* ) => MergeStrategy.discard
   case PathList( "META-INF", "maven", "commons-logging", xs @ _* ) => MergeStrategy.discard
   case PathList( "META-INF", "maven", "org.apache.avro", xs @ _* ) => MergeStrategy.discard
+
+  case "reference.conf" => MergeStrategy.concat
 
   case x if Assembly.isConfigFile(x) => MergeStrategy.concat
 
@@ -130,7 +136,7 @@ dockerfile in docker := {
 //    env( "CONFIG_HOME", "/etc/spotlight" )
     env( "SPOTLIGHT_CONFIG", "application-prod.conf" )
     expose( 2004 )
-
+    expose( 2552 )
     expose( 22 )
   }
 }

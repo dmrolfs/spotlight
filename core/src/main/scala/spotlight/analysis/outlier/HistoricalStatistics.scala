@@ -13,7 +13,7 @@ import spotlight.model.timeseries._
   */
 trait HistoricalStatistics extends Serializable {
   def :+( point: PointA ): HistoricalStatistics
-  def recordLastPoints( points: Seq[PointA] ): HistoricalStatistics
+  @deprecated("replace with RecentHistory", "20161004") def recordLastPoints( points: Seq[PointA] ): HistoricalStatistics
 
   def covariance: RealMatrix
   def dimension: Int
@@ -26,15 +26,15 @@ trait HistoricalStatistics extends Serializable {
   def sum: PointA
   def sumLog: PointA
   def sumOfSquares: PointA
-  def lastPoints: Seq[PointA]
+  @deprecated("replace with RecentHistory", "20161004") def lastPoints: Seq[PointA]
 }
 
 
 object HistoricalStatistics {
-  val LastN: Int = 6 * 60 * 24 // 6pts / sec for 1-day    // 3
+//  val LastN: Int = 6 * 60 * 24 // 6pts / sec for 1-day    // 3
 
   def apply( k: Int, isCovarianceBiasCorrected: Boolean ): HistoricalStatistics = {
-    ApacheMath3HistoricalStatistics( new MultivariateSummaryStatistics(k, isCovarianceBiasCorrected) )
+    ApacheMath3HistoricalStatistics( new MultivariateSummaryStatistics(k, isCovarianceBiasCorrected), RecentHistory.apply() )
   }
 
   def fromActivePoints( points: Seq[DoublePoint], isCovarianceBiasCorrected: Boolean ): HistoricalStatistics = {
@@ -44,17 +44,16 @@ object HistoricalStatistics {
 
   final case class ApacheMath3HistoricalStatistics private[outlier](
     all: MultivariateSummaryStatistics,
-    override val lastPoints: Seq[PointA] = Seq.empty[PointA]
+    recent: RecentHistory
   ) extends HistoricalStatistics {
     override def :+( point: PointA ): HistoricalStatistics = {
       all addValue point
       this
     }
 
-    override def recordLastPoints( points: Seq[PointA] ): HistoricalStatistics = {
-      val recorded = points drop ( points.size - LastN )
-      this.copy( lastPoints = this.lastPoints.drop(this.lastPoints.size - LastN + recorded.size) ++ recorded )
-    }
+
+    @deprecated("replace with RecentHistory", "20161004") override def recordLastPoints( points: Seq[PointA] ): HistoricalStatistics = this.copy( recent = recent withPoints points )
+    @deprecated("replace with RecentHistory", "20161004") override def lastPoints: Seq[PointA] = recent.points
 
     override def N: Long = all.getN
     override def mean: PointA = all.getMean
@@ -71,7 +70,6 @@ object HistoricalStatistics {
     override def toString: String = {
       s"""
          |allStatistics: [${all.toString}]
-         |lastPoints = [${lastPoints.map{_.mkString("(",",",")")}.mkString(",")}]
        """.stripMargin
     }
 
@@ -86,8 +84,8 @@ public LinkedList EMA(int dperiods, double alpha)
             throws IOException {
         String line;
         int i = 0;
-        DescriptiveStatistics stats = new SynchronizedDescriptiveStatistics();
-        stats.setWindowSize(dperiods);
+        DescriptiveStatistics statistics = new SynchronizedDescriptiveStatistics();
+        statistics.setWindowSize(dperiods);
         File f = new File("");
         BufferedReader in = new BufferedReader(new FileReader(f));
         LinkedList<Double> ema1 = new LinkedList<Double>();
@@ -96,21 +94,21 @@ public LinkedList EMA(int dperiods, double alpha)
             double sum = 0;
             double den = 0;
             System.out.println("line: " + " " + line);
-            stats.addValue(Double.parseDouble(line.trim()));
+            statistics.addValue(Double.parseDouble(line.trim()));
             i++;
             if (i > dperiods)
                 for (int j = 0; j < dperiods; j++) {
                     double var = Math.pow((1 - alpha), j);
                     den += var;
-                    sum += stats.getElement(j) * var;
-                    System.out.println("elements:"+stats.getElement(j));
+                    sum += statistics.getElement(j) * var;
+                    System.out.println("elements:"+statistics.getElement(j));
                     System.out.println("sum:"+sum);
                 }
             else
                 for (int j = 0; j < i; j++) {
                     double var = Math.pow((1 - alpha), j);
                     den += var;
-                    sum += stats.getElement(j) * var;
+                    sum += statistics.getElement(j) * var;
                 }
             ema1.add(sum / den);
             System.out.println("EMA: " + sum / den);

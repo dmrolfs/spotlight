@@ -1,13 +1,16 @@
 package spotlight.analysis.outlier
 
-import spotlight.model.outlier.OutlierPlan
+import akka.actor.ActorSystem
 
 import scala.concurrent.duration._
 import akka.testkit._
-import org.joda.{ time => joda }
+import com.typesafe.config.Config
+import org.joda.{time => joda}
+import org.scalatest.mockito.MockitoSugar
+import peds.akka.envelope.Envelope
+import spotlight.model.outlier.OutlierPlan
+import spotlight.model.timeseries.{DataPoint, TimeSeries}
 import spotlight.testkit.ParallelAkkaSpec
-import org.scalatest.mock.MockitoSugar
-import spotlight.model.timeseries.{TimeSeries, DataPoint}
 
 
 /**
@@ -15,11 +18,17 @@ import spotlight.model.timeseries.{TimeSeries, DataPoint}
  */
 class DetectionAlgorithmRouterSpec extends ParallelAkkaSpec with MockitoSugar {
 
-  class Fixture extends AkkaFixture {
-    val router = TestActorRef[DetectionAlgorithmRouter]( DetectionAlgorithmRouter.props )
+  override def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture = {
+    new Fixture( config, system, slug )
   }
 
-  override def makeAkkaFixture(): Fixture = new Fixture
+  class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends AkkaFixture( _config, _system, _slug ) {
+    val algo = 'foo
+    val algorithm = TestProbe()
+    val router = TestActorRef[DetectionAlgorithmRouter]( DetectionAlgorithmRouter.props( Map(algo -> algorithm.ref) ) )
+    val subscriber = TestProbe()
+  }
+
 
   "DetectionAlgorithmRouter" should {
     import DetectionAlgorithmRouter.{ AlgorithmRegistered, RegisterDetectionAlgorithm }
@@ -28,14 +37,13 @@ class DetectionAlgorithmRouterSpec extends ParallelAkkaSpec with MockitoSugar {
       val probe = TestProbe()
       router.receive( RegisterDetectionAlgorithm('foo, probe.ref), probe.ref )
       probe.expectMsgPF( hint = "register", max = 200.millis.dilated ) {
-        case AlgorithmRegistered( actual ) => actual.name mustBe Symbol("foo").name
+        case Envelope( AlgorithmRegistered(actual), _ ) => actual.name mustBe Symbol("foo").name
       }
     }
 
     "route detection messages" in { f: Fixture =>
       import f._
-      val algo = TestProbe()
-      router.receive( RegisterDetectionAlgorithm('foo, algo.ref) )
+      router.receive( RegisterDetectionAlgorithm(algo, algorithm.ref) )
 
       val myPoints = Seq(
         DataPoint( new joda.DateTime(448), 8.46 ),
@@ -62,10 +70,17 @@ class DetectionAlgorithmRouterSpec extends ParallelAkkaSpec with MockitoSugar {
       val series = TimeSeries( "series", myPoints )
       val aggregator = TestProbe()
       val plan = mock[OutlierPlan]
-      val msg = DetectUsing('foo, aggregator.ref, DetectOutliersInSeries(series, plan), HistoricalStatistics(2, false) )
+      val msg = DetectUsing(
+        'foo,
+        DetectOutliersInSeries(series, plan, subscriber.ref, Set()),
+        HistoricalStatistics(2, false)
+      )
 
+      implicit val sender = aggregator.ref
       router.receive( msg )
-      algo.expectMsg( 2.seconds.dilated, "route", msg )
+      algorithm.expectMsgPF( 2.seconds.dilated, "route" ) {
+        case Envelope( actual, _ ) => actual mustBe msg
+      }
     }
   }
 }

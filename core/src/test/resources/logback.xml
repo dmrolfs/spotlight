@@ -1,51 +1,54 @@
 <configuration>
   <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
     <encoder>
-      <!-- <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern> -->
-      <pattern>%-5level %date [%thread] %logger{36} - %message%n</pattern>
+      <pattern>%-5level %-4relative [%thread{10}] %logger{10} - %message%n</pattern>
     </encoder>
   </appender>
 
   <timestamp key="bySecond" datePattern="yyyyMMdd'T'HHmmss"/>
 
   <appender name="FILE" class="ch.qos.logback.core.FileAppender">
-    <file>log/testFile-${bySecond}.log</file>
+    <file>core/target/log/testFile-${bySecond}.log</file>
     <append>true</append>
     <!-- encoders are assigned the type
          ch.qos.logback.classic.encoder.PatternLayoutEncoder by default -->
     <encoder>
-      <pattern>%-5level %-4relative [%thread] %logger{35} - %msg%n</pattern>
+      <pattern>%-5level %date [%thread] %logger{35} - %msg%n</pattern>
     </encoder>
   </appender>
-
-  <appender name="DEBUG_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
-    <file>${LOG_HOME}/debug.log</file>
-    <append>true</append>
-    <!-- encoders are assigned the type
-         ch.qos.logback.classic.encoder.PatternLayoutEncoder by default -->
-    <encoder>
-      <pattern>%-4relative [%thread] %-5level %logger{35} - %msg%n</pattern>
-    </encoder>
-    <rollingPolicy class="ch.qos.logback.core.rolling.FixedWindowRollingPolicy">
-      <!-- rollover daily -->
-      <fileNamePattern>${LOG_HOME}/debug-%i.log.gz</fileNamePattern>
-      <cleanHistoryOnStart>true</cleanHistoryOnStart>
-      <minIndex>1</minIndex>
-      <maxIndex>1</maxIndex>
-    </rollingPolicy>
-    <triggeringPolicy class="ch.qos.logback.core.rolling.SizeBasedTriggeringPolicy">
-      <maxFileSize>1GB</maxFileSize>
-    </triggeringPolicy>
-  </appender>
-
-  <logger name="Debug" level="DEBUG" additivity="false">
-    <appender-ref ref="DEBUG_FILE" />
-  </logger>
 
   <!--<root level="WARN">-->
-  <root level="INFO">
-  <!--<root level="DEBUG">-->
+  <!--<root level="INFO">-->
+  <root level="DEBUG">
     <appender-ref ref="STDOUT" />
     <appender-ref ref="FILE" />
   </root>
 </configuration>
+
+
+    <!--<appender name="DEBUG_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">-->
+    <!--&lt;!&ndash;<file>${LOG_HOME}/debug.log</file>&ndash;&gt;-->
+    <!--&lt;!&ndash;<file>debug-rolfs-${bySecond}.log</file>&ndash;&gt;-->
+    <!--<file>core/target/log/debug-${bySecond}.log</file>-->
+    <!--<append>true</append>-->
+    <!--&lt;!&ndash; encoders are assigned the type-->
+    <!--ch.qos.logback.classic.encoder.PatternLayoutEncoder by default &ndash;&gt;-->
+    <!--<encoder>-->
+    <!--<pattern>%-4relative [%thread] %-5level %logger{35} - %msg%n</pattern>-->
+    <!--</encoder>-->
+    <!--<rollingPolicy class="ch.qos.logback.core.rolling.FixedWindowRollingPolicy">-->
+    <!--&lt;!&ndash; rollover daily &ndash;&gt;-->
+    <!--<fileNamePattern>${LOG_HOME}/debug-%i.log.gz</fileNamePattern>-->
+    <!--<cleanHistoryOnStart>true</cleanHistoryOnStart>-->
+    <!--<minIndex>1</minIndex>-->
+    <!--<maxIndex>1</maxIndex>-->
+    <!--</rollingPolicy>-->
+    <!--<triggeringPolicy class="ch.qos.logback.core.rolling.SizeBasedTriggeringPolicy">-->
+    <!--<maxFileSize>1GB</maxFileSize>-->
+    <!--</triggeringPolicy>-->
+    <!--</appender>-->
+
+    <!--<logger name="Debug" level="DEBUG" additivity="false">-->
+    <!--<appender-ref ref="DEBUG_FILE" />-->
+    <!--</logger>-->
+

@@ -42,7 +42,7 @@ object MedianAbsoluteDeviationAnalyzer {
     }
 
     override def toString: String = {
-      s"""${getClass.safeSimpleName}(moving-stats:[${movingStatistics}] deviation-stats:[${deviationStatistics}])"""
+      s"""${getClass.safeSimpleName}(moving-statistics:[${movingStatistics}] deviation-statistics:[${deviationStatistics}])"""
     }
   }
 

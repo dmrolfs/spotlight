@@ -1,6 +1,10 @@
 package spotlight.analysis.outlier.algorithm.skyline
 
+import akka.actor.ActorSystem
+
+import scala.concurrent.duration._
 import akka.testkit._
+import com.typesafe.config.Config
 import com.typesafe.scalalogging.LazyLogging
 import spotlight.analysis.outlier.HistoricalStatistics
 import spotlight.model.outlier._
@@ -10,17 +14,15 @@ import org.apache.commons.math3.random.RandomDataGenerator
 import org.joda.{time => joda}
 import org.mockito.Mockito._
 import org.scalatest.Tag
-import org.scalatest.mock.MockitoSugar
+import org.scalatest.mockito.MockitoSugar
 import peds.commons.V
-
-import scala.concurrent.duration._
-import scala.concurrent.{ExecutionContext, Future}
+import spotlight.analysis.outlier.algorithm.CommonAnalyzer
 
 
 /**
   * Created by rolfsd on 2/15/16.
   */
-abstract class SkylineBaseSpec extends ParallelAkkaSpec with MockitoSugar with LazyLogging {
+abstract class SkylineBaseSpec extends ParallelAkkaSpec with MockitoSugar {
   object SkylineFixture {
     val appliesToAll: OutlierPlan.AppliesTo = {
       val isQuorun: IsQuorum = IsQuorum.AtLeastQuorumSpecification(0, 0)
@@ -43,11 +45,14 @@ abstract class SkylineBaseSpec extends ParallelAkkaSpec with MockitoSugar with L
     }
   }
 
-  abstract class SkylineFixture extends AkkaFixture {
+  abstract class SkylineFixture( _config: Config, _system: ActorSystem, _slug: String )
+  extends AkkaFixture( _config, _system, _slug ) {
+
     implicit def scalaDurationToJoda( d: FiniteDuration ): joda.Duration = new joda.Duration( d.toMillis )
 
     val router = TestProbe()
     val aggregator = TestProbe()
+    val subscriber = TestProbe()
 
     def makeDataPoints(
       values: Seq[Double],
@@ -88,7 +93,11 @@ abstract class SkylineBaseSpec extends ParallelAkkaSpec with MockitoSugar with L
       }
     }
 
-    def tailAverage( data: Seq[DataPoint], lastPoints: Seq[DataPoint], tailLength: Int = 3 ): Seq[DataPoint] = {
+    def tailAverage(
+      data: Seq[DataPoint],
+      lastPoints: Seq[DataPoint],
+      tailLength: Int = CommonAnalyzer.DefaultTailAverageLength
+    ): Seq[DataPoint] = {
       val values = data map { _.value }
       val lastPos: Int = {
         data.headOption

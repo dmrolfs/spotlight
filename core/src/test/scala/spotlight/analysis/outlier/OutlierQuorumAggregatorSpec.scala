@@ -1,13 +1,14 @@
 package spotlight.analysis.outlier
 
-import scala.concurrent.{Await, ExecutionContext, Future}
+import scala.concurrent.Await
 import scala.concurrent.duration._
-import akka.actor.Terminated
+import akka.actor.{ActorSystem, Terminated}
 import akka.testkit._
-import org.scalatest.{Outcome, Tag}
-import org.scalatest.mock.MockitoSugar
+import org.scalatest.Outcome
+import org.scalatest.mockito.MockitoSugar
 import org.mockito.Mockito._
-import com.typesafe.config.ConfigFactory
+import com.typesafe.config.{Config, ConfigFactory}
+import peds.akka.envelope.Envelope
 import peds.commons.V
 import spotlight.model.timeseries.{ThresholdBoundary, TimeSeries, TimeSeriesBase, Topic}
 import spotlight.testkit.ParallelAkkaSpec
@@ -21,7 +22,13 @@ import spotlight.model.outlier._
 class OutlierQuorumAggregatorSpec extends ParallelAkkaSpec with MockitoSugar {
   override val trace = Trace[OutlierQuorumAggregatorSpec]
 
-  class Fixture extends AkkaFixture { fixture =>
+  override def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture = {
+    new Fixture( config, system, slug )
+  }
+
+  class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends AkkaFixture( _config, _system, _slug ) {
+    fixture =>
+
     val defaultPlan = plan( 3.seconds )
     val none = mock[NoOutliers]
     when( none.plan ) thenReturn defaultPlan
@@ -59,22 +66,6 @@ class OutlierQuorumAggregatorSpec extends ParallelAkkaSpec with MockitoSugar {
         grouping = grouping,
         planSpecification = ConfigFactory.empty
       )
-    }
-  }
-
-  override def makeAkkaFixture(): Fixture = new Fixture
-
-  override def withFixture( test: OneArgTest ): Outcome = trace.block( s"withFixture($test)" ) {
-    val f = makeAkkaFixture()
-
-    try {
-      f.before()
-      test( f )
-    } finally {
-      import f._
-      f.after()
-      val terminated = f.system.terminate()
-      Await.result( terminated, 3.seconds.dilated )
     }
   }
 
@@ -119,7 +110,7 @@ class OutlierQuorumAggregatorSpec extends ParallelAkkaSpec with MockitoSugar {
       log.info( "outliers.anomalySize = [{}]", outliers.anomalySize )
 
       aggregator.receive( outliers )
-      destination.expectMsgClass( classOf[NoOutliers] )
+      destination.expectMsgPF( hint = "destination expectation" ) { case Envelope( m, _ ) => { m mustBe a [NoOutliers] } }
     }
   }
 }

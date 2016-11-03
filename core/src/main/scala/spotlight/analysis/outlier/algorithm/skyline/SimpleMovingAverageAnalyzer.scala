@@ -18,6 +18,7 @@ import spotlight.model.timeseries._
 /**
   * Created by rolfsd on 2/25/16.
   */
+@deprecated( "use SimpleMovingAverageAlgorithm", since="20161001" )
 object SimpleMovingAverageAnalyzer {
   val Algorithm = Symbol( "simple-moving-average" )
 
@@ -41,11 +42,12 @@ object SimpleMovingAverageAnalyzer {
     }
 
     override def toString: String = {
-      s"""${getClass.safeSimpleName}(moving-stats:[${movingStatistics}])"""
+      s"""${getClass.safeSimpleName}(moving-statistics:[${movingStatistics}])"""
     }
   }
 }
 
+@deprecated( "use SimpleMovingAverageAlgorithm", since="20161001" )
 class SimpleMovingAverageAnalyzer( override val router: ActorRef ) extends CommonAnalyzer[SimpleMovingAverageAnalyzer.Context] {
   import SimpleMovingAverageAnalyzer._
   import CommonAnalyzer.ApproximateDayWindow

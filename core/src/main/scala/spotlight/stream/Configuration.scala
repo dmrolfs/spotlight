@@ -1,7 +1,10 @@
 package spotlight.stream
 
+import java.lang.Enum
 import java.net.{InetAddress, InetSocketAddress}
 import java.time.Duration
+import java.util
+
 import scala.concurrent.duration._
 import scala.util.matching.Regex
 import scalaz.Scalaz._
@@ -20,6 +23,7 @@ import peds.commons.{V, Valid}
   */
 trait Configuration extends Config {
   def sourceAddress: InetSocketAddress
+  def clusterPort: Int
   def maxFrameLength: Int
   def protocol: GraphiteSerializationProtocol
   def windowDuration: FiniteDuration
@@ -35,6 +39,7 @@ trait Configuration extends Config {
     s"""
       |\nRunning Spotlight using the following configuration:
       |\tsource binding  : ${sourceAddress}
+      |\tcluster port    : ${clusterPort}
       |\tpublish binding : ${graphiteAddress}
       |\tmax frame size  : ${maxFrameLength}
       |\tprotocol        : ${protocol}
@@ -181,7 +186,9 @@ object Configuration {
           p <- graphitePort
         } yield new InetSocketAddress( h, p )
       },
-      underlying = config
+      underlying = {
+        ConfigFactory.parseString( SimpleConfiguration.AkkaRemotePortPath + "=" + usage.clusterPort ).withFallback( config )
+      }
     )
   }
 
@@ -198,6 +205,10 @@ object Configuration {
   }
 
 
+  object SimpleConfiguration {
+    val AkkaRemotePortPath = "akka.remote.netty.tcp.port"
+  }
+
   final case class SimpleConfiguration private[stream](
     override val sourceAddress: InetSocketAddress,
     override val maxFrameLength: Int,
@@ -206,6 +217,8 @@ object Configuration {
     override val graphiteAddress: Option[InetSocketAddress],
     underlying: Config
   ) extends Configuration with LazyLogging {
+    override def clusterPort: Int = underlying.getInt( SimpleConfiguration.AkkaRemotePortPath )
+
     override def detectionBudget: FiniteDuration = {
       FiniteDuration( getDuration(Directory.DETECTION_BUDGET, MILLISECONDS), MILLISECONDS )
     }
@@ -331,6 +344,11 @@ object Configuration {
     }
 
 
+
+    override def getEnumList[T <: Enum[T]]( enumClass: Class[T], path: String ): util.List[T] = {
+      underlying.getEnumList[T]( enumClass, path )
+    }
+    override def getEnum[T <: Enum[T]]( enumClass: Class[T], path: String ): T = underlying.getEnum[T]( enumClass, path )
     override def getAnyRefList(s: String) = underlying.getAnyRefList(s)
     override def getIntList(s: String): java.util.List[Integer] = underlying.getIntList(s)
     override def getValue(s: String): ConfigValue = underlying.getValue(s)
@@ -397,6 +415,7 @@ object Configuration {
   case class UsageConfigurationError private[stream]( usage: String ) extends IllegalArgumentException( usage )
 
   final case class UsageSettings private[stream](
+    clusterPort: Int = 2552,
     sourceHost: Option[InetAddress] = None,
     sourcePort: Option[Int] = None,
     windowSize: Option[FiniteDuration] = None
@@ -418,6 +437,10 @@ object Configuration {
       opt[Int]( 'p', "port" ) action { (e, c) =>
         c.copy( sourcePort = Some(e) )
       } text( "connection port of source server")
+
+      opt[Int]( 'c', "cluster-port" ) action { (e, c) =>
+        c.copy( clusterPort = e )
+      }
 
       opt[Long]( 'w', "window" ) action { (e, c) =>
         c.copy( windowSize = Some(FiniteDuration(e, SECONDS)) )

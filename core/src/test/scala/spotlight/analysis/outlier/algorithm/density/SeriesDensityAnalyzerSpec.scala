@@ -2,17 +2,17 @@ package spotlight.analysis.outlier.algorithm.density
 
 import java.util.concurrent.atomic.AtomicInteger
 
+import akka.actor.ActorSystem
 import akka.event.EventStream
 import akka.testkit._
 import com.github.nscala_time.time.OrderingImplicits._
-import com.typesafe.config.ConfigFactory
-import org.apache.commons.math3.ml.clustering.DoublePoint
+import com.typesafe.config.{Config, ConfigFactory}
 import org.apache.commons.math3.ml.distance.EuclideanDistance
 import org.apache.commons.math3.random.RandomDataGenerator
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import org.joda.{time => joda}
 import org.mockito.Mockito._
-import org.scalatest.mock.MockitoSugar
+import org.scalatest.mockito.MockitoSugar
 import peds.commons.V
 import shapeless._
 import spotlight.analysis.outlier._
@@ -29,7 +29,12 @@ import scala.concurrent.duration._
  * Created by damonrolfs on 9/18/14.
  */
 class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
-  import SeriesDensityAnalyzerSpec._
+  import SeriesDensityAnalyzerSpec.{ points, pointsA, pointsB }
+
+
+  override def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture = {
+    new Fixture( config, system, slug )
+  }
 
   object Fixture {
     import scalaz._
@@ -53,7 +58,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
     }
   }
 
-  class Fixture extends AkkaFixture {
+  class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends AkkaFixture( _config, _system, _slug ) {
     val metric = Topic( "metric.a" )
     val algoS = SeriesDensityAnalyzer.Algorithm
     val algoC = CohortDensityAnalyzer.Algorithm
@@ -63,6 +68,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
 
     val router = TestProbe()
     val aggregator = TestProbe()
+    val subscriber = TestProbe()
     val bus = mock[EventStream]
     val randomGenerator = new RandomDataGenerator
     def tweakSeries( s: TimeSeries, factorRange: (Double, Double) ): TimeSeries = {
@@ -72,7 +78,11 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       TimeSeries.pointsLens.set( s )( tweaked )
     }
 
-    def makeDensityExpectedHistory(points: Seq[DataPoint], start: Option[DescriptiveStatistics], last: Option[DataPoint] ): DescriptiveStatistics = {
+    def makeDensityExpectedHistory(
+      points: Seq[DataPoint],
+      start: Option[DescriptiveStatistics],
+      last: Option[DataPoint]
+    ): DescriptiveStatistics = {
       val initial = start getOrElse { new DescriptiveStatistics( CommonAnalyzer.ApproximateDayWindow ) }
       val dps = points.toDoublePoints
       val basis = last map { l => dps.zip( l.toDoublePoint +: dps ) } getOrElse { (dps drop 1).zip( dps ) }
@@ -150,8 +160,6 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
   }
 
 
-  override def makeAkkaFixture(): Fixture = new Fixture
-
   "SeriesDensityAnalyzer" should  {
     "register with router upon create" in { f: Fixture =>
       import f._
@@ -169,8 +177,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       analyzer.receive(
         DetectUsing(
           algoS,
-          aggregator.ref,
-          DetectOutliersInSeries( TimeSeries("series", points), plan ),
+          DetectOutliersInSeries( TimeSeries("series", points), plan, subscriber.ref, Set() ),
           HistoricalStatistics(2, false),
           ConfigFactory.parseString(
             s"""
@@ -182,7 +189,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       )
     }
 
-    "detect outlying points in series" in { f: Fixture =>
+    "detect outlying points in series" taggedAs WIP in { f: Fixture =>
       import f._
       val analyzer = TestActorRef[SeriesDensityAnalyzer]( SeriesDensityAnalyzer.props(router.ref) )
       val series = TimeSeries( "series", points )
@@ -198,7 +205,14 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       )
 
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
-      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries( series, plan ), HistoricalStatistics(2, false), algProps ) )
+      implicit val sender = aggregator.ref
+      analyzer ! DetectUsing(
+        algoS,
+        DetectOutliersInSeries( series, plan, subscriber.ref, Set() ),
+        HistoricalStatistics(2, false),
+        algProps
+      )
+
       aggregator.expectMsgPF( 2.seconds.dilated, "detect" ) {
         case m @ SeriesOutliers(alg, source, plan, outliers, control) => {
           alg mustBe Set( algoS )
@@ -249,7 +263,14 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       )
 
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
-      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries( series, plan ), HistoricalStatistics(2, false), algProps ) )
+      implicit val sender = aggregator.ref
+      analyzer ! DetectUsing(
+        algoS,
+        DetectOutliersInSeries( series, plan, subscriber.ref, Set() ),
+        HistoricalStatistics(2, false),
+        algProps
+      )
+
       aggregator.expectMsgPF( 2.seconds.dilated, "detect" ) {
         case m @ NoOutliers(alg, source, plan, control) => {
           alg mustBe Set( algoS )
@@ -259,15 +280,14 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       }
     }
 
-    "detect outlier through series of micro batches" taggedAs (WIP) in { f: Fixture =>
+    "detect outlier through series of micro batches" in { f: Fixture =>
       import f._
       import spotlight.model.timeseries.DataPoint._
 
       def detectUsing( series: TimeSeries, history: HistoricalStatistics ): DetectUsing = {
         DetectUsing(
           algorithm = algoS,
-          aggregator = aggregator.ref,
-          payload = OutlierDetectionMessage( series, plan ).toOption.get,
+          payload = OutlierDetectionMessage( series, plan, subscriber.ref ).toOption.get,
           history = history,
           properties = ConfigFactory.parseString(
             s"""
@@ -279,6 +299,8 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
         )
       }
 
+      implicit val sender = aggregator.ref
+
       val analyzer = TestActorRef[SeriesDensityAnalyzer]( SeriesDensityAnalyzer.props( router.ref ) )
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
 
@@ -286,21 +308,22 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       val start = joda.DateTime.now
       val rnd = new RandomDataGenerator()
 
-      @tailrec def loop( i: Int, left: Int, previous: Option[(TimeSeries, HistoricalStatistics)] = None ): Unit = {
-        log.info( ">>>>>>>>>  TEST-LOOP( i:[{}] left:[{}]", i, left )
+      @tailrec def loop( i: Int, remaining: Int, previous: Option[(TimeSeries, HistoricalStatistics)] = None ): Unit = {
+        log.info( ">>>>>>>>>  TEST-LOOP( i:[{}] left:[{}]", i, remaining )
         val dt = start plusSeconds (10 * i)
-        val v = if ( left == 0 ) 1000.0 else rnd.nextUniform( 0.99, 1.01, true )
+        val v = if ( remaining == 0 ) 1000.0 else rnd.nextUniform( 0.999, 1.001, true )
         val s = TimeSeries( topic, Seq( DataPoint(dt, v) ) )
         val h = {
           previous
           .map { case (ps, ph) => s.points.foldLeft( ph recordLastPoints ps.points ) { (acc, p) => acc :+ p } }
           .getOrElse { HistoricalStatistics.fromActivePoints( s.points, false ) }
         }
-        analyzer receive detectUsing( s, h )
+        analyzer ! detectUsing( s, h )
 
         val expected: PartialFunction[Any, Unit] = {
-          if ( left == 0 ) {
+          if ( remaining == 0 ) {
             case m: SeriesOutliers => {
+              Option(m.plan) mustBe defined
               m.algorithms mustBe Set( algoS )
               m.source mustBe s
               m.hasAnomalies mustBe true
@@ -308,6 +331,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
             }
           } else {
             case m: NoOutliers => {
+              Option(m.plan) mustBe defined
               m.algorithms mustBe Set( algoS )
               m.source mustBe s
               m.hasAnomalies mustBe false
@@ -317,7 +341,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
 
         aggregator.expectMsgPF( 2.seconds.dilated, s"point-$i" )( expected )
 
-        if ( left == 0 ) () else loop( i + 1, left - 1, Some( (s, h) ) )
+        if ( remaining == 0 ) () else loop( i + 1, remaining - 1, Some( (s, h) ) )
       }
 
       loop( 0, 30 )
@@ -376,8 +400,14 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
         """.stripMargin
       )
 
-      val expected = DetectUsing( algoC, aggregator.ref, DetectOutliersInCohort(cohort, plan), HistoricalStatistics(2, false), algProps )
-      analyzer.receive( expected )
+      val expected = DetectUsing(
+        algoC,
+        DetectOutliersInCohort(cohort, plan, subscriber.ref, Set()),
+        HistoricalStatistics(2, false),
+        algProps
+      )
+      implicit val sender = aggregator.ref
+      analyzer ! expected
       aggregator.expectMsgPF( 2.seconds.dilated, "detect" ) {
         case UnrecognizedPayload( alg, actual ) => {
           alg.name mustBe algoS.name
@@ -387,7 +417,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
     }
 
 
-    "history is updated with each detect request" in { f: Fixture =>
+    "shape is updated with each detect request" in { f: Fixture =>
       import f._
 
       def detectUsing( message: OutlierDetectionMessage, history: HistoricalStatistics ): DetectUsing = {
@@ -400,17 +430,19 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
            """.stripMargin
         )
 
-        DetectUsing( algorithm = algoS, aggregator.ref, payload = message, history, properties = config )
+        DetectUsing( algorithm = algoS, payload = message, history, properties = config )
       }
 
-      val PointsForLast = HistoricalStatistics.LastN
+      val PointsForLast = RecentHistory.LastN
+
+      implicit val sender = aggregator.ref
 
       val analyzer = TestActorRef[SeriesDensityAnalyzer]( SeriesDensityAnalyzer.props( router.ref ) )
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
 
       val detectHistoryA = HistoricalStatistics.fromActivePoints( pointsA, false )
       val msgA = detectUsing(
-        message = OutlierDetectionMessage( TimeSeries(topic = metric, points = pointsA), plan ).toOption.get,
+        message = OutlierDetectionMessage( TimeSeries(topic = metric, points = pointsA), plan, subscriber.ref ).toOption.get,
         history = detectHistoryA
       )
 
@@ -437,7 +469,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       detectHistoryABLast.zip(pointsALast).foreach{ case (f, b) => f mustBe b }
 
       val msgAB = detectUsing(
-        message = OutlierDetectionMessage( TimeSeries( topic = metric, points = pointsB ), plan ).toOption.get,
+        message = OutlierDetectionMessage( TimeSeries( topic = metric, points = pointsB ), plan, subscriber.ref ).toOption.get,
         history = detectHistoryAB
       )
       val densityExpectedAB = makeDensityExpectedHistory( pointsB, Some(densityExpectedA), pointsA.lastOption )
@@ -459,12 +491,12 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       analyzerB.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
 
       val densityExpectedB_A = makeDensityExpectedHistory( pointsA, None, None )
-      analyzerB.underlyingActor._scopedContexts.get( HistoryKey(plan, metric) ) mustBe None
-      analyzerB receive msgA
+      analyzerB.underlyingActor._scopedContexts.get( OutlierPlan.Scope(plan, metric) ) mustBe None
+      analyzerB ! msgA
       aggregator.expectMsgPF( 2.seconds.dilated, "default-foo-A" ) {
         case m: SeriesOutliers => {
           assertDescriptiveStats(
-            analyzerB.underlyingActor._scopedContexts( HistoryKey(plan, metric) ).asInstanceOf[SeriesDensityAnalyzer.Context].distanceStatistics,
+            analyzerB.underlyingActor._scopedContexts( OutlierPlan.Scope(plan, metric) ).asInstanceOf[SeriesDensityAnalyzer.Context].distanceStatistics,
             densityExpectedB_A
           )
           m.topic mustBe metric
@@ -475,11 +507,11 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       }
 
       val densityExpectedB_AB = makeDensityExpectedHistory( pointsB, Option(densityExpectedB_A), pointsA.lastOption )
-      analyzerB receive msgAB
+      analyzerB ! msgAB
       aggregator.expectMsgPF( 2.seconds.dilated, "default-foo-AB" ){
         case m: NoOutliers => {
           assertDescriptiveStats(
-            analyzerB.underlyingActor._scopedContexts( HistoryKey(plan, metric) ).asInstanceOf[SeriesDensityAnalyzer.Context].distanceStatistics,
+            analyzerB.underlyingActor._scopedContexts( OutlierPlan.Scope(plan, metric) ).asInstanceOf[SeriesDensityAnalyzer.Context].distanceStatistics,
             densityExpectedB_AB
           )
           m.topic mustBe metric
@@ -498,11 +530,11 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
 //        }
       }
 //      router.expectMsgPF( 2.seconds.dilated, "default-routed-bar-A" ) {
-//        case m @ DetectUsing( algo, _, payload, history, properties ) => {
+//        case m @ DetectUsing( algo, _, payload, shape, properties ) => {
 //          m.topic mustBe metric
 //          algo must equal('bar)
-//          history.get.n mustBe pointsA.size
-//          assertHistoricalStats( history.get, expectedA )
+//          shape.get.n mustBe pointsA.size
+//          assertHistoricalStats( shape.get, expectedA )
 //        }
 //      }
 //
@@ -514,21 +546,21 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
 //      detect receive msgB
 //
 //      router.expectMsgPF( 2.seconds.dilated, "default-routed-foo-AB" ) {
-//        case m @ DetectUsing( algo, _, payload, history, properties ) => {
-//          trace( s"history = $history" )
+//        case m @ DetectUsing( algo, _, payload, shape, properties ) => {
+//          trace( s"shape = $shape" )
 //          m.topic mustBe metric
 //          algo must equal('foo)
-//          history.get.n mustBe (pointsA.size + pointsB.size)
-//          assertHistoricalStats( history.get, expectedAB )
+//          shape.get.n mustBe (pointsA.size + pointsB.size)
+//          assertHistoricalStats( shape.get, expectedAB )
 //        }
 //      }
 //
 //      router.expectMsgPF( 2.seconds.dilated, "default-routed-bar-AB" ) {
-//        case m @ DetectUsing( algo, _, payload, history, properties ) => {
+//        case m @ DetectUsing( algo, _, payload, shape, properties ) => {
 //          m.topic mustBe metric
 //          algo must equal('bar)
-//          history.get.n mustBe (pointsA.size + pointsB.size)
-//          assertHistoricalStats( history.get, expectedAB )
+//          shape.get.n mustBe (pointsA.size + pointsB.size)
+//          assertHistoricalStats( shape.get, expectedAB )
 //        }
 //      }
     }
@@ -550,7 +582,14 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       )
 
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
-      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries( series, plan ), HistoricalStatistics(2, false), algProps ) )
+      implicit val sender = aggregator.ref
+      analyzer ! DetectUsing(
+        algoS,
+        DetectOutliersInSeries( series, plan, subscriber.ref, Set() ),
+        HistoricalStatistics(2, false),
+        algProps
+      )
+
       aggregator.expectMsgPF( 2.seconds.dilated, "detect" ) {
         case m @ SeriesOutliers(alg, source, plan, outliers, actual) => {
           alg mustBe Set( algoS )
@@ -560,7 +599,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
           outliers mustBe expected
 
           actual( algoS ).size mustBe series.points.size - 1
-          actual mustBe expectedControls
+          actual mustBe SeriesDensityAnalyzerSpec.expectedControls
         }
       }
     }

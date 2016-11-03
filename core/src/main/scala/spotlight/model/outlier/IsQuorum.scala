@@ -5,7 +5,7 @@ import peds.commons.log.Trace
 import peds.commons.util._
 
 
-trait IsQuorum {
+trait IsQuorum extends Serializable {
   def apply( results: OutlierAlgorithmResults ): Boolean
   def totalIssued: Int
 
@@ -41,6 +41,6 @@ object IsQuorum {
       }
     }
 
-    override def toString: String = s"${getClass.safeSimpleName}(trigger:[${triggerPoint}]% of total:[${totalIssued}])"
+    override def toString: String = s"${getClass.safeSimpleName}(trigger:[${triggerPoint * 100}]% of total:[${totalIssued}])"
   }
 }

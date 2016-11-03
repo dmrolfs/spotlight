@@ -1,7 +1,6 @@
 package spotlight.stream
 
 import java.util.concurrent.atomic.AtomicInteger
-
 import scala.concurrent.duration._
 import akka.NotUsed
 import akka.stream.FanOutShape.{Init, Name}
@@ -13,9 +12,9 @@ import com.typesafe.scalalogging.{Logger, StrictLogging}
 import org.slf4j.LoggerFactory
 import peds.akka.metrics.Instrumented
 import peds.akka.stream.StreamMonitor
-import peds.commons.{V, Valid}
+import peds.commons.V
 import peds.commons.collection.BloomFilter
-import spotlight.analysis.outlier.OutlierPlanDetectionRouter
+import spotlight.analysis.outlier.PlanCatalog
 import spotlight.model.outlier._
 import spotlight.model.timeseries.TimeSeriesBase.Merging
 import spotlight.model.timeseries._
@@ -45,7 +44,7 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
   }
 
   def scoringGraph(
-    planRouterRef: ActorRef,
+    catalogProps: Props,
     config: Configuration
   )(
     implicit system: ActorSystem,
@@ -67,26 +66,22 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
         Flow[TimeSeries].filter{ !isPlanned( _, config.plans ) }.via( watchUnrecognized )
       )
 
-      val zipConcatWithPlans = b.add(
-        Flow[TimeSeries]
-        .map { ts => config.plans collect { case p if p appliesTo ts => (ts, p) } }
-        .mapConcat { identity }
-      )
+//      val zipConcatWithPlans = b.add(
+//        Flow[TimeSeries]
+//        .map { ts => config.plans collect { case p if p appliesTo ts => (ts, OutlierPlan.Scope(p, ts.topic)) } }
+//        .mapConcat { identity }
+//      )
 
-      val combineByPlan = b.add( Flow[(TimeSeries, OutlierPlan)] .via( batchSeriesByPlan(100000) ) )
+      val regulator = b.add( Flow[TimeSeries].via( regulateByTopic(100000) ) )
+//      val combineByPlan = b.add( Flow[(TimeSeries, OutlierPlan.Scope)].via( batchSeriesByPlan(100000) ) )
 
-      val buffer = b.add(
-        Flow[(TimeSeries, OutlierPlan)].buffer( 1000, OverflowStrategy.backpressure ).watchFlow( Symbol("plan.buffer") )
-      )
+      val buffer = b.add( Flow[TimeSeries].buffer( 1000, OverflowStrategy.backpressure ).watchFlow( Symbol("plan.buffer") ) )
 
-      val detect = b.add(
-        OutlierPlanDetectionRouter.elasticPlanDetectionRouterFlow(
-          planDetectorRouterRef = planRouterRef,
-          maxInDetectionCpuFactor = config.maxInDetectionCpuFactor
-        )
-      )
+//      val detect = b.add( OutlierPlanDetectionRouter.flow( planRouterRef ) )
+      val detect = b.add( PlanCatalog.flow( catalogProps ) )
 
-      logMetrics ~> blockPriors ~> broadcast ~> passPlanned ~> zipConcatWithPlans ~> combineByPlan ~> buffer ~> detect
+//      logMetrics ~> blockPriors ~> broadcast ~> passPlanned ~> zipConcatWithPlans ~> combineByPlan ~> buffer ~> detect
+      logMetrics ~> blockPriors ~> broadcast ~> passPlanned ~> regulator ~> buffer ~> detect
                                    broadcast ~> passUnrecognized
 
       ScoringShape(
@@ -97,6 +92,28 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
       )
     }
   }
+
+
+//  def scoringFlow(
+//    planRouterRef: ActorRef,
+//    config: Configuration
+//  )(
+//    implicit system: ActorSystem,
+//    materializer: Materializer
+//  ): Flow[TimeSeries, Outliers, NotUsed] = {
+//    import akka.stream.scaladsl.GraphDSL.Implicits._
+//
+//    val graph = GraphDSL.create() { implicit b =>
+//      val scoring = b.add( scoringGraph(planRouterRef, config) )
+//      val logUnrecognized = b.add( logMetric( Logger( LoggerFactory getLogger "Unrecognized" ), config.plans ) )
+//      val termUnrecognized = b.add( Sink.ignore )
+//
+//      scoring.out1 ~> logUnrecognized ~> termUnrecognized
+//      FlowShape( in = scoring.in, out = scoring.out0 )
+//    }
+//
+//    Flow.fromGraph( graph )
+//  }
 
 
   def logMetric(
@@ -153,70 +170,107 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
 
   val debugLogger = Logger( LoggerFactory getLogger "Debug" )
 
-  def batchSeriesByPlan(
+  def regulateByTopic(
     max: Long
   )(
     implicit system: ActorSystem,
     materializer: Materializer,
     tsMerging: Merging[TimeSeries]
-  ): Flow[(TimeSeries, OutlierPlan), (TimeSeries, OutlierPlan), NotUsed] = {
-    type PlanSeriesAccumulator = Map[(Topic, OutlierPlan), TimeSeries]
-    val seed: ((TimeSeries, OutlierPlan)) => (PlanSeriesAccumulator, Int) = (tsp: (TimeSeries, OutlierPlan)) => {
-      val (ts, p) = tsp
-      val key = (ts.topic, p)
-      ( Map( key -> ts ), 0 )
-    }
+  ): Flow[TimeSeries, TimeSeries, NotUsed] = {
+    import scalaz.{ \/-, -\/, Scalaz }, Scalaz._
 
-    Flow[(TimeSeries, OutlierPlan)]
-    .batch( max, seed ){ case ((acc, count), (ts, p)) =>
-      import scalaz._, Scalaz._
+    type TopicAccumulator = Map[Topic, TimeSeries]
+    val seedFn: (TimeSeries) => (TopicAccumulator, Long) = (ts: TimeSeries) => ( Map( ts.topic -> ts ), 0 )
 
-      val key: (Topic, OutlierPlan) = (ts.topic, p)
-      val existing: Option[TimeSeries]  = acc get key
-
-      val newAcc: V[PlanSeriesAccumulator] = for {
-        updated <- existing.map{ e => tsMerging.merge(e, ts).disjunction } getOrElse ts.right
-      } yield {
-        acc + ( key -> updated )
+    Flow[TimeSeries]
+    .batch( max, seedFn ){ case ((acc, count), ts) =>
+      val existing = acc get ts.topic
+      val updatedAcc = {
+        for {
+          updated <- existing map { e => tsMerging.merge( e, ts ).disjunction } getOrElse ts.right
+        } yield {
+          acc + ( ts.topic -> updated )
+        }
       }
 
-      val resultingAcc = newAcc match {
-        case \/-( a ) => {
-//          val points: Int = a.values.foldLeft( 0 ){ _ + _.points.size }
-//          debugLogger.info(
-//            "batchSeriesByPlan batching count:[{}] topic-plans & points = [{}] [{}] avg pts/topic-plan combo=[{}]",
-//            count.toString,
-//            a.keys.size.toString,
-//            points.toString,
-//            ( points.toDouble / a.keys.size.toDouble ).toString
-//          )
-          a
-        }
+      val newAcc = updatedAcc match {
+        case \/-( uacc ) => uacc
         case -\/( exs ) => {
-          exs foreach { ex => logger.error( "batching series by plan failed: {}", ex ) }
+          exs foreach { ex => logger.error( "flow regulation for topic:[{}] failed on series merge", ts.topic, ex ) }
           acc
         }
       }
 
-      ( resultingAcc, count + 1 )
+      ( newAcc, count + 1 )
     }
-    .map { ec: (PlanSeriesAccumulator, Int) =>
-//      val (elems, count) = ec
-//      val recs: Seq[((Topic, OutlierPlan), TimeSeries)] = elems.toSeq
-//      debugLogger.info(
-//        "batchSeriesByPlan pushing combos downstream topic:plans combos:[{}] total points:[{}]",
-//        recs.size.toString,
-//        recs.foldLeft( 0 ){ _ + _._2.points.size }.toString
-//      )
-      ec
-    }
-    .mapConcat { case (ps, _) => ps.toSeq.to[scala.collection.immutable.Seq].map { case ((topic, plan), ts) => ( ts, plan ) } }
-    .map { tsp: (TimeSeries, OutlierPlan) =>
-//      val (ts, p) = tsp
-//      debugLogger.info( "batchSeriesByPlan pushing downstream topic:plan=[{}:{}]\t# points:[{}]", ts.topic, p.name, ts.points.size.toString )
-      tsp
-    }
+    .map { case (acc, count) => acc }
+    .mapConcat { _.values.to[scala.collection.immutable.Iterable] }
   }
+
+//  def batchSeriesByPlan(
+//    max: Long
+//  )(
+//    implicit system: ActorSystem,
+//    materializer: Materializer,
+//    tsMerging: Merging[TimeSeries]
+//  ): Flow[(TimeSeries, OutlierPlan.Scope), (TimeSeries, OutlierPlan.Scope), NotUsed] = {
+//    type PlanSeriesAccumulator = Map[OutlierPlan.Scope, TimeSeries]
+//    val seed: ((TimeSeries, OutlierPlan.Scope)) => (PlanSeriesAccumulator, Int) = (tsp: (TimeSeries, OutlierPlan.Scope)) => {
+//      val (ts, p) = tsp
+//      val key = p
+//      ( Map( key -> ts ), 0 )
+//    }
+//
+//    Flow[(TimeSeries, OutlierPlan.Scope)]
+//    .batch( max, seed ){ case ((acc, count), (ts, p)) =>
+//      import scalaz._, Scalaz._
+//
+//      val key: OutlierPlan.Scope = p
+//      val existing: Option[TimeSeries]  = acc get key
+//
+//      val newAcc: V[PlanSeriesAccumulator] = for {
+//        updated <- existing.map{ e => tsMerging.merge(e, ts).disjunction } getOrElse ts.right
+//      } yield {
+//        acc + ( key -> updated )
+//      }
+//
+//      val resultingAcc = newAcc match {
+//        case \/-( a ) => {
+////          val points: Int = a.values.foldLeft( 0 ){ _ + _.points.size }
+////          debugLogger.info(
+////            "batchSeriesByPlan batching count:[{}] topic-plans & points = [{}] [{}] avg pts/topic-plan combo=[{}]",
+////            count.toString,
+////            a.keys.size.toString,
+////            points.toString,
+////            ( points.toDouble / a.keys.size.toDouble ).toString
+////          )
+//          a
+//        }
+//        case -\/( exs ) => {
+//          exs foreach { ex => logger.error( "batching series by plan failed: {}", ex ) }
+//          acc
+//        }
+//      }
+//
+//      ( resultingAcc, count + 1 )
+//    }
+//    .map { ec: (PlanSeriesAccumulator, Int) =>
+////      val (elems, count) = ec
+////      val recs: Seq[((Topic, OutlierPlan), TimeSeries)] = elems.toSeq
+////      debugLogger.info(
+////        "batchSeriesByPlan pushing combos downstream topic:plans combos:[{}] total points:[{}]",
+////        recs.size.toString,
+////        recs.foldLeft( 0 ){ _ + _._2.points.size }.toString
+////      )
+//      ec
+//    }
+//    .mapConcat { case (ps, _) => ps.toSeq.to[scala.collection.immutable.Seq].map { case (scope, ts) => ( ts, scope ) } }
+//    .map { tsp: (TimeSeries, OutlierPlan.Scope) =>
+////      val (ts, p) = tsp
+////      debugLogger.info( "batchSeriesByPlan pushing downstream topic:plan=[{}:{}]\t# points:[{}]", ts.topic, p.name, ts.points.size.toString )
+//      tsp
+//    }
+//  }
 
 
   def batchSeriesByWindow(

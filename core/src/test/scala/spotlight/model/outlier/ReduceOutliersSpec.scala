@@ -1,17 +1,14 @@
 package spotlight.model.outlier
 
-import spotlight.model.outlier.IsQuorum.{AtLeastQuorumSpecification, MajorityQuorumSpecification}
 import org.scalatest._
-import org.scalatest.mock.MockitoSugar
+import org.scalatest.mockito.MockitoSugar
+import org.mockito.Mockito._
+import org.mockito.Matchers._
 import org.joda.{time => joda}
 import com.github.nscala_time.time.Imports._
 import com.typesafe.scalalogging.LazyLogging
 import peds.commons.log.Trace
 import spotlight.model.timeseries.{ThresholdBoundary, DataPoint, TimeSeries}
-
-import scalaz._
-import org.mockito.Mockito._
-import org.mockito.Matchers._
 
 
 class ReduceOutliersSpec

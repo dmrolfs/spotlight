@@ -7,6 +7,7 @@ import scalaz.{-\/, \/-}
 import com.typesafe.scalalogging.Logger
 import org.slf4j.LoggerFactory
 import nl.grons.metrics.scala.{Meter, MetricName, Timer}
+import peds.akka.envelope._
 import peds.akka.metrics.InstrumentedActor
 import peds.commons.log.Trace
 import spotlight.analysis.outlier.OutlierQuorumAggregator.ConfigurationProvider
@@ -14,16 +15,15 @@ import spotlight.model.outlier._
 import spotlight.model.timeseries.{TimeSeriesBase, Topic}
 
 
-
 object OutlierQuorumAggregator {
   val trace = Trace[OutlierQuorumAggregator.type]
 
-  def props( plan: OutlierPlan, source: TimeSeriesBase ): Props = {
-    Props(
-      new OutlierQuorumAggregator(plan, source) with ConfigurationProvider {
-        override val warningsBeforeTimeout: Int = 3
-      }
-    )
+  def props( plan: OutlierPlan, source: TimeSeriesBase ): Props = Props( new DefaultOutlierQuorumAggregator(plan, source) )
+
+  private class DefaultOutlierQuorumAggregator( plan: OutlierPlan, source: TimeSeriesBase )
+  extends OutlierQuorumAggregator( plan, source )
+  with ConfigurationProvider {
+    override val warningsBeforeTimeout: Int = 3
   }
 
   case class AnalysisTimedOut( topic: Topic, plan: OutlierPlan )
@@ -42,7 +42,7 @@ object OutlierQuorumAggregator {
  * Created by rolfsd on 9/28/15.
  */
 class OutlierQuorumAggregator( plan: OutlierPlan, source: TimeSeriesBase )
-extends Actor with InstrumentedActor with ActorLogging { outer: ConfigurationProvider =>
+extends EnvelopingActor with InstrumentedActor with ActorLogging { outer: ConfigurationProvider =>
   import OutlierQuorumAggregator._
 
   override lazy val metricBaseName: MetricName = MetricName( classOf[OutlierQuorumAggregator] )
@@ -78,6 +78,7 @@ extends Actor with InstrumentedActor with ActorLogging { outer: ConfigurationPro
     case m: Outliers => {
       val source = sender()
       _fulfilled ++= m.algorithms map { _ -> m }
+      log.debug( "TEST: Quorum received [{}] from [{}] fulfilled:[{}] of total:[{}]", m.getClass.getSimpleName, source, _fulfilled.size, plan.algorithms.size )
       if ( _fulfilled.size == plan.algorithms.size ) publishAndStop( _fulfilled )
     }
 
@@ -103,7 +104,7 @@ extends Actor with InstrumentedActor with ActorLogging { outer: ConfigurationPro
       }
 
       scheduleWhistle()
-      context become around( quorum(retriesLeft) )
+      context become LoggingReceive { around( quorum(retriesLeft) ) }
     }
 
     case timeout: AnalysisTimedOut => {
@@ -132,7 +133,7 @@ extends Actor with InstrumentedActor with ActorLogging { outer: ConfigurationPro
 
     plan.reduce( fulfilled, source, plan ) match {
       case \/-( o ) => {
-        context.parent ! o
+        context.parent !+ o
         logTally( o, fulfilled )
       }
 

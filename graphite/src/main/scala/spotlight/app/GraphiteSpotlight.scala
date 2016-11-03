@@ -2,12 +2,11 @@ package spotlight.app
 
 import java.net.{InetSocketAddress, Socket}
 
-import scala.concurrent.{ExecutionContext, Future, TimeoutException}
+import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
 import scala.util.{Failure, Success}
-import scala.util.matching.Regex
-import akka.NotUsed
-import akka.actor.{ActorRef, ActorSystem}
+import akka.{Done, NotUsed}
+import akka.actor.{ActorPath, ActorRef, ActorSystem, Props}
 import akka.stream.scaladsl._
 import akka.stream._
 import akka.util.{ByteString, Timeout}
@@ -17,21 +16,20 @@ import Scalaz._
 import org.slf4j.LoggerFactory
 import com.typesafe.scalalogging.{Logger, StrictLogging}
 import com.typesafe.config.Config
+import demesne.StartTask
+import demesne.{AggregateRootType, BoundedContext, DomainModel}
 import kamon.Kamon
 import nl.grons.metrics.scala.{Meter, MetricName}
-import peds.akka.supervision.IsolatedLifeCycleSupervisor.{ChildStarted, WaitForStart}
 import peds.commons.log.Trace
-import peds.akka.supervision.OneForOneStrategyFactory
 import peds.akka.metrics.{Instrumented, Reporter}
 import peds.commons.V
 import peds.akka.stream.StreamMonitor
-import spotlight.analysis.outlier.OutlierPlanDetectionRouter
+import spotlight.analysis.outlier.algorithm.statistical.SimpleMovingAverageAlgorithm
+import spotlight.analysis.outlier.{AnalysisPlanModule, AnalysisScopeProxy, DetectionAlgorithmRouter, PlanCatalog}
 import spotlight.model.outlier._
-import spotlight.model.timeseries.{TimeSeriesBase, Topic}
-import spotlight.protocol.GraphiteSerializationProtocol
+import spotlight.model.timeseries.Topic
 import spotlight.publish.{GraphitePublisher, LogPublisher}
-import spotlight.stream.{Configuration, OutlierDetectionBootstrap, OutlierScoringModel}
-import spotlight.stream.OutlierDetectionBootstrap.{GetOutlierDetector, GetOutlierPlanDetectionRouter}
+import spotlight.stream.{Configuration, OutlierScoringModel}
 
 
 /**
@@ -46,7 +44,7 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
   override protected val logger: Logger = Logger( LoggerFactory.getLogger("GraphiteSpotlight") )
   val trace = Trace[GraphiteSpotlight.type]
   val PlanConfigPath = "spotlight.detection-plans"
-
+  val ActorSystemName = "Spotlight"
 
   case class BootstrapContext(
     config: Configuration,
@@ -59,12 +57,17 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
   def main( args: Array[String] ): Unit = {
     Configuration( args ).disjunction match {
       case \/-( config ) => {
-        implicit val system = ActorSystem( "Spotlight" )
+        logger.info( "TEST: akka.persistence journal: [{}]", config.getString("akka.persistence.journal.plugin") )
+        logger.info( "TEST: cluster-port=[{}] akka-remoting:[{}]", config.clusterPort.toString, config.getInt("akka.remote.netty.tcp.port").toString )
+        implicit val system = ActorSystem( ActorSystemName, config )
+        logger.info( "TEST: ActorSystem:[{}]", system )
+//        system.logConfiguration()
+        logger.info( "TEST------------------------------------")
         implicit val ec = system.dispatcher
 
         val serverBinding = for {
-          context <- bootstrap( args, config )
-          binding <- execute( context )
+          boundedContext <- bootstrap( args, config )
+          binding <- execute( boundedContext, config )
         } yield binding
 
         serverBinding.onComplete {
@@ -85,129 +88,171 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
     }
   }
 
-  def bootstrap( args: Array[String], config: Configuration )( implicit system: ActorSystem ): Future[BootstrapContext] = {
-    Kamon.start( config )
+//  def bootstrap( args: Array[String], config: Configuration )( implicit system: ActorSystem ): Future[BootstrapContext] = {
+  def bootstrap( args: Array[String], config: Configuration )( implicit system: ActorSystem ): Future[BoundedContext] = {
+    Kamon.start()
     logger info config.usage
 
     startMetricsReporter( config )
 
     implicit val ec = system.dispatcher
-
-    val reloader = Configuration.reloader( args )()()
-    val workflow = startDetection( config, reloader )
-
-    import akka.pattern.ask
-
     implicit val timeout = Timeout( 30.seconds )
-    val actors = for {
-      _ <- workflow ? WaitForStart
-      ChildStarted( d ) <- ( workflow ? GetOutlierDetector ).mapTo[ChildStarted]
-      ChildStarted( pr ) <- ( workflow ? GetOutlierPlanDetectionRouter ).mapTo[ChildStarted]
-    } yield ( d, pr )
 
-    val bootstrapTimeout = akka.pattern.after( 1.second, system.scheduler ) {
-      Future.failed( new TimeoutException( "failed to bootstrap detection workflow core actors" ) )
-    }
+//    val reloader = Configuration.reloader( args )()()
 
-    Future.firstCompletedOf( actors :: bootstrapTimeout :: Nil ) map {
-      case (detector, planRouter) => {
-        logger.info( "bootstrap detector:[{}] planRouter:[{}]", detector, planRouter )
+    startBoundedContext( 'GraphiteSpotlight, config, rootTypes, startTasks(config) )
+//    val workflow = startDetection( config, reloader )
+
+//    import akka.pattern.ask
+
+//    val actors = for {
+//      _ <- workflow ? WaitForStart
+//      ChildStarted( d ) <- ( workflow ? GetOutlierDetector ).mapTo[ChildStarted]
+//      ChildStarted( pr ) <- ( workflow ? GetOutlierPlanDetectionRouter ).mapTo[ChildStarted]
+//    } yield ( d, pr )
+
+//    val bootstrapTimeout = akka.pattern.after( 1.second, system.scheduler ) {
+//      Future.failed( new TimeoutException( "failed to bootstrap detection workflow core actors" ) )
+//    }
+//
+//    Future.firstCompletedOf( actors :: bootstrapTimeout :: Nil ) map {
+//      case (detector, planRouter) => {
+//        logger.info( "bootstrap detector:[{}] planRouter:[{}]", detector, planRouter )
 //        startPlanWatcher( config, Set(detector) )
-        BootstrapContext( config, reloader, detector, planRouter )
-      }
-    }
+//        BootstrapContext( config, reloader, detector, planRouter )
+//      }
+//    }
   }
 
+  def rootTypes: Set[AggregateRootType] = {
+    Set(
+      AnalysisPlanModule.module.rootType,
+       SimpleMovingAverageAlgorithm.rootType
+    )
+  }
 
-  def execute( context: BootstrapContext )( implicit system: ActorSystem ): Future[Tcp.ServerBinding] = {
+  def startTasks( config: Configuration )( implicit system: ActorSystem ): Set[StartTask] = {
+    logger.info( "TEST:akka.persistence.journal.plugin: [{}]", config.getString("akka.persistence.journal.plugin") )
+    Set(
+     DetectionAlgorithmRouter.startTask( config )( system.dispatcher ),
+      SharedLeveldbStore.start(
+        path = ActorPath.fromString(
+          s"akka.tcp://${system.name}@127.0.0.1:${config.clusterPort}/user/${SharedLeveldbStore.Name}"
+        ),
+        startStore = true
+      )
+    )
+  }
+
+  def startBoundedContext(
+    name: Symbol,
+    configuration: Config,
+    rootTypes: Set[AggregateRootType],
+    startTasks: Set[StartTask]
+  )(
+    implicit system: ActorSystem,
+    timeout: Timeout,
+    ec: ExecutionContext
+  ): Future[BoundedContext] = {
+    for {
+      made <- BoundedContext.make( name, configuration, rootTypes, startTasks = startTasks )
+      started <- made.start()
+    } yield started
+  }
+
+  def execute(
+    context: BoundedContext,
+    conf: Configuration
+  )(
+    implicit system: ActorSystem,
+    ec: ExecutionContext
+  ): Future[Tcp.ServerBinding] = {
     implicit val materializer = ActorMaterializer(
       ActorMaterializerSettings( system ) withSupervisionStrategy workflowSupervision
     )
 
-    val address = context.config.sourceAddress
+    val address = conf.sourceAddress
+    val connection = Tcp().bind( address.getHostName, address.getPort )
 
-    val connections = Tcp().bind( address.getHostName, address.getPort )
-
-    val handler = Sink.foreach[Tcp.IncomingConnection] { connection =>
-      detectionWorkflow( context ) match {
-        case \/-( model ) => connection handleWith model
-        case f @ -\/( exs ) => {
-          exs foreach { ex => logger error s"failed to handle connection: ${ex.getMessage}" }
-          Failure( exs.head )
-        }
-      }
+    val sink = Sink.foreach[Tcp.IncomingConnection] { connection =>
+      val catalogProps = PlanCatalog.props(
+        configuration = conf,
+        maxInFlightCpuFactor = conf.maxInDetectionCpuFactor,
+        applicationDetectionBudget = Some( conf.detectionBudget )
+      )(
+        context
+      )
+      val detectionModel = detectionWorkflow( catalogProps, conf )
+      connection handleWith detectionModel
     }
 
-    connections.to( handler ).run()
+    ( connection to sink ).run()
   }
 
   def detectionWorkflow(
-    context: BootstrapContext
+    catalogProps: Props,
+    conf: Configuration
   )(
     implicit system: ActorSystem,
     materializer: Materializer
-  ): V[Flow[ByteString, ByteString, NotUsed]] = {
-    context.reloader() map { conf =>
-      logger.info(
-        s"""
-           |\nConnection made using the following configuration:
-           |\tTCP-In Buffer Size   : ${conf.tcpInboundBufferSize}
-           |\tWorkflow Buffer Size : ${conf.workflowBufferSize}
-           |\tDetect Timeout       : ${conf.detectionBudget.toCoarsest}
-           |\tplans                : [${conf.plans.zipWithIndex.map{ case (p,i) => f"${i}%2d: ${p}"}.mkString("\n","\n","\n")}]
-        """.stripMargin
+  ): Flow[ByteString, ByteString, NotUsed] = {
+    logger.info(
+      s"""
+         |\nConnection made using the following configuration:
+         |\tTCP-In Buffer Size   : ${conf.tcpInboundBufferSize}
+         |\tWorkflow Buffer Size : ${conf.workflowBufferSize}
+         |\tDetect Timeout       : ${conf.detectionBudget.toCoarsest}
+         |\tplans                : [${conf.plans.zipWithIndex.map{ case (p,i) => f"${i}%2d: ${p}"}.mkString("\n","\n","\n")}]
+      """.stripMargin
+    )
+
+    val graph = GraphDSL.create() { implicit b =>
+      import GraphDSL.Implicits._
+      import StreamMonitor._
+
+      //todo add support to watch FlowShapes
+
+      val framing = b.add( conf.protocol.framingFlow(conf.maxFrameLength).watchSourced( 'framing ) )
+
+      val intakeBuffer = b.add(
+        Flow[ByteString]
+        .buffer( conf.tcpInboundBufferSize, OverflowStrategy.backpressure )
+        .watchFlow( 'intakeBuffer )
       )
 
-      val graph = GraphDSL.create() { implicit b =>
-        import GraphDSL.Implicits._
-        import StreamMonitor._
+      val timeSeries = b.add( conf.protocol.unmarshalTimeSeriesData )
+      val scoring = b.add( OutlierScoringModel.scoringGraph( catalogProps, conf) )
+      val logUnrecognized = b.add(
+        OutlierScoringModel.logMetric( Logger( LoggerFactory getLogger "Unrecognized" ), conf.plans )
+      )
+      val egressBroadcast = b.add( Broadcast[Outliers](outputPorts = 2, eagerCancel = true) )
 
-        //todo add support to watch FlowShapes
+      //todo remove after working
+      val publishBuffer = b.add(
+        Flow[Outliers].buffer( 1000, OverflowStrategy.backpressure ).watchFlow( Symbol("publish.buffer"))
+      )
+      val publish = b.add( publishOutliers( conf.graphiteAddress ) )
+      val tcpOut = b.add( Flow[Outliers].map{ _ => ByteString() } )
 
-        val framing = b.add( conf.protocol.framingFlow(conf.maxFrameLength).watchSourced( 'framing ) )
-
-        val intakeBuffer = b.add(
-          Flow[ByteString]
-          .buffer( conf.tcpInboundBufferSize, OverflowStrategy.backpressure )
-          .watchFlow( 'intakeBuffer )
-        )
-
-        val timeSeries = b.add( conf.protocol.unmarshalTimeSeriesData )
-        val scoring = b.add( OutlierScoringModel.scoringGraph( planRouterRef = context.planRouter, config = conf ) )
-        val logUnrecognized = b.add(
-          OutlierScoringModel.logMetric( Logger( LoggerFactory getLogger "Unrecognized" ), conf.plans )
-        )
-        val egressBroadcast = b.add( Broadcast[Outliers](outputPorts = 2, eagerCancel = true) )
-
-        //todo remove after working
-        val publishBuffer = b.add(
-          Flow[Outliers].buffer( 1000, OverflowStrategy.backpressure ).watchFlow( Symbol("publish.buffer"))
-        )
-        val publish = b.add( publishOutliers( context.config.graphiteAddress ) )
-        val tcpOut = b.add( Flow[Outliers].map{ _ => ByteString() } )
-
-        val termUnrecognized = b.add( Sink.ignore )
+      val termUnrecognized = b.add( Sink.ignore )
 
 //framing,intakeBuffer,scoring.planned,plan.router
-        StreamMonitor.set(
-          'framing,
-          'intakeBuffer,
-          Symbol("plan.buffer"),
-//          Symbol( OutlierPlanDetectionRouter.WatchPoints.PlanRouter.name + ".buffer" ),
-          OutlierPlanDetectionRouter.WatchPoints.PlanRouter,
-          Symbol( "publish.buffer" )
-        )
+      StreamMonitor.set(
+        'framing,
+        'intakeBuffer,
+        Symbol("plan.buffer"),
+        Symbol( "publish.buffer" )
+      )
 
-        framing ~> intakeBuffer ~> timeSeries ~> scoring.in
-                                                 scoring.out0 ~> egressBroadcast ~> tcpOut
-                                                                 egressBroadcast ~> publishBuffer ~> publish
-                                                 scoring.out1 ~> logUnrecognized ~> termUnrecognized
+      framing ~> intakeBuffer ~> timeSeries ~> scoring.in
+                                               scoring.out0 ~> egressBroadcast ~> tcpOut
+                                                               egressBroadcast ~> publishBuffer ~> publish
+                                               scoring.out1 ~> logUnrecognized ~> termUnrecognized
 
-        FlowShape( framing.in, tcpOut.out )
-      }
-
-      Flow.fromGraph( graph ).withAttributes( ActorAttributes.supervisionStrategy(workflowSupervision) )
+      FlowShape( framing.in, tcpOut.out )
     }
+
+    Flow.fromGraph( graph ).withAttributes( ActorAttributes.supervisionStrategy(workflowSupervision) )
   }
 
   def publishOutliers( graphiteAddress: Option[InetSocketAddress] ): Sink[Outliers, ActorRef] = {
@@ -234,7 +279,7 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
     Sink.actorSubscriber[Outliers]( props.withDispatcher( "publisher-dispatcher" ) ).named( "graphite" )
   }
 
-  def startPlanWatcher( config: Configuration, listeners: Set[ActorRef] )( implicit system: ActorSystem ): Unit = {
+//  def startPlanWatcher( config: Configuration, listeners: Set[ActorRef] )( implicit system: ActorSystem ): Unit = {
 //    logger info s"Outlier plan origin: [${config.planOrigin}]"
 //    import java.nio.file.{ StandardWatchEventKinds => Events }
 //    import better.files.FileWatcher._
@@ -256,7 +301,7 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
 //        }
 //      }
 //    }
-  }
+//  }
 
   lazy val workflowFailuresMeter: Meter = metrics meter "workflow.failures"
 
@@ -278,23 +323,23 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
     }
   }
 
-  def startDetection( config: Configuration, reloader: () => V[Configuration] )( implicit system: ActorSystem ): ActorRef = {
-    system.actorOf(
-      OutlierDetectionBootstrap.props(
-        new OutlierDetectionBootstrap( ) with OneForOneStrategyFactory with OutlierDetectionBootstrap.ConfigurationProvider {
-          override def sourceAddress: InetSocketAddress = config.sourceAddress
-          override def maxFrameLength: Int = config.maxFrameLength
-          override def protocol: GraphiteSerializationProtocol = config.protocol
-          override def windowDuration: FiniteDuration = config.windowDuration
-          override def detectionBudget: FiniteDuration = config.detectionBudget
-          override def bufferSize: Int = config.workflowBufferSize
-          override def maxInDetectionCpuFactor: Double = config.maxInDetectionCpuFactor
-          override def configuration: Config = config
-        }
-      ),
-      "detection-supervisor"
-    )
-  }
+//  def startDetection( config: Configuration, reloader: () => V[Configuration] )( implicit system: ActorSystem ): ActorRef = {
+//    system.actorOf(
+//      OutlierDetectionBootstrap.props(
+//        new OutlierDetectionBootstrap( ) with OneForOneStrategyFactory with OutlierDetectionBootstrap.ConfigurationProvider {
+//          override def sourceAddress: InetSocketAddress = config.sourceAddress
+//          override def maxFrameLength: Int = config.maxFrameLength
+//          override def protocol: GraphiteSerializationProtocol = config.protocol
+//          override def windowDuration: FiniteDuration = config.windowDuration
+//          override def detectionBudget: FiniteDuration = config.detectionBudget
+//          override def bufferSize: Int = config.workflowBufferSize
+//          override def maxInDetectionCpuFactor: Double = config.maxInDetectionCpuFactor
+//          override def configuration: Config = config
+//        }
+//      ),
+//      "detection-supervisor"
+//    )
+//  }
 }
 
 

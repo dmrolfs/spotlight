@@ -1,16 +1,19 @@
 package spotlight.testkit
 
 import java.util.concurrent.atomic.AtomicInteger
-import scala.concurrent.{ Await, Future }
+
+import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 import akka.actor.ActorSystem
 import akka.dispatch.Dispatchers
-import akka.event.{ Logging, LoggingAdapter }
-import akka.stream.{ ActorMaterializer, Materializer }
+import akka.event.{Logging, LoggingAdapter}
 import akka.testkit.TestEvent.Mute
-import akka.testkit.{ DeadLettersFilter, ImplicitSender, TestKit }
-import com.typesafe.config.{ Config, ConfigFactory }
-import org.scalatest.{ fixture, Outcome, Tag, ParallelTestExecution, MustMatchers }
+import akka.testkit.{DeadLettersFilter, TestKit}
+
+import scalaz.{-\/, \/, \/-}
+import com.typesafe.config.{Config, ConfigFactory}
+import com.typesafe.scalalogging.{LazyLogging, StrictLogging}
+import org.scalatest.{MustMatchers, Outcome, ParallelTestExecution, Tag, fixture}
 import peds.commons.log.Trace
 import peds.commons.util._
 
@@ -18,30 +21,61 @@ import peds.commons.util._
 /**
  * Created by rolfsd on 10/28/15.
  */
-object ParallelAkkaSpec {
-  val sysId = new AtomicInteger()
+object ParallelAkkaSpec extends LazyLogging {
+  val testPosition: AtomicInteger = new AtomicInteger()
 
-  val testConf: Config = ConfigFactory.load.withFallback(
-    ConfigFactory.parseString(
-      """
-       |akka {
-       |  loggers = ["akka.testkit.TestEventListener"]
-       |  loglevel = "DEBUG"
-       |  stdout-loglevel = "DEBUG"
-       |  actor {
-       |    default-dispatcher {
-       |      executor = "fork-join-executor"
-       |      fork-join-executor {
-       |        parallelism-min = 8
-       |        parallelism-tolerance = 2.0
-       |        parallelism-max = 8
-       |      }
-       |    }
-       |  }
-       |}
-      """.stripMargin
+  def testConf( systemName: String ): Config = {
+    ConfigFactory.load.withFallback(
+      ConfigFactory.parseString(
+        s"""
+          |akka {
+          |  persistence {
+          |    journal.plugin = "inmemory-journal"
+          |    snapshot-store.plugin = "inmemory-snapshot-store"
+          |  }
+          |}
+          |
+          |akka {
+          |  loggers = ["akka.testkit.TestEventListener"]
+          |  logging-filter = "akka.event.DefaultLoggingFilter"
+          |  loglevel = DEBUG
+          |  stdout-loglevel = DEBUG
+          |  log-dead-letters = on
+          |  log-dead-letters-during-shutdown = on
+          |
+          |  actor {
+          |    provider = "akka.cluster.ClusterActorRefProvider"
+          |#    default-dispatcher {
+          |#      executor = "fork-join-executor"
+          |#      fork-join-executor {
+          |#        parallelism-min = 8
+          |#        parallelism-tolerance = 2.0
+          |#        parallelism-max = 8
+          |#      }
+          |#    }
+          |  }
+          |
+          |  remote {
+          |    log-remote-lifecycle-events = off
+          |    netty.tcp {
+          |      hostname = "127.0.0.1"
+          |      port = 0
+          |    }
+          |  }
+          |
+          |  cluster {
+          |    seed-nodes = [
+          |      "akka.tcp://${systemName}@127.0.0.1:2551",
+          |      "akka.tcp://${systemName}@127.0.0.1:2552"
+          |    ]
+          |
+          |    auto-down-unreachable-after = 10s
+          |  }
+          |}
+        """.stripMargin
+      )
     )
-  )
+  }
 
 
   def getCallerName( clazz: Class[_] ): String = {
@@ -59,25 +93,28 @@ object ParallelAkkaSpec {
 trait ParallelAkkaSpec
 extends fixture.WordSpec
 with MustMatchers
-with ParallelTestExecution { outer =>
-  import ParallelAkkaSpec._
+with ParallelTestExecution
+with StrictLogging {
+  outer =>
 
   val trace = Trace( getClass.safeSimpleName )
 
   object WIP extends Tag( "wip" )
 
-  def makeSystem( name: String, config: Config ): ActorSystem = ActorSystem( name, config )
+//  def makeSystem( name: String, config: Config ): ActorSystem = ActorSystem( name, config )
 
   type Fixture <: AkkaFixture
   type FixtureParam = Fixture
-  def makeAkkaFixture(): Fixture
 
-  class AkkaFixture( id: Int = sysId.incrementAndGet(), config: Config = testConf )
-  extends TestKit( makeSystem(s"Parallel-${id}", config) ) with ImplicitSender {
-    def before(): Unit = { }
-    def after(): Unit = { }
+  def testSlug( test: OneArgTest ): String = "Parallel-" + ParallelAkkaSpec.testPosition.incrementAndGet()
+  def testConfiguration( test: OneArgTest, slug: String ): Config = ParallelAkkaSpec.testConf( systemName = slug )
+  def testSystem( test: OneArgTest, config: Config, slug: String ): ActorSystem = ActorSystem( name = slug, config )
+  def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture
 
-    implicit val materializer: Materializer = ActorMaterializer()
+
+  class AkkaFixture( val config: Config, _system: ActorSystem, val slug: String ) extends TestKit( _system ) {
+    def before( test: OneArgTest ): Unit = { }
+    def after( test: OneArgTest ): Unit = { }
 
     val log: LoggingAdapter = Logging( system, outer.getClass )
 
@@ -86,7 +123,7 @@ with ParallelTestExecution { outer =>
     }
 
     def muteDeadLetters( messageClasses: Class[_]* )( sys: ActorSystem = system ): Unit = {
-      if (!sys.log.isDebugEnabled) {
+      if ( !sys.log.isDebugEnabled ) {
         def mute( clazz: Class[_] ): Unit = sys.eventStream.publish( Mute(DeadLettersFilter(clazz)(occurrences = Int.MaxValue)) )
 
         if ( messageClasses.isEmpty ) mute( classOf[AnyRef] )
@@ -95,17 +132,40 @@ with ParallelTestExecution { outer =>
     }
   }
 
-
   override def withFixture( test: OneArgTest ): Outcome = {
-    val f = makeAkkaFixture()
-    try {
-      f.before()
-      test( f )
-    } finally {
-      f.after()
-      val terminated = f.system.terminate()
-      Await.ready( terminated, 1.second )
+    val fixture = \/ fromTryCatchNonFatal {
+      val slug = testSlug( test )
+      val config = testConfiguration( test, slug )
+      val system = testSystem( test, config, slug )
+      createAkkaFixture( test, config, system, slug )
+    }
+
+    val results = fixture map { f =>
+      logger.debug( ".......... before test .........." )
+      f before test
+      logger.debug( "++++++++++ starting test ++++++++++" )
+      ( test(f), f )
+    }
+
+    val outcome = results map { case (outcome, f) =>
+      logger.debug( "---------- finished test ------------" )
+      f after test
+      logger.debug( ".......... after test .........." )
+
+      Option(f.system) foreach { s =>
+        val terminated = s.terminate()
+        Await.ready( terminated, 1.second )
+      }
+
+      outcome
+    }
+
+    outcome match {
+      case \/-( o ) => o
+      case -\/( ex ) => {
+        logger.error( s"test[${test.name}] failed", ex )
+        throw ex
+      }
     }
   }
-
 }

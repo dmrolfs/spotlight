@@ -1,9 +1,11 @@
 package spotlight.analysis.outlier.algorithm.skyline
 
+import akka.actor.ActorSystem
+
 import scala.collection.immutable
 import scala.concurrent.duration._
 import akka.testkit._
-import com.typesafe.config.ConfigFactory
+import com.typesafe.config.{Config, ConfigFactory}
 import org.mockito.Mockito._
 import spotlight.analysis.outlier.{DetectOutliersInSeries, DetectUsing, DetectionAlgorithmRouter}
 import spotlight.model.outlier._
@@ -13,9 +15,12 @@ import spotlight.model.outlier._
   * Created by rolfsd on 2/15/16.
   */
 class SkylineEWMASpec extends SkylineBaseSpec {
-//  import SkylineBaseSpec._
 
-  class Fixture extends SkylineFixture {
+  override def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture = {
+    new Fixture( config, system, slug )
+  }
+
+  class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends SkylineFixture( _config, _system, _slug ) {
     val algoS = ExponentialMovingAverageAnalyzer.Algorithm
     val algProps = ConfigFactory.parseString( s"""${algoS.name}.tolerance: 3""" )
 
@@ -24,8 +29,6 @@ class SkylineEWMASpec extends SkylineBaseSpec {
     when( plan.appliesTo ).thenReturn( SkylineFixture.appliesToAll )
     when( plan.algorithms ).thenReturn( Set(algoS) )
   }
-
-  override def makeAkkaFixture(): Fixture = new Fixture
 
 
   "ExponentialMovingAverageAnalyzer" should {
@@ -43,7 +46,14 @@ class SkylineEWMASpec extends SkylineBaseSpec {
 
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
       val history1 = historyWith( None, series )
-      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series, plan), history1, algProps ) )
+      implicit val sender = aggregator.ref
+      analyzer ! DetectUsing(
+        algoS,
+        DetectOutliersInSeries(series, plan, subscriber.ref, Set()),
+        history1,
+        algProps
+      )
+
       aggregator.expectMsgPF( 2.seconds.dilated, "stddev from moving average" ) {
         case m @ SeriesOutliers(alg, source, plan, outliers, control) => {
           alg mustBe Set( algoS )
@@ -63,7 +73,13 @@ class SkylineEWMASpec extends SkylineBaseSpec {
       val series2 = spike( full2 )( 0 )
       val history2 = historyWith( Option(history1 recordLastPoints series.points), series2 )
 
-      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
+      analyzer ! DetectUsing(
+        algoS,
+        DetectOutliersInSeries(series2, plan, subscriber.ref, Set()),
+        history2,
+        algProps
+      )
+
       aggregator.expectMsgPF( 2.seconds.dilated, "stddev from moving average again" ) {
         case m @ NoOutliers(alg, source, plan, control) => {
           alg mustBe Set( algoS )

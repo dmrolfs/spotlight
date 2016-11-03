@@ -2,7 +2,7 @@ package spotlight.model.outlier
 
 import spotlight.model.outlier.IsQuorum.{AtLeastQuorumSpecification, MajorityQuorumSpecification}
 import org.scalatest._
-import org.scalatest.mock.MockitoSugar
+import org.scalatest.mockito.MockitoSugar
 import org.joda.{time => joda}
 import com.github.nscala_time.time.Imports._
 import peds.commons.log.Trace

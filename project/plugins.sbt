@@ -14,7 +14,7 @@ addSbtPlugin( "io.spray" % "sbt-revolver" % "0.7.1" )
 // Check for updates.
 //addSbtPlugin( "com.timushev.sbt" % "sbt-updates" % "latest.integration" )
 
-addSbtPlugin("org.scoverage" % "sbt-scoverage" % "1.3.5")
+addSbtPlugin("org.scoverage" % "sbt-scoverage" % "1.4.0")
 
 //addSbtPlugin("org.scoverage" %% "sbt-coveralls" % "1.1.0")
 
@@ -33,3 +33,5 @@ addSbtPlugin("me.lessis" % "bintray-sbt" % "0.3.0")
 addSbtPlugin("com.julianpeeters" % "sbt-avrohugger" % "0.9.8")
 
 addSbtPlugin("org.oedura" % "scavro-plugin" % "1.0.1")
+
+addSbtPlugin("io.get-coursier" % "sbt-coursier" % "1.0.0-M14-2")

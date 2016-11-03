@@ -11,7 +11,7 @@ import spotlight.model.outlier.ReduceOutliers.CorroboratedReduceOutliers.Check
 import spotlight.model.timeseries.{ThresholdBoundary, DataPoint, TimeSeriesBase, Topic}
 
 
-trait ReduceOutliers {
+trait ReduceOutliers extends Serializable {
   def apply(
     results: OutlierAlgorithmResults,
     source: TimeSeriesBase,

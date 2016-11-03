@@ -2,7 +2,6 @@ package spotlight.analysis.outlier.algorithm.skyline
 
 import scala.reflect.ClassTag
 import akka.actor.{ActorRef, Props}
-
 import scalaz._
 import Scalaz._
 import scalaz.Kleisli.kleisli
@@ -13,7 +12,7 @@ import peds.commons.util._
 import spotlight.analysis.outlier.algorithm.AlgorithmActor.AlgorithmContext
 import spotlight.analysis.outlier.algorithm.CommonAnalyzer
 import CommonAnalyzer.WrappingContext
-import spotlight.analysis.outlier.HistoricalStatistics
+import spotlight.analysis.outlier.RecentHistory
 import spotlight.model.outlier.Outliers
 import spotlight.model.timeseries._
 
@@ -44,7 +43,7 @@ object GrubbsAnalyzer {
     }
 
     override def toString: String = {
-      s"""${getClass.safeSimpleName}(moving-stats:[${movingStatistics}])"""
+      s"""${getClass.safeSimpleName}(moving-statistics:[${movingStatistics}])"""
     }
   }
 }
@@ -63,7 +62,7 @@ class GrubbsAnalyzer( override val router: ActorRef ) extends CommonAnalyzer[Gru
   }
 
   def makeStatistics( ctx: AlgorithmContext ): Valid[DescriptiveStatistics] = {
-    new DescriptiveStatistics( HistoricalStatistics.LastN ).successNel
+    new DescriptiveStatistics( RecentHistory.LastN ).successNel
   }
 
   /**
@@ -98,11 +97,11 @@ class GrubbsAnalyzer( override val router: ActorRef ) extends CommonAnalyzer[Gru
       val tol = tolerance getOrElse 3D
 
 //      val statsData = filledAverages map { _.value }
-//      val stats = new DescriptiveStatistics( statsData.toArray
+//      val statistics = new DescriptiveStatistics( statsData.toArray
 
       val mean = ctx.movingStatistics.getMean
       val stddev = ctx.movingStatistics.getStandardDeviation
-      log.debug( "Skyline[Grubbs]: stats-N:[{}] group-size:[{}] mean:[{}] stddev:[{}]", ctx.movingStatistics.getN.toString, size.toString, mean.toString, stddev.toString )
+      log.debug( "Skyline[Grubbs]: statistics-N:[{}] group-size:[{}] mean:[{}] stddev:[{}]", ctx.movingStatistics.getN.toString, size.toString, mean.toString, stddev.toString )
       // zscore calculation considered in threshold expected and distance formula
 //      val zScores = taverages map { case (ts, v) => ( ts, math.abs(v - mean) / stddev ) }
 //      log.debug( "Skyline[Grubbs]: mean:[{}] stddev:[{}] zScores:[{}]", mean, stddev, zScores.mkString(",") )
@@ -122,7 +121,7 @@ class GrubbsAnalyzer( override val router: ActorRef ) extends CommonAnalyzer[Gru
             distance = tol * grubbsScore * stddev
           )
 
-//          logDebug( ctx.plan, ctx.source, filledAverages, taverages, grubbsScore, stats, cv, tol, threshold.isOutlier(p.value), threshold )
+//          logDebug( ctx.plan, ctx.source, filledAverages, taverages, grubbsScore, statistics, cv, tol, threshold.isOutlier(p.value), threshold )
 
           ( threshold isOutlier p.value, threshold )
         },

@@ -18,6 +18,7 @@ libraryDependencies ++=
 //    facility.suanshu, // don't want to use due to $$$
     facility.scopt,
     demesne.core,
+    facility.lang,
     facility.parboiled,
     facility.hadoopClient,
     facility.pyrolite,
@@ -26,7 +27,7 @@ libraryDependencies ++=
     akka.streamsTestkit,
     demesne.testkit,
     "org.python" % "jython-standalone" % "2.5.3",
-    "com.github.marklister" %% "product-collections" % "1.4.2"
+    "com.github.marklister" %% "product-collections" % "1.4.3"
   )
 
 //libraryDependencies += ( "com.jsuereth" %% "scala-arm" % "2.0.0-M1" )

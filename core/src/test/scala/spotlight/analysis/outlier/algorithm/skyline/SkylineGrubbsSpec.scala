@@ -1,27 +1,33 @@
 package spotlight.analysis.outlier.algorithm.skyline
 
+import akka.actor.ActorSystem
+
+import scala.annotation.tailrec
 import scala.collection.immutable
 import scala.concurrent.duration._
 import akka.testkit._
-import com.typesafe.config.ConfigFactory
+import com.typesafe.config.{Config, ConfigFactory}
 import org.apache.commons.math3.distribution.TDistribution
-import org.apache.commons.math3.random.{RandomDataGenerator, RandomGenerator}
+import org.apache.commons.math3.random.RandomDataGenerator
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import org.mockito.Mockito._
 import org.joda.{time => joda}
-import spotlight.analysis.outlier.{DetectOutliersInSeries, DetectUsing, DetectionAlgorithmRouter, HistoricalStatistics, OutlierDetectionMessage}
+import spotlight.analysis.outlier.algorithm.CommonAnalyzer
+import spotlight.analysis.outlier._
 import spotlight.model.outlier.{NoOutliers, OutlierPlan, Outliers, SeriesOutliers}
-import spotlight.model.timeseries.{ThresholdBoundary, DataPoint, TimeSeries}
-
-import scala.annotation.tailrec
-
+import spotlight.model.timeseries.{DataPoint, ThresholdBoundary, TimeSeries}
 
 
 /**
   * Created by rolfsd on 3/22/16.
   */
 class SkylineGrubbsSpec extends SkylineBaseSpec {
-  class Fixture extends SkylineFixture {
+
+  override def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture = {
+    new Fixture( config, system, slug )
+  }
+
+  class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends SkylineFixture( _config, _system, _slug ) {
     val algoS = GrubbsAnalyzer.Algorithm
     val algProps = ConfigFactory.parseString( s"""${algoS.name}.tolerance: 3""" )
 
@@ -33,9 +39,9 @@ class SkylineGrubbsSpec extends SkylineBaseSpec {
     def fillDataFromHistory(
       original: Seq[DataPoint],
       history: HistoricalStatistics,
-      targetSize: Int = HistoricalStatistics.LastN
+      targetSize: Int = RecentHistory.LastN
     ): Seq[DataPoint] = {
-      val minPoints = HistoricalStatistics.LastN
+      val minPoints = RecentHistory.LastN
       if ( minPoints < original.size ) original
       else {
         val inHistory = history.lastPoints.size
@@ -50,7 +56,7 @@ class SkylineGrubbsSpec extends SkylineBaseSpec {
     }
 
     def tailAverageData( data: Seq[DataPoint], last: Seq[DataPoint] = Seq.empty[DataPoint] ): Seq[DataPoint] = {
-      val TailLength = 3
+      val TailLength = CommonAnalyzer.DefaultTailAverageLength
       val lastPoints = last.drop( last.size - TailLength + 1 ) map { _.value }
       data.map { _.timestamp }
       .zipWithIndex
@@ -80,7 +86,7 @@ class SkylineGrubbsSpec extends SkylineBaseSpec {
       val mean = stats.getMean
       val stddev = stats.getStandardDeviation
       log.debug( "expected: combined:[{}]", combined.mkString(",") )
-      log.debug( "expected stats-N:[{}] size:[{}] mean:[{}] sttdev:[{}]", stats.getN.toString, N.toString, mean.toString, stddev.toString)
+      log.debug( "expected statistics-N:[{}] size:[{}] mean:[{}] sttdev:[{}]", stats.getN.toString, N.toString, mean.toString, stddev.toString)
 
       val tdist = new TDistribution( math.max( N - 2, 1 ) )
       val threshold = tdist.inverseCumulativeProbability( 0.05 / (2.0 * N) )
@@ -96,11 +102,9 @@ class SkylineGrubbsSpec extends SkylineBaseSpec {
     }
   }
 
-  override def makeAkkaFixture(): Fixture = new Fixture
-
 
   "GrubbsAnalyzer" should {
-    "find outliers via Grubbs Test" in { f: Fixture =>
+    "find outliers via Grubbs Test" taggedAs (WIP) in { f: Fixture =>
       import f._
       // helpful online grubbs calculator: http://graphpad.com/quickcalcs/Grubbs1.cfm
 
@@ -116,9 +120,16 @@ class SkylineGrubbsSpec extends SkylineBaseSpec {
       val algProps = ConfigFactory.parseString( s"""${algoS.name}.tolerance: 1""" )
 
       val analyzer = TestActorRef[GrubbsAnalyzer]( GrubbsAnalyzer.props(router.ref) )
-      analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
+      analyzer ! DetectionAlgorithmRouter.AlgorithmRegistered( algoS )
       val history1 = historyWith( None, series )
-      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series, plan), history1, algProps ) )
+      implicit val sender = aggregator.ref
+      analyzer ! DetectUsing(
+        algoS,
+        DetectOutliersInSeries(series, plan, subscriber.ref, Set()),
+        history1,
+        algProps
+      )
+
       aggregator.expectMsgPF( 2.seconds.dilated, "grubbs" ) {
         case m @ SeriesOutliers(alg, source, plan, outliers, control) => {
           alg mustBe Set( algoS )
@@ -139,13 +150,29 @@ class SkylineGrubbsSpec extends SkylineBaseSpec {
       val series2 = spike( full )( 0 )
       val history2 = historyWith( Option(history1 recordLastPoints series.points), series2 )
 
-      analyzer.receive( DetectUsing(algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
+      analyzer ! DetectUsing(
+        algoS,
+        DetectOutliersInSeries(series2, plan, subscriber.ref, Set()),
+        history2,
+        algProps
+      )
+
       aggregator.expectMsgPF( 2.seconds.dilated, "grubbs again" ) {
-        case m @ NoOutliers(alg, source, plan, control) => {
+//tailaverage: 1
+        case m @ SeriesOutliers(alg, source, plan, outliers, control) => {
           alg mustBe Set( algoS )
           source mustBe series2
-          m.hasAnomalies mustBe false
+          m.hasAnomalies mustBe true
+          outliers.size mustBe 1
+          outliers mustBe Seq( series2.points.head )
         }
+
+//tailaverage: 3
+//        case m @ NoOutliers(alg, source, plan, control) => {
+//          alg mustBe Set( algoS )
+//          source mustBe series2
+//          m.hasAnomalies mustBe false
+//        }
       }
     }
 
@@ -155,15 +182,16 @@ class SkylineGrubbsSpec extends SkylineBaseSpec {
       def detectUsing( series: TimeSeries, history: HistoricalStatistics ): DetectUsing = {
         DetectUsing(
           algorithm = algoS,
-          aggregator = aggregator.ref,
-          payload = OutlierDetectionMessage( series, plan ).toOption.get,
+          payload = OutlierDetectionMessage( series, plan, subscriber.ref ).toOption.get,
           history = history,
           properties = algProps
         )
       }
 
+      implicit val sender = aggregator.ref
+
       val analyzer = TestActorRef[GrubbsAnalyzer]( GrubbsAnalyzer.props( router.ref ) )
-      analyzer receive DetectionAlgorithmRouter.AlgorithmRegistered( algoS )
+      analyzer ! DetectionAlgorithmRouter.AlgorithmRegistered( algoS )
 
       val topic = "test.topic"
       val start = joda.DateTime.now
@@ -179,7 +207,7 @@ class SkylineGrubbsSpec extends SkylineBaseSpec {
           .map { case (ps, ph) => s.points.foldLeft( ph recordLastPoints ps.points ) { (acc, p) => acc :+ p } }
           .getOrElse { HistoricalStatistics.fromActivePoints( s.points, false ) }
         }
-        analyzer receive detectUsing( s, h )
+        analyzer ! detectUsing( s, h )
 
         val expected: PartialFunction[Any, Unit] = {
           if ( left == 0 ) {
@@ -206,8 +234,10 @@ class SkylineGrubbsSpec extends SkylineBaseSpec {
       loop( 0, 125 )
     }
 
-    "provide full threshold boundaries" taggedAs (WIP) in { f: Fixture =>
+    "provide full threshold boundaries" in { f: Fixture =>
       import f._
+      implicit val sender = aggregator.ref
+
       val analyzer = TestActorRef[GrubbsAnalyzer]( GrubbsAnalyzer.props( router.ref ) )
       val now = joda.DateTime.now
       val full = makeDataPoints(
@@ -228,7 +258,14 @@ class SkylineGrubbsSpec extends SkylineBaseSpec {
         series.points,
         history1.lastPoints.map{ p => DataPoint( new joda.DateTime(p(0).toLong), p(1) ) }
       )
-      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series, plan), history1, algProps ) )
+
+      analyzer ! DetectUsing(
+        algoS,
+        DetectOutliersInSeries(series, plan, subscriber.ref, Set()),
+        history1,
+        algProps
+      )
+
       aggregator.expectMsgPF( 2.seconds.dilated, "sma threshold" ) {
         case m @ SeriesOutliers(alg, source, plan, outliers, actual) => {
           actual.keySet mustBe Set( algoS )
@@ -249,7 +286,13 @@ class SkylineGrubbsSpec extends SkylineBaseSpec {
         data = series2.points,
         lastPoints = history2.lastPoints.map{ p => DataPoint( new joda.DateTime(p(0).toLong), p(1) ) }
       )
-      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
+      analyzer ! DetectUsing(
+        algoS,
+        DetectOutliersInSeries(series2, plan, subscriber.ref, Set()),
+        history2,
+        algProps
+      )
+
       aggregator.expectMsgPF( 2.seconds.dilated, "sma threshold again" ) {
         case m: Outliers => {
           val actual = m.thresholdBoundaries

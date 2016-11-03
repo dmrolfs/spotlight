@@ -1,15 +1,18 @@
 package spotlight.analysis.outlier.algorithm.skyline
 
+import akka.actor.ActorSystem
+
 import scala.collection.immutable
 import scala.concurrent.duration._
 import akka.testkit._
-import com.typesafe.config.ConfigFactory
+import com.typesafe.config.{Config, ConfigFactory}
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import org.mockito.Mockito._
-import org.joda.{ time => joda }
+import org.joda.{time => joda}
+import spotlight.analysis.outlier.algorithm.CommonAnalyzer
 import spotlight.analysis.outlier.{DetectOutliersInSeries, DetectUsing, DetectionAlgorithmRouter}
 import spotlight.model.outlier.{OutlierPlan, SeriesOutliers}
-import spotlight.model.timeseries.{ThresholdBoundary, DataPoint}
+import spotlight.model.timeseries.{DataPoint, ThresholdBoundary}
 
 import scala.annotation.tailrec
 
@@ -19,7 +22,11 @@ import scala.annotation.tailrec
   * Created by rolfsd on 3/22/16.
   */
 class SkylineSimpleMovingAverageSpec extends SkylineBaseSpec {
-  class Fixture extends SkylineFixture {
+  override def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture = {
+    new Fixture( config, system, slug )
+  }
+
+  class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends SkylineFixture( _config, _system, _slug ) {
     val algoS = SimpleMovingAverageAnalyzer.Algorithm
     val algProps = ConfigFactory.parseString( s"""${algoS.name}.tolerance: 3""" )
 
@@ -29,7 +36,7 @@ class SkylineSimpleMovingAverageSpec extends SkylineBaseSpec {
     when( plan.algorithms ).thenReturn( Set(algoS) )
 
     def tailAverageData( data: Seq[DataPoint], last: Seq[DataPoint] = Seq.empty[DataPoint] ): Seq[DataPoint] = {
-      val TailLength = 3
+      val TailLength = CommonAnalyzer.DefaultTailAverageLength
       val lastPoints = last.drop( last.size - TailLength + 1 ) map { _.value }
       data.map { _.timestamp }
       .zipWithIndex
@@ -72,15 +79,15 @@ class SkylineSimpleMovingAverageSpec extends SkylineBaseSpec {
     }
   }
 
-  override def makeAkkaFixture(): Fixture = new Fixture
-
 
   "SimpleMovingAverageAnalyzer" should {
-    "find outliers deviating stddev from simple moving average" in { f: Fixture =>
+    "find outliers deviating stddev from simple moving average" taggedAs (WIP) in { f: Fixture =>
       import f._
+      implicit val sender = aggregator.ref
+
       val analyzer = TestActorRef[SimpleMovingAverageAnalyzer]( SimpleMovingAverageAnalyzer.props( router.ref ) )
       val full = makeDataPoints(
-        values = immutable.IndexedSeq.fill( 1000 )( 1.0 ),
+        values = immutable.IndexedSeq.fill( 20 )( 1.0 ),
         timeWiggle = (0.97, 1.03),
         valueWiggle = (1.0, 1.0)
       )
@@ -90,9 +97,15 @@ class SkylineSimpleMovingAverageSpec extends SkylineBaseSpec {
       val algoS = SimpleMovingAverageAnalyzer.Algorithm
       val algProps = ConfigFactory.parseString( s"""${algoS.name}.tolerance: 3""" )
 
-      analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
+      analyzer ! DetectionAlgorithmRouter.AlgorithmRegistered( algoS )
       val history1 = historyWith( None, series )
-      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series, plan), history1, algProps ) )
+      analyzer ! DetectUsing(
+        algoS,
+        DetectOutliersInSeries(series, plan, subscriber.ref, Set()),
+        history1,
+        algProps
+      )
+
       aggregator.expectMsgPF( 2.seconds.dilated, "stddev from average" ) {
         case m @ SeriesOutliers(alg, source, plan, outliers, control) => {
           alg mustBe Set( algoS )
@@ -104,27 +117,38 @@ class SkylineSimpleMovingAverageSpec extends SkylineBaseSpec {
       }
 
       val full2 = makeDataPoints(
-        values = immutable.IndexedSeq.fill( 1000 )( 1.0 ),
+        values = immutable.IndexedSeq.fill( 20 )( 1.0 ),
         timeWiggle = (0.97, 1.03),
         valueWiggle = (1.0, 1.0)
       )
       val series2 = spike( full2 )( 0 )
       val history2 = historyWith( Option(history1 recordLastPoints series.points), series2 )
 
-      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
+      analyzer ! DetectUsing(
+        algoS,
+        DetectOutliersInSeries(series2, plan, subscriber.ref, Set()),
+        history2,
+        algProps
+      )
+
       aggregator.expectMsgPF( 2.seconds.dilated, "stddev from average again" ) {
         case m @ SeriesOutliers(alg, source, plan, outliers, control) => {
           alg mustBe Set( algoS )
           source mustBe series2
           m.hasAnomalies mustBe true
-          outliers.size mustBe 3
-          outliers mustBe series2.points.take(3)
+//tail-average: 1 elem
+          outliers.size mustBe 1
+          outliers mustBe series2.points.take(1)
+//tail-average: 3 elems
+//          outliers.size mustBe 3
+//          outliers mustBe series2.points.take(3)
         }
       }
     }
 
-    "provide full threshold boundaries" taggedAs (WIP) in { f: Fixture =>
+    "provide full threshold boundaries" in { f: Fixture =>
       import f._
+      implicit val sender = aggregator.ref
       val analyzer = TestActorRef[SimpleMovingAverageAnalyzer]( SimpleMovingAverageAnalyzer.props( router.ref ) )
       val now = joda.DateTime.now
       val full = makeDataPoints(
@@ -139,10 +163,16 @@ class SkylineSimpleMovingAverageSpec extends SkylineBaseSpec {
       val algoS = SimpleMovingAverageAnalyzer.Algorithm
       val algProps = ConfigFactory.parseString( s"""${algoS.name}.tolerance: 3""" )
 
-      analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
+      analyzer ! DetectionAlgorithmRouter.AlgorithmRegistered( algoS )
       val history1 = historyWith( None, series )
       val lastPoints1 = history1.lastPoints.map{ p => DataPoint( new joda.DateTime(p(0).toLong), p(1) ) }
-      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series, plan), history1, algProps ) )
+      analyzer ! DetectUsing(
+        algoS,
+        DetectOutliersInSeries(series, plan, subscriber.ref, Set()),
+        history1,
+        algProps
+      )
+
       aggregator.expectMsgPF( 2.seconds.dilated, "sma threshold" ) {
         case m @ SeriesOutliers(alg, source, plan, outliers, actual) => {
           actual.keySet mustBe Set( algoS )
@@ -163,7 +193,13 @@ class SkylineSimpleMovingAverageSpec extends SkylineBaseSpec {
       val series2 = spike( full2, 100 )( 0 )
       val history2 = historyWith( Option(history1 recordLastPoints series.points), series2 )
       val lastPoints2 = history2.lastPoints.map{ p => DataPoint( new joda.DateTime(p(0).toLong), p(1) ) }
-      analyzer.receive( DetectUsing( algoS, aggregator.ref, DetectOutliersInSeries(series2, plan), history2, algProps ) )
+      analyzer ! DetectUsing(
+        algoS,
+        DetectOutliersInSeries(series2, plan, subscriber.ref, Set()),
+        history2,
+        algProps
+      )
+
       aggregator.expectMsgPF( 2.seconds.dilated, "sma threshold again" ) {
         case m @ SeriesOutliers(alg, source, plan, outliers, actual) => {
           actual.keySet mustBe Set( algoS )
