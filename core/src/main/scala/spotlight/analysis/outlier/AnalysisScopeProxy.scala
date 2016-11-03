@@ -9,7 +9,11 @@ import akka.stream._
 import akka.stream.actor.{ActorSubscriber, ActorSubscriberMessage, RequestStrategy, WatermarkRequestStrategy}
 import akka.stream.scaladsl.{Flow, GraphDSL, Keep, RunnableGraph, Sink, Source}
 import akka.util.Timeout
+
+//import scalaz._
+//import Scalaz._
 import com.typesafe.config.Config
+import com.typesafe.scalalogging.LazyLogging
 import nl.grons.metrics.scala.{Meter, MetricName, Timer}
 import peds.akka.envelope._
 import peds.akka.metrics.InstrumentedActor
@@ -17,9 +21,6 @@ import peds.akka.stream._
 import demesne.{AggregateRootType, DomainModel}
 import peds.commons.log.Trace
 import spotlight.analysis.outlier.algorithm.{AlgorithmModule, AlgorithmProtocol}
-import spotlight.analysis.outlier.algorithm.density.{CohortDensityAnalyzer, SeriesCentroidDensityAnalyzer, SeriesDensityAnalyzer}
-import spotlight.analysis.outlier.algorithm.skyline._
-import spotlight.analysis.outlier.algorithm.statistical.{GrubbsAlgorithm, SimpleMovingAverageAlgorithm}
 import spotlight.model.outlier.OutlierPlan.Scope
 import spotlight.model.outlier.OutlierPlan
 import spotlight.model.timeseries.TimeSeriesBase.Merging
@@ -29,7 +30,7 @@ import spotlight.model.timeseries.{IdentifiedTimeSeries, TimeSeries, Topic}
 /**
   * Created by rolfsd on 5/26/16.
   */
-object AnalysisScopeProxy {
+object AnalysisScopeProxy extends LazyLogging {
   private val trace = Trace[AnalysisScopeProxy.type]
 
   def props(
@@ -50,27 +51,12 @@ object AnalysisScopeProxy {
   with Provider {
     private val trace = Trace[Default]
 
-    //todo rather than this explicit, hardcoded impl; leverage AggregateRoot repository initialization workflow
     override def rootTypeFor( algorithm: Symbol ): Option[AggregateRootType] = trace.block( s"rootTypeFor(${algorithm})" ) {
-      algorithm match {
-        case SeriesDensityAnalyzer.Algorithm => ??? // SeriesDensityAnalyzer.props( router ),
-        case SeriesCentroidDensityAnalyzer.Algorithm => ??? // SeriesCentroidDensityAnalyzer.props( router ),
-        case CohortDensityAnalyzer.Algorithm => ??? // CohortDensityAnalyzer.props( router ),
-        case ExponentialMovingAverageAnalyzer.Algorithm => ??? // ExponentialMovingAverageAnalyzer.props( router ),
-        case FirstHourAverageAnalyzer.Algorithm => ??? // FirstHourAverageAnalyzer.props( router ),
-        case GrubbsAlgorithm.algorithm.label => Some( GrubbsAlgorithm.rootType )
-        case HistogramBinsAnalyzer.Algorithm => ??? // HistogramBinsAnalyzer.props( router ),
-        case KolmogorovSmirnovAnalyzer.Algorithm => ??? // KolmogorovSmirnovAnalyzer.props( router ),
-        case LeastSquaresAnalyzer.Algorithm => ??? // LeastSquaresAnalyzer.props( router ),
-        case MeanSubtractionCumulationAnalyzer.Algorithm => ??? // MeanSubtractionCumulationAnalyzer.props( router ),
-        case MedianAbsoluteDeviationAnalyzer.Algorithm => ??? // MedianAbsoluteDeviationAnalyzer.props( router ),
-        case SimpleMovingAverageAlgorithm.algorithm.label => Some( SimpleMovingAverageAlgorithm.rootType )
-        case SeasonalExponentialMovingAverageAnalyzer.Algorithm => ??? // SeasonalExponentialMovingAverageAnalyzer.props( router )
-        case _ => None
-      }
+      DetectionAlgorithmRouter unsafeRootTypeFor algorithm
     }
   }
 
+  def name( scope: OutlierPlan.Scope ): String = "Proxy-" + scope.toString
 
   trait Provider { provider: Actor with ActorLogging =>
     def scope: OutlierPlan.Scope
@@ -90,9 +76,7 @@ object AnalysisScopeProxy {
       val algorithmRefs = for {
         name <- plan.algorithms.toSeq
       _ = log.debug( "TEST: plan algorithm name:[{}]", name )
-        rootType = rootTypeFor( name )
-        _ = log.debug( "TEST: root type for [{}] = [{}]", name, rootType )
-        rt <- rootType.toSeq
+        rt <- rootTypeFor( name ).toSeq
         algoId <- rt.identifying.castIntoTID( scope )
       _ = log.debug( "TEST: algoId [{}]", algoId )
         ref = model( rt, algoId )
@@ -106,47 +90,22 @@ object AnalysisScopeProxy {
 
       context.actorOf(
         DetectionAlgorithmRouter.props( Map(algorithmRefs:_*) ).withDispatcher( "outlier-detection-dispatcher" ),
-        s"${provider.plan.name}Router"
+        DetectionAlgorithmRouter.name( provider.scope.toString )
       )
     }
 
-//    def makeAlgorithms(
-//      routerRef: ActorRef
-//    )(
-//      implicit context: ActorContext,
-//      ec: ExecutionContext,
-//      algorithmIdentifying: EntityIdentifying[AlgorithmModule.AnalysisState]
-//    ): Future[Set[ActorRef]] = {
-//      def scopeId: AlgorithmModule.AnalysisState#TID = {
-//        implicitly[EntityIdentifying[AlgorithmModule.AnalysisState]] tag provider.scope
-//      }
-//
-//      val algs = {
-//        for {
-//          a <- provider.plan.algorithms
-//          rt <- provider.rootTypeFor( a )
-//        } yield {
-//          val aref = provider.model.aggregateOf( rt, provider.scope )
-//          aref !+ EntityMessage.Add( scopeId )
-////          implicit val to = provider.timeout
-//          ( aref ?+ AlgorithmProtocol.Register( scopeId, routerRef ) )
-//          .mapTo[AlgorithmProtocol.Registered]
-//          .map { _ => aref }
-//        }
-//      }
-//
-//      Future sequence algs
-//    }
-
     def makeDetector( routerRef: ActorRef )( implicit context: ActorContext ): ActorRef = {
       context.actorOf(
-        OutlierDetection.props( routerRef ).withDispatcher( "outlier-detection-dispatcher" ),
-        s"outlier-detector-${provider.plan.name}"
+        OutlierDetection.props( routerRef, provider.scope.toString ).withDispatcher( "outlier-detection-dispatcher" ),
+        OutlierDetection.name( provider.scope.toString )
       )
     }
   }
 
+
   private[outlier] final case class Workers private( detector: ActorRef, router: ActorRef )
+
+
 }
 
 class AnalysisScopeProxy

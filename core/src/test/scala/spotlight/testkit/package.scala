@@ -206,8 +206,8 @@ package object testkit {
 //     |    }
 //     |
 //     |    serialization-bindings {
-//     |      "spotlight.analysis.outlier.algorithm.AlgorithmProtocol$Advanced" = kyro
-//     |      "spotlight.analysis.outlier.algorithm.AlgorithmProtocol$ConfigurationChanged" = kyro
+//     |      "spotlight.analysis.outlier.algorithm.AlgorithmProtocol$Advanced" = kryo
+//     |      "spotlight.analysis.outlier.algorithm.AlgorithmProtocol$ConfigurationChanged" = kryo
 //     |    }
 //     |  }
 //     |}

@@ -1,18 +1,22 @@
 package spotlight.analysis.outlier
 
+import java.util.ServiceConfigurationError
+
 import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
 import scala.util.matching.Regex
 import akka.{Done, NotUsed}
-import akka.actor.{ActorLogging, ActorRef, ActorSystem, Props}
+import akka.actor.{ActorLogging, ActorRef, ActorSystem, Props, Stash}
 import akka.event.LoggingReceive
 import akka.stream.actor.ActorSubscriberMessage.{OnComplete, OnError, OnNext}
 import akka.stream.{FlowShape, Materializer}
 import akka.stream.actor.{ActorSubscriber, ActorSubscriberMessage, MaxInFlightRequestStrategy, RequestStrategy}
 import akka.stream.scaladsl.{Flow, GraphDSL, Keep, Sink, Source}
 import akka.util.Timeout
-import scalaz.{-\/, \/-}
-import com.typesafe.config.{Config, ConfigObject}
+
+import scalaz._
+import Scalaz._
+import com.typesafe.config.{Config, ConfigObject, ConfigValue, ConfigValueType}
 import com.typesafe.scalalogging.LazyLogging
 import nl.grons.metrics.scala.MetricName
 import peds.akka.envelope._
@@ -20,7 +24,7 @@ import peds.akka.envelope.pattern.ask
 import peds.akka.metrics.InstrumentedActor
 import peds.akka.stream.StreamMonitor._
 import peds.commons.log.Trace
-import demesne.DomainModel
+import demesne.{BoundedContext, DomainModel}
 import peds.akka.stream.CommonActorPublisher
 import spotlight.analysis.outlier.OutlierDetection.DetectionResult
 import spotlight.model.outlier.{IsQuorum, OutlierPlan, Outliers, ReduceOutliers}
@@ -46,8 +50,19 @@ object PlanCatalog extends LazyLogging {
     applicationDetectionBudget: Option[FiniteDuration] = None,
     applicationPlans: Set[OutlierPlan] = Set.empty[OutlierPlan]
   )(
-    implicit model: DomainModel
-  ): Props = Props( Default(model, configuration, maxInFlightCpuFactor, applicationDetectionBudget, applicationPlans) )
+    implicit boundedContext: BoundedContext
+  ): Props = {
+    Props(
+      Default(
+        boundedContext,
+        configuration,
+        maxInFlightCpuFactor,
+        applicationDetectionBudget,
+        applicationPlans
+      )
+    )
+    // .withDispatcher( "spotlight.planCatalog.stash-dispatcher" )
+  }
 
   def flow(
     catalogProps: Props
@@ -113,12 +128,12 @@ object PlanCatalog extends LazyLogging {
   }
 
   final case class Default private[PlanCatalog](
-    model: DomainModel,
+    _boundedContext: BoundedContext,
     configuration: Config,
     maxInFlightCpuFactor: Double = 8.0,
     applicationDetectionBudget: Option[FiniteDuration] = None,
     applicationPlans: Set[OutlierPlan] = Set.empty[OutlierPlan]
-  ) extends PlanCatalog( model ) with Provider {
+  ) extends PlanCatalog( _boundedContext ) with Provider {
     private val trace = Trace[Default]
 
     override val maxInFlight: Int = ( Runtime.getRuntime.availableProcessors() * maxInFlightCpuFactor ).toInt
@@ -287,17 +302,19 @@ object PlanCatalog extends LazyLogging {
   }
 }
 
-class PlanCatalog( model: DomainModel ) extends ActorSubscriber with EnvelopingActor with InstrumentedActor with ActorLogging {
-  outer: PlanCatalog.Provider =>
-
+class PlanCatalog( _boundedContext: BoundedContext )
+extends ActorSubscriber with Stash with EnvelopingActor with InstrumentedActor with ActorLogging { outer: PlanCatalog.Provider =>
   import spotlight.analysis.outlier.{ PlanCatalogProtocol => P }
   import spotlight.analysis.outlier.{ AnalysisPlanProtocol => AP }
+
+  var boundedContext: BoundedContext = _boundedContext
 
   override lazy val metricBaseName: MetricName = MetricName( classOf[PlanCatalog] )
 
   type PlanIndex = DomainModel.AggregateIndex[String, AnalysisPlanModule.module.TID, OutlierPlan.Summary]
   lazy val planIndex: PlanIndex = {
-    model
+    boundedContext
+    .unsafeModel
     .aggregateIndexFor[String, AnalysisPlanModule.module.TID, OutlierPlan.Summary](
       AnalysisPlanModule.module.rootType,
       AnalysisPlanModule.namedPlanIndex
@@ -343,7 +360,7 @@ class PlanCatalog( model: DomainModel ) extends ActorSubscriber with EnvelopingA
         subscriber.path.name,
         m
       )
-      dispatch( ts, subscriber )
+      dispatch( ts, subscriber )( context.dispatcher )
     }
 
     case msg @ StreamMessage( ts: TimeSeries, subscriber ) => {
@@ -353,7 +370,7 @@ class PlanCatalog( model: DomainModel ) extends ActorSubscriber with EnvelopingA
 
     case ts: TimeSeries if planIndex.entries.values exists { _ appliesTo ts } => {
       log.debug( "PlanCatalog[{}] dispatching time series to sender[{}]: [{}]", workId, sender().path.name, ts )
-      dispatch( ts, sender() )
+      dispatch( ts, sender() )( context.dispatcher )
     }
 
     case ts: TimeSeries => {
@@ -363,12 +380,14 @@ class PlanCatalog( model: DomainModel ) extends ActorSubscriber with EnvelopingA
 
     case result: DetectionResult if workSubscribers.keySet.intersect( result.workIds ).isEmpty => {
       log.error(
-        "PlanCatalog[{}]: ignoring received result for UNKNOWN workId:[{}] all-ids:[{}]: [{}]",
+        "PlanCatalog[{}]: stashing received result for UNKNOWN workId:[{}] all-ids:[{}]: [{}]",
         self.path.name,
         workId,
         workSubscribers.keySet.mkString(", "),
         result
       )
+
+      stash()
     }
 
     case result @ DetectionResult( outliers, workIds ) => {
@@ -391,11 +410,10 @@ class PlanCatalog( model: DomainModel ) extends ActorSubscriber with EnvelopingA
         )
       }
 
-      known
-      .map { workSubscribers.apply }
-      .foreach { _ ! result }
-
+      val subscribers = known map { workSubscribers.apply }
       workSubscribers --= result.workIds
+      subscribers foreach { _ ! result }
+      unstashAll()
     }
   }
 
@@ -439,20 +457,24 @@ class PlanCatalog( model: DomainModel ) extends ActorSubscriber with EnvelopingA
   // could optimize via bloomfilter if necessary
   private def plansApplyToSeries( ts: TimeSeries ): Boolean = planIndex.entries.values exists { _ appliesTo ts }
 
-  private def dispatch( ts: TimeSeries, subscriber: ActorRef ): Unit = {
+  private def dispatch( ts: TimeSeries, subscriber: ActorRef )( implicit ec: ExecutionContext ): Unit = {
+//todo WORK HERE - due to concurrency is workSubscribers clobbered
+    workSubscribers += (workId -> subscriber)
+
     for {
-      plan <- planIndex.entries.values if plan appliesTo ts
+      model <- boundedContext.futureModel
     } {
-      val planRef = model( AnalysisPlanModule.module.rootType, plan.id )
-      log.debug(
-        "PlanCatalog[{}]: sending topic[{}] to plan-module[{}] with sender:[{}]",
-        s"${self.path.name}:${workId}",
-        ts.topic,
-        planRef.path,
-        subscriber.path
-      )
-      workSubscribers += ( workId -> subscriber )
-      planRef !+ AP.AcceptTimeSeries( plan.id, ts )
+      planIndex.entries.values withFilter { _ appliesTo ts } foreach { plan =>
+        val ref = model( AnalysisPlanModule.module.rootType, plan.id )
+        log.debug(
+          "PlanCatalog[{}]: sending topic[{}] to plan-module[{}] with sender:[{}]",
+          s"${self.path.name}:${workId}",
+          ts.topic,
+          ref.path,
+          subscriber.path
+        )
+        ref !+ AP.AcceptTimeSeries( plan.id, ts )
+      }
     }
   }
 
@@ -480,7 +502,6 @@ class PlanCatalog( model: DomainModel ) extends ActorSubscriber with EnvelopingA
     }
   }
 
-
   def makeMissingSpecifiedPlans(
      missing: Set[OutlierPlan]
   )(
@@ -489,22 +510,26 @@ class PlanCatalog( model: DomainModel ) extends ActorSubscriber with EnvelopingA
   ): Future[Map[String, OutlierPlan.Summary]] = {
     import demesne.module.entity.{ messages => EntityMessages }
 
-    val queries = missing.toSeq.map { p =>
-      log.info( "PlanCatalog[{}]: making plan entity for: [{}]", self.path, p )
-      val planRef =  model( AnalysisPlanModule.module.rootType, p.id )
+    def loadSpecifiedPlans( model: DomainModel ): Seq[Future[(String, OutlierPlan.Summary)]] = {
+      missing.toSeq.map { p =>
+        log.info( "PlanCatalog[{}]: making plan entity for: [{}]", self.path, p )
+        val planRef =  model( AnalysisPlanModule.module.rootType, p.id )
 
-      for {
-        added <- ( planRef ?+ EntityMessages.Add( p.id, Some(p) ) )
-        _ = log.debug( "PlanCatalog: notified that plan is added:[{}]", added )
-        loaded <- loadPlan( p.id )
-        _ = log.debug( "PlanCatalog: loaded plan:[{}]", loaded )
-      } yield loaded
+        for {
+          added <- ( planRef ?+ EntityMessages.Add( p.id, Some(p) ) )
+          _ = log.debug( "PlanCatalog: notified that plan is added:[{}]", added )
+          loaded <- loadPlan( p.id )
+          _ = log.debug( "PlanCatalog: loaded plan:[{}]", loaded )
+        } yield loaded
+      }
     }
 
-
-    Future.sequence( queries ) map { qs =>
-      log.info( "TEST: PlanCatalog loaded plans: [{}]", qs.map{ case (n,p) => s"$n->$p" }.mkString(",") )
-      Map( qs:_* )
+    for {
+      m <- boundedContext.futureModel
+      loaded <- Future.sequence( loadSpecifiedPlans(m) )
+    } yield {
+      log.info( "TEST: PlanCatalog loaded plans: [{}]", loaded.map{ case (n,p) => s"$n->$p" }.mkString(",") )
+      Map( loaded:_* )
     }
   }
 
@@ -512,19 +537,31 @@ class PlanCatalog( model: DomainModel ) extends ActorSubscriber with EnvelopingA
     fetchPlanInfo( planId ) map { summary => ( summary.info.name, summary.info.toSummary  ) }
   }
 
-  def fetchPlanInfo(
-    pid: AnalysisPlanModule.module.TID
-  )(
-    implicit ec: ExecutionContext,
-    to: Timeout
-  ): Future[AnalysisPlanProtocol.PlanInfo] = {
-    val planRef = model( AnalysisPlanModule.module.rootType, pid )
-    ( planRef ?+ AP.GetPlan( pid ) ).collect { case Envelope( info: AP.PlanInfo, _ ) =>
-      log.info( "PlanCataloge[{}]: fetched plan entity: [{}]", self.path, info.sourceId )
-      info
-    }
-  }
+  def fetchPlanInfo( pid: AnalysisPlanModule.module.TID )( implicit ec: ExecutionContext, to: Timeout ): Future[AP.PlanInfo] = {
+    def toInfo( message: Any ): Future[AP.PlanInfo] = {
+      message match {
+        case Envelope( info: AP.PlanInfo, _ ) => {
+          log.info( "PlanCataloge[{}]: fetched plan entity: [{}]", self.path, info.sourceId )
+          Future successful info
+        }
 
+        case info: AP.PlanInfo => Future successful info
+
+        case m => {
+          val ex = new IllegalStateException( s"unknown response to plan inquiry for id:[${pid}]: ${m}" )
+          log.error( ex, "failed to fetch plan for id: {}", pid )
+          Future failed ex
+        }
+      }
+    }
+
+    for {
+      model <- boundedContext.futureModel
+      ref = model( AnalysisPlanModule.module.rootType, pid )
+      msg <- ( ref ?+ AP.GetPlan(pid) ).mapTo[Envelope]
+      info <- toInfo( msg )
+    } yield info
+  }
 }
 
 

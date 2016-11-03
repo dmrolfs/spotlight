@@ -159,7 +159,7 @@ class PlanCatalogSpec extends ParallelAkkaSpec with ScalaFutures with StrictLogg
       whenReady( index.futureEntries, timeout(3.seconds.dilated) ) { _ mustBe empty }
 
       logger.info( "TEST: ==============  CREATING CATALOG  ==============")
-      val catalog = system.actorOf( PlanCatalog.props( config ) )
+      val catalog = system.actorOf( PlanCatalog.props( config )( boundedContext ) )
       val foo = (catalog ? P.WaitingForStart).mapTo[P.Started.type]
       Await.ready( foo, 15.seconds.dilated )
 

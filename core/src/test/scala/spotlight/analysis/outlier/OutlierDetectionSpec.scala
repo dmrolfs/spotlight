@@ -38,7 +38,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
 
     val detect = TestActorRef[OutlierDetection with OutlierDetection.ConfigurationProvider](
       Props(
-        new OutlierDetection with TestConfigurationProvider {
+        new OutlierDetection( "test" ) with TestConfigurationProvider {
           override def preStart(): Unit = { }
         }
       )

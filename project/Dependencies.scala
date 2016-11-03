@@ -37,7 +37,8 @@ object Dependencies {
     val testkit = module( "testkit" )
     val streamsTestkit = module( "stream-testkit" )
 
-    val kyro = "com.github.romix.akka" %% "akka-kryo-serialization" % "0.4.1"
+    val kryo = "com.github.romix.akka" %% "akka-kryo-serialization" % "0.5.0"
+    val kryoSerializers = "de.javakaffee" % "kryo-serializers" % "0.41"
   }
 
   object persistence {
@@ -166,7 +167,8 @@ object Dependencies {
       akka.actor,
       akka.stream,
       akka.slf4j,
-      akka.kyro,
+      akka.kryo,
+      akka.kryoSerializers,
       log.logback.classic,
       facility.uuid,
       facility.config,

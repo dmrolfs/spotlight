@@ -211,12 +211,12 @@
 //    serializers {
 //      java = "akka.serialization.JavaSerializer"
 //      # Define kryo serializer
-//      kyro = "com.romix.akka.serialization.kryo.KryoSerializer"
+//      kryo = "com.romix.akka.serialization.kryo.KryoSerializer"
 //    }
 //
 //    serialization-bindings {
-//      "demesne.EventLike" = kyro
-//      "spotlight.model.outlier.OutlierPlan" = kyro
+//      "demesne.EventLike" = kryo
+//      "spotlight.model.outlier.OutlierPlan" = kryo
 //    }
 //  }
 //}

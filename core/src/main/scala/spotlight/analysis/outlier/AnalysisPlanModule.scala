@@ -165,7 +165,7 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
               highWatermark = provider.highWatermark,
               bufferSize = provider.bufferSize
             ),
-            name = scope.toString+"-AnalysisScopeProxy"
+            name = AnalysisScopeProxy.name( scope )
           )
         }
       }

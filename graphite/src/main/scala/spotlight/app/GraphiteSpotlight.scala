@@ -1,6 +1,7 @@
 package spotlight.app
 
 import java.net.{InetSocketAddress, Socket}
+
 import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
 import scala.util.{Failure, Success}
@@ -24,7 +25,7 @@ import peds.akka.metrics.{Instrumented, Reporter}
 import peds.commons.V
 import peds.akka.stream.StreamMonitor
 import spotlight.analysis.outlier.algorithm.statistical.SimpleMovingAverageAlgorithm
-import spotlight.analysis.outlier.{AnalysisPlanModule, PlanCatalog}
+import spotlight.analysis.outlier.{AnalysisPlanModule, AnalysisScopeProxy, DetectionAlgorithmRouter, PlanCatalog}
 import spotlight.model.outlier._
 import spotlight.model.timeseries.Topic
 import spotlight.publish.{GraphitePublisher, LogPublisher}
@@ -133,6 +134,7 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
   def startTasks( config: Configuration )( implicit system: ActorSystem ): Set[StartTask] = {
     logger.info( "TEST:akka.persistence.journal.plugin: [{}]", config.getString("akka.persistence.journal.plugin") )
     Set(
+     DetectionAlgorithmRouter.startTask( config )( system.dispatcher ),
       SharedLeveldbStore.start(
         path = ActorPath.fromString(
           s"akka.tcp://${system.name}@127.0.0.1:${config.clusterPort}/user/${SharedLeveldbStore.Name}"
@@ -158,7 +160,6 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
     } yield started
   }
 
-  //todo: simplify use by having "bootstrap" (or better name actor) receive all ts request and forward to detector
   def execute(
     context: BoundedContext,
     conf: Configuration
@@ -171,27 +172,21 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
     )
 
     val address = conf.sourceAddress
-    val connections = Tcp().bind( address.getHostName, address.getPort )
+    val connection = Tcp().bind( address.getHostName, address.getPort )
 
-    def makeHandler( model: DomainModel ): Sink[Tcp.IncomingConnection, Future[Done]] = {
-      Sink.foreach[Tcp.IncomingConnection] { connection =>
-        val catalogProps = PlanCatalog.props(
-          configuration = conf,
-          maxInFlightCpuFactor = conf.maxInDetectionCpuFactor,
-          applicationDetectionBudget = Some( conf.detectionBudget )
-        )(
-          model
-        )
-        val detectionModel = detectionWorkflow( catalogProps, conf )
-        connection handleWith detectionModel
-      }
+    val sink = Sink.foreach[Tcp.IncomingConnection] { connection =>
+      val catalogProps = PlanCatalog.props(
+        configuration = conf,
+        maxInFlightCpuFactor = conf.maxInDetectionCpuFactor,
+        applicationDetectionBudget = Some( conf.detectionBudget )
+      )(
+        context
+      )
+      val detectionModel = detectionWorkflow( catalogProps, conf )
+      connection handleWith detectionModel
     }
 
-    for {
-      model <- context.futureModel
-      handler = makeHandler( model )
-      connection <- connections.to( handler ).run()
-    } yield connection
+    ( connection to sink ).run()
   }
 
   def detectionWorkflow(

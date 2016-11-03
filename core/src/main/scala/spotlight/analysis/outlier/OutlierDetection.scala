@@ -23,9 +23,11 @@ import spotlight.model.outlier.{OutlierPlan, Outliers}
 
 
 object OutlierDetection extends StrictLogging with Instrumented {
-  def props( routerRef: ActorRef ): Props = Props( new Default(routerRef) )
+  def props( routerRef: ActorRef, scope: String ): Props = Props( new Default(routerRef, scope) )
 
-  private class Default( routerRef: ActorRef ) extends OutlierDetection with ConfigurationProvider {
+  def name( scope: String ): String = "OutlierDetector-" + scope
+
+  private class Default( routerRef: ActorRef, _scope: String ) extends OutlierDetection( _scope ) with ConfigurationProvider {
     override def router: ActorRef = routerRef
   }
 
@@ -85,7 +87,7 @@ object OutlierDetection extends StrictLogging with Instrumented {
 }
 
 
-class OutlierDetection
+class OutlierDetection( scope: String )
 extends Actor
 with EnvelopingActor
 with InstrumentedActor
@@ -104,16 +106,18 @@ with ActorLogging {
   override lazy val metricBaseName: MetricName = MetricName( classOf[OutlierDetection] )
   val detectionTimer: Timer = metrics timer "detect"
 
+  val outstandingMetricName: String = "outstanding." + scope
+
   def initializeMetrics(): Unit = {
     stripLingeringMetrics()
-    metrics.gauge( "outstanding" ) { outstanding.size }
+    metrics.gauge( outstandingMetricName ) { outstanding.size }
   }
 
   def stripLingeringMetrics(): Unit = {
     metrics.registry.removeMatching(
       new MetricFilter {
         override def matches( name: String, metric: Metric ): Boolean = {
-          name.contains( classOf[OutlierDetection].getName ) && name.contains( "outstanding" )
+          name.contains( classOf[OutlierDetection].getName ) && name.contains( outstandingMetricName )
         }
       }
     )

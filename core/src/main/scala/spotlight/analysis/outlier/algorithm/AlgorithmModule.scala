@@ -179,6 +179,8 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
 
   def algorithm: Algorithm
   override lazy val aggregateIdTag: Symbol = algorithm.label
+  override lazy val shardName: String = algorithm.label.name
+
 
   trait Algorithm {
     val label: Symbol

@@ -360,6 +360,8 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
           maxInFlightCpuFactor = 1.0,
           applicationDetectionBudget = Some(2.minutes),
           applicationPlans = Set( defaultPlan )
+        )(
+          boundedContext
         )
       }
 

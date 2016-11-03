@@ -57,13 +57,15 @@ class SkylineSeasonalEWMASpec extends SkylineBaseSpec {
       val today = joda.LocalDate.now
       val tomorrow = today plus joda.Days.ONE
       val weekFromToday = today plus joda.Weeks.ONE
+      val endOfMonth = new joda.DateTime( 2016, 10, 31, 7, 0, 0, 1 )
       val model = SeasonalModel( reference = startOfToday, waveLength = joda.Days.ONE.toStandardDuration, bins = 24 ).toOption.get
       model.seasonStartFor( today.toDateTime( new joda.LocalTime(0, 0, 0) ) ) mustBe startOfToday
       model.seasonStartFor( today.toDateTime( new joda.LocalTime(1, 0, 37, 746) ) ) mustBe startOfToday
       model.seasonStartFor( today.toDateTime( new joda.LocalTime(23, 59, 37, 746) ) ) mustBe startOfToday
       model.seasonStartFor( today.toDateTime( new joda.LocalTime(23, 59, 59, 999) ) ) mustBe startOfToday
       model.seasonStartFor( tomorrow.toDateTime( new joda.LocalTime(13, 37, 59, 999) ) ) mustBe (startOfToday plus joda.Days.ONE)
-      model.seasonStartFor( weekFromToday.toDateTime( new joda.LocalTime(7, 0, 0, 1) ) ) mustBe (startOfToday plus joda.Weeks.ONE)
+//      model.seasonStartFor( weekFromToday.toDateTime( new joda.LocalTime(7, 0, 0, 1) ) ) mustBe (startOfToday plus joda.Weeks.ONE)
+      model.seasonStartFor( endOfMonth plus joda.Weeks.ONE ) mustBe (startOfToday plus joda.Weeks.ONE)
     }
 
     "identifies bin start for date" in { f: Fixture =>
