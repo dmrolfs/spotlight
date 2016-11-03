@@ -9,17 +9,14 @@ import akka.stream._
 import akka.stream.actor.{ActorSubscriber, ActorSubscriberMessage, RequestStrategy, WatermarkRequestStrategy}
 import akka.stream.scaladsl.{Flow, GraphDSL, Keep, RunnableGraph, Sink, Source}
 import akka.util.Timeout
-
-//import scalaz._
-//import Scalaz._
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.LazyLogging
 import nl.grons.metrics.scala.{Meter, MetricName, Timer}
 import peds.akka.envelope._
 import peds.akka.metrics.InstrumentedActor
 import peds.akka.stream._
-import demesne.{AggregateRootType, DomainModel}
 import peds.commons.log.Trace
+import demesne.{AggregateRootType, DomainModel}
 import spotlight.analysis.outlier.algorithm.{AlgorithmModule, AlgorithmProtocol}
 import spotlight.model.outlier.OutlierPlan.Scope
 import spotlight.model.outlier.OutlierPlan

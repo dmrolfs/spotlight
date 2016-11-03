@@ -5,10 +5,8 @@ import akka.Done
 import akka.actor._
 import akka.agent.Agent
 import akka.event.LoggingReceive
-
 import scalaz._
 import Scalaz._
-import scalaz.concurrent.Task
 import com.typesafe.config.{Config, ConfigValue, ConfigValueType}
 import com.typesafe.scalalogging.LazyLogging
 import demesne.{AggregateRootType, BoundedContext, DomainModel, StartTask}
@@ -18,8 +16,6 @@ import peds.commons.{TryV, Valid}
 import peds.commons.log.Trace
 import peds.commons.concurrent._
 import spotlight.analysis.outlier.algorithm.{AlgorithmModule, InsufficientAlgorithmModuleError}
-import spotlight.analysis.outlier.algorithm.density._
-import spotlight.analysis.outlier.algorithm.skyline._
 import spotlight.analysis.outlier.algorithm.statistical._
 
 
