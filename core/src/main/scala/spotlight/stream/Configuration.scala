@@ -1,7 +1,10 @@
 package spotlight.stream
 
+import java.lang.Enum
 import java.net.{InetAddress, InetSocketAddress}
 import java.time.Duration
+import java.util
+
 import scala.concurrent.duration._
 import scala.util.matching.Regex
 import scalaz.Scalaz._
@@ -341,6 +344,11 @@ object Configuration {
     }
 
 
+
+    override def getEnumList[T <: Enum[T]]( enumClass: Class[T], path: String ): util.List[T] = {
+      underlying.getEnumList[T]( enumClass, path )
+    }
+    override def getEnum[T <: Enum[T]]( enumClass: Class[T], path: String ): T = underlying.getEnum[T]( enumClass, path )
     override def getAnyRefList(s: String) = underlying.getAnyRefList(s)
     override def getIntList(s: String): java.util.List[Integer] = underlying.getIntList(s)
     override def getValue(s: String): ConfigValue = underlying.getValue(s)

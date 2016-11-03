@@ -3,7 +3,7 @@ import sbt._
 
 object Dependencies {
   object peds {
-    val version = "0.3.3-SNAPSHOT"
+    val version = "0.4.0"
     def module( id: String ) = "com.github.dmrolfs" %% s"peds-$id" % version
     def all = Seq( commons, akka, archetype )
 
@@ -14,14 +14,14 @@ object Dependencies {
   }
 
   object demesne {
-    val version = "2.0.0-SNAPSHOT"
+    val version = "2.0.0"
     def module( id: String ) = "com.github.dmrolfs" %% s"demesne-$id" % version
     val core = module( "core" )
     val testkit = module( "testkit" )
   }
 
   object akka {
-    val version = "2.4.11"
+    val version = "2.4.12"
     def module( id: String ) = "com.typesafe.akka" %% s"akka-$id" % version
     val all: Seq[ModuleID] = Seq( actor, stream, agent, cluster, clusterSharding, contrib, persistence, remote, slf4j )
 
@@ -57,13 +57,13 @@ object Dependencies {
 
   object time {
     val joda = "joda-time" % "joda-time" % "2.9.4"
-    val jodaConvert = "org.joda" % "joda-convert" % "1.8"
+    val jodaConvert = "org.joda" % "joda-convert" % "1.8.1"
     val scalaTime = "com.github.nscala-time" %% "nscala-time" % "2.14.0"
     def all = Seq( joda, jodaConvert, scalaTime )
   }
 
   object log {
-    val typesafe = "com.typesafe.scala-logging" %% "scala-logging" % "3.4.0"
+    val typesafe = "com.typesafe.scala-logging" %% "scala-logging" % "3.5.0"
 
     object logback {
       val version = "1.1.7"
@@ -108,14 +108,14 @@ object Dependencies {
 
   object facility {
     val uuid = "com.eaio.uuid" % "uuid" % "3.4"
-    val config = "com.typesafe" % "config" % "1.3.0"
+    val config = "com.typesafe" % "config" % "1.3.1"
 //    val pureConfig = "com.github.melrief" %% "pureconfig" % "0.1.5"
     val shapeless = "com.chuusai" %% "shapeless" % "2.3.2"
     val parboiled = "org.parboiled" %% "parboiled" % "2.1.3"
     val inflector = "org.atteo" % "evo-inflector" % "1.2.1"
     val squants = "com.squants"  %% "squants"  % "0.6.2"
     val accord = "com.wix" %% "accord-core" % "0.6"
-    val lang = "org.apache.commons" % "commons-lang3" % "3.4"
+    val lang = "org.apache.commons" % "commons-lang3" % "3.5"
     val math3 = "org.apache.commons" % "commons-math3" % "3.6.1"
 //    val suanshu = "com.numericalmethod" % "suanshu" % "3.4.0" intransitive()  // don't want to use due to $$$
     val scopt = "com.github.scopt" %% "scopt" % "3.5.0"
