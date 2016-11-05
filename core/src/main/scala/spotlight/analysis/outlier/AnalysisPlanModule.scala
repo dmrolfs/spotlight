@@ -1,8 +1,8 @@
 package spotlight.analysis.outlier
 
 import scala.reflect._
-import akka.actor.{ActorContext, ActorRef, PoisonPill, Props, Terminated}
-import shapeless.Lens
+import akka.actor.{Actor, ActorContext, ActorLogging, ActorRef, PoisonPill, Props, Terminated}
+import shapeless.{Lens, lens}
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.LazyLogging
 import peds.akka.envelope._
@@ -17,7 +17,8 @@ import demesne.index.local.IndexLocalAgent
 import demesne.{AggregateProtocol, AggregateRootType, DomainModel}
 import demesne.index.{Directive, IndexBusSubscription, StackableIndexBusPublisher}
 import demesne.module.LocalAggregate
-import spotlight.model.outlier.{IsQuorum, OutlierPlan, ReduceOutliers}
+import spotlight.model.outlier.OutlierPlan.Scope
+import spotlight.model.outlier._
 import spotlight.model.timeseries.{TimeSeries, Topic}
 
 
@@ -26,8 +27,16 @@ object AnalysisPlanProtocol extends AggregateProtocol[OutlierPlan#ID]{
   sealed abstract class AnalysisPlanCommand extends AnalysisPlanMessage with CommandMessage
   sealed abstract class AnalysisPlanEvent extends AnalysisPlanMessage with EventMessage
 
-  case class AcceptTimeSeries( override val targetId: AcceptTimeSeries#TID, data: TimeSeries ) extends AnalysisPlanCommand
-
+  case class AcceptTimeSeries(
+    override val targetId: AcceptTimeSeries#TID,
+    override val correlationIds: Set[WorkId],
+    override val data: TimeSeries,
+    override val scope: Option[OutlierPlan.Scope] = None
+  ) extends AnalysisPlanCommand with CorrelatedSeries {
+    override def withData( newData: TimeSeries ): CorrelatedData[TimeSeries] = this.copy( data = newData )
+    override def withCorrelationIds( newIds: Set[WorkId] ): CorrelatedData[TimeSeries] = this.copy( correlationIds = newIds )
+    override def withScope( newScope: Option[Scope] ): CorrelatedData[TimeSeries] = this.copy( scope = newScope )
+  }
 
   //todo add info change commands
   //todo reify algorithm
@@ -145,7 +154,7 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
       }
 
 
-      trait ProxyProvider { provider =>
+      trait ProxyProvider { provider: Actor with ActorLogging =>
         def highWatermark: Int = 10 * Runtime.getRuntime.availableProcessors()
         def bufferSize: Int = 1000
 
@@ -157,6 +166,7 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
           context: ActorContext
         ): ActorRef = {
           val scope = OutlierPlan.Scope( plan, topic )
+          log.debug( "making analysis proxy for scope: [{}]", scope )
           context.actorOf(
             AnalysisScopeProxy.props(
               scope = scope,
@@ -181,21 +191,21 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
       private val trace = Trace[OutlierPlanActor]
 
       override def preDisable(): Unit = {
-        scopeProxies.values foreach { _ ! PoisonPill }
-        scopeProxies = Map.empty[Topic, ActorRef]
+        proxies.values foreach { _ ! PoisonPill }
+        proxies = Map.empty[Topic, ActorRef]
       }
 
       override var state: OutlierPlan = _
       override val evState: ClassTag[OutlierPlan] = ClassTag( classOf[OutlierPlan] )
 
-      var scopeProxies: Map[Topic, ActorRef] = Map.empty[Topic, ActorRef]
+      var proxies: Map[Topic, ActorRef] = Map.empty[Topic, ActorRef]
 
       def proxyFor( topic: Topic ): ActorRef = {
-        scopeProxies
+        proxies
         .get( topic )
         .getOrElse {
           val proxy = outer.makeProxy( topic, state )( model, context )
-          scopeProxies += topic -> proxy
+          proxies += topic -> proxy
           log.info( "TEST: Setting [{}] to watch proxy:[{}]", self, proxy )
           context watch proxy
           proxy
@@ -238,7 +248,7 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
 
         case EntityMessages.Add( targetId, info ) => {
           log.info(
-            "AnalysisPlanModule caught Add message but unsure targetId[{}] matches aggregateId:[{}] => [{}][{}]",
+            "AnalysisPlanModule caught Add message but targetId[{}] does not match aggregateId:[{}] => [{}][{}]",
             (targetId, targetId.id.getClass),
             (aggregateId, aggregateId.id.getClass),
             targetId == aggregateId,
@@ -246,7 +256,7 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
           )
         }
         case a => {
-          log.info( "AnalysisPlanModule caught generic message: [{}]", a )
+          log.info( "AnalysisPlanModule ignoring generic message: [{}]", a )
         }
       }
 
@@ -254,17 +264,18 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
         workflow orElse maintenance orElse planEntity orElse super.active
       }
 
-      def workflow: Receive = {
-        case P.AcceptTimeSeries( id, ts ) => {
+      val workflow: Receive = {
+        case m @ CorrelatedData( ts: TimeSeries, correlationIds, _ ) => {
           log.debug(
             "AnalysisPlanModule[{}] routing data for topic:[{}] sender:[{}]",
-            s"${self.path.name}:${workId}", ts.topic, sender().path.name
+            s"${self.path.name}:${workId}==?${correlationIds}=>${correlationIds.exists(_ == workId)}", ts.topic, sender().path.name
           )
-          proxyFor( ts.topic ) forwardEnvelope ( ts, OutlierPlan.Scope(plan = state, topic = ts.topic) )
+
+          proxyFor( ts.topic ) forwardEnvelope m.withScope( Some(OutlierPlan.Scope(plan = state, topic = ts.topic)) )
         }
       }
 
-      def planEntity: Receive = {
+      val planEntity: Receive = {
         case _: P.GetPlan => sender() !+ P.PlanInfo( state.id, state )
 
         case P.ApplyTo( id, appliesTo ) => persist( P.ScopeChanged(id, appliesTo) ) { acceptAndPublish }
@@ -272,8 +283,8 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
         case P.UseAlgorithms( id, algorithms, config ) => {
           persist( P.AlgorithmsChanged(id, algorithms, config) ) { e =>
             acceptAndPublish( e )
-            log.info( "notifying {} plan constituents of algorithm change", scopeProxies.keySet.size )
-            scopeProxies foreach { case (_, proxy) => proxy !+ e }
+            log.info( "notifying {} plan constituents of algorithm change", proxies.keySet.size )
+            proxies foreach { case (_, proxy) => proxy !+ e }
           }
         }
 
@@ -282,16 +293,16 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
         }
       }
 
-      def maintenance: Receive = {
+      val maintenance: Receive = {
         case Terminated( deadActor ) => {
           log.info( "[{}] notified of dead actor at:[{}]", aggregateId, deadActor.path )
-          scopeProxies find { case (_, ref) => ref == deadActor } foreach { case (t, _) =>
+          proxies find { case (_, ref) => ref == deadActor } foreach { case (t, _) =>
             log.warning( "removing record of dead proxy for topic:[{}]", t )
-            scopeProxies = scopeProxies - t
+            proxies = proxies - t
           }
         }
 
-        case _: P.GetProxies => sender() ! P.Proxies( aggregateId, scopeProxies )
+        case _: P.GetProxies => sender() ! P.Proxies( aggregateId, proxies )
       }
 
       override def unhandled( message: Any ): Unit = {

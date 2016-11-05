@@ -2,6 +2,8 @@ package spotlight.analysis.outlier.algorithm.density
 
 import java.util.concurrent.atomic.AtomicInteger
 
+import scala.annotation.tailrec
+import scala.concurrent.duration._
 import akka.actor.ActorSystem
 import akka.event.EventStream
 import akka.testkit._
@@ -19,10 +21,7 @@ import spotlight.analysis.outlier._
 import spotlight.analysis.outlier.algorithm.{AlgorithmActor, CommonAnalyzer}
 import spotlight.model.outlier._
 import spotlight.model.timeseries._
-import spotlight.testkit.ParallelAkkaSpec
-
-import scala.annotation.tailrec
-import scala.concurrent.duration._
+import spotlight.testkit.{ParallelAkkaSpec, TestCorrelatedSeries}
 
 
 /**
@@ -61,7 +60,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
   class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends AkkaFixture( _config, _system, _slug ) {
     val metric = Topic( "metric.a" )
     val algoS = SeriesDensityAnalyzer.Algorithm
-    val algoC = CohortDensityAnalyzer.Algorithm
+//    val algoC = CohortDensityAnalyzer.Algorithm
     val plan = mock[OutlierPlan]
     when( plan.appliesTo ).thenReturn( Fixture.appliesToAll )
     when( plan.algorithms ) thenReturn Set( algoS )
@@ -177,7 +176,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       analyzer.receive(
         DetectUsing(
           algoS,
-          DetectOutliersInSeries( TimeSeries("series", points), plan, subscriber.ref, Set() ),
+          DetectOutliersInSeries( TestCorrelatedSeries(TimeSeries("series", points)), plan, subscriber.ref ),
           HistoricalStatistics(2, false),
           ConfigFactory.parseString(
             s"""
@@ -208,7 +207,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       implicit val sender = aggregator.ref
       analyzer ! DetectUsing(
         algoS,
-        DetectOutliersInSeries( series, plan, subscriber.ref, Set() ),
+        DetectOutliersInSeries( TestCorrelatedSeries(series), plan, subscriber.ref ),
         HistoricalStatistics(2, false),
         algProps
       )
@@ -266,7 +265,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       implicit val sender = aggregator.ref
       analyzer ! DetectUsing(
         algoS,
-        DetectOutliersInSeries( series, plan, subscriber.ref, Set() ),
+        DetectOutliersInSeries( TestCorrelatedSeries(series), plan, subscriber.ref ),
         HistoricalStatistics(2, false),
         algProps
       )
@@ -287,7 +286,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       def detectUsing( series: TimeSeries, history: HistoricalStatistics ): DetectUsing = {
         DetectUsing(
           algorithm = algoS,
-          payload = OutlierDetectionMessage( series, plan, subscriber.ref ).toOption.get,
+          payload = OutlierDetectionMessage( TestCorrelatedSeries(series), plan, subscriber.ref ).toOption.get,
           history = history,
           properties = ConfigFactory.parseString(
             s"""
@@ -380,41 +379,41 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
 //      }
     }
 
-    "series analyzer doesn't recognize cohort" in { f: Fixture =>
-      import f._
-      val analyzer = TestActorRef[SeriesDensityAnalyzer]( SeriesDensityAnalyzer.props(router.ref) )
-      analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
-
-      val series1 = TimeSeries( "series.one", pointsA )
-      val range = (0.99998, 1.00003)
-      val series2 = tweakSeries( TimeSeries("series.two", pointsB), range )
-      val series3 = tweakSeries( TimeSeries("series.three", pointsB), range )
-      val series4 = tweakSeries( TimeSeries("series.four", pointsB), range )
-      val cohort = TimeSeriesCohort( series1, series2, series3, series4 )
-
-      val algProps = ConfigFactory.parseString(
-        s"""
-           |${algoS.name}.tolerance: 3.0
-           |${algoC.name}.seedEps: 5.0
-           |${algoC.name}.minDensityConnectedPoints: 2
-        """.stripMargin
-      )
-
-      val expected = DetectUsing(
-        algoC,
-        DetectOutliersInCohort(cohort, plan, subscriber.ref, Set()),
-        HistoricalStatistics(2, false),
-        algProps
-      )
-      implicit val sender = aggregator.ref
-      analyzer ! expected
-      aggregator.expectMsgPF( 2.seconds.dilated, "detect" ) {
-        case UnrecognizedPayload( alg, actual ) => {
-          alg.name mustBe algoS.name
-          actual mustBe expected
-        }
-      }
-    }
+//    "series analyzer doesn't recognize cohort" in { f: Fixture =>
+//      import f._
+//      val analyzer = TestActorRef[SeriesDensityAnalyzer]( SeriesDensityAnalyzer.props(router.ref) )
+//      analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
+//
+//      val series1 = TimeSeries( "series.one", pointsA )
+//      val range = (0.99998, 1.00003)
+//      val series2 = tweakSeries( TimeSeries("series.two", pointsB), range )
+//      val series3 = tweakSeries( TimeSeries("series.three", pointsB), range )
+//      val series4 = tweakSeries( TimeSeries("series.four", pointsB), range )
+//      val cohort = TimeSeriesCohort( series1, series2, series3, series4 )
+//
+//      val algProps = ConfigFactory.parseString(
+//        s"""
+//           |${algoS.name}.tolerance: 3.0
+//           |${algoC.name}.seedEps: 5.0
+//           |${algoC.name}.minDensityConnectedPoints: 2
+//        """.stripMargin
+//      )
+//
+//      val expected = DetectUsing(
+//        algoC,
+//        DetectOutliersInCohort(cohort, plan, subscriber.ref, Set()),
+//        HistoricalStatistics(2, false),
+//        algProps
+//      )
+//      implicit val sender = aggregator.ref
+//      analyzer ! expected
+//      aggregator.expectMsgPF( 2.seconds.dilated, "detect" ) {
+//        case UnrecognizedPayload( alg, actual ) => {
+//          alg.name mustBe algoS.name
+//          actual mustBe expected
+//        }
+//      }
+//    }
 
 
     "shape is updated with each detect request" in { f: Fixture =>
@@ -442,7 +441,11 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
 
       val detectHistoryA = HistoricalStatistics.fromActivePoints( pointsA, false )
       val msgA = detectUsing(
-        message = OutlierDetectionMessage( TimeSeries(topic = metric, points = pointsA), plan, subscriber.ref ).toOption.get,
+        message = OutlierDetectionMessage(
+          TestCorrelatedSeries(TimeSeries(topic = metric, points = pointsA)),
+          plan,
+          subscriber.ref
+        ).toOption.get,
         history = detectHistoryA
       )
 
@@ -469,7 +472,11 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       detectHistoryABLast.zip(pointsALast).foreach{ case (f, b) => f mustBe b }
 
       val msgAB = detectUsing(
-        message = OutlierDetectionMessage( TimeSeries( topic = metric, points = pointsB ), plan, subscriber.ref ).toOption.get,
+        message = OutlierDetectionMessage(
+          TestCorrelatedSeries(TimeSeries( topic = metric, points = pointsB )),
+          plan,
+          subscriber.ref
+        ).toOption.get,
         history = detectHistoryAB
       )
       val densityExpectedAB = makeDensityExpectedHistory( pointsB, Some(densityExpectedA), pointsA.lastOption )
@@ -585,7 +592,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       implicit val sender = aggregator.ref
       analyzer ! DetectUsing(
         algoS,
-        DetectOutliersInSeries( series, plan, subscriber.ref, Set() ),
+        DetectOutliersInSeries( TestCorrelatedSeries(series), plan, subscriber.ref ),
         HistoricalStatistics(2, false),
         algProps
       )

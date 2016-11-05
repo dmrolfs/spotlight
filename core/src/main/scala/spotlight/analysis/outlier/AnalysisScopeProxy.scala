@@ -19,9 +19,9 @@ import peds.commons.log.Trace
 import demesne.{AggregateRootType, DomainModel}
 import spotlight.analysis.outlier.algorithm.{AlgorithmModule, AlgorithmProtocol}
 import spotlight.model.outlier.OutlierPlan.Scope
-import spotlight.model.outlier.OutlierPlan
+import spotlight.model.outlier.{CorrelatedData, CorrelatedSeries, OutlierPlan}
 import spotlight.model.timeseries.TimeSeriesBase.Merging
-import spotlight.model.timeseries.{IdentifiedTimeSeries, TimeSeries, Topic}
+import spotlight.model.timeseries.{TimeSeries, Topic}
 
 
 /**
@@ -142,18 +142,34 @@ with ActorLogging { outer: AnalysisScopeProxy.Provider =>
 
   override def receive: Receive = LoggingReceive { around( workflow ) }
 
+  import spotlight.analysis.outlier.{ AnalysisPlanProtocol => P }
+
   val workflow: Receive = {
-    case (ts: TimeSeries, s: OutlierPlan.Scope) if s == outer.scope => {
-      log.debug( "AnalysisScopeProxy[{}] [{}] forwarding time series [{}] into detection stream", self.path.name, workId, ts.topic )
-      streamIngressFor( sender() ) forwardEnvelope (ts, Set(workId))
+    case m @ CorrelatedData( ts: TimeSeries, correlationIds, Some(s) ) if s == outer.scope => {
+      log.debug(
+        "AnalysisScopeProxy:WORKFLOW[{}] [{}] forwarding time series [{}] into detection stream",
+        self.path.name, correlationIds, ts.topic
+      )
+      streamIngressFor( sender() ) forwardEnvelope m
     }
 
-    case (ts: TimeSeries, p: OutlierPlan) if workflow isDefinedAt (ts, Scope(p, ts.topic)) => workflow( (ts, Scope(p, ts.topic)) )
+//    case (ts: TimeSeries, s: OutlierPlan.Scope) if s == outer.scope => {
+//      log.debug( "AnalysisScopeProxy[{}] [{}] forwarding time series [{}] into detection stream", self.path.name, workId, ts.topic )
+//      streamIngressFor( sender() ) forwardEnvelope P.AcceptTimeSeries(
+//        targetId = AnalysisPlanModule.identifying.tag( s ),
+//        correlationIds = Set(workId),
+//        data = ts,
+//        scope = Some(s)
+//      )
+//    }
+
+//    case (ts: TimeSeries, p: OutlierPlan) if workflow isDefinedAt (ts, Scope(p, ts.topic)) => workflow( (ts, Scope(p, ts.topic)) )
 
     case AnalysisPlanProtocol.AlgorithmsChanged(_, algorithms, config) => {
       if ( algorithms != outer.plan.algorithms ) updatePlan( algorithms, config )
       if ( config != outer.plan.algorithmConfig ) updateAlgorithmConfigurations( config )
     }
+    case bad => log.error( "AnalysisScopeProxy[{}]: UNKNOWN BAD MESSAGE: [{}]", outer.scope, bad )
   }
 
   def updatePlan( algorithms: Set[Symbol], configuration: Config ): Unit = trace.block( "updatePlan" ) {
@@ -202,7 +218,7 @@ with ActorLogging { outer: AnalysisScopeProxy.Provider =>
 
     val (ingressRef, ingress) = {
       Source
-      .actorPublisher[IdentifiedTimeSeries]( StreamIngress.props[IdentifiedTimeSeries] )
+      .actorPublisher[CorrelatedSeries]( StreamIngress.props[CorrelatedSeries] )
       .toMat( Sink.asPublisher(false) )( Keep.both )
       .run()
     }
@@ -210,15 +226,19 @@ with ActorLogging { outer: AnalysisScopeProxy.Provider =>
     val graph = GraphDSL.create() { implicit b =>
       import GraphDSL.Implicits._
 
+      def flowLog[T]( label: String ): FlowShape[T, T] = {
+        b.add( Flow[T] map { m => log.debug( "AnalysisScopeProxy:FLOW-STREAM: {}: [{}]", label, m.toString); m } )
+      }
+
       val ingressPublisher = b.add( Source.fromPublisher( ingress ) )
       val batch = outer.plan.grouping map { g => b.add( batchSeries( g ) ) }
-      val buffer = b.add( Flow[IdentifiedTimeSeries].buffer(outer.bufferSize, OverflowStrategy.backpressure) )
+      val buffer = b.add( Flow[CorrelatedSeries].buffer(outer.bufferSize, OverflowStrategy.backpressure) )
       val detect = b.add( detectionFlow( outer.plan, subscriber, outer.workers ) )
 
       if ( batch.isDefined ) {
-        ingressPublisher ~> batch.get ~> buffer ~> detect
+        ingressPublisher ~> flowLog[CorrelatedSeries]("entry") ~> batch.get ~> flowLog[CorrelatedSeries]( "batched") ~> buffer ~> flowLog[CorrelatedSeries]( "to-detect" ) ~> detect
       } else {
-        ingressPublisher ~> buffer ~> detect
+        ingressPublisher ~> flowLog[CorrelatedSeries]("entry") ~> buffer ~> flowLog[CorrelatedSeries]( "to-detect" ) ~> detect
       }
 
       ClosedShape
@@ -233,18 +253,19 @@ with ActorLogging { outer: AnalysisScopeProxy.Provider =>
     grouping: OutlierPlan.Grouping
   )(
     implicit tsMerging: Merging[TimeSeries]
-  ): Flow[IdentifiedTimeSeries, IdentifiedTimeSeries, NotUsed] = {
+  ): Flow[CorrelatedSeries, CorrelatedSeries, NotUsed] = {
     log.debug( "batchSeries grouping = [{}]", grouping )
+    val correlatedDataLens = CorrelatedData.dataLens[TimeSeries] ~ CorrelatedData.correlationIdsLens[TimeSeries]
 
-    Flow[IdentifiedTimeSeries]
+    Flow[CorrelatedSeries]
     .groupedWithin( n = grouping.limit, d = grouping.window )
     .map {
-      _.groupBy { case (ts, _) => ts.topic }
-      .map { case (topic, its) =>
-        its.tail.foldLeft( its.head ){ case ((accTs, accWids), (ts, wids)) =>
-          val newTs = tsMerging.merge( accTs, ts ) valueOr { exs => throw exs.head }
-          val newWids = accWids ++ wids
-          ( newTs, newWids )
+      _.groupBy { _.data.topic }
+      .map { case (_, msgs) =>
+        msgs.tail.foldLeft( msgs.head ){ case (acc, m) =>
+          val newData = tsMerging.merge( acc.data, m.data ) valueOr { exs => throw exs.head }
+          val newCorrelationIds = acc.correlationIds ++ m.correlationIds
+          correlatedDataLens.set( acc )( newData, newCorrelationIds )
         }
       }
     }
@@ -257,13 +278,19 @@ with ActorLogging { outer: AnalysisScopeProxy.Provider =>
     w: Workers
   )(
     implicit system: ActorSystem
-  ): Sink[IdentifiedTimeSeries, NotUsed] = {
+  ): Sink[CorrelatedData[TimeSeries], NotUsed] = {
     val label = Symbol( OutlierDetection.WatchPoints.DetectionFlow.name + "." + p.name )
 
-    Flow[IdentifiedTimeSeries]
-    .filter { case (ts, wids) => p appliesTo ts }
-    .map { case (ts, wids) => OutlierDetectionMessage(ts, p, subscriber, wids).disjunction }
+    Flow[CorrelatedData[TimeSeries]]
+    .map { m => log.debug( "AnalysisScopeProxy:FLOW-DETECT: before-filter: [{}]", m.toString); m }
+    .filter { m =>
+      val result = p appliesTo m
+      log.debug( "AnalysisScopeProxy:FLOW-DETECT: filtering:[{}] msg:[{}]", result, m.toString )
+      result
+    }
+    .map { m => OutlierDetectionMessage(m, p, subscriber).disjunction }
     .collect { case scalaz.\/-( m ) => m }
+    .map { m => log.debug( "AnalysisScopeProxy:FLOW-DETECT: on-to-detection-grid: [{}]", m.toString); m }
     .toMat {
       Sink
       .actorRef[OutlierDetectionMessage]( w.detector, ActorSubscriberMessage.OnComplete )

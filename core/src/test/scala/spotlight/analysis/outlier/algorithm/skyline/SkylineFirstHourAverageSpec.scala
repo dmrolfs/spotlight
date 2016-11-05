@@ -14,6 +14,7 @@ import spotlight.analysis.outlier.algorithm.CommonAnalyzer
 import spotlight.analysis.outlier.{DetectOutliersInSeries, DetectUsing, DetectionAlgorithmRouter}
 import spotlight.model.outlier.{OutlierPlan, SeriesOutliers}
 import spotlight.model.timeseries.{DataPoint, ThresholdBoundary}
+import spotlight.testkit.TestCorrelatedSeries
 
 
 /**
@@ -122,7 +123,7 @@ class SkylineFirstHourAverageSpec extends SkylineBaseSpec {
       implicit val sender = aggregator.ref
       analyzer ! DetectUsing(
         algoS,
-        DetectOutliersInSeries(series, plan, subscriber.ref, Set()),
+        DetectOutliersInSeries(TestCorrelatedSeries(series), plan, subscriber.ref),
         history1,
         algProps
       )
@@ -151,7 +152,7 @@ class SkylineFirstHourAverageSpec extends SkylineBaseSpec {
 
       analyzer ! DetectUsing(
         algoS,
-        DetectOutliersInSeries(series2, plan, subscriber.ref, Set()),
+        DetectOutliersInSeries(TestCorrelatedSeries(series2), plan, subscriber.ref),
         history2,
         algProps
       )
@@ -190,7 +191,7 @@ class SkylineFirstHourAverageSpec extends SkylineBaseSpec {
       implicit val sender = aggregator.ref
       analyzer ! DetectUsing(
           algoS,
-          DetectOutliersInSeries(series, plan, subscriber.ref, Set()),
+          DetectOutliersInSeries(TestCorrelatedSeries(series), plan, subscriber.ref),
           history1,
           algProps
         )
@@ -219,7 +220,7 @@ class SkylineFirstHourAverageSpec extends SkylineBaseSpec {
 
       analyzer ! DetectUsing(
         algoS,
-        DetectOutliersInSeries(series2, plan, subscriber.ref, Set()),
+        DetectOutliersInSeries(TestCorrelatedSeries(series2), plan, subscriber.ref),
         history2,
         algProps
       )
@@ -260,7 +261,7 @@ class SkylineFirstHourAverageSpec extends SkylineBaseSpec {
       implicit val sender = aggregator.ref
       analyzer ! DetectUsing(
         algoS,
-        DetectOutliersInSeries(series, plan, subscriber.ref, Set()),
+        DetectOutliersInSeries(TestCorrelatedSeries(series), plan, subscriber.ref),
         history1,
         algProps
       )
@@ -285,7 +286,7 @@ class SkylineFirstHourAverageSpec extends SkylineBaseSpec {
 
       analyzer ! DetectUsing(
         algoS,
-        DetectOutliersInSeries(series2, plan, subscriber.ref, Set()),
+        DetectOutliersInSeries(TestCorrelatedSeries(series2), plan, subscriber.ref),
         history2,
         algProps
       )

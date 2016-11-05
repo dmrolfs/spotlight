@@ -1,13 +1,13 @@
 package spotlight.analysis.outlier
 
-import akka.actor.ActorSystem
-
 import scala.concurrent.duration._
+import akka.actor.ActorSystem
 import akka.testkit._
 import com.typesafe.config.Config
 import org.joda.{time => joda}
 import org.scalatest.mockito.MockitoSugar
-import peds.akka.envelope.Envelope
+import peds.akka.envelope.{Envelope, WorkId}
+import spotlight.analysis.outlier.AnalysisPlanProtocol.AcceptTimeSeries
 import spotlight.model.outlier.OutlierPlan
 import spotlight.model.timeseries.{DataPoint, TimeSeries}
 import spotlight.testkit.ParallelAkkaSpec
@@ -72,7 +72,7 @@ class DetectionAlgorithmRouterSpec extends ParallelAkkaSpec with MockitoSugar {
       val plan = mock[OutlierPlan]
       val msg = DetectUsing(
         'foo,
-        DetectOutliersInSeries(series, plan, subscriber.ref, Set()),
+        DetectOutliersInSeries(AcceptTimeSeries(null, Set.empty[WorkId], series), plan, subscriber.ref),
         HistoricalStatistics(2, false)
       )
 

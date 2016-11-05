@@ -19,6 +19,7 @@ import spotlight.model.outlier.OutlierPlan
 import spotlight.model.timeseries._
 
 
+@deprecated( "replaced by AlgorithmModule and AlgorithmModule.AlgorithmProtocol", "v2" )
 sealed trait AlgorithmProtocolOLD
 object AlgorithmProtocolOLD extends {
   case class Register( scopeId: OutlierPlan.Scope, routerRef: ActorRef ) extends AlgorithmProtocolOLD
@@ -26,6 +27,7 @@ object AlgorithmProtocolOLD extends {
 }
 
 
+@deprecated( "replaced by AlgorithmModule and AlgorithmModule.AlgorithmProtocol", "v2" )
 trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
   import AlgorithmActor._
 
@@ -112,6 +114,7 @@ trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
   }
 }
 
+@deprecated( "replaced by AlgorithmModule and AlgorithmModule.AlgorithmProtocol", "v2" )
 object AlgorithmActor {
 
   trait AlgorithmContext {
@@ -133,6 +136,7 @@ object AlgorithmActor {
     def addThresholdBoundary(control: ThresholdBoundary ): That
   }
 
+  @deprecated( "replaced by AlgorithmModule and AlgorithmModule.AlgorithmProtocol", "v2" )
   object AlgorithmContext extends LazyLogging {
     def apply( message: DetectUsing, data: Seq[DoublePoint] ): AlgorithmContext = {
       SimpleAlgorithmContext( message, message.source, data )
@@ -196,6 +200,7 @@ object AlgorithmActor {
   }
 
 
+  @deprecated( "replaced by AlgorithmModule and AlgorithmModule.AlgorithmProtocol", "v2" )
   case class AlgorithmUsedBeforeRegistrationError( algorithm: Symbol, path: ActorPath )
     extends IllegalStateException( s"actor [${path}] not registered algorithm [${algorithm.name}] before use" )
     with OutlierAlgorithmError

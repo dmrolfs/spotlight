@@ -9,6 +9,7 @@ import com.typesafe.config.{Config, ConfigFactory}
 import org.mockito.Mockito._
 import spotlight.analysis.outlier.{DetectOutliersInSeries, DetectUsing, DetectionAlgorithmRouter}
 import spotlight.model.outlier._
+import spotlight.testkit.TestCorrelatedSeries
 
 
 /**
@@ -49,7 +50,7 @@ class SkylineEWMASpec extends SkylineBaseSpec {
       implicit val sender = aggregator.ref
       analyzer ! DetectUsing(
         algoS,
-        DetectOutliersInSeries(series, plan, subscriber.ref, Set()),
+        DetectOutliersInSeries(TestCorrelatedSeries(series), plan, subscriber.ref),
         history1,
         algProps
       )
@@ -75,7 +76,7 @@ class SkylineEWMASpec extends SkylineBaseSpec {
 
       analyzer ! DetectUsing(
         algoS,
-        DetectOutliersInSeries(series2, plan, subscriber.ref, Set()),
+        DetectOutliersInSeries(TestCorrelatedSeries(series2), plan, subscriber.ref),
         history2,
         algProps
       )

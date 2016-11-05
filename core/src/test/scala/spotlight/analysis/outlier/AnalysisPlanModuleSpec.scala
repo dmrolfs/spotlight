@@ -12,7 +12,7 @@ import demesne.module.{AggregateEnvironment, LocalAggregate}
 import demesne.{AggregateRootType, DomainModel}
 import demesne.repository.AggregateRootProps
 import demesne.module.entity.{EntityAggregateModule, messages => EntityMessages}
-import org.scalatest.Tag
+import org.scalatest.{OptionValues, Tag}
 import peds.akka.publish.StackableStreamPublisher
 import peds.commons.V
 import peds.commons.identifier.{ShortUUID, TaggedID}
@@ -30,7 +30,7 @@ import spotlight.model.timeseries._
 /**
   * Created by rolfsd on 6/15/16.
   */
-class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] { outer =>
+class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] with OptionValues { outer =>
   override type ID = AnalysisPlanModule.module.ID
   override type Protocol = AnalysisPlanProtocol.type
   override val protocol: Protocol = AnalysisPlanProtocol
@@ -206,33 +206,33 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] { outer =>
       actual must be theSameInstanceAs a2
     }
 
-    "dead proxy must be cleared" in { f: Fixture =>
+    "dead proxy must be cleared" taggedAs WIP in { f: Fixture =>
       import f._
 
       entity ! EntityMessages.Add( tid, Some(plan) )
       bus.expectMsgType[EntityMessages.Added]
       proxiesFrom( entity, tid ) mustBe empty
 
-      entity ! P.AcceptTimeSeries( tid, TimeSeries( "test" ) )
+      entity ! P.AcceptTimeSeries( tid, Set.empty[WorkId], TimeSeries( "test" ) )
       val p1 = proxiesFrom( entity, tid )
       p1.keys must contain ( "test".toTopic )
 
       val proxy = p1( "test" )
       proxy ! PoisonPill
       logger.debug( "TEST: waiting a bit for Terminated to propagate..." )
-      Thread.sleep( 1000 )
+      Thread.sleep( 5000 )
       logger.info( "TEST: checking proxy..." )
 
       val p2 = proxiesFrom( entity, tid )
       logger.debug( "TEST: p2 = [{}]", p2.mkString(", ") )
       p2 mustBe empty
 
-      entity ! P.AcceptTimeSeries( tid, TimeSeries( "test" ) )
+      entity ! P.AcceptTimeSeries( tid, Set.empty[WorkId], TimeSeries( "test" ) )
       val p3 = proxiesFrom( entity, tid )
       p3.keys must contain ( "test".toTopic )
     }
 
-    "handle workflow" taggedAs( WORKFLOW ) in { f: Fixture =>
+    "handle workflow" taggedAs( WORKFLOW, WIP ) in { f: Fixture =>
       import f._
       logger.debug( "TEST: fixture class: [{}]", f.getClass )
 
@@ -240,41 +240,50 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] { outer =>
 
       proxiesFrom( entity, tid ) mustBe empty
 
-      entity ! P.AcceptTimeSeries( tid, TimeSeries( "test" ) )
+      val wid1 = Set( WorkId() )
+      entity ! P.AcceptTimeSeries( tid, wid1, TimeSeries( "test" ) )
       val p1 = proxiesFrom( entity, tid )
       p1.keys must contain ( "test".toTopic )
 
       f.asInstanceOf[WorkflowFixture].proxyProbes must have size 1
       val testProbe = f.asInstanceOf[WorkflowFixture].proxyProbes( "test".toTopic )
       testProbe.expectMsgPF( hint = "accept test time series" ) {
-        case Envelope( (ts: TimeSeries, s: OutlierPlan.Scope), h ) => {
-          s.plan mustBe f.plan.name
-          s.topic mustBe "test".toTopic
+        case Envelope( P.AcceptTimeSeries(pid, cids, ts: TimeSeries, s), _ ) => {
+          pid mustBe tid
+          cids mustBe wid1
+          s.value.plan mustBe f.plan.name
+          s.value.topic mustBe "test".toTopic
           ts.topic mustBe "test".toTopic
         }
       }
 
-      entity ! P.AcceptTimeSeries( tid, TimeSeries( "test" ) )
+      val wid2 = wid1 + WorkId()
+      entity ! P.AcceptTimeSeries( tid, wid2, TimeSeries( "test" ) )
       val p2 = proxiesFrom( entity, tid )
       p2.keys must contain ( "test".toTopic )
       f.asInstanceOf[WorkflowFixture].proxyProbes must have size 1
       testProbe.expectMsgPF( hint = "accept test time series" ) {
-        case Envelope( (ts: TimeSeries, s: OutlierPlan.Scope), h ) => {
-          s.plan mustBe f.plan.name
-          s.topic mustBe "test".toTopic
+        case Envelope( P.AcceptTimeSeries(pid, cids, ts: TimeSeries, s), _ ) => {
+          pid mustBe tid
+          cids mustBe wid2
+          s.value.plan mustBe f.plan.name
+          s.value.topic mustBe "test".toTopic
           ts.topic mustBe "test".toTopic
         }
       }
 
-      entity ! P.AcceptTimeSeries( tid, TimeSeries( "foo" ) )
+      val wid3 = wid2 + WorkId()
+      entity ! P.AcceptTimeSeries( tid, wid3, TimeSeries( "foo" ) )
       val p3 = proxiesFrom( entity, tid )
       p3.keys must contain allOf ( "test".toTopic, "foo".toTopic )
       f.asInstanceOf[WorkflowFixture].proxyProbes must have size 2
       val fooProbe = f.asInstanceOf[WorkflowFixture].proxyProbes( "foo".toTopic )
       fooProbe.expectMsgPF( hint = "accept foo time series" ) {
-        case Envelope( (ts: TimeSeries, s: OutlierPlan.Scope), h ) => {
-          s.plan mustBe f.plan.name
-          s.topic mustBe "foo".toTopic
+        case Envelope( P.AcceptTimeSeries(pid, cids, ts: TimeSeries, s), _ ) => {
+          pid mustBe tid
+          cids mustBe wid3
+          s.value.plan mustBe f.plan.name
+          s.value.topic mustBe "foo".toTopic
           ts.topic mustBe "foo".toTopic
         }
       }
@@ -397,7 +406,7 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] { outer =>
       actual.reduce must be theSameInstanceAs reduce
     }
 
-    "accept time series" taggedAs WIP in { f: Fixture =>
+    "accept time series" in { f: Fixture =>
       val df = f.asInstanceOf[DefaultFixture]
       import df._
 
@@ -411,7 +420,7 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] { outer =>
       val flatline = makeDataPoints( values = Seq.fill( 5 ){ 1.0 }, timeWiggle = (0.97, 1.03) )
       val series = spike( t, flatline, 1000 )()
 
-      val accepted = entity ?+ P.AcceptTimeSeries( planTid, series )
+      val accepted = entity ?+ P.AcceptTimeSeries( planTid, Set.empty[WorkId], series )
 //todo removed since unnecessary
 //      whenReady( accepted ) { actual =>
 //        actual match {
@@ -420,14 +429,18 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] { outer =>
 //        }
 //      }
       proxyProbe.expectMsgPF( 1.second.dilated, "proxy received" ) {
-        case Envelope( (ts, scope), _ ) => {
+        case Envelope( P.AcceptTimeSeries( pid, cids, ts, scope), _ ) => {
+          pid mustBe planTid
+          cids mustBe empty
           ts mustBe series
-          scope mustBe OutlierPlan.Scope( p, t )
+          scope.value mustBe OutlierPlan.Scope( p, t )
         }
 
-        case (ts, scope) => {
+        case P.AcceptTimeSeries( pid, cids, ts, scope) => {
+          pid mustBe planTid
+          cids mustBe empty
           ts mustBe series
-          scope mustBe OutlierPlan.Scope( p, t )
+          scope.value mustBe OutlierPlan.Scope( p, t )
         }
       }
     }

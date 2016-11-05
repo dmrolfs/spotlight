@@ -1,8 +1,10 @@
 package spotlight.analysis.outlier
 
 import java.net.URI
+
 import scala.concurrent.ExecutionContext
 import akka.actor.{Actor, ActorLogging, ActorPath, ActorRef, Props}
+import akka.agent.Agent
 import akka.event.LoggingReceive
 import akka.pattern.AskTimeoutException
 import akka.stream.Supervision
@@ -12,14 +14,14 @@ import scalaz.{-\/, \/, \/-}
 import com.codahale.metrics.{Metric, MetricFilter}
 import org.slf4j.LoggerFactory
 import com.typesafe.scalalogging.{Logger, StrictLogging}
-import nl.grons.metrics.scala.{Meter, MetricName, Timer}
+import nl.grons.metrics.scala.{Meter, MetricBuilder, MetricName, Timer}
 import peds.akka.envelope._
 import peds.akka.metrics.{Instrumented, InstrumentedActor}
 import peds.commons.TryV
 import peds.commons.identifier.ShortUUID
 import peds.commons.log.Trace
 import spotlight.model.timeseries._
-import spotlight.model.outlier.{OutlierPlan, Outliers}
+import spotlight.model.outlier.{CorrelatedData, OutlierPlan, Outliers}
 
 
 object OutlierDetection extends StrictLogging with Instrumented {
@@ -32,7 +34,13 @@ object OutlierDetection extends StrictLogging with Instrumented {
   }
 
 
+  override lazy val metricBaseName: MetricName = MetricName( classOf[OutlierDetection] )
+
   lazy val timeoutMeter: Meter = metrics meter "timeouts"
+  val totalOutstanding: Agent[Int] = Agent( 0 )( scala.concurrent.ExecutionContext.global )
+  def incrementTotalOutstanding(): Unit = totalOutstanding send { _ + 1 }
+  def decrementTotalOutstanding(): Unit = totalOutstanding send { _ - 1 }
+  metrics.gauge( "outstanding" ){ totalOutstanding.get() }
 
   val decider: Supervision.Decider = {
     case ex: AskTimeoutException => {
@@ -52,7 +60,7 @@ object OutlierDetection extends StrictLogging with Instrumented {
   }
 
   sealed trait DetectionProtocol
-  case class DetectionResult( outliers: Outliers, workIds: Set[WorkId] ) extends DetectionProtocol
+  case class DetectionResult( outliers: Outliers, correlationIds: Set[WorkId] ) extends DetectionProtocol
   case class UnrecognizedTopic( topic: Topic ) extends DetectionProtocol
   case class DetectionTimedOut( topic: Topic, plan: OutlierPlan ) extends DetectionProtocol
 
@@ -60,6 +68,7 @@ object OutlierDetection extends StrictLogging with Instrumented {
   val extractOutlierDetectionTopic: OutlierPlan.ExtractTopic = {
     case e @ Envelope( payload, _ ) if extractOutlierDetectionTopic isDefinedAt payload => extractOutlierDetectionTopic( payload )
     case m: OutlierDetectionMessage => Some(m.topic)
+    case CorrelatedData( ts: TimeSeriesBase, _, _ ) => Some( ts.topic )
     case ts: TimeSeriesBase => Some(ts.topic)
     case t: Topic => Some(t)
   }
@@ -70,17 +79,18 @@ object OutlierDetection extends StrictLogging with Instrumented {
 
   case class DetectionRequest private[OutlierDetection](
     subscriber: ActorRef,
-    workIds: Set[WorkId],
+    correlationIds: Set[WorkId],
     startNanos: Long = System.nanoTime()
   )
+
   private[OutlierDetection] object DetectionRequest {
     private val trace = Trace[DetectionResult.type]
     def from( m: OutlierDetectionMessage )( implicit wid: WorkId ): DetectionRequest = trace.block( "from" ) {
       logger.debug( "req = [{}]", m )
-      logger.debug( "req.workIds = [{}]", m.workIds )
+      logger.debug( "req.correlationIds = [{}]", m.correlationIds )
       logger.debug( "workId:[{}]", wid )
-      val wids = if ( m.workIds.nonEmpty ) m.workIds else Set( wid )
-      logger.debug( "wids = [{}]", wids )
+      val wids = if ( m.correlationIds.nonEmpty ) m.correlationIds else Set( wid )
+      logger.debug( "request correlationIds = [{}]", wids )
       DetectionRequest( m.subscriber, wids )
     }
   }
@@ -125,6 +135,15 @@ with ActorLogging {
 
   type AggregatorSubscribers = Map[ActorRef, DetectionRequest]
   var outstanding: AggregatorSubscribers = Map.empty[ActorRef, DetectionRequest]
+  def addToOutstanding( aggregator: ActorRef, request: DetectionRequest ): Unit = {
+    outstanding += ( aggregator -> request )
+    incrementTotalOutstanding()
+  }
+
+  def removeFromOutstanding( aggregator: ActorRef ): Unit = {
+    outstanding -= aggregator
+    decrementTotalOutstanding()
+  }
 
   override def receive: Receive = LoggingReceive { around( detection() ) }
 
@@ -134,7 +153,7 @@ with ActorLogging {
       dispatch( m, m.plan )( context.dispatcher ) match {
         case \/-( aggregator ) => {
           log.debug( "TEST: OutlierDetection aggregator:[{}] for subscriber:[{}]", aggregator.path.name, m.subscriber.path.name )
-          outstanding += ( aggregator -> DetectionRequest.from( m ) )
+          addToOutstanding( aggregator, DetectionRequest from m )
           stopIfFullyComplete( isWaitingToComplete )
         }
         case -\/( ex ) => log.error( ex, "OutlierDetector failed to create aggregator for topic:[{}]", m.topic )
@@ -146,9 +165,9 @@ with ActorLogging {
       val aggregator = sender()
       val request = outstanding( aggregator )
       log.debug( "OutlierDetection sending results for [{}] to subscriber:[{}]", workId, request.subscriber )
-      log.debug( "TEST: OutlierDetection AFTER send [{}] subscriber.workIds=[{}]", workId, request.workIds )
-      request.subscriber !+ DetectionResult( result, request.workIds )
-      outstanding -= aggregator
+      log.debug( "TEST: OutlierDetection AFTER send [{}] subscriber.correlationIds=[{}]", workId, request.correlationIds )
+      request.subscriber !+ DetectionResult( result, request.correlationIds )
+      removeFromOutstanding( aggregator )
       detectionTimer.update( System.nanoTime() - request.startNanos, scala.concurrent.duration.NANOSECONDS )
       updateScore( result )
     }
@@ -161,7 +180,7 @@ with ActorLogging {
       .get( aggregator )
       .foreach { request =>
         request.subscriber !+ timedOut
-        outstanding -= aggregator
+        removeFromOutstanding( aggregator )
       }
 
       stopIfFullyComplete( isWaitingToComplete )

@@ -22,6 +22,7 @@ import spotlight.model.timeseries._
 /**
   * Created by rolfsd on 2/12/16.
   */
+@deprecated( "replaced by AlgorithmModule and AlgorithmModule.AlgorithmProtocol", "v2" )
 object CommonAnalyzer {
   trait WrappingContext extends AlgorithmContext {
     def underlying: AlgorithmContext
@@ -70,6 +71,7 @@ object CommonAnalyzer {
 }
 
 
+@deprecated( "replaced by AlgorithmModule and AlgorithmModule.AlgorithmProtocol", "v2" )
 trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor {
   import CommonAnalyzer.WrappingContext
 
