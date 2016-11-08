@@ -98,6 +98,24 @@ package object testkit {
         |  # Set to 1 for as fair as possible.
         |  throughput = 100
         |}
+        |
+        |spotlight.dispatchers {
+        |  outlier-detection-dispatcher {
+        |    type = Dispatcher
+        |    executor = "fork-join-executor"
+        |    #  throughput = 100
+        |    fork-join-executor { }
+        |  }
+        |
+        |  publishing-dispatcher {
+        |    type = Dispatcher
+        |    executor = "thread-pool-executor"
+        |    thread-pool-executor {
+        |      fixed-pool-size = 8
+        |    }
+        |  }
+        |}
+        |
       """.stripMargin
     )
 

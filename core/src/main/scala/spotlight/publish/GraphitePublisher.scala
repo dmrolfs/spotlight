@@ -31,6 +31,7 @@ import spotlight.protocol.PythonPickleProtocol
 object GraphitePublisher extends LazyLogging {
   def props( makePublisher: => GraphitePublisher with PublishProvider ): Props = Props( makePublisher )
 
+  val DispatcherPath: String = "spotlight.dispatchers.publishing-dispatcher"
 
   sealed trait GraphitePublisherProtocol
   case object Open extends GraphitePublisherProtocol
@@ -95,7 +96,7 @@ class GraphitePublisher extends DenseOutlierPublisher { outer: GraphitePublisher
   lazy val publishRequestMeter: Meter = metrics.meter( "request", "publish" )
   lazy val sendBatchRequestMeter: Meter = metrics.meter( "request", "sendBatch" )
 
-  val publishDispatcher: MessageDispatcher = context.system.dispatchers lookup "publishing-dispatcher"
+  val publishDispatcher: MessageDispatcher = context.system.dispatchers lookup DispatcherPath
 
   val circuitStatus: Agent[BreakerStatus] = Agent[BreakerStatus]( BreakerClosed )( publishDispatcher )
 

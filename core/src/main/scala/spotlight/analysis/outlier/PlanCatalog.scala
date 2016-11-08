@@ -19,7 +19,7 @@ import scalaz._
 import Scalaz._
 import com.typesafe.config.{Config, ConfigObject, ConfigValue, ConfigValueType}
 import com.typesafe.scalalogging.LazyLogging
-import nl.grons.metrics.scala.MetricName
+import nl.grons.metrics.scala.{MetricName, Timer}
 import peds.akka.envelope._
 import peds.akka.envelope.pattern.ask
 import peds.akka.metrics.InstrumentedActor
@@ -112,6 +112,8 @@ object PlanCatalog extends LazyLogging {
   }
 
   private[outlier] case class StreamMessage[P]( payload: P, subscriber: ActorRef )
+
+  private[outlier] case class PlanRequest( subscriber: ActorRef, startNanos: Long = System.nanoTime() )
 
 
   trait Provider {
@@ -303,6 +305,7 @@ object PlanCatalog extends LazyLogging {
 
 class PlanCatalog( _boundedContext: BoundedContext )
 extends ActorSubscriber with Stash with EnvelopingActor with InstrumentedActor with ActorLogging { outer: PlanCatalog.Provider =>
+  import PlanCatalog.PlanRequest
   import spotlight.analysis.outlier.{ PlanCatalogProtocol => P }
   import spotlight.analysis.outlier.{ AnalysisPlanProtocol => AP }
 
@@ -311,11 +314,13 @@ extends ActorSubscriber with Stash with EnvelopingActor with InstrumentedActor w
   var boundedContext: BoundedContext = _boundedContext
 
   override lazy val metricBaseName: MetricName = MetricName( classOf[PlanCatalog] )
+  val catalogTimer: Timer = metrics timer "catalog"
+
   val outstandingMetricName: String = "outstanding"
 
   def initializeMetrics(): Unit = {
     stripLingeringMetrics()
-    metrics.gauge( outstandingMetricName ) { workSubscribers.size }
+    metrics.gauge( outstandingMetricName ) { outstandingRequests }
   }
 
   def stripLingeringMetrics(): Unit = {
@@ -350,20 +355,41 @@ extends ActorSubscriber with Stash with EnvelopingActor with InstrumentedActor w
   }
 
   //todo: associate timestamp with workId in order to reap tombstones
-  var workSubscribers: Map[WorkId, ActorRef] = Map.empty[WorkId, ActorRef]
-  def knownWork: Set[WorkId] = workSubscribers.keySet
+  var _workRequests: Map[WorkId, PlanRequest] = Map.empty[WorkId, PlanRequest]
+  def outstandingRequests: Int = _workRequests.size
+  def addWorkRequest( correlationId: WorkId, subscriber: ActorRef ): Unit = {
+    _workRequests += ( correlationId -> PlanRequest(subscriber) )
+  }
 
-  def hasWorkInProgress( workIds: Set[WorkId] ): Boolean = trace.block( s"hasWorkInProgress" ){ findWorkInProgress( workIds ).nonEmpty }
+  def removeWorkRequests( correlationIds: Set[WorkId] ): Unit = {
+    for {
+      cid <- correlationIds
+      knownRequest <- _workRequests.get( cid ).toSet
+    } {
+      catalogTimer.update( System.nanoTime() - knownRequest.startNanos, scala.concurrent.duration.NANOSECONDS )
+    }
 
-  def findWorkInProgress( workIds: Set[WorkId] ): Set[WorkId] = trace.block( "findWorkInProgress" ) {
-    log.debug( "outstanding work: [{}]", workSubscribers.keySet )
+    _workRequests --= correlationIds
+  }
+
+  def knownWork: Set[WorkId] = _workRequests.keySet
+  val isKnownWork: WorkId => Boolean = _workRequests.contains( _: WorkId )
+
+  def hasWorkInProgress( workIds: Set[WorkId] ): Boolean = findOutstandingCorrelationIds( workIds ).nonEmpty
+
+  def findOutstandingWorkRequests( correlationIds: Set[WorkId] ): Set[(WorkId, PlanRequest)] = {
+    correlationIds.collect{ case cid => _workRequests.get( cid ) map { req => ( cid, req ) } }.flatten
+  }
+
+  def findOutstandingCorrelationIds( workIds: Set[WorkId] ): Set[WorkId] = trace.briefBlock( "findOutstandingCorrelationIds" ) {
+    log.debug( "outstanding work: [{}]", knownWork )
     log.debug( "returning work: [{}]", workIds )
-    log.debug( "known intersect: [{}]", workSubscribers.keySet intersect workIds )
-    workSubscribers.keySet intersect workIds
+    log.debug( "known intersect: [{}]", knownWork intersect workIds )
+    knownWork intersect workIds
   }
 
   override protected def requestStrategy: RequestStrategy = new MaxInFlightRequestStrategy( outer.maxInFlight ) {
-    override def inFlightInternally: Int = workSubscribers.size
+    override def inFlightInternally: Int = outstandingRequests
   }
 
 
@@ -419,7 +445,7 @@ extends ActorSubscriber with Stash with EnvelopingActor with InstrumentedActor w
         "PlanCatalog:ACTIVE[{}]: stashing received result for UNKNOWN workId:[{}] all-ids:[{}]: [{}]",
         self.path.name,
         workId,
-        workSubscribers.keySet.mkString(", "),
+        knownWork.mkString(", "),
         result
       )
 
@@ -432,11 +458,11 @@ extends ActorSubscriber with Stash with EnvelopingActor with InstrumentedActor w
         self.path,
         outliers.hasAnomalies,
         workId,
-        workSubscribers.get( workId ).map{ _.path.name }
+        _workRequests.get( workId ).map{ _.subscriber.path.name }
       )
-      log.debug( "PlanCatalog:ACTIVE: received (workId:[{}] -> subscriber:[{}])  all:[{}]", workId, workSubscribers.get(workId), workSubscribers.mkString(", ") )
+      log.debug( "PlanCatalog:ACTIVE: received (workId:[{}] -> subscriber:[{}])  all:[{}]", workId, _workRequests.get(workId), _workRequests.mkString(", ") )
 
-      val (known, unknown) = result.correlationIds partition { workSubscribers.contains }
+      val (known, unknown) = result.correlationIds partition isKnownWork
       if ( unknown.nonEmpty ) {
         log.warning(
           "PlanCatalog:ACTIVE received topic:[{}] algorithms:[{}] results for unrecognized workIds:[{}]",
@@ -446,14 +472,14 @@ extends ActorSubscriber with Stash with EnvelopingActor with InstrumentedActor w
         )
       }
 
-      val subscribers = known map { workSubscribers.apply }
-      workSubscribers --= result.correlationIds
+      val requests = findOutstandingWorkRequests( known )
+      removeWorkRequests( result.correlationIds )
       log.debug(
         "PlanCatalog:ACTIVE sending result to {} subscriber{}",
-        subscribers.size,
-        if ( subscribers.size == 1 ) "" else "s"
+        requests.size,
+        if ( requests.size == 1 ) "" else "s"
       )
-      subscribers foreach { _ ! result }
+      requests foreach { case (_, r) => r.subscriber ! result }
       log.debug( "PlanCatalog:ACTIVE unstashing" )
       unstashAll()
     }
@@ -500,8 +526,7 @@ extends ActorSubscriber with Stash with EnvelopingActor with InstrumentedActor w
     // pulled up future dependencies so I'm not closing over this
     val correlationId = workId
     val entries = planIndex.entries
-
-    workSubscribers += ( correlationId -> subscriber )
+    addWorkRequest( correlationId, subscriber )
 
     for {
       model <- boundedContext.futureModel

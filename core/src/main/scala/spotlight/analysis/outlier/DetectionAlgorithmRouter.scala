@@ -50,6 +50,7 @@ object DetectionAlgorithmRouter extends LazyLogging {
 
 
   def props( routingTable: Map[Symbol, ActorRef] ): Props = Props( new Default( routingTable ) )
+  val DispatcherPath: String = OutlierDetection.DispatcherPath
 
   def name( scope: String ): String = "DetectionRouter-" + scope
 

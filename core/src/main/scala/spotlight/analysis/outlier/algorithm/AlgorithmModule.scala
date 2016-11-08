@@ -2,7 +2,6 @@ package spotlight.analysis.outlier.algorithm
 
 import scala.annotation.tailrec
 import scala.reflect._
-import akka.Done
 import akka.actor.{ActorPath, Props}
 import akka.cluster.sharding.ShardRegion
 import akka.event.LoggingReceive
@@ -20,11 +19,10 @@ import peds.akka.envelope._
 import peds.akka.metrics.InstrumentedActor
 import peds.akka.publish.{EventPublisher, StackableStreamPublisher}
 import peds.archetype.domain.model.core.{Entity, EntityIdentifying}
-import peds.commons.{KOp, TryV, Valid}
+import peds.commons.{KOp, TryV}
 import peds.commons.identifier.{Identifying, TaggedID}
 import peds.commons.log.Trace
 import demesne._
-import demesne.repository.StartProtocol.Loaded
 import demesne.repository.{AggregateRootRepository, EnvelopingAggregateRootRepository}
 import demesne.repository.AggregateRootRepository.{ClusteredAggregateContext, LocalAggregateContext}
 import spotlight.analysis.outlier._
@@ -454,13 +452,13 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
           log.info( "TEST: AdvancedType:[ {} ]\tAdvancedType(m)=[{}]", AdvancedType.toString, AdvancedType.unapply(m) )
         }
 
-        case m => {
-          log.info( "TEST:[{}]: working on Advanced but unknown...", self.path )
-          log.info( "TEST: m = [{}]", m )
-          log.info( "TEST: AdvancedType:[ {} ]\tAdvancedType(m)=[{}]", AdvancedType.toString, AdvancedType.unapply(m) )
-        }
+//        case m => {
+//          log.info( "TEST:[{}]: working on Advanced but unknown...", self.path )
+//          log.info( "TEST: m = [{}]", m )
+//          log.info( "TEST: AdvancedType:[ {} ]\tAdvancedType(m)=[{}]", AdvancedType.toString, AdvancedType.unapply(m) )
+//        }
 
-//        case m => super.unhandled( m )
+        case m => super.unhandled( m )
       }
     }
 

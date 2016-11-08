@@ -276,7 +276,7 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
       LogPublisher.props
     }
 
-    Sink.actorSubscriber[Outliers]( props.withDispatcher( "publisher-dispatcher" ) ).named( "graphite" )
+    Sink.actorSubscriber[Outliers]( props withDispatcher GraphitePublisher.DispatcherPath ).named( "graphite" )
   }
 
 //  def startPlanWatcher( config: Configuration, listeners: Set[ActorRef] )( implicit system: ActorSystem ): Unit = {

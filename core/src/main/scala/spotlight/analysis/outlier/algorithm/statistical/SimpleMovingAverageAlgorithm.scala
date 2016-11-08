@@ -1,7 +1,5 @@
 package spotlight.analysis.outlier.algorithm.statistical
 
-import com.typesafe.config.Config
-
 import scala.reflect.ClassTag
 import org.apache.commons.lang3.ClassUtils
 import org.apache.commons.math3.ml.clustering.DoublePoint

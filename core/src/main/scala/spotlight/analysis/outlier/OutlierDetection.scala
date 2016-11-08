@@ -11,10 +11,9 @@ import akka.stream.Supervision
 import akka.stream.actor.ActorSubscriberMessage
 
 import scalaz.{-\/, \/, \/-}
-import com.codahale.metrics.{Metric, MetricFilter}
 import org.slf4j.LoggerFactory
 import com.typesafe.scalalogging.{Logger, StrictLogging}
-import nl.grons.metrics.scala.{Meter, MetricBuilder, MetricName, Timer}
+import nl.grons.metrics.scala.{Meter, MetricName, Timer}
 import peds.akka.envelope._
 import peds.akka.metrics.{Instrumented, InstrumentedActor}
 import peds.commons.TryV
@@ -24,8 +23,9 @@ import spotlight.model.timeseries._
 import spotlight.model.outlier.{CorrelatedData, OutlierPlan, Outliers}
 
 
-object OutlierDetection extends StrictLogging with Instrumented {
+object OutlierDetection extends Instrumented with StrictLogging {
   def props( routerRef: ActorRef, scope: String ): Props = Props( new Default(routerRef, scope) )
+  val DispatcherPath: String = "spotlight.dispatchers.outlier-detection-dispatcher"
 
   def name( scope: String ): String = "OutlierDetector-" + scope
 
@@ -38,9 +38,10 @@ object OutlierDetection extends StrictLogging with Instrumented {
 
   lazy val timeoutMeter: Meter = metrics meter "timeouts"
   val totalOutstanding: Agent[Int] = Agent( 0 )( scala.concurrent.ExecutionContext.global )
+  metrics.gauge( "outstanding" ){ totalOutstanding.get() }
+
   def incrementTotalOutstanding(): Unit = totalOutstanding send { _ + 1 }
   def decrementTotalOutstanding(): Unit = totalOutstanding send { _ - 1 }
-  metrics.gauge( "outstanding" ){ totalOutstanding.get() }
 
   val decider: Supervision.Decider = {
     case ex: AskTimeoutException => {
@@ -108,30 +109,8 @@ with ActorLogging {
 
   val trace = Trace[OutlierDetection]
 
-  override def preStart(): Unit = {
-    initializeMetrics()
-    log.info( "{} dispatcher: [{}]", self.path, context.dispatcher )
-  }
-
   override lazy val metricBaseName: MetricName = MetricName( classOf[OutlierDetection] )
   val detectionTimer: Timer = metrics timer "detect"
-
-  val outstandingMetricName: String = "outstanding." + scope
-
-  def initializeMetrics(): Unit = {
-    stripLingeringMetrics()
-    metrics.gauge( outstandingMetricName ) { outstanding.size }
-  }
-
-  def stripLingeringMetrics(): Unit = {
-    metrics.registry.removeMatching(
-      new MetricFilter {
-        override def matches( name: String, metric: Metric ): Boolean = {
-          name.contains( classOf[OutlierDetection].getName ) && name.contains( outstandingMetricName )
-        }
-      }
-    )
-  }
 
   type AggregatorSubscribers = Map[ActorRef, DetectionRequest]
   var outstanding: AggregatorSubscribers = Map.empty[ActorRef, DetectionRequest]
