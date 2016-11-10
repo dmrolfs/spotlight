@@ -410,7 +410,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
       val data: List[TimeSeries] = topics.zip(List(dp1)).map{ case (t,p) => TimeSeries(t, p) }
 
       logger.debug( "waiting to start.....")
-      Thread.sleep( 200 )
+      Thread.sleep( 1000 )
       logger.debug( "....starting")
       data foreach { ps.sendNext }
       val actual = sub.expectNext()

@@ -18,9 +18,11 @@ import spotlight.protocol.{GraphiteSerializationProtocol, MessagePackProtocol, P
 import peds.commons.{V, Valid}
 
 
+//todo refactor in form of ActorSystem.Settings; i.e., class name and Settings.config rt extending Config
 /**
   * Created by rolfsd on 1/12/16.
   */
+@deprecated("refactor in form of ActorSystem.Settings; i.e., class name and Settings.config rt extending Config", "11-10-2016")
 trait Configuration extends Config {
   def sourceAddress: InetSocketAddress
   def clusterPort: Int

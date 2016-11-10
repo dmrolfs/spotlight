@@ -12,7 +12,6 @@ import com.typesafe.scalalogging.{Logger, StrictLogging}
 import org.slf4j.LoggerFactory
 import peds.akka.metrics.Instrumented
 import peds.akka.stream.StreamMonitor
-import peds.commons.V
 import peds.commons.collection.BloomFilter
 import spotlight.analysis.outlier.PlanCatalog
 import spotlight.model.outlier._
@@ -35,12 +34,13 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
   }
 
   object WatchPoints {
+    val PlanBuffer = Symbol( "plan.buffer" )
     val ScoringPlanned = Symbol("scoring.planned")
     val ScoringUnrecognized = Symbol("scoring.unrecognized")
-    val ScoringBatch = Symbol("scoring.batch")
-    val ScoringAnalysisBuffer = Symbol("scoring.analysisBuffer")
-    val ScoringGrouping = Symbol("scoring.grouping")
-    val ScoringDetect = Symbol("scoring.detect")
+//    val ScoringBatch = Symbol("scoring.batch")
+//    val ScoringAnalysisBuffer = Symbol("scoring.analysisBuffer")
+//    val ScoringGrouping = Symbol("scoring.grouping")
+//    val ScoringDetect = Symbol("scoring.detect")
   }
 
   def scoringGraph(
@@ -66,21 +66,12 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
         Flow[TimeSeries].filter{ !isPlanned( _, config.plans ) }.via( watchUnrecognized )
       )
 
-//      val zipConcatWithPlans = b.add(
-//        Flow[TimeSeries]
-//        .map { ts => config.plans collect { case p if p appliesTo ts => (ts, OutlierPlan.Scope(p, ts.topic)) } }
-//        .mapConcat { identity }
-//      )
-
       val regulator = b.add( Flow[TimeSeries].via( regulateByTopic(100000) ) )
-//      val combineByPlan = b.add( Flow[(TimeSeries, OutlierPlan.Scope)].via( batchSeriesByPlan(100000) ) )
 
-      val buffer = b.add( Flow[TimeSeries].buffer( 1000, OverflowStrategy.backpressure ).watchFlow( Symbol("plan.buffer") ) )
+      val buffer = b.add( Flow[TimeSeries].buffer( 1000, OverflowStrategy.backpressure ).watchFlow( WatchPoints.PlanBuffer ) )
 
-//      val detect = b.add( OutlierPlanDetectionRouter.flow( planRouterRef ) )
       val detect = b.add( PlanCatalog.flow( catalogProps ) )
 
-//      logMetrics ~> blockPriors ~> broadcast ~> passPlanned ~> zipConcatWithPlans ~> combineByPlan ~> buffer ~> detect
       logMetrics ~> blockPriors ~> broadcast ~> passPlanned ~> regulator ~> buffer ~> detect
                                    broadcast ~> passUnrecognized
 
@@ -92,28 +83,6 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
       )
     }
   }
-
-
-//  def scoringFlow(
-//    planRouterRef: ActorRef,
-//    config: Configuration
-//  )(
-//    implicit system: ActorSystem,
-//    materializer: Materializer
-//  ): Flow[TimeSeries, Outliers, NotUsed] = {
-//    import akka.stream.scaladsl.GraphDSL.Implicits._
-//
-//    val graph = GraphDSL.create() { implicit b =>
-//      val scoring = b.add( scoringGraph(planRouterRef, config) )
-//      val logUnrecognized = b.add( logMetric( Logger( LoggerFactory getLogger "Unrecognized" ), config.plans ) )
-//      val termUnrecognized = b.add( Sink.ignore )
-//
-//      scoring.out1 ~> logUnrecognized ~> termUnrecognized
-//      FlowShape( in = scoring.in, out = scoring.out0 )
-//    }
-//
-//    Flow.fromGraph( graph )
-//  }
 
 
   def logMetric(

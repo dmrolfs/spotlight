@@ -1,7 +1,5 @@
 package spotlight.analysis.outlier
 
-import java.util.ServiceConfigurationError
-
 import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
 import scala.util.matching.Regex
@@ -10,14 +8,14 @@ import akka.actor.{ActorLogging, ActorRef, ActorSystem, Props, Stash}
 import akka.event.LoggingReceive
 import akka.stream.actor.ActorSubscriberMessage.{OnComplete, OnError, OnNext}
 import akka.stream.{FlowShape, Materializer}
-import akka.stream.actor.{ActorSubscriber, ActorSubscriberMessage, MaxInFlightRequestStrategy, RequestStrategy}
+import akka.stream.actor.{ActorSubscriber, MaxInFlightRequestStrategy, RequestStrategy}
 import akka.stream.scaladsl.{Flow, GraphDSL, Keep, Sink, Source}
 import akka.util.Timeout
 import com.codahale.metrics.{Metric, MetricFilter}
 
 import scalaz._
 import Scalaz._
-import com.typesafe.config.{Config, ConfigObject, ConfigValue, ConfigValueType}
+import com.typesafe.config.{Config, ConfigObject}
 import com.typesafe.scalalogging.LazyLogging
 import nl.grons.metrics.scala.{MetricName, Timer}
 import peds.akka.envelope._
@@ -71,7 +69,7 @@ object PlanCatalog extends LazyLogging {
     implicit system: ActorSystem,
     materializer: Materializer
   ): Flow[TimeSeries, Outliers, NotUsed] = {
-    val outletProps = CommonActorPublisher.props[DetectionResult]
+    val outletProps = CommonActorPublisher.props[DetectionResult]()
 
     val g = GraphDSL.create() { implicit b =>
       import akka.stream.scaladsl.GraphDSL.Implicits._
@@ -79,7 +77,7 @@ object PlanCatalog extends LazyLogging {
       val (outletRef, outlet) = {
         Source
         .actorPublisher[DetectionResult]( outletProps ).named( "PlanCatalogFlowOutlet" )
-        .toMat( Sink.asPublisher(false) )( Keep.both )
+        .toMat( Sink.asPublisher(true) )( Keep.both )
         .run()
       }
 
@@ -630,226 +628,3 @@ extends ActorSubscriber with Stash with EnvelopingActor with InstrumentedActor w
     } yield info
   }
 }
-
-
-
-
-
-//sealed trait Catalog extends Entity {
-//  override type ID = ShortUUID
-//  override val evID: ClassTag[ID] = classTag[ShortUUID]
-//  override val evTID: ClassTag[TID] = classTag[TaggedID[ShortUUID]]
-//
-//  def isActive: Boolean
-//  def analysisPlans: Map[String, OutlierPlan#TID]
-//}
-//
-//object Catalog {
-//  implicit val identifying: EntityIdentifying[Catalog] = {
-//    new EntityIdentifying[Catalog] with ShortUUID.ShortUuidIdentifying[Catalog] {
-//      override val evEntity: ClassTag[Catalog] = classTag[Catalog]
-//    }
-//  }
-//
-//  private[outlier] def apply(
-//    id: Catalog#TID,
-//    name: String,
-//    slug: String,
-//    analysisPlans: Map[String, OutlierPlan#TID] = Map.empty[String, OutlierPlan#TID],
-//    isActive: Boolean = true
-//  ): Catalog = {
-//    CatalogState( id, name, slug, analysisPlans, isActive )
-//  }
-//}
-
-
-//object CatalogModule extends CatalogModule
-
-
-//final case class CatalogState private[outlier](
-//  override val id: Catalog#TID,
-//  override val name: String,
-//  override val slug: String,
-//  override val analysisPlans: Map[String, OutlierPlan#TID] = Map.empty[String, OutlierPlan#TID],
-//  override val isActive: Boolean = true
-//) extends Catalog
-
-//class PlanCatalog extends Actor with InstrumentedActor with ActorLogging { module: PlanCatalog.Provider =>
-//
-//
-//
-////////////////////////////////////////////////////////
-///////////////////////////////////////////////////////
-//
-//
-//  override def initializer(
-//    rootType: AggregateRootType,
-//    model: DomainModel,
-//    props: Map[Symbol, Any]
-//  )(
-//    implicit ec: ExecutionContext
-//  ): Valid[Future[Done]] = trace.block( "initializer" ) {
-//    import shapeless.syntax.typeable._
-//
-//    logger.debug(
-//      "Module context demesne.configuration = [\n{}\n]",
-//      props(demesne.ConfigurationKey).asInstanceOf[Config].root().render(
-//        com.typesafe.config.ConfigRenderOptions.defaults().setFormatted(true)
-//      )
-//    )
-//
-//    val init: Option[Valid[Future[Done]]] = {
-//      val spotlightPath = "spotlight"
-//      for {
-//        conf <- props get demesne.ConfigurationKey
-//        base <- conf.cast[Config]
-//        spotlight <- if ( base hasPath spotlightPath ) Some(base getConfig spotlightPath ) else None
-//        budget <- specifyDetectionBudget( spotlight getConfig "workflow" )
-//        plans <- Option( specifyPlans(spotlight getConfig "detection-plans") )
-//      } yield {
-//        detectionBudget = budget
-//        logger.debug( "CatalogModule: specified detection budget = [{}]", detectionBudget.toCoarsest )
-//
-//        specifiedPlans = plans
-//        logger.debug( "CatalogModule: specified plans = [{}]", specifiedPlans.mkString(", ") )
-//
-//        super.initializer( rootType, model, props )
-//      }
-//    }
-//
-//    init getOrElse {
-//      throw new IllegalStateException( "unable to initialize CatalogModule due to insufficient context configuration" )
-//    }
-//  }
-//
-//  var detectionBudget: FiniteDuration = 10.seconds
-//
-//  protected var specifiedPlans: Set[OutlierPlan] = Set.empty[OutlierPlan]
-//
-//
-//  override def idLens: Lens[Catalog, TID] = new Lens[Catalog, Catalog#TID] {
-//    override def get( c: Catalog ): Catalog#TID = c.id
-//    override def set( c: Catalog )( id: Catalog#TID ): Catalog = {
-//      CatalogState( id = id, name = c.name, slug = c.slug, analysisPlans = c.analysisPlans, isActive = c.isActive )
-//    }
-//  }
-//
-//  override val nameLens: Lens[Catalog, String] = new Lens[Catalog, String] {
-//    override def get( c: Catalog ): String = c.name
-//    override def set( c: Catalog )( name: String ): Catalog = {
-//      CatalogState( id = c.id, name = name, slug = c.slug, analysisPlans = c.analysisPlans, isActive = c.isActive )
-//    }
-//  }
-//
-//  override val slugLens: Option[Lens[Catalog, String]] = {
-//    Some(
-//      new Lens[Catalog, String] {
-//        override def get( c: Catalog ): String = c.slug
-//        override def set( c: Catalog )( slug: String ): Catalog = {
-//          CatalogState( id = c.id, name = c.name, slug = slug, analysisPlans = c.analysisPlans, isActive = c.isActive )
-//        }
-//      }
-//    )
-//  }
-//
-//  override val isActiveLens: Option[Lens[Catalog, Boolean]] = {
-//    Some(
-//      new Lens[Catalog, Boolean] {
-//        override def get( c: Catalog ): Boolean = c.isActive
-//        override def set( c: Catalog )( isActive: Boolean ): Catalog = {
-//          CatalogState( id = c.id, name = c.name, slug = c.slug, analysisPlans = c.analysisPlans, isActive = isActive )
-//        }
-//      }
-//    )
-//  }
-//
-//  val analysisPlansLens: Lens[Catalog, Map[String, OutlierPlan#TID]] = new Lens[Catalog, Map[String, OutlierPlan#TID]] {
-//    override def get( c: Catalog ): Map[String, OutlierPlan#TID] = c.analysisPlans
-//    override def set( c: Catalog )( ps: Map[String, OutlierPlan#TID] ): Catalog = {
-//      CatalogState( id = c.id, name = c.name, slug = c.slug, analysisPlans = ps, isActive = c.isActive )
-//    }
-//  }
-//
-//  override def aggregateRootPropsOp: AggregateRootProps = {
-//    (model: DomainModel, rootType: AggregateRootType) => PlanCatalog.props( model, rootType )
-//  }
-//
-//
-//  object PlanCatalog {
-//    def props( model: DomainModel, rootType: AggregateRootType ): Props = Props( new Default( model, rootType ) )
-//
-//    private class Default( model: DomainModel, rootType: AggregateRootType )
-//    extends PlanCatalog( model, rootType ) with Provider with StackableStreamPublisher with StackableRegisterBusPublisher
-//
-//
-//    trait Provider {
-//      def detectionBudget: FiniteDuration = module.detectionBudget
-//      def specifiedPlans: Set[OutlierPlan] = module.specifiedPlans
-//    }
-//  }
-//
-//  class PlanCatalog( override val model: DomainModel, override val rootType: AggregateRootType )
-//  extends module.EntityAggregateActor { actor: PlanCatalog.Provider with EventPublisher =>
-//    import demesne.module.entity.{ messages => EntityMessage }
-//    import spotlight.analysis.outlier.{ PlanCatalogProtocol => P }
-//    import spotlight.analysis.outlier.{ AnalysisPlanProtocol => AP }
-//
-////    override var state: Catalog = _
-//
-////    initialize upon first data message? to avoid order dependency?
-////    catalog doesn't need to be persistent if impl in terms of plan index
-//
-//
-////    var plansCache: Map[String, P.PlanSummary] = Map.empty[String, P.PlanSummary]
-//
-////    val actorDispatcher = context.system.dispatcher
-////    val defaultTimeout = akka.util.Timeout( 30.seconds )
-//
-//
-////    override def preStart(): Unit = {
-////      super.preStart( )
-////      context.system.eventStream.subscribe( self, classOf[EntityMessage] )
-////      context.system.eventStream.subscribe( self, classOf[AnalysisPlanProtocol.Message] )
-////    }
-//
-//
-////    def loadExistingCacheElements(
-////      plans: Set[OutlierPlan]
-////    )(
-////      implicit ec: ExecutionContext,
-////      to: Timeout
-////    ): Future[Map[String, P.PlanSummary]] = {
-////      val queries = plans.toSeq.map { p => loadPlan( p.id ) }
-////      Future.sequence( queries ) map { qs => Map( qs:_* ) }
-////    }
-//
-//
-////    WORK HERE NEED TO RECORD PLAN-ADDED FOR ESTABLISHED PLANS...  MAYBE PERSIST PLAN-ADDED EVENTS FOR SPECIFIED PLANS?
-////    WORK HERE HOW NOT TO CONFLICT WITH RECEOVERY SCENARIO?
-//
-//    //todo upon add watch info actor for changes and incorporate them in to cache
-//    //todo the cache is what is sent out in reply to GetPlansForXYZ
-//
-//
-////    override val acceptance: Acceptance = entityAcceptance orElse {
-////      case (P.PlanAdded(_, pid, name), s) => analysisPlansLens.modify( s ){ _ + (name -> pid) }
-////      case (P.PlanRemoved(_, _, name), s) => analysisPlansLens.modify( s ){ _ - name }
-////    }
-//
-//
-////    override def active: Receive = workflow orElse catalog orElse plans orElse super.active
-//
-//
-//    val catalog: Receive = {
-////      case P.AddPlan( _, summary ) => persistAddedPlan( summary )
-//
-////      case P.RemovePlan( _, pid, name ) if state.analysisPlans.contains( name ) => persistRemovedPlan( name )
-//
-//    }
-//
-//
-//
-//  }
-//
-//
-//}
