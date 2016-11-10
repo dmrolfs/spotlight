@@ -1,7 +1,5 @@
 package spotlight.analysis.outlier.algorithm.statistical
 
-import com.typesafe.config.Config
-
 import scala.reflect.ClassTag
 import org.apache.commons.lang3.ClassUtils
 import org.apache.commons.math3.ml.clustering.DoublePoint
@@ -53,19 +51,16 @@ object SimpleMovingAverageAlgorithm extends AlgorithmModule with AlgorithmModule
     override val id: TID,
     override val name: String,
     statistics: Shape = makeShape() //,
-//    override val thresholds: Seq[ThresholdBoundary] = Seq.empty[ThresholdBoundary]
   ) extends AlgorithmModule.AnalysisState with AlgorithmModule.StrictSelf[State] {
     override type Self = State
 
     override def algorithm: Symbol = outer.algorithm.label
 
     override def canEqual( that: Any ): Boolean = that.isInstanceOf[State]
-//    override def addThreshold( threshold: ThresholdBoundary ): Self = copy( thresholds = thresholds :+ threshold )
     override def toString: String = {
       s"${ClassUtils.getAbbreviatedName(getClass, 15)}( " +
         s"id:[${id}]; "+
         s"statistics:[${statistics}]; "+
-//        s"""thresholds:[${thresholds.mkString(",")}]""" +
       " )"
     }
   }
@@ -87,43 +82,9 @@ object SimpleMovingAverageAlgorithm extends AlgorithmModule with AlgorithmModule
     }
 
     override def shapeLens: Lens[State, Shape] = lens[State] >> 'statistics
-//    override def thresholdLens: Lens[State, Seq[ThresholdBoundary]] = lens[State] >> 'thresholds
   }
 
 
   override type Shape = SummaryStatistics
   def makeShape(): Shape = new SummaryStatistics()
-//  case class Shape( movingStatistics: SummaryStatistics ) extends Equals {
-//    override def canEqual( rhs: Any ): Boolean = rhs.isInstanceOf[Shape]
-//
-//    override def equals( rhs: Any ): Boolean = {
-//      rhs match {
-//        case that: Shape => {
-//          if ( this eq that ) true
-//          else {
-//            ( that.## == this.## ) &&
-//              ( that canEqual this ) &&
-//              ( this.movingStatistics.getN == that.movingStatistics.getN ) &&
-//              ( this.movingStatistics.getMean == that.movingStatistics.getMean ) &&
-//              ( this.movingStatistics.getStandardDeviation == that.movingStatistics.getStandardDeviation )
-//          }
-//        }
-//
-//        case _ => false
-//      }
-//    }
-//
-//    override def hashCode(): Int = {
-//      41 * (
-//        41 * (
-//          41 + movingStatistics.getN.##
-//          ) + movingStatistics.getMean.##
-//        ) + movingStatistics.getStandardDeviation.##
-//    }
-//  }
-//
-//
-//  object Shape {
-//    def statsLens: Lens[Shape, DescriptiveStatistics] = lens[Shape] >> 'movingStatistics
-//  }
 }

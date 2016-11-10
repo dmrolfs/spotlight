@@ -9,6 +9,7 @@ import org.joda.{time => joda}
 import org.mockito.Mockito._
 import spotlight.analysis.outlier.{DetectOutliersInSeries, DetectUsing, DetectionAlgorithmRouter, Moment}
 import spotlight.model.outlier._
+import spotlight.testkit.TestCorrelatedSeries
 
 
 /**
@@ -205,7 +206,7 @@ class SkylineSeasonalEWMASpec extends SkylineBaseSpec {
 
       analyzer ! DetectUsing(
         algoS,
-        DetectOutliersInSeries(series, plan, subscriber.ref, Set()),
+        DetectOutliersInSeries(TestCorrelatedSeries(series), plan, subscriber.ref),
         history1,
         algProps
       )
@@ -233,7 +234,7 @@ class SkylineSeasonalEWMASpec extends SkylineBaseSpec {
 
       analyzer ! DetectUsing(
         algoS,
-        DetectOutliersInSeries(series2, plan, subscriber.ref, Set()),
+        DetectOutliersInSeries(TestCorrelatedSeries(series2), plan, subscriber.ref),
         history2,
         algProps
       )

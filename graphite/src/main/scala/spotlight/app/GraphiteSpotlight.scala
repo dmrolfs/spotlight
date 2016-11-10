@@ -1,35 +1,26 @@
 package spotlight.app
 
 import java.net.{InetSocketAddress, Socket}
-
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.Future
 import scala.concurrent.duration._
 import scala.util.{Failure, Success}
-import akka.{Done, NotUsed}
-import akka.actor.{ActorPath, ActorRef, ActorSystem, Props}
+import akka.NotUsed
+import akka.actor.ActorRef
 import akka.stream.scaladsl._
 import akka.stream._
 import akka.util.{ByteString, Timeout}
-
-import scalaz.{Sink => _, _}
-import Scalaz._
 import org.slf4j.LoggerFactory
 import com.typesafe.scalalogging.{Logger, StrictLogging}
-import com.typesafe.config.Config
-import demesne.StartTask
-import demesne.{AggregateRootType, BoundedContext, DomainModel}
+import demesne.BoundedContext
 import kamon.Kamon
-import nl.grons.metrics.scala.{Meter, MetricName}
+import nl.grons.metrics.scala.MetricName
 import peds.commons.log.Trace
-import peds.akka.metrics.{Instrumented, Reporter}
-import peds.commons.V
+import peds.akka.metrics.Instrumented
 import peds.akka.stream.StreamMonitor
-import spotlight.analysis.outlier.algorithm.statistical.SimpleMovingAverageAlgorithm
-import spotlight.analysis.outlier.{AnalysisPlanModule, AnalysisScopeProxy, DetectionAlgorithmRouter, PlanCatalog}
 import spotlight.model.outlier._
-import spotlight.model.timeseries.Topic
+import spotlight.model.timeseries.{TimeSeries, Topic}
 import spotlight.publish.{GraphitePublisher, LogPublisher}
-import spotlight.stream.{Configuration, OutlierScoringModel}
+import spotlight.stream.{Bootstrap, BootstrapContext, Configuration, OutlierScoringModel}
 
 
 /**
@@ -43,216 +34,109 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
 
   override protected val logger: Logger = Logger( LoggerFactory.getLogger("GraphiteSpotlight") )
   val trace = Trace[GraphiteSpotlight.type]
-  val PlanConfigPath = "spotlight.detection-plans"
   val ActorSystemName = "Spotlight"
 
-  case class BootstrapContext(
-    config: Configuration,
-    reloader: () => V[Configuration],
-    detector: ActorRef,
-    planRouter: ActorRef
-  )
-
-
   def main( args: Array[String] ): Unit = {
-    Configuration( args ).disjunction match {
-      case \/-( config ) => {
-        logger.info( "TEST: akka.persistence journal: [{}]", config.getString("akka.persistence.journal.plugin") )
-        logger.info( "TEST: cluster-port=[{}] akka-remoting:[{}]", config.clusterPort.toString, config.getInt("akka.remote.netty.tcp.port").toString )
-        implicit val system = ActorSystem( ActorSystemName, config )
-        logger.info( "TEST: ActorSystem:[{}]", system )
-//        system.logConfiguration()
-        logger.info( "TEST------------------------------------")
-        implicit val ec = system.dispatcher
+    import scala.concurrent.ExecutionContext.Implicits.global
 
-        val serverBinding = for {
-          boundedContext <- bootstrap( args, config )
-          binding <- execute( boundedContext, config )
-        } yield binding
+    val context = {
+      import spotlight.stream.{ BootstrapContext => BC }
+      BootstrapContext
+      .builder
+      .set( BC.Name, ActorSystemName )
+      .set( BC.StartTasks, Set( SharedLeveldbStore.start( true ), Bootstrap.kamonStartTask ) )
+      .set( BC.Timeout, Timeout(30.seconds) )
+      .build()
+    }
 
-        serverBinding.onComplete {
-          case Success(b) => logger.info( "Server started, listening on: " + b.localAddress )
+    Bootstrap( context )
+    .run( args )
+    .foreach { case (boundedContext, configuration, flow) =>
+      execute( flow )( boundedContext, configuration ) onComplete {
+        case Success(b) => logger.info( "Server started, listening on: " + b.localAddress )
 
-          case Failure( ex ) => {
-            logger.error( s"Server could not bind to ${config.sourceAddress.getAddress}: ${ex.getMessage}")
-            system.terminate()
-            Kamon.shutdown()
-          }
+        case Failure( ex ) => {
+          logger.error( "Server could not bind to source", ex )
+          boundedContext.shutdown()
+          Kamon.shutdown()
         }
-      }
-
-      case -\/( exs ) => {
-        logger error s"""Failed to start: ${exs.toList.map {_.getMessage}.mkString( "\n", "\n", "\n" )}"""
-        System exit -1
       }
     }
   }
 
-//  def bootstrap( args: Array[String], config: Configuration )( implicit system: ActorSystem ): Future[BootstrapContext] = {
-  def bootstrap( args: Array[String], config: Configuration )( implicit system: ActorSystem ): Future[BoundedContext] = {
-    Kamon.start()
-    logger info config.usage
-
-    startMetricsReporter( config )
-
-    implicit val ec = system.dispatcher
-    implicit val timeout = Timeout( 30.seconds )
-
-//    val reloader = Configuration.reloader( args )()()
-
-    startBoundedContext( 'GraphiteSpotlight, config, rootTypes, startTasks(config) )
-//    val workflow = startDetection( config, reloader )
-
-//    import akka.pattern.ask
-
-//    val actors = for {
-//      _ <- workflow ? WaitForStart
-//      ChildStarted( d ) <- ( workflow ? GetOutlierDetector ).mapTo[ChildStarted]
-//      ChildStarted( pr ) <- ( workflow ? GetOutlierPlanDetectionRouter ).mapTo[ChildStarted]
-//    } yield ( d, pr )
-
-//    val bootstrapTimeout = akka.pattern.after( 1.second, system.scheduler ) {
-//      Future.failed( new TimeoutException( "failed to bootstrap detection workflow core actors" ) )
-//    }
-//
-//    Future.firstCompletedOf( actors :: bootstrapTimeout :: Nil ) map {
-//      case (detector, planRouter) => {
-//        logger.info( "bootstrap detector:[{}] planRouter:[{}]", detector, planRouter )
-//        startPlanWatcher( config, Set(detector) )
-//        BootstrapContext( config, reloader, detector, planRouter )
-//      }
-//    }
-  }
-
-  def rootTypes: Set[AggregateRootType] = {
-    Set(
-      AnalysisPlanModule.module.rootType,
-       SimpleMovingAverageAlgorithm.rootType
-    )
-  }
-
-  def startTasks( config: Configuration )( implicit system: ActorSystem ): Set[StartTask] = {
-    logger.info( "TEST:akka.persistence.journal.plugin: [{}]", config.getString("akka.persistence.journal.plugin") )
-    Set(
-     DetectionAlgorithmRouter.startTask( config )( system.dispatcher ),
-      SharedLeveldbStore.start(
-        path = ActorPath.fromString(
-          s"akka.tcp://${system.name}@127.0.0.1:${config.clusterPort}/user/${SharedLeveldbStore.Name}"
-        ),
-        startStore = true
-      )
-    )
-  }
-
-  def startBoundedContext(
-    name: Symbol,
-    configuration: Config,
-    rootTypes: Set[AggregateRootType],
-    startTasks: Set[StartTask]
-  )(
-    implicit system: ActorSystem,
-    timeout: Timeout,
-    ec: ExecutionContext
-  ): Future[BoundedContext] = {
-    for {
-      made <- BoundedContext.make( name, configuration, rootTypes, startTasks = startTasks )
-      started <- made.start()
-    } yield started
+  private object WatchPoints {
+    val Framing = 'framing
+    val Intake = 'intake
+    val PublishBuffer = Symbol( "publish.buffer" )
   }
 
   def execute(
-    context: BoundedContext,
-    conf: Configuration
+    scoring: Flow[TimeSeries, Outliers, NotUsed]
   )(
-    implicit system: ActorSystem,
-    ec: ExecutionContext
+    implicit boundedContext: BoundedContext,
+    configuration: Configuration
   ): Future[Tcp.ServerBinding] = {
-    implicit val materializer = ActorMaterializer(
-      ActorMaterializerSettings( system ) withSupervisionStrategy workflowSupervision
+    logger.info(
+      s"""
+        |\nConnection made using the following configuration:
+        |\tTCP-In Buffer Size   : ${configuration.tcpInboundBufferSize}
+        |\tWorkflow Buffer Size : ${configuration.workflowBufferSize}
+        |\tDetect Timeout       : ${configuration.detectionBudget.toCoarsest}
+        |\tplans                : [${configuration.plans.zipWithIndex.map{ case (p,i) => f"${i}%2d: ${p}"}.mkString("\n","\n","\n")}]
+      """.stripMargin
     )
 
-    val address = conf.sourceAddress
+    implicit val system = boundedContext.system
+    implicit val materializer = ActorMaterializer(
+      ActorMaterializerSettings( system ) withSupervisionStrategy Bootstrap.supervisionDecider
+    )
+    val address = configuration.sourceAddress
     val connection = Tcp().bind( address.getHostName, address.getPort )
-
     val sink = Sink.foreach[Tcp.IncomingConnection] { connection =>
-      val catalogProps = PlanCatalog.props(
-        configuration = conf,
-        maxInFlightCpuFactor = conf.maxInDetectionCpuFactor,
-        applicationDetectionBudget = Some( conf.detectionBudget )
-      )(
-        context
-      )
-      val detectionModel = detectionWorkflow( catalogProps, conf )
-      connection handleWith detectionModel
+      val detectionFlow = {
+        inlet
+        .via( scoring )
+        .via( outlet )
+      }
+
+      connection handleWith detectionFlow
     }
+
+    import spotlight.app.GraphiteSpotlight.{ WatchPoints => GS }
+    import spotlight.stream.OutlierScoringModel.{ WatchPoints => OSM }
+    StreamMonitor.set( GS.Framing, GS.Intake, OSM.PlanBuffer, GS.PublishBuffer )
 
     ( connection to sink ).run()
   }
 
-  def detectionWorkflow(
-    catalogProps: Props,
-    conf: Configuration
-  )(
-    implicit system: ActorSystem,
-    materializer: Materializer
-  ): Flow[ByteString, ByteString, NotUsed] = {
-    logger.info(
-      s"""
-         |\nConnection made using the following configuration:
-         |\tTCP-In Buffer Size   : ${conf.tcpInboundBufferSize}
-         |\tWorkflow Buffer Size : ${conf.workflowBufferSize}
-         |\tDetect Timeout       : ${conf.detectionBudget.toCoarsest}
-         |\tplans                : [${conf.plans.zipWithIndex.map{ case (p,i) => f"${i}%2d: ${p}"}.mkString("\n","\n","\n")}]
-      """.stripMargin
-    )
+  def inlet( implicit boundedContext: BoundedContext, configuration: Configuration ): Flow[ByteString, TimeSeries, NotUsed] = {
+    import StreamMonitor._
+    import WatchPoints._
+    configuration.protocol.framingFlow( configuration.maxFrameLength ).watchSourced( Framing )
+    .via( Flow[ByteString].buffer( configuration.tcpInboundBufferSize, OverflowStrategy.backpressure ).watchFlow( Intake ) ) //todo fix StreamMonitor flow measurement so able to watch .buffer(..) and not need Flow structure
+    .via( configuration.protocol.unmarshalTimeSeriesData )
+  }
 
+  def outlet( implicit boundedContext: BoundedContext, configuration: Configuration ): Flow[Outliers, ByteString, NotUsed] = {
     val graph = GraphDSL.create() { implicit b =>
       import GraphDSL.Implicits._
       import StreamMonitor._
+      import WatchPoints._
 
-      //todo add support to watch FlowShapes
-
-      val framing = b.add( conf.protocol.framingFlow(conf.maxFrameLength).watchSourced( 'framing ) )
-
-      val intakeBuffer = b.add(
-        Flow[ByteString]
-        .buffer( conf.tcpInboundBufferSize, OverflowStrategy.backpressure )
-        .watchFlow( 'intakeBuffer )
-      )
-
-      val timeSeries = b.add( conf.protocol.unmarshalTimeSeriesData )
-      val scoring = b.add( OutlierScoringModel.scoringGraph( catalogProps, conf) )
-      val logUnrecognized = b.add(
-        OutlierScoringModel.logMetric( Logger( LoggerFactory getLogger "Unrecognized" ), conf.plans )
-      )
       val egressBroadcast = b.add( Broadcast[Outliers](outputPorts = 2, eagerCancel = true) )
-
-      //todo remove after working
       val publishBuffer = b.add(
-        Flow[Outliers].buffer( 1000, OverflowStrategy.backpressure ).watchFlow( Symbol("publish.buffer"))
+        Flow[Outliers].buffer( 1000, OverflowStrategy.backpressure ).watchFlow( PublishBuffer )
       )
-      val publish = b.add( publishOutliers( conf.graphiteAddress ) )
+      val publish = b.add( publishOutliers(configuration.graphiteAddress) )
       val tcpOut = b.add( Flow[Outliers].map{ _ => ByteString() } )
 
-      val termUnrecognized = b.add( Sink.ignore )
+      egressBroadcast ~> tcpOut
+      egressBroadcast ~> publishBuffer ~> publish
 
-//framing,intakeBuffer,scoring.planned,plan.router
-      StreamMonitor.set(
-        'framing,
-        'intakeBuffer,
-        Symbol("plan.buffer"),
-        Symbol( "publish.buffer" )
-      )
-
-      framing ~> intakeBuffer ~> timeSeries ~> scoring.in
-                                               scoring.out0 ~> egressBroadcast ~> tcpOut
-                                                               egressBroadcast ~> publishBuffer ~> publish
-                                               scoring.out1 ~> logUnrecognized ~> termUnrecognized
-
-      FlowShape( framing.in, tcpOut.out )
+      FlowShape( egressBroadcast.in, tcpOut.out )
     }
 
-    Flow.fromGraph( graph ).withAttributes( ActorAttributes.supervisionStrategy(workflowSupervision) )
+    Flow.fromGraph( graph ).withAttributes( ActorAttributes supervisionStrategy Bootstrap.supervisionDecider )
   }
 
   def publishOutliers( graphiteAddress: Option[InetSocketAddress] ): Sink[Outliers, ActorRef] = {
@@ -276,94 +160,6 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
       LogPublisher.props
     }
 
-    Sink.actorSubscriber[Outliers]( props.withDispatcher( "publisher-dispatcher" ) ).named( "graphite" )
+    Sink.actorSubscriber[Outliers]( props withDispatcher GraphitePublisher.DispatcherPath ).named( "graphite" )
   }
-
-//  def startPlanWatcher( config: Configuration, listeners: Set[ActorRef] )( implicit system: ActorSystem ): Unit = {
-//    logger info s"Outlier plan origin: [${config.planOrigin}]"
-//    import java.nio.file.{ StandardWatchEventKinds => Events }
-//    import better.files.FileWatcher._
-//
-//    val Path = "@\\s+file:(.*):\\s+\\d+,".r
-//
-//    Path
-//    .findAllMatchIn( config.planOrigin.toString )
-//    .map { _ group 1 }
-//    .foreach { filename =>
-//      // note: attempting to watch a shared file wrt VirtualBox will not work (https://www.virtualbox.org/ticket/9069)
-//      // so dev testing of watching should be done by running the Java locally
-//      logger info s"watching for changes in ${filename}"
-//      val configWatcher = File( filename ).newWatcher( true )
-//      configWatcher ! on( Events.ENTRY_MODIFY ) {
-//        case _ => {
-//          logger info s"config file watcher sending reload command due to change in ${config.planOrigin.description}"
-//          listeners foreach { _ ! OutlierDetection.ReloadPlans }
-//        }
-//      }
-//    }
-//  }
-
-  lazy val workflowFailuresMeter: Meter = metrics meter "workflow.failures"
-
-  val workflowSupervision: Supervision.Decider = {
-    case ex => {
-      logger.error( "Error caught by Supervisor:", ex )
-      workflowFailuresMeter.mark( )
-      Supervision.Restart
-    }
-  }
-
-  def startMetricsReporter( config: Configuration ): Unit = {
-    if ( config hasPath "spotlight.metrics" ) {
-      logger info s"""starting metric reporting with config: [${config getConfig "spotlight.metrics"}]"""
-      val reporter = Reporter.startReporter( config getConfig "spotlight.metrics" )
-      logger info s"metric reporter: [${reporter}]"
-    } else {
-      logger warn """metric report configuration missing at "spotlight.metrics""""
-    }
-  }
-
-//  def startDetection( config: Configuration, reloader: () => V[Configuration] )( implicit system: ActorSystem ): ActorRef = {
-//    system.actorOf(
-//      OutlierDetectionBootstrap.props(
-//        new OutlierDetectionBootstrap( ) with OneForOneStrategyFactory with OutlierDetectionBootstrap.ConfigurationProvider {
-//          override def sourceAddress: InetSocketAddress = config.sourceAddress
-//          override def maxFrameLength: Int = config.maxFrameLength
-//          override def protocol: GraphiteSerializationProtocol = config.protocol
-//          override def windowDuration: FiniteDuration = config.windowDuration
-//          override def detectionBudget: FiniteDuration = config.detectionBudget
-//          override def bufferSize: Int = config.workflowBufferSize
-//          override def maxInDetectionCpuFactor: Double = config.maxInDetectionCpuFactor
-//          override def configuration: Config = config
-//        }
-//      ),
-//      "detection-supervisor"
-//    )
-//  }
 }
-
-
-//  def archiveFilter[T <: TimeSeriesBase]( config: Configuration ): Flow[T, T, NotUsed] = {
-//    val archiveWhitelist: Set[Regex] = {
-//      import scala.collection.JavaConverters._
-//      if ( config hasPath "spotlight.training.whitelist" ) {
-//        config.getStringList( "spotlight.training.whitelist" ).asScala.toSet map { wl: String => new Regex( wl ) }
-//      } else {
-//        Set.empty[Regex]
-//      }
-//    }
-//    logger info s"""training archive whitelist: [${archiveWhitelist.mkString(",")}]"""
-//
-//    val baseline = (ts: T) => { config.plans.exists{ _ appliesTo ts } }
-//
-//    val isArchivable: T => Boolean = {
-//      if ( archiveWhitelist.nonEmpty ) baseline
-//      else (ts: T) => { archiveWhitelist.exists( _.findFirstIn( ts.topic.name ).isDefined ) || baseline( ts ) }
-//    }
-//
-//    Flow[T].filter{ isArchivable }
-//  }
-
-//  private val trainingLogger: Logger = Logger( LoggerFactory getLogger "Training" )
-//
-//  private def trainingDispatcher( system: ActorSystem ): ExecutionContext = system.dispatchers lookup "logger-dispatcher"

@@ -7,10 +7,10 @@ import akka.testkit._
 import scalaz.Scalaz.{when => _, _}
 import org.scalatest.mockito.MockitoSugar
 import com.typesafe.config.{Config, ConfigFactory}
-import peds.akka.envelope.Envelope
+import peds.akka.envelope.{Envelope, WorkId}
 import spotlight.model.timeseries._
-import spotlight.model.outlier.{IsQuorum, OutlierPlan, ReduceOutliers}
-import spotlight.testkit.ParallelAkkaSpec
+import spotlight.model.outlier._
+import spotlight.testkit.{ParallelAkkaSpec, TestCorrelatedSeries}
 
 
 /**
@@ -101,7 +101,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
       detect.underlyingActor.router mustBe f.router.ref
 
       val msg = OutlierDetectionMessage(
-        TimeSeries( topic = "dummy", points = Seq.empty[DataPoint] ),
+        TestCorrelatedSeries( TimeSeries(topic = "dummy", points = Seq.empty[DataPoint]) ),
         defaultPlan,
         subscriber.ref
       ).toOption.get
@@ -148,7 +148,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
       )
 
       val msg = OutlierDetectionMessage(
-        TimeSeries( topic = metric, points = Seq.empty[DataPoint] ),
+        TestCorrelatedSeries( TimeSeries(topic = metric, points = Seq.empty[DataPoint]) ),
         defaultPlan,
         subscriber.ref
       ).toOption.get
@@ -194,7 +194,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
       )
 
       val msgForDefault = OutlierDetectionMessage(
-        TimeSeries( topic = "dummy", points = Seq.empty[DataPoint] ),
+        TestCorrelatedSeries( TimeSeries( topic = "dummy", points = Seq.empty[DataPoint] ) ),
         defaultPlan,
         subscriber.ref
       ).toOption.get
@@ -211,7 +211,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
       }
 
       val metricMsg = OutlierDetectionMessage(
-        TimeSeries( topic = metric, points = Seq.empty[DataPoint] ),
+        TestCorrelatedSeries( TimeSeries( topic = metric, points = Seq.empty[DataPoint] ) ),
         defaultPlan,
         subscriber.ref
       ).toOption.get
@@ -315,7 +315,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
       val expectedA = HistoricalStatistics.fromActivePoints( pointsA, isCovarianceBiasCorrected = false )
 
       val msgA = OutlierDetectionMessage(
-        TimeSeries(topic = metric, points = pointsA),
+        TestCorrelatedSeries( TimeSeries(topic = metric, points = pointsA) ),
         defaultPlan,
         subscriber.ref
       ).toOption.get
@@ -345,7 +345,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
       trace( s"""expectedAB LAST= [${expectedAB.lastPoints.toPointTs.mkString(",")}]""" )
 
       val msgB = OutlierDetectionMessage(
-        TimeSeries(topic = metric, points = pointsB),
+        TestCorrelatedSeries( TimeSeries(topic = metric, points = pointsB) ),
         defaultPlan,
         subscriber.ref
       ).toOption.get

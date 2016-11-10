@@ -4,6 +4,7 @@ import scala.concurrent.duration._
 import akka.NotUsed
 import akka.actor._
 import akka.actor.SupervisorStrategy.{Escalate, Restart, Stop}
+import akka.agent.Agent
 import akka.event.LoggingReceive
 import akka.stream._
 import akka.stream.actor.{ActorSubscriber, ActorSubscriberMessage, RequestStrategy, WatermarkRequestStrategy}
@@ -13,21 +14,21 @@ import com.typesafe.config.Config
 import com.typesafe.scalalogging.LazyLogging
 import nl.grons.metrics.scala.{Meter, MetricName, Timer}
 import peds.akka.envelope._
-import peds.akka.metrics.InstrumentedActor
+import peds.akka.metrics.{Instrumented, InstrumentedActor}
 import peds.akka.stream._
 import peds.commons.log.Trace
 import demesne.{AggregateRootType, DomainModel}
 import spotlight.analysis.outlier.algorithm.{AlgorithmModule, AlgorithmProtocol}
 import spotlight.model.outlier.OutlierPlan.Scope
-import spotlight.model.outlier.OutlierPlan
+import spotlight.model.outlier.{CorrelatedData, CorrelatedSeries, OutlierPlan}
 import spotlight.model.timeseries.TimeSeriesBase.Merging
-import spotlight.model.timeseries.{IdentifiedTimeSeries, TimeSeries, Topic}
+import spotlight.model.timeseries.{TimeSeries, Topic}
 
 
 /**
   * Created by rolfsd on 5/26/16.
   */
-object AnalysisScopeProxy extends LazyLogging {
+object AnalysisScopeProxy extends Instrumented with LazyLogging {
   private val trace = Trace[AnalysisScopeProxy.type]
 
   def props(
@@ -86,14 +87,14 @@ object AnalysisScopeProxy extends LazyLogging {
       log.debug( "TEST: for Router - algorithmRefs=[{}]", algorithmRefs.mkString(", ") )
 
       context.actorOf(
-        DetectionAlgorithmRouter.props( Map(algorithmRefs:_*) ).withDispatcher( "outlier-detection-dispatcher" ),
+        DetectionAlgorithmRouter.props( Map(algorithmRefs:_*) ).withDispatcher( DetectionAlgorithmRouter.DispatcherPath ),
         DetectionAlgorithmRouter.name( provider.scope.toString )
       )
     }
 
     def makeDetector( routerRef: ActorRef )( implicit context: ActorContext ): ActorRef = {
       context.actorOf(
-        OutlierDetection.props( routerRef, provider.scope.toString ).withDispatcher( "outlier-detection-dispatcher" ),
+        OutlierDetection.props( routerRef, provider.scope.toString ).withDispatcher( OutlierDetection.DispatcherPath ),
         OutlierDetection.name( provider.scope.toString )
       )
     }
@@ -102,7 +103,24 @@ object AnalysisScopeProxy extends LazyLogging {
 
   private[outlier] final case class Workers private( detector: ActorRef, router: ActorRef )
 
+  override lazy val metricBaseName: MetricName = MetricName( classOf[AnalysisScopeProxy] )
+  val totalStreams: Agent[Map[ActorPath, Int]] = Agent( Map.empty[ActorPath, Int] )( scala.concurrent.ExecutionContext.global )
+  metrics.gauge( "proxies" ){ totalStreams.get.foldLeft( 0 ){ case (acc, (_, count)) => acc + count } }
 
+  def incrementStreamsForProxy( path: ActorPath ): Unit = {
+    totalStreams send { streams =>
+      val current = streams.getOrElse( path, 1 )
+      streams + ( path -> (current + 1) )
+    }
+  }
+  def decrementStreamsForProxy( path: ActorPath ): Unit = {
+    totalStreams send { streams =>
+      streams
+      .get( path )
+      .map { count => streams + (path -> (count - 1) ) }
+      .getOrElse { streams }
+    }
+  }
 }
 
 class AnalysisScopeProxy
@@ -123,7 +141,6 @@ with ActorLogging { outer: AnalysisScopeProxy.Provider =>
   case class PlanStream private( ingressRef: ActorRef, graph: RunnableGraph[NotUsed] )
   var streams: Map[ActorRef, PlanStream] = Map.empty[ActorRef, PlanStream] //todo good idea to key off sender(analysis plan) ref or path or name?
 
-
   val streamSupervision: Supervision.Decider = {
     case ex => {
       log.error( ex, "Error caught by analysis scope proxy supervisor" )
@@ -137,22 +154,29 @@ with ActorLogging { outer: AnalysisScopeProxy.Provider =>
     ActorMaterializer( ActorMaterializerSettings(system) withSupervisionStrategy streamSupervision )
   }
 
+  //todo decrement streams count on restart
 
   override protected def requestStrategy: RequestStrategy = new WatermarkRequestStrategy( outer.highWatermark )
 
   override def receive: Receive = LoggingReceive { around( workflow ) }
 
   val workflow: Receive = {
-    case (ts: TimeSeries, s: OutlierPlan.Scope) if s == outer.scope => {
-      log.debug( "AnalysisScopeProxy[{}] [{}] forwarding time series [{}] into detection stream", self.path.name, workId, ts.topic )
-      streamIngressFor( sender() ) forwardEnvelope (ts, Set(workId))
+    case m @ CorrelatedData( ts: TimeSeries, correlationIds, Some(s) ) if s == outer.scope => {
+      log.debug(
+        "AnalysisScopeProxy:WORKFLOW[{}] [{}] forwarding time series [{}] into detection stream",
+        self.path.name, correlationIds, ts.topic
+      )
+      streamIngressFor( sender() ) forwardEnvelope m
     }
-
-    case (ts: TimeSeries, p: OutlierPlan) if workflow isDefinedAt (ts, Scope(p, ts.topic)) => workflow( (ts, Scope(p, ts.topic)) )
 
     case AnalysisPlanProtocol.AlgorithmsChanged(_, algorithms, config) => {
       if ( algorithms != outer.plan.algorithms ) updatePlan( algorithms, config )
       if ( config != outer.plan.algorithmConfig ) updateAlgorithmConfigurations( config )
+    }
+
+    case Terminated( deadActor ) => {
+      log.info( "[{}] notified of dead actor at: [{}]", self.path.name, deadActor.path )
+      AnalysisScopeProxy decrementStreamsForProxy self.path
     }
   }
 
@@ -177,6 +201,7 @@ with ActorLogging { outer: AnalysisScopeProxy.Provider =>
         log.debug( "making plan stream for subscriber:[{}]", subscriber )
         val ps = makePlanStream( subscriber )
         streams += ( subscriber -> ps )
+        AnalysisScopeProxy incrementStreamsForProxy self.path
         ps.ingressRef
       }
     }
@@ -198,11 +223,11 @@ with ActorLogging { outer: AnalysisScopeProxy.Provider =>
     system: ActorSystem,
     materializer: Materializer
   ): PlanStream = {
-    log.info( "making new flow for plan-scope:subscriber: [{} : {}]", outer.scope, subscriber )
+    log.info( "making new flow for plan-scope:subscriber: [{}] : [{}]", outer.scope, subscriber.path.name )
 
     val (ingressRef, ingress) = {
       Source
-      .actorPublisher[IdentifiedTimeSeries]( StreamIngress.props[IdentifiedTimeSeries] )
+      .actorPublisher[CorrelatedSeries]( StreamIngress.props[CorrelatedSeries] )
       .toMat( Sink.asPublisher(false) )( Keep.both )
       .run()
     }
@@ -210,15 +235,19 @@ with ActorLogging { outer: AnalysisScopeProxy.Provider =>
     val graph = GraphDSL.create() { implicit b =>
       import GraphDSL.Implicits._
 
+      def flowLog[T]( label: String ): FlowShape[T, T] = {
+        b.add( Flow[T] map { m => log.debug( "AnalysisScopeProxy:FLOW-STREAM: {}: [{}]", label, m.toString); m } )
+      }
+
       val ingressPublisher = b.add( Source.fromPublisher( ingress ) )
       val batch = outer.plan.grouping map { g => b.add( batchSeries( g ) ) }
-      val buffer = b.add( Flow[IdentifiedTimeSeries].buffer(outer.bufferSize, OverflowStrategy.backpressure) )
+      val buffer = b.add( Flow[CorrelatedSeries].buffer(outer.bufferSize, OverflowStrategy.backpressure) )
       val detect = b.add( detectionFlow( outer.plan, subscriber, outer.workers ) )
 
       if ( batch.isDefined ) {
-        ingressPublisher ~> batch.get ~> buffer ~> detect
+        ingressPublisher ~> flowLog[CorrelatedSeries]("entry") ~> batch.get ~> flowLog[CorrelatedSeries]( "batched") ~> buffer ~> flowLog[CorrelatedSeries]( "to-detect" ) ~> detect
       } else {
-        ingressPublisher ~> buffer ~> detect
+        ingressPublisher ~> flowLog[CorrelatedSeries]("entry") ~> buffer ~> flowLog[CorrelatedSeries]( "to-detect" ) ~> detect
       }
 
       ClosedShape
@@ -226,6 +255,7 @@ with ActorLogging { outer: AnalysisScopeProxy.Provider =>
 
     val runnable = RunnableGraph.fromGraph( graph ).named( s"PlanDetection-${outer.scope}-${subscriber.path}" )
     runnable.run()
+    context watch ingressRef
     PlanStream( ingressRef, runnable )
   }
 
@@ -233,18 +263,19 @@ with ActorLogging { outer: AnalysisScopeProxy.Provider =>
     grouping: OutlierPlan.Grouping
   )(
     implicit tsMerging: Merging[TimeSeries]
-  ): Flow[IdentifiedTimeSeries, IdentifiedTimeSeries, NotUsed] = {
+  ): Flow[CorrelatedSeries, CorrelatedSeries, NotUsed] = {
     log.debug( "batchSeries grouping = [{}]", grouping )
+    val correlatedDataLens = CorrelatedData.dataLens[TimeSeries] ~ CorrelatedData.correlationIdsLens[TimeSeries]
 
-    Flow[IdentifiedTimeSeries]
+    Flow[CorrelatedSeries]
     .groupedWithin( n = grouping.limit, d = grouping.window )
     .map {
-      _.groupBy { case (ts, _) => ts.topic }
-      .map { case (topic, its) =>
-        its.tail.foldLeft( its.head ){ case ((accTs, accWids), (ts, wids)) =>
-          val newTs = tsMerging.merge( accTs, ts ) valueOr { exs => throw exs.head }
-          val newWids = accWids ++ wids
-          ( newTs, newWids )
+      _.groupBy { _.data.topic }
+      .map { case (_, msgs) =>
+        msgs.tail.foldLeft( msgs.head ){ case (acc, m) =>
+          val newData = tsMerging.merge( acc.data, m.data ) valueOr { exs => throw exs.head }
+          val newCorrelationIds = acc.correlationIds ++ m.correlationIds
+          correlatedDataLens.set( acc )( newData, newCorrelationIds )
         }
       }
     }
@@ -257,13 +288,19 @@ with ActorLogging { outer: AnalysisScopeProxy.Provider =>
     w: Workers
   )(
     implicit system: ActorSystem
-  ): Sink[IdentifiedTimeSeries, NotUsed] = {
+  ): Sink[CorrelatedData[TimeSeries], NotUsed] = {
     val label = Symbol( OutlierDetection.WatchPoints.DetectionFlow.name + "." + p.name )
 
-    Flow[IdentifiedTimeSeries]
-    .filter { case (ts, wids) => p appliesTo ts }
-    .map { case (ts, wids) => OutlierDetectionMessage(ts, p, subscriber, wids).disjunction }
+    Flow[CorrelatedData[TimeSeries]]
+    .map { m => log.debug( "AnalysisScopeProxy:FLOW-DETECT: before-filter: [{}]", m.toString); m }
+    .filter { m =>
+      val result = p appliesTo m
+      log.debug( "AnalysisScopeProxy:FLOW-DETECT: filtering:[{}] msg:[{}]", result, m.toString )
+      result
+    }
+    .map { m => OutlierDetectionMessage(m, p, subscriber).disjunction }
     .collect { case scalaz.\/-( m ) => m }
+    .map { m => log.debug( "AnalysisScopeProxy:FLOW-DETECT: on-to-detection-grid: [{}]", m.toString); m }
     .toMat {
       Sink
       .actorRef[OutlierDetectionMessage]( w.detector, ActorSubscriberMessage.OnComplete )

@@ -10,7 +10,6 @@ import spotlight.model.timeseries.{TimeSeries, TimeSeriesBase}
  * Created by rolfsd on 10/4/15.
  */
 package object outlier {
-
   type TimeSeriesScope = (TimeSeries, OutlierPlan.Scope)
 
 

@@ -6,7 +6,7 @@ import peds.akka.envelope.WorkId
 
 
 package object timeseries {
-  type IdentifiedTimeSeries = (TimeSeries, Set[WorkId])
+//  type IdentifiedTimeSeries = (TimeSeries, Set[WorkId])
 
   type PointA = Array[Double]
   type PointT = (Double, Double)

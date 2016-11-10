@@ -11,6 +11,7 @@ import spotlight.analysis.outlier.algorithm.{AlgorithmModuleSpec, AlgorithmProto
 import spotlight.analysis.outlier.{DetectOutliersInSeries, DetectUsing, HistoricalStatistics}
 import spotlight.model.outlier.{NoOutliers, OutlierPlan, SeriesOutliers}
 import spotlight.model.timeseries.{DataPoint, ThresholdBoundary, TimeSeries}
+import spotlight.testkit.TestCorrelatedSeries
 
 import scala.annotation.tailrec
 import scala.concurrent.duration._
@@ -153,7 +154,7 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmModuleSpec[SimpleMovingA
         aggregate.sendEnvelope(
           DetectUsing(
             algorithm = module.algorithm.label,
-            payload = DetectOutliersInSeries( series, plan, subscriber.ref, Set() ),
+            payload = DetectOutliersInSeries( TestCorrelatedSeries(series), plan, subscriber.ref ),
             history = history
           )
         )(

@@ -72,6 +72,24 @@ object ParallelAkkaSpec extends LazyLogging {
           |    auto-down-unreachable-after = 10s
           |  }
           |}
+          |
+          |spotlight.dispatchers {
+          |  outlier-detection-dispatcher {
+          |    type = Dispatcher
+          |    executor = "fork-join-executor"
+          |    #  throughput = 100
+          |    fork-join-executor { }
+          |  }
+          |
+          |  publishing-dispatcher {
+          |    type = Dispatcher
+          |    executor = "thread-pool-executor"
+          |    thread-pool-executor {
+          |      fixed-pool-size = 8
+          |    }
+          |  }
+          |}
+          |
         """.stripMargin
       )
     )

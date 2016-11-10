@@ -20,11 +20,11 @@ import spotlight.model.timeseries._
 /**
   * Created by rolfsd on 10/14/16.
   */
-object SalesAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfiguration { outer =>
-  private val trace = Trace[SalesAlgorithm.type]
+object PastPeriodAverageAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfiguration { outer =>
+  private val trace = Trace[PastPeriodAverageAlgorithm.type]
 
   override def algorithm: Algorithm = new Algorithm {
-    override val label: Symbol = 'MonthlySales
+    override val label: Symbol = 'PastPeriod
 
     override def prepareData( algorithmContext: Context ): Seq[DoublePoint] = {
       algorithmContext.tailAverage()( algorithmContext.data )
@@ -78,7 +78,7 @@ object SalesAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfigu
 
     implicit val periodOrdering: Ordering[Period] = Ordering by { _.descriptor }
 
-    final case class PeriodImpl private[SalesAlgorithm](
+    final case class PeriodImpl private[PastPeriodAverageAlgorithm](
       override val descriptor: Int,
       override val timestamp: joda.DateTime
     ) extends Period {

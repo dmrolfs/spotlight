@@ -1,13 +1,14 @@
 package spotlight.model
 
-import org.joda.{ time => joda }
+import org.joda.{time => joda}
+import spotlight.model.timeseries.TimeSeries
 
 
 /**
  * Created by rolfsd on 10/4/15.
  */
 package object outlier {
-
+  type CorrelatedSeries = CorrelatedData[TimeSeries]
   type OutlierAlgorithmResults = Map[Symbol, Outliers]
 
   object OutlierAlgorithmResults {
