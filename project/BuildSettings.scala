@@ -12,7 +12,7 @@ object BuildSettings {
     organization := "com.github.dmrolfs",
     licenses += ("MIT", url("http://opensource.org/licenses/MIT")),
     crossScalaVersions := Seq( "2.11.8" ),
-    scalaVersion <<= crossScalaVersions { (vs: Seq[String]) => vs.head },
+    scalaVersion := crossScalaVersions{ (vs: Seq[String]) => vs.head }.value,
     // updateOptions := updateOptions.value.withCachedResolution(true),
     scalacOptions ++= Seq(
       // "-encoding",
