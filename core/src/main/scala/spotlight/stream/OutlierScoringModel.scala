@@ -45,7 +45,7 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
 
   def scoringGraph(
     catalogProps: Props,
-    config: Configuration
+    settings: Settings
   )(
     implicit system: ActorSystem,
     materializer: Materializer
@@ -54,16 +54,16 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
     import StreamMonitor._
 
     GraphDSL.create() { implicit b =>
-      val logMetrics = b.add( logMetric( Logger(LoggerFactory getLogger "Metrics"), config.plans ) )
+      val logMetrics = b.add( logMetric( Logger(LoggerFactory getLogger "Metrics"), settings.plans ) )
       val blockPriors = b.add( Flow[TimeSeries].filter{ ts => !isOutlierReport(ts) } )
       val broadcast = b.add( Broadcast[TimeSeries](outputPorts = 2, eagerCancel = false) )
 
       val watchPlanned = Flow[TimeSeries].map{ identity }.watchConsumed( WatchPoints.ScoringPlanned )
-      val passPlanned = b.add( Flow[TimeSeries].filter{ isPlanned( _, config.plans ) }.via( watchPlanned ) )
+      val passPlanned = b.add( Flow[TimeSeries].filter{ isPlanned( _, settings.plans ) }.via( watchPlanned ) )
 
       val watchUnrecognized = Flow[TimeSeries].map{ identity }.watchConsumed( WatchPoints.ScoringUnrecognized )
       val passUnrecognized = b.add(
-        Flow[TimeSeries].filter{ !isPlanned( _, config.plans ) }.via( watchUnrecognized )
+        Flow[TimeSeries].filter{ !isPlanned( _, settings.plans ) }.via( watchUnrecognized )
       )
 
       val regulator = b.add( Flow[TimeSeries].via( regulateByTopic(100000) ) )

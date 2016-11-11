@@ -10,7 +10,7 @@ import akka.util.Timeout
 import com.typesafe.scalalogging.StrictLogging
 import peds.commons.concurrent._
 import demesne.{BoundedContext, StartTask}
-import spotlight.stream.Configuration
+import spotlight.stream.Settings
 
 
 /**
@@ -26,7 +26,7 @@ object SharedLeveldbStore extends StrictLogging {
       val system = bc.system
       implicit val ec = system.dispatcher
       implicit val timeout = Timeout( 1.minute )
-      val clusterPort = bc.configuration.asInstanceOf[Configuration].clusterPort
+      val clusterPort = bc.configuration.asInstanceOf[Settings].clusterPort
       val path = ActorPath fromString s"akka.tcp://${system.name}@127.0.0.1:${clusterPort}/user/${SharedLeveldbStore.Name}"
       val identifyStore = {
         if ( startStore ) {

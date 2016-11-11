@@ -49,7 +49,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
     val protocol = new PythonPickleProtocol
     val stringFlow: Flow[ByteString, ByteString, NotUsed] = Flow[ByteString].via( protocol.framingFlow() )
 
-//    val configurationReloader = Configuration.reloader( Array.empty[String] )()()
+//    val configurationReloader = Settings.reloader( Array.empty[String] )()()
 
 //    val algo = SeriesDensityAnalyzer.Algorithm
     val algo = SimpleMovingAverageAlgorithm.algorithm.label

@@ -1,10 +1,6 @@
 package spotlight.stream
 
-import java.lang.Enum
 import java.net.{InetAddress, InetSocketAddress}
-import java.time.Duration
-import java.util
-
 import scala.concurrent.duration._
 import scala.util.matching.Regex
 import scalaz.Scalaz._
@@ -22,8 +18,7 @@ import peds.commons.{V, Valid}
 /**
   * Created by rolfsd on 1/12/16.
   */
-@deprecated("refactor in form of ActorSystem.Settings; i.e., class name and Settings.config rt extending Config", "11-10-2016")
-trait Configuration extends Config {
+trait Settings {
   def sourceAddress: InetSocketAddress
   def clusterPort: Int
   def maxFrameLength: Int
@@ -36,6 +31,8 @@ trait Configuration extends Config {
   def planOrigin: ConfigOrigin
   def tcpInboundBufferSize: Int
   def workflowBufferSize: Int
+
+  def config: Config
 
   def usage: String = {
     s"""
@@ -53,8 +50,8 @@ trait Configuration extends Config {
   }
 }
 
-object Configuration {
-  type Reload = () => V[Configuration]
+object Settings {
+  type Reload = () => V[Settings]
 
   def reloader(
     args: Array[String]
@@ -70,17 +67,17 @@ object Configuration {
       for {
         u <- usage.disjunction
         c <- checkConfiguration( config, u ).disjunction
-      } yield makeConfiguration( u, c)
+      } yield makeSettings( u, c)
     }
   }
 
-  def apply( args: Array[String], config: => Config = ConfigFactory.load ): Valid[Configuration] = {
+  def apply( args: Array[String], config: => Config = ConfigFactory.load ): Valid[Settings] = {
     import scalaz.Validation.FlatMap._
 
     for {
       u <- checkUsage( args )
       c <- checkConfiguration( config, u )
-    } yield makeConfiguration( u, c )
+    } yield makeSettings( u, c )
   }
 
   private def checkUsage( args: Array[String] ): Valid[UsageSettings] = {
@@ -132,7 +129,7 @@ object Configuration {
     required.traverseU{ Req.check }.map{ _ => config }
   }
 
-  private def makeConfiguration( usage: UsageSettings, config: Config ): Configuration = {
+  private def makeSettings( usage: UsageSettings, config: Config ): Settings = {
     val sourceHost: InetAddress = usage.sourceHost getOrElse {
       if ( config.hasPath(Directory.SOURCE_HOST) ) InetAddress.getByName( config.getString(Directory.SOURCE_HOST) )
       else InetAddress.getLocalHost
@@ -177,7 +174,7 @@ object Configuration {
       Some( 2004 )
     }
 
-    SimpleConfiguration(
+    SimpleSettings(
       sourceAddress = new InetSocketAddress( sourceHost, sourcePort ),
       maxFrameLength = maxFrameLength,
       protocol = protocol,
@@ -188,9 +185,7 @@ object Configuration {
           p <- graphitePort
         } yield new InetSocketAddress( h, p )
       },
-      underlying = {
-        ConfigFactory.parseString( SimpleConfiguration.AkkaRemotePortPath + "=" + usage.clusterPort ).withFallback( config )
-      }
+      config = ConfigFactory.parseString( SimpleSettings.AkkaRemotePortPath + "=" + usage.clusterPort ).withFallback( config )
     )
   }
 
@@ -207,33 +202,33 @@ object Configuration {
   }
 
 
-  object SimpleConfiguration {
+  object SimpleSettings {
     val AkkaRemotePortPath = "akka.remote.netty.tcp.port"
   }
 
-  final case class SimpleConfiguration private[stream](
+  final case class SimpleSettings private[stream](
     override val sourceAddress: InetSocketAddress,
     override val maxFrameLength: Int,
     override val protocol: GraphiteSerializationProtocol,
     override val windowDuration: FiniteDuration,
     override val graphiteAddress: Option[InetSocketAddress],
-    underlying: Config
-  ) extends Configuration with LazyLogging {
-    override def clusterPort: Int = underlying.getInt( SimpleConfiguration.AkkaRemotePortPath )
+    override val config: Config
+  ) extends Settings with LazyLogging {
+    override def clusterPort: Int = config.getInt( SimpleSettings.AkkaRemotePortPath )
 
     override def detectionBudget: FiniteDuration = {
-      FiniteDuration( getDuration(Directory.DETECTION_BUDGET, MILLISECONDS), MILLISECONDS )
+      FiniteDuration( config.getDuration(Directory.DETECTION_BUDGET, MILLISECONDS), MILLISECONDS )
     }
 
     override def maxInDetectionCpuFactor: Double = {
       val path = "spotlight.workflow.detect.max-in-flight-cpu-factor"
-      if ( hasPath( path ) ) getDouble( path ) else 1.0
+      if ( config hasPath path ) config.getDouble( path ) else 1.0
     }
 
-    override val plans: Set[OutlierPlan] = makePlans( getConfig( Configuration.Directory.PLAN_PATH ) ) //todo support plan reloading
-    override def planOrigin: ConfigOrigin = getConfig( Configuration.Directory.PLAN_PATH ).origin()
-    override def workflowBufferSize: Int = getInt( Directory.WORKFLOW_BUFFER_SIZE )
-    override def tcpInboundBufferSize: Int = getInt( Directory.TCP_INBOUND_BUFFER_SIZE )
+    override val plans: Set[OutlierPlan] = makePlans( config.getConfig( Settings.Directory.PLAN_PATH ) ) //todo support plan reloading
+    override def planOrigin: ConfigOrigin = config.getConfig( Settings.Directory.PLAN_PATH ).origin()
+    override def workflowBufferSize: Int = config.getInt( Directory.WORKFLOW_BUFFER_SIZE )
+    override def tcpInboundBufferSize: Int = config.getInt( Directory.TCP_INBOUND_BUFFER_SIZE )
 
     private def makeIsQuorum( spec: Config, algorithmSize: Int ): IsQuorum = {
       val MAJORITY = "majority"
@@ -347,71 +342,71 @@ object Configuration {
 
 
 
-    override def getEnumList[T <: Enum[T]]( enumClass: Class[T], path: String ): util.List[T] = {
-      underlying.getEnumList[T]( enumClass, path )
-    }
-    override def getEnum[T <: Enum[T]]( enumClass: Class[T], path: String ): T = underlying.getEnum[T]( enumClass, path )
-    override def getAnyRefList(s: String) = underlying.getAnyRefList(s)
-    override def getIntList(s: String): java.util.List[Integer] = underlying.getIntList(s)
-    override def getValue(s: String): ConfigValue = underlying.getValue(s)
-    override def root(): ConfigObject = underlying.root()
-    override def getAnyRef(s: String): AnyRef = underlying.getAnyRef(s)
-    override def getConfigList(s: String): java.util.List[_ <: Config] = underlying.getConfigList(s)
-    override def getIsNull(s: String): Boolean = underlying.getIsNull(s)
-    override def withFallback(configMergeable: ConfigMergeable): Config = underlying.withFallback(configMergeable)
-    override def checkValid(config: Config, strings: String*): Unit = underlying.checkValid(config, strings:_*)
-    override def resolveWith(config: Config): Config = underlying.resolveWith(config)
-    override def resolveWith(config: Config, configResolveOptions: ConfigResolveOptions): Config = {
-      underlying.resolveWith(config, configResolveOptions )
-    }
-    override def getList(s: String): ConfigList = underlying.getList(s)
-    override def getDouble(s: String): Double = underlying.getDouble(s)
-    override def getLongList(s: String): java.util.List[java.lang.Long] = underlying.getLongList(s)
-    override def getObjectList(s: String): java.util.List[_ <: ConfigObject] = underlying.getObjectList(s)
-    override def withOnlyPath(s: String): Config = underlying.withOnlyPath(s)
-    override def entrySet(): java.util.Set[java.util.Map.Entry[String, ConfigValue]] = underlying.entrySet()
-    override def getDoubleList(s: String): java.util.List[java.lang.Double] = underlying.getDoubleList(s)
-    override def hasPathOrNull(s: String): Boolean = underlying.hasPathOrNull(s)
-    override def hasPath(s: String): Boolean = underlying.hasPath(s)
-    override def getLong(s: String): Long = underlying.getLong(s)
-    override def getMemorySizeList(s: String): java.util.List[ConfigMemorySize] = underlying.getMemorySizeList(s)
-    override def getBooleanList(s: String): java.util.List[java.lang.Boolean] = underlying.getBooleanList(s)
-    override def getBytesList(s: String): java.util.List[java.lang.Long] = underlying.getBytesList(s)
-    override def getBoolean(s: String): Boolean = underlying.getBoolean(s)
-    override def getConfig(s: String): Config = underlying.getConfig(s)
-    override def getObject(s: String): ConfigObject = underlying.getObject(s)
-    override def getStringList(s: String): java.util.List[String] = underlying.getStringList(s)
-    override def getNumberList(s: String): java.util.List[Number] = underlying.getNumberList(s)
-    override def atPath(s: String): Config = underlying.atPath(s)
-    override def isResolved: Boolean = underlying.isResolved
-    override def isEmpty: Boolean = underlying.isEmpty
-    override def atKey(s: String): Config = underlying.atKey(s)
-    override def getDuration(s: String, timeUnit: TimeUnit): Long = underlying.getDuration(s, timeUnit)
-    override def getDuration( path: String ): Duration = underlying getDuration path
-    override def withValue(s: String, configValue: ConfigValue): Config = underlying.withValue(s, configValue)
-    override def getInt(s: String): Int = underlying.getInt(s)
-    override def resolve(): Config = underlying.resolve()
-    override def resolve(configResolveOptions: ConfigResolveOptions): Config = underlying.resolve(configResolveOptions)
-    override def getNumber(s: String): Number = underlying.getNumber(s)
-    override def getDurationList(s: String, timeUnit: TimeUnit): java.util.List[java.lang.Long] = underlying.getDurationList(s, timeUnit)
-    override def getDurationList(s: String): java.util.List[Duration] = underlying getDurationList s
-    override def origin(): ConfigOrigin = underlying.origin()
-    override def withoutPath(s: String): Config = underlying.withoutPath(s)
-    override def getMemorySize(s: String): ConfigMemorySize = underlying.getMemorySize(s)
-    override def getBytes(s: String): java.lang.Long = underlying.getBytes(s)
-    override def getString(s: String): String = underlying.getString(s)
-
-    @deprecated( "replaced by {@link #getDurationList(String, TimeUnit)}", "1.1" )
-    override def getNanoseconds(s: String): java.lang.Long = underlying.getNanoseconds(s)
-
-    @deprecated( "replaced by {@link #getDurationList(String, TimeUnit)}", "1.1" )
-    override def getNanosecondsList(s: String): java.util.List[java.lang.Long] = underlying.getNanosecondsList(s)
-
-    @deprecated( "replaced by {@link #getDurationList(String, TimeUnit)}", "1.1" )
-    override def getMilliseconds(s: String): java.lang.Long = underlying.getMilliseconds(s)
-
-    @deprecated( "replaced by {@link #getDurationList(String, TimeUnit)}", "1.1" )
-    override def getMillisecondsList(s: String): java.util.List[java.lang.Long] = underlying.getMillisecondsList(s)
+//    override def getEnumList[T <: Enum[T]]( enumClass: Class[T], path: String ): util.List[T] = {
+//      underlying.getEnumList[T]( enumClass, path )
+//    }
+//    override def getEnum[T <: Enum[T]]( enumClass: Class[T], path: String ): T = underlying.getEnum[T]( enumClass, path )
+//    override def getAnyRefList(s: String) = underlying.getAnyRefList(s)
+//    override def getIntList(s: String): java.util.List[Integer] = underlying.getIntList(s)
+//    override def getValue(s: String): ConfigValue = underlying.getValue(s)
+//    override def root(): ConfigObject = underlying.root()
+//    override def getAnyRef(s: String): AnyRef = underlying.getAnyRef(s)
+//    override def getConfigList(s: String): java.util.List[_ <: Config] = underlying.getConfigList(s)
+//    override def getIsNull(s: String): Boolean = underlying.getIsNull(s)
+//    override def withFallback(configMergeable: ConfigMergeable): Config = underlying.withFallback(configMergeable)
+//    override def checkValid(config: Config, strings: String*): Unit = underlying.checkValid(config, strings:_*)
+//    override def resolveWith(config: Config): Config = underlying.resolveWith(config)
+//    override def resolveWith(config: Config, configResolveOptions: ConfigResolveOptions): Config = {
+//      underlying.resolveWith(config, configResolveOptions )
+//    }
+//    override def getList(s: String): ConfigList = underlying.getList(s)
+//    override def getDouble(s: String): Double = underlying.getDouble(s)
+//    override def getLongList(s: String): java.util.List[java.lang.Long] = underlying.getLongList(s)
+//    override def getObjectList(s: String): java.util.List[_ <: ConfigObject] = underlying.getObjectList(s)
+//    override def withOnlyPath(s: String): Config = underlying.withOnlyPath(s)
+//    override def entrySet(): java.util.Set[java.util.Map.Entry[String, ConfigValue]] = underlying.entrySet()
+//    override def getDoubleList(s: String): java.util.List[java.lang.Double] = underlying.getDoubleList(s)
+//    override def hasPathOrNull(s: String): Boolean = underlying.hasPathOrNull(s)
+//    override def hasPath(s: String): Boolean = underlying.hasPath(s)
+//    override def getLong(s: String): Long = underlying.getLong(s)
+//    override def getMemorySizeList(s: String): java.util.List[ConfigMemorySize] = underlying.getMemorySizeList(s)
+//    override def getBooleanList(s: String): java.util.List[java.lang.Boolean] = underlying.getBooleanList(s)
+//    override def getBytesList(s: String): java.util.List[java.lang.Long] = underlying.getBytesList(s)
+//    override def getBoolean(s: String): Boolean = underlying.getBoolean(s)
+//    override def getConfig(s: String): Config = underlying.getConfig(s)
+//    override def getObject(s: String): ConfigObject = underlying.getObject(s)
+//    override def getStringList(s: String): java.util.List[String] = underlying.getStringList(s)
+//    override def getNumberList(s: String): java.util.List[Number] = underlying.getNumberList(s)
+//    override def atPath(s: String): Config = underlying.atPath(s)
+//    override def isResolved: Boolean = underlying.isResolved
+//    override def isEmpty: Boolean = underlying.isEmpty
+//    override def atKey(s: String): Config = underlying.atKey(s)
+//    override def getDuration(s: String, timeUnit: TimeUnit): Long = underlying.getDuration(s, timeUnit)
+//    override def getDuration( path: String ): Duration = underlying getDuration path
+//    override def withValue(s: String, configValue: ConfigValue): Config = underlying.withValue(s, configValue)
+//    override def getInt(s: String): Int = underlying.getInt(s)
+//    override def resolve(): Config = underlying.resolve()
+//    override def resolve(configResolveOptions: ConfigResolveOptions): Config = underlying.resolve(configResolveOptions)
+//    override def getNumber(s: String): Number = underlying.getNumber(s)
+//    override def getDurationList(s: String, timeUnit: TimeUnit): java.util.List[java.lang.Long] = underlying.getDurationList(s, timeUnit)
+//    override def getDurationList(s: String): java.util.List[Duration] = underlying getDurationList s
+//    override def origin(): ConfigOrigin = underlying.origin()
+//    override def withoutPath(s: String): Config = underlying.withoutPath(s)
+//    override def getMemorySize(s: String): ConfigMemorySize = underlying.getMemorySize(s)
+//    override def getBytes(s: String): java.lang.Long = underlying.getBytes(s)
+//    override def getString(s: String): String = underlying.getString(s)
+//
+//    @deprecated( "replaced by {@link #getDurationList(String, TimeUnit)}", "1.1" )
+//    override def getNanoseconds(s: String): java.lang.Long = underlying.getNanoseconds(s)
+//
+//    @deprecated( "replaced by {@link #getDurationList(String, TimeUnit)}", "1.1" )
+//    override def getNanosecondsList(s: String): java.util.List[java.lang.Long] = underlying.getNanosecondsList(s)
+//
+//    @deprecated( "replaced by {@link #getDurationList(String, TimeUnit)}", "1.1" )
+//    override def getMilliseconds(s: String): java.lang.Long = underlying.getMilliseconds(s)
+//
+//    @deprecated( "replaced by {@link #getDurationList(String, TimeUnit)}", "1.1" )
+//    override def getMillisecondsList(s: String): java.util.List[java.lang.Long] = underlying.getMillisecondsList(s)
   }
 
   case class UsageConfigurationError private[stream]( usage: String ) extends IllegalArgumentException( usage )

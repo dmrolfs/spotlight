@@ -66,9 +66,9 @@ object Bootstrap extends Instrumented with StrictLogging {
   override lazy val metricBaseName: MetricName = MetricName( getClass.getPackage.getName, getClass.safeSimpleName )
   lazy val workflowFailuresMeter: Meter = metrics meter "workflow.failures"
 
-  type SystemConfiguration = ( ActorSystem, Configuration )
-  type BoundedConfiguration = ( BoundedContext, Configuration )
-  type SpotlightContext = ( BoundedContext, Configuration, Flow[TimeSeries, Outliers, NotUsed] )
+  type SystemSettings = ( ActorSystem, Settings )
+  type BoundedSettings = ( BoundedContext, Settings )
+  type SpotlightContext = ( BoundedContext, Settings, Flow[TimeSeries, Outliers, NotUsed] )
 
 
   def apply(
@@ -86,10 +86,10 @@ object Bootstrap extends Instrumented with StrictLogging {
     )
   }
 
-  def systemStartTasks( configuration: Configuration )( implicit ec: ExecutionContext ): Set[StartTask] = {
+  def systemStartTasks( settings: Settings )( implicit ec: ExecutionContext ): Set[StartTask] = {
     Set(
-      DetectionAlgorithmRouter.startTask( configuration ),
-      metricsReporterStartTask( configuration )
+      DetectionAlgorithmRouter.startTask( settings.config ),
+      metricsReporterStartTask( settings.config )
     )
   }
 
@@ -111,12 +111,12 @@ object Bootstrap extends Instrumented with StrictLogging {
   val kamonStartTask: StartTask = StartTask.withUnitTask( "start Kamon monitoring" ){ Task { kamon.Kamon.start(); Done } }
 
 
-  def systemConfiguration( context: BootstrapContext ): Kleisli[Future, Array[String], SystemConfiguration] = {
-    kleisli[Future, Array[String], SystemConfiguration] { args =>
-      Configuration( args ).disjunction map { config =>
-        logger info config.usage
-        val system = context.system getOrElse ActorSystem( context.name, config )
-        ( system, config )
+  def systemConfiguration( context: BootstrapContext ): Kleisli[Future, Array[String], SystemSettings] = {
+    kleisli[Future, Array[String], SystemSettings] { args =>
+      Settings( args ).disjunction map { settings =>
+        logger info settings.usage
+        val system = context.system getOrElse ActorSystem( context.name, settings.config )
+        ( system, settings )
       } match {
         case \/-( systemConfiguration ) => Future successful systemConfiguration
         case -\/( exs ) => {
@@ -127,8 +127,8 @@ object Bootstrap extends Instrumented with StrictLogging {
     }
   }
 
-  def startBoundedContext( context: BootstrapContext ): Kleisli[Future, SystemConfiguration, BoundedConfiguration] = {
-    kleisli[Future, SystemConfiguration, BoundedConfiguration] { case (system, config) =>
+  def startBoundedContext( context: BootstrapContext ): Kleisli[Future, SystemSettings, BoundedSettings] = {
+    kleisli[Future, SystemSettings, BoundedSettings] { case (system, settings) =>
       implicit val sys = system
       implicit val ec = system.dispatcher
       implicit val timeout = context.timeout
@@ -136,22 +136,22 @@ object Bootstrap extends Instrumented with StrictLogging {
       val makeBoundedContext = {
         BoundedContext.make(
           key = Symbol(context.name),
-          configuration = config,
+          configuration = settings.config,
           rootTypes = context.rootTypes ++ systemRootTypes,
           userResources = context.resources,
-          startTasks = context.startTasks ++ systemStartTasks(config)
+          startTasks = context.startTasks ++ systemStartTasks(settings)
         )
       }
 
       for {
         made <- makeBoundedContext
         started <- made.start()
-      } yield ( started, config )
+      } yield ( started, settings )
     }
   }
 
-  def makeFlow(): Kleisli[Future, BoundedConfiguration, SpotlightContext] = {
-    kleisli[Future, BoundedConfiguration, SpotlightContext] { case (boundedContext, configuration) =>
+  def makeFlow(): Kleisli[Future, BoundedSettings, SpotlightContext] = {
+    kleisli[Future, BoundedSettings, SpotlightContext] { case (boundedContext, settings) =>
       implicit val bc = boundedContext
       implicit val system = boundedContext.system
       implicit val materializer = ActorMaterializer(
@@ -159,18 +159,18 @@ object Bootstrap extends Instrumented with StrictLogging {
       )
 
       val catalogProps = PlanCatalog.props(
-        configuration = configuration,
-        maxInFlightCpuFactor = configuration.maxInDetectionCpuFactor,
-        applicationDetectionBudget = Some(configuration.detectionBudget)
+        configuration = settings.config,
+        maxInFlightCpuFactor = settings.maxInDetectionCpuFactor,
+        applicationDetectionBudget = Some(settings.detectionBudget)
       )
 
-      Future successful ( boundedContext, configuration, detectionModel(catalogProps, configuration) )
+      Future successful ( boundedContext, settings, detectionModel(catalogProps, settings) )
     }
   }
 
   def detectionModel(
     catalogProps: Props,
-    conf: Configuration
+    settings: Settings
   )(
     implicit system: ActorSystem,
     materializer: Materializer
@@ -180,9 +180,9 @@ object Bootstrap extends Instrumented with StrictLogging {
 
       //todo add support to watch FlowShapes
 
-      val scoring = b.add( OutlierScoringModel.scoringGraph( catalogProps, conf) )
+      val scoring = b.add( OutlierScoringModel.scoringGraph( catalogProps, settings) )
       val logUnrecognized = b.add(
-        OutlierScoringModel.logMetric( Logger( LoggerFactory getLogger "Unrecognized" ), conf.plans )
+        OutlierScoringModel.logMetric( Logger( LoggerFactory getLogger "Unrecognized" ), settings.plans )
       )
 
       val termUnrecognized = b.add( Sink.ignore )

@@ -20,7 +20,7 @@ import peds.akka.stream.StreamMonitor
 import spotlight.model.outlier._
 import spotlight.model.timeseries.{TimeSeries, Topic}
 import spotlight.publish.{GraphitePublisher, LogPublisher}
-import spotlight.stream.{Bootstrap, BootstrapContext, Configuration, OutlierScoringModel}
+import spotlight.stream.{Bootstrap, BootstrapContext, Settings, OutlierScoringModel}
 
 
 /**
@@ -74,15 +74,15 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
     scoring: Flow[TimeSeries, Outliers, NotUsed]
   )(
     implicit boundedContext: BoundedContext,
-    configuration: Configuration
+    settings: Settings
   ): Future[Tcp.ServerBinding] = {
     logger.info(
       s"""
         |\nConnection made using the following configuration:
-        |\tTCP-In Buffer Size   : ${configuration.tcpInboundBufferSize}
-        |\tWorkflow Buffer Size : ${configuration.workflowBufferSize}
-        |\tDetect Timeout       : ${configuration.detectionBudget.toCoarsest}
-        |\tplans                : [${configuration.plans.zipWithIndex.map{ case (p,i) => f"${i}%2d: ${p}"}.mkString("\n","\n","\n")}]
+        |\tTCP-In Buffer Size   : ${settings.tcpInboundBufferSize}
+        |\tWorkflow Buffer Size : ${settings.workflowBufferSize}
+        |\tDetect Timeout       : ${settings.detectionBudget.toCoarsest}
+        |\tplans                : [${settings.plans.zipWithIndex.map{ case (p,i) => f"${i}%2d: ${p}"}.mkString("\n","\n","\n")}]
       """.stripMargin
     )
 
@@ -90,7 +90,7 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
     implicit val materializer = ActorMaterializer(
       ActorMaterializerSettings( system ) withSupervisionStrategy Bootstrap.supervisionDecider
     )
-    val address = configuration.sourceAddress
+    val address = settings.sourceAddress
     val connection = Tcp().bind( address.getHostName, address.getPort )
     val sink = Sink.foreach[Tcp.IncomingConnection] { connection =>
       val detectionFlow = {
@@ -109,15 +109,15 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
     ( connection to sink ).run()
   }
 
-  def inlet( implicit boundedContext: BoundedContext, configuration: Configuration ): Flow[ByteString, TimeSeries, NotUsed] = {
+  def inlet( implicit boundedContext: BoundedContext, settings: Settings ): Flow[ByteString, TimeSeries, NotUsed] = {
     import StreamMonitor._
     import WatchPoints._
-    configuration.protocol.framingFlow( configuration.maxFrameLength ).watchSourced( Framing )
-    .via( Flow[ByteString].buffer( configuration.tcpInboundBufferSize, OverflowStrategy.backpressure ).watchFlow( Intake ) ) //todo fix StreamMonitor flow measurement so able to watch .buffer(..) and not need Flow structure
-    .via( configuration.protocol.unmarshalTimeSeriesData )
+    settings.protocol.framingFlow( settings.maxFrameLength ).watchSourced( Framing )
+    .via( Flow[ByteString].buffer( settings.tcpInboundBufferSize, OverflowStrategy.backpressure ).watchFlow( Intake ) ) //todo fix StreamMonitor flow measurement so able to watch .buffer(..) and not need Flow structure
+    .via( settings.protocol.unmarshalTimeSeriesData )
   }
 
-  def outlet( implicit boundedContext: BoundedContext, configuration: Configuration ): Flow[Outliers, ByteString, NotUsed] = {
+  def outlet( implicit boundedContext: BoundedContext, settings: Settings ): Flow[Outliers, ByteString, NotUsed] = {
     val graph = GraphDSL.create() { implicit b =>
       import GraphDSL.Implicits._
       import StreamMonitor._
@@ -127,7 +127,7 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
       val publishBuffer = b.add(
         Flow[Outliers].buffer( 1000, OverflowStrategy.backpressure ).watchFlow( PublishBuffer )
       )
-      val publish = b.add( publishOutliers(configuration.graphiteAddress) )
+      val publish = b.add( publishOutliers( settings.graphiteAddress) )
       val tcpOut = b.add( Flow[Outliers].map{ _ => ByteString() } )
 
       egressBroadcast ~> tcpOut
