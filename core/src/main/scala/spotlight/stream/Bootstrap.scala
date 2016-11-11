@@ -33,6 +33,7 @@ import spotlight.model.timeseries.TimeSeries
 case class BootstrapContext(
   name: String,
   rootTypes: Set[AggregateRootType],
+  system: Option[ActorSystem],
   resources: Map[Symbol, Any],
   startTasks: Set[StartTask],
   timeout: Timeout
@@ -41,6 +42,7 @@ case class BootstrapContext(
 object BootstrapContext extends HasBuilder[BootstrapContext] {
   object Name extends Param[String]
   object RootTypes extends OptParam[Set[AggregateRootType]]( Set.empty[AggregateRootType] )
+  object System extends OptParam[Option[ActorSystem]]( None )
   object Resources extends OptParam[Map[Symbol, Any]]( Map.empty[Symbol, Any] )
   object StartTasks extends OptParam[Set[StartTask]]( Set.empty[StartTask] )
   object Timeout extends OptParam[Timeout]( 30.seconds )
@@ -48,7 +50,15 @@ object BootstrapContext extends HasBuilder[BootstrapContext] {
   // Establish HList <=> BootstrapContext isomorphism
   val gen = Generic[BootstrapContext]
   // Establish Param[_] <=> constructor parameter correspondence
-  override val fieldsContainer = createFieldsContainer( Name :: RootTypes :: Resources :: StartTasks :: Timeout :: HNil )
+  override val fieldsContainer = createFieldsContainer(
+    Name ::
+    RootTypes ::
+    System ::
+    Resources ::
+    StartTasks ::
+    Timeout ::
+    HNil
+  )
 }
 
 
@@ -105,7 +115,8 @@ object Bootstrap extends Instrumented with StrictLogging {
     kleisli[Future, Array[String], SystemConfiguration] { args =>
       Configuration( args ).disjunction map { config =>
         logger info config.usage
-        ( ActorSystem(context.name, config), config )
+        val system = context.system getOrElse ActorSystem( context.name, config )
+        ( system, config )
       } match {
         case \/-( systemConfiguration ) => Future successful systemConfiguration
         case -\/( exs ) => {
