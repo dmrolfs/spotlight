@@ -3,7 +3,7 @@ import sbt._
 
 object Dependencies {
   object peds {
-    val version = "0.4.1"
+    val version = "0.4.2"
     def module( id: String ) = "com.github.dmrolfs" %% s"peds-$id" % version
     def all = Seq( commons, akka, archetype )
 
@@ -14,7 +14,7 @@ object Dependencies {
   }
 
   object demesne {
-    val version = "2.0.1"
+    val version = "2.0.2"
     def module( id: String ) = "com.github.dmrolfs" %% s"demesne-$id" % version
     val core = module( "core" )
     val testkit = module( "testkit" )
@@ -56,7 +56,7 @@ object Dependencies {
   }
 
   object time {
-    val joda = "joda-time" % "joda-time" % "2.9.4"
+    val joda = "joda-time" % "joda-time" % "2.9.6"
     val jodaConvert = "org.joda" % "joda-convert" % "1.8.1"
     val scalaTime = "com.github.nscala-time" %% "nscala-time" % "2.14.0"
     def all = Seq( joda, jodaConvert, scalaTime )

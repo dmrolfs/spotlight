@@ -88,7 +88,8 @@ dockerfile in docker := {
           "/etc/spotlight:" + artifactTargetPath,
           "-Dconfig.resource=${SPOTLIGHT_CONFIG}",
           s"-Djava.library.path=${targetBase}/sigar-bin/",
-          s"-javaagent:${targetBase}/${aspectj.name}"
+          s"-javaagent:${targetBase}/${aspectj.name}",
+          "-c 2552"
         )
 //        entryPoint(
 //          targetBase + "/" + entry.name,

@@ -5,14 +5,14 @@ import sbt._
 import spray.revolver.RevolverPlugin._
 
 object BuildSettings {
-  val VERSION = "2.0.1"
+  val VERSION = "2.0.2"
 
   val defaultBuildSettings = Defaults.coreDefaultSettings ++ Format.settings ++ Revolver.settings ++ Seq(
     version := VERSION,
     organization := "com.github.dmrolfs",
     licenses += ("MIT", url("http://opensource.org/licenses/MIT")),
     crossScalaVersions := Seq( "2.11.8" ),
-    scalaVersion <<= crossScalaVersions { (vs: Seq[String]) => vs.head },
+    scalaVersion := crossScalaVersions{ (vs: Seq[String]) => vs.head }.value,
     // updateOptions := updateOptions.value.withCachedResolution(true),
     scalacOptions ++= Seq(
       // "-encoding",

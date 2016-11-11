@@ -124,7 +124,7 @@ with StrictLogging {
   type Fixture <: AkkaFixture
   type FixtureParam = Fixture
 
-  def testSlug( test: OneArgTest ): String = "Parallel-" + ParallelAkkaSpec.testPosition.incrementAndGet()
+  def testSlug( test: OneArgTest ): String = s"Par-${getClass.safeSimpleName}-${ParallelAkkaSpec.testPosition.incrementAndGet()}"
   def testConfiguration( test: OneArgTest, slug: String ): Config = ParallelAkkaSpec.testConf( systemName = slug )
   def testSystem( test: OneArgTest, config: Config, slug: String ): ActorSystem = ActorSystem( name = slug, config )
   def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture
