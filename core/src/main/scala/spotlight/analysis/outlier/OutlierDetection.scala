@@ -149,6 +149,7 @@ with ActorLogging {
       removeFromOutstanding( aggregator )
       detectionTimer.update( System.nanoTime() - request.startNanos, scala.concurrent.duration.NANOSECONDS )
       updateScore( result )
+      stopIfFullyComplete( isWaitingToComplete )
     }
 
     case timedOut @ OutlierQuorumAggregator.AnalysisTimedOut( topic, plan ) => {

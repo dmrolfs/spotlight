@@ -406,7 +406,7 @@
 ////        grouping = grouping,
 ////        timeout = 5000.millis,
 ////        isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = algos.size, triggerPoint = 1 ),
-////        reduce = Configuration.makeOutlierReducer,
+////        reduce = Settings.makeOutlierReducer,
 ////        planSpecification = ConfigFactory.parseString(
 ////          algos
 ////          .map { a =>

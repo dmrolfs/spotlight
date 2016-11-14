@@ -333,7 +333,7 @@ extends ActorSubscriber with Stash with EnvelopingActor with InstrumentedActor w
 
 
   type PlanIndex = DomainModel.AggregateIndex[String, AnalysisPlanModule.module.TID, OutlierPlan.Summary]
-  lazy val planIndex: PlanIndex = {
+  val planIndex: PlanIndex = {
     boundedContext
     .unsafeModel
     .aggregateIndexFor[String, AnalysisPlanModule.module.TID, OutlierPlan.Summary](
@@ -394,6 +394,14 @@ extends ActorSubscriber with Stash with EnvelopingActor with InstrumentedActor w
   case object Initialize extends P.CatalogMessage
   override def preStart(): Unit = self ! Initialize
 
+  var isWaitingToComplete: Boolean = false
+  private def stopIfFullyComplete(): Unit = {
+    if ( isWaitingToComplete && outstandingRequests == 0 ) {
+      log.info( "PlanCatalog[{}] finished outstanding work. stopping for completion", self.path )
+      context stop self
+    }
+  }
+
 
   override def receive: Receive = LoggingReceive { around( quiescent ) }
 
@@ -421,21 +429,25 @@ extends ActorSubscriber with Stash with EnvelopingActor with InstrumentedActor w
         m
       )
       dispatch( ts, subscriber )( context.dispatcher )
+      stopIfFullyComplete()
     }
 
     case StreamMessage( ts: TimeSeries, _ ) => {
       //todo route unrecogonized ts
       log.warning( "PlanCatalog:ACTIVE[{}]: no plan on record that applies to time-series:[{}]", self.path, ts.topic )
+      stopIfFullyComplete()
     }
 
     case ts: TimeSeries if applicablePlanExists( ts ) => {
       log.debug( "PlanCatalog:ACTIVE[{}] dispatching time series to sender[{}]: [{}]", workId, sender().path.name, ts )
       dispatch( ts, sender() )( context.dispatcher )
+      stopIfFullyComplete()
     }
 
     case ts: TimeSeries => {
       //todo route unrecogonized ts
       log.warning( "PlanCatalog:ACTIVE[{}]: no plan on record that applies to time-series:[{}]", self.path, ts.topic )
+      stopIfFullyComplete()
     }
 
     case result: DetectionResult if !hasWorkInProgress( result.correlationIds ) => {
@@ -448,6 +460,7 @@ extends ActorSubscriber with Stash with EnvelopingActor with InstrumentedActor w
       )
 
       stash()
+      stopIfFullyComplete()
     }
 
     case result @ DetectionResult( outliers, workIds ) => {
@@ -480,6 +493,7 @@ extends ActorSubscriber with Stash with EnvelopingActor with InstrumentedActor w
       requests foreach { case (_, r) => r.subscriber ! result }
       log.debug( "PlanCatalog:ACTIVE unstashing" )
       unstashAll()
+      stopIfFullyComplete()
     }
   }
 
@@ -491,7 +505,8 @@ extends ActorSubscriber with Stash with EnvelopingActor with InstrumentedActor w
 
     case OnComplete => {
       log.info( "PlanCatalog:STREAM[{}] closing on completed stream", self.path.name )
-      context stop self
+      isWaitingToComplete = true
+      stopIfFullyComplete()
     }
 
     case OnError( ex ) => {
