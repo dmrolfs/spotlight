@@ -173,8 +173,6 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
   }
 
 
-
-
   def algorithm: Algorithm
   override lazy val aggregateIdTag: Symbol = algorithm.label
   override lazy val shardName: String = algorithm.label.name
@@ -182,7 +180,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
 
   trait Algorithm {
     val label: Symbol
-    def prepareContext( algorithmContext: Context ): Context = identity( algorithmContext )
+//    def prepareContext( algorithmContext: Context ): Context = identity( algorithmContext )
     def prepareData( algorithmContext: Context ): Seq[DoublePoint]
     def step( point: PointT )( implicit state: State, algorithmContext: Context ): Option[(Boolean, ThresholdBoundary)]
   }
