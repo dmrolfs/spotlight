@@ -26,7 +26,10 @@ object SharedLeveldbStore extends StrictLogging {
       val system = bc.system
       implicit val ec = system.dispatcher
       implicit val timeout = Timeout( 1.minute )
-      val clusterPort = bc.configuration.asInstanceOf[Settings].clusterPort
+      val clusterPort = {
+        val ClusterPortPath = "spotlight.settings.cluster-port"
+        if ( bc.configuration hasPath ClusterPortPath ) bc.configuration.getInt( ClusterPortPath ) else 2551
+      }
       val path = ActorPath fromString s"akka.tcp://${system.name}@127.0.0.1:${clusterPort}/user/${SharedLeveldbStore.Name}"
       val identifyStore = {
         if ( startStore ) {

@@ -18,7 +18,7 @@ import peds.commons.{V, Valid}
 /**
   * Created by rolfsd on 1/12/16.
   */
-trait Settings {
+trait Settings extends LazyLogging {
   def sourceAddress: InetSocketAddress
   def clusterPort: Int
   def maxFrameLength: Int
@@ -33,6 +33,29 @@ trait Settings {
   def workflowBufferSize: Int
 
   def config: Config
+
+  def toConfig: Config = {
+    val settingsConfig = {
+      s"""
+         | spotlight.settings {
+         |   source-address: "${sourceAddress}"
+         |   cluster-port: ${clusterPort}
+         |   max-frame-length: ${maxFrameLength}
+         |   protocol: ${protocol.getClass.getCanonicalName}
+         |   window-duration: ${windowDuration}
+         |   ${graphiteAddress.map{ ga => "graphite-address:\""+ga.toString+"\"" } getOrElse "" }
+         |   detection-budget: ${detectionBudget}
+         |   max-in-detection-cpu-factor: ${maxInDetectionCpuFactor}
+         |   tcp-inbound-buffer-size: ${tcpInboundBufferSize}
+         |   workflow-buffer-size: ${workflowBufferSize}
+         | }
+       """.stripMargin
+    }
+
+    logger.info( "Settings.toConfig base:[{}]", settingsConfig )
+
+    ConfigFactory.parseString( settingsConfig ) withFallback config
+  }
 
   def usage: String = {
     s"""
