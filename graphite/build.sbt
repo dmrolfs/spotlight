@@ -1,6 +1,7 @@
 import Dependencies._
 import sbtassembly.AssemblyPlugin.autoImport.MergeStrategy
 
+enablePlugins(DockerComposePlugin)
 
 name := "spotlight-graphite"
 
@@ -53,6 +54,9 @@ assemblyMergeStrategy in assembly := {
 }
 
 docker <<= ( docker dependsOn assembly )
+
+dockerImageCreationTask := docker.value
+
 
 dockerfile in docker := {
   val artifact = ( assemblyOutputPath in assembly ).value

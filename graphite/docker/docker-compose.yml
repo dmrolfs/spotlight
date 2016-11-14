@@ -1,0 +1,27 @@
+spotlight-graphite:
+  image: dmrolfs/spotlight:2.0.3-SNAPSHOT
+  expose:
+    - 2551
+  ports:
+    - "20004:2005"
+  volumes_from:
+    - leveldb
+  volumes:
+    - /var/log/spotlight:/var/log
+    - /etc/spotlight:/etc/spotlight
+  environment:
+    - SPOTLIGHT_CONFIG=application-prod.config
+
+data:
+  image: gliderlabs/alpine
+  command: echo Data Container
+  user: 999:999
+  labels:
+    spotlight.role: "Volume Container"
+
+leveldb:
+  extends:
+    file: docker-compose.yml
+    service: data
+  volumes:
+    - /var/lib/leveldb/data
