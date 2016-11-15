@@ -136,7 +136,7 @@ object Bootstrap extends Instrumented with StrictLogging {
       val makeBoundedContext = {
         BoundedContext.make(
           key = Symbol(context.name),
-          configuration = settings.config,
+          configuration = settings.toConfig,
           rootTypes = context.rootTypes ++ systemRootTypes,
           userResources = context.resources,
           startTasks = context.startTasks ++ systemStartTasks(settings)
