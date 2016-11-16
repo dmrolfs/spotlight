@@ -199,11 +199,11 @@ object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfig
 
     override def toString: String = {
       s"${ClassUtils.getAbbreviatedName(getClass, 15)}( " +
-        s"id:[${id}]; "+
-        s"movingStatistics:[N:${movingStatistics.getN} mean:${movingStatistics.getMean} stddev:${movingStatistics.getStandardDeviation}]" +
-        s"sampleSize:[${sampleSize}]" +
-//        s"""thresholds:[${thresholds.mkString(",")}]""" +
-        " )"
+      s"id:[${id}] "+
+      s"sampleSize:[${sampleSize}] " +
+      s"movingStatistics:[N:${movingStatistics.getN} m:${movingStatistics.getMean} sd:${movingStatistics.getStandardDeviation} " +
+      s"range:[${movingStatistics.getMin} - ${movingStatistics.getMax}]] " +
+      ")"
     }
   }
 

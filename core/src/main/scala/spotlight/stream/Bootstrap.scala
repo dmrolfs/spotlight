@@ -94,9 +94,11 @@ object Bootstrap extends Instrumented with StrictLogging {
   }
 
   def metricsReporterStartTask( config: Config ): StartTask = StartTask.withUnitTask( "start metrics reporter" ){
+    val MetricsPath = "spotlight.metrics"
+
     Task {
-      if ( config hasPath "spotlight.metrics" ) {
-        val metricsConfig = config getConfig "spotlight.metrics"
+      if ( config hasPath MetricsPath ) {
+        val metricsConfig = config getConfig MetricsPath
         logger.info( "starting metric reporting with config: [{}]", metricsConfig )
         val reporter = Reporter startReporter metricsConfig
         logger.info( "metric reporter: [{}]", reporter )
@@ -113,7 +115,16 @@ object Bootstrap extends Instrumented with StrictLogging {
 
   def systemConfiguration( context: BootstrapContext ): Kleisli[Future, Array[String], SystemSettings] = {
     kleisli[Future, Array[String], SystemSettings] { args =>
-      Settings( args ).disjunction map { settings =>
+      val spotlightConfig =
+      logger.info(
+        "spotlight.config:[{}] URL:[{}]",
+        System getProperty "spotlight.config",
+        Thread.currentThread()
+          .getContextClassLoader.asInstanceOf[java.net.URLClassLoader]
+          .findResource( System getProperty "spotlight.config" )
+      )
+
+      Settings( args, config = com.typesafe.config.ConfigFactory.load() ).disjunction map { settings =>
         logger info settings.usage
         val system = context.system getOrElse ActorSystem( context.name, settings.config )
         ( system, settings )

@@ -1,6 +1,7 @@
 import Dependencies._
 import sbtassembly.AssemblyPlugin.autoImport.MergeStrategy
 
+enablePlugins(DockerComposePlugin)
 
 name := "spotlight-graphite"
 
@@ -54,12 +55,15 @@ assemblyMergeStrategy in assembly := {
 
 docker <<= ( docker dependsOn assembly )
 
+dockerImageCreationTask := docker.value
+
 dockerfile in docker := {
   val artifact = ( assemblyOutputPath in assembly ).value
   val targetBase = "/app"
   val artifactTargetPath = s"${targetBase}/${artifact.name}"
   val coreosPath = baseDirectory.value / ".." / "coreos"
-  val entryScript = ( coreosPath ** "spotlight.sh" ).get.headOption
+  val dockerPath = baseDirectory.value / "docker"
+  val entryScript = ( dockerPath ** "spotlight.sh" ).get.headOption
   val aspectjArtifactName = ( coreosPath ** "aspectjweaver-*.jar" ).get.headOption
   val sigarBinary = ( coreosPath ** "libsigar-amd64-linux.so" ).get.headOption
   val mainclass = mainClass.in( Compile, run ).value.getOrElse( sys.error("Expected exactly one main class") )
@@ -70,6 +74,9 @@ dockerfile in docker := {
     run( "apt-get", "update" )
     run( "apt-get", "-y", "install", "tmux" )
     copy( artifact, artifactTargetPath )
+
+    env( ("LOG_HOME", "/var/log"), ("SPOTLIGHT_CONFIG", "application-prod.conf") )
+    expose( 22, 2004, 2552 )
 
     val aspectAndSigar = for {
       aspectj <- aspectjArtifactName
@@ -86,10 +93,8 @@ dockerfile in docker := {
           s"${targetBase}/${entry.name}",
           mainclass,
           "/etc/spotlight:" + artifactTargetPath,
-          "-Dconfig.resource=${SPOTLIGHT_CONFIG}",
           s"-Djava.library.path=${targetBase}/sigar-bin/",
-          s"-javaagent:${targetBase}/${aspectj.name}",
-          "-c 2552"
+          s"-javaagent:${targetBase}/${aspectj.name}"
         )
 //        entryPoint(
 //          targetBase + "/" + entry.name,
@@ -132,13 +137,6 @@ dockerfile in docker := {
 //        )
 //      }
     }
-
-    env( "LOG_HOME", "/var/log" )
-//    env( "CONFIG_HOME", "/etc/spotlight" )
-    env( "SPOTLIGHT_CONFIG", "application-prod.conf" )
-    expose( 2004 )
-    expose( 2552 )
-    expose( 22 )
   }
 }
 

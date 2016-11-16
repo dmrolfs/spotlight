@@ -1,5 +1,7 @@
 addSbtPlugin("se.marcuslonnberg" % "sbt-docker" % "latest.integration")
 
+addSbtPlugin("com.tapad" % "sbt-docker-compose" % "1.0.13")
+
 //addSbtPlugin( "com.typesafe.sbt" % "sbt-pgp" % "latest.integration" )
 
 addSbtPlugin( "org.allenai.plugins" % "allenai-sbt-release" % "2014.11.06-0" )
