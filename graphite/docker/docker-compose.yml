@@ -1,16 +1,17 @@
 spotlight-graphite:
-  image: dmrolfs/spotlight:2.0.3-SNAPSHOT
+  image: dmrolfs/spotlight-graphite:latest
   expose:
-    - 2551
+    - 22
+    - 2552
   ports:
-    - "20004:2005"
+    - "20004:2004"
   volumes_from:
     - leveldb
   volumes:
-    - /var/log/spotlight:/var/log
-    - /etc/spotlight:/etc/spotlight
+    - /Users/rolfsd/spotlight/log:/var/log
+    - /Users/rolfsd/spotlight/etc:/etc/spotlight
   environment:
-    - SPOTLIGHT_CONFIG=application-prod.config
+    - SPOTLIGHT_CONFIG=application-prod.conf
 
 data:
   image: gliderlabs/alpine
@@ -24,4 +25,5 @@ leveldb:
     file: docker-compose.yml
     service: data
   volumes:
-    - /var/lib/leveldb/data
+    - /Users/rolfsd/spotlight/data/journal:/var/lib/spotlight/data/leveldb/shared-journal
+    - /Users/rolfsd/spotlight/data/snapshots:/var/lib/spotlight/data/leveldb/snapshots

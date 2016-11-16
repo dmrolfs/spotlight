@@ -59,9 +59,10 @@ object SimpleMovingAverageAlgorithm extends AlgorithmModule with AlgorithmModule
     override def canEqual( that: Any ): Boolean = that.isInstanceOf[State]
     override def toString: String = {
       s"${ClassUtils.getAbbreviatedName(getClass, 15)}( " +
-        s"id:[${id}]; "+
-        s"statistics:[${statistics}]; "+
-      " )"
+      s"id:[${id}] " +
+      s"statistics:[N=${statistics.getN} m=${statistics.getMean} sd=${statistics.getStandardDeviation} " +
+      s"range:[${statistics.getMin} - ${statistics.getMax}}]]; "+
+      ")"
     }
   }
 

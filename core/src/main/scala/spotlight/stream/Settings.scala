@@ -73,7 +73,7 @@ trait Settings extends LazyLogging {
   }
 }
 
-object Settings {
+object Settings extends LazyLogging {
   type Reload = () => V[Settings]
 
   def reloader(
@@ -105,6 +105,7 @@ object Settings {
 
   private def checkUsage( args: Array[String] ): Valid[UsageSettings] = {
     val parser = UsageSettings.makeUsageConfig
+    logger.info( "Settings args:[{}]", args )
     parser.parse( args, UsageSettings.zero ) match {
       case Some( settings ) => settings.successNel
       case None => Validation.failureNel( UsageConfigurationError(parser.usage) )
