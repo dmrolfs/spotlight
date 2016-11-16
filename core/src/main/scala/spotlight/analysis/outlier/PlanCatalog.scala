@@ -396,9 +396,19 @@ extends ActorSubscriber with Stash with EnvelopingActor with InstrumentedActor w
 
   var isWaitingToComplete: Boolean = false
   private def stopIfFullyComplete(): Unit = {
-    if ( isWaitingToComplete && outstandingRequests == 0 ) {
-      log.info( "PlanCatalog[{}] finished outstanding work. stopping for completion", self.path )
-      context stop self
+    if ( isWaitingToComplete ) {
+      log.info(
+        "PlanCatalog[{}] waiting to complete on [{}] outstanding work: [{}]",
+        self.path.name,
+        outstandingRequests,
+        knownWork.mkString( ", " )
+      )
+
+      if ( outstandingRequests == 0 ) {
+        log.info( "PlanCatalog[{}] is closing upon work completion...", self.path.name )
+//todo        context stop self
+        log.error( "PlanCatalog[{}] SIMULATED closing upon completion", self.path.name )
+      }
     }
   }
 

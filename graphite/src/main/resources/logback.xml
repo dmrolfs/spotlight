@@ -48,6 +48,22 @@
     </triggeringPolicy>
   </appender>
 
+  <appender name="CONFIG_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+    <file>${LOG_HOME}/config-render.log</file>
+    <append>false</append>
+    <encoder>
+      <pattern>%msg%n</pattern>
+    </encoder>
+    <rollingPolicy class="ch.qos.logback.core.rolling.FixedWindowRollingPolicy">
+      <fileNamePattern>${LOG_HOME}/config-render-%i.log.gz</fileNamePattern>
+      <!--<cleanHistoryOnStart>true</cleanHistoryOnStart>-->
+      <minIndex>1</minIndex>
+      <maxIndex>3</maxIndex>
+    </rollingPolicy>
+    <triggeringPolicy class="ch.qos.logback.core.rolling.SizeBasedTriggeringPolicy">
+      <maxFileSize>1GB</maxFileSize>
+    </triggeringPolicy>
+  </appender>
 
   <appender name="OUTLIERS_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
     <file>${LOG_HOME}/outliers.log</file>
@@ -162,9 +178,9 @@
     <appender-ref ref="UNRECOGNIZED_METRICS_FILE" />
   </logger>
 
-  <!--<logger name="Training" level="DEBUG" additivity="false">-->
-    <!--<appender-ref ref="TRAINING_FILE" />-->
-  <!--</logger>-->
+  <logger name="Config" level="DEBUG" additivity="false">
+    <appender-ref ref="CONFIG_FILE" />
+  </logger>
 
   <logger name="StreamMonitor" level="DEBUG" additivity="false">
     <appender-ref ref="STREAM_MONITOR_FILE" />
