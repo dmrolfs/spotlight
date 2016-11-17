@@ -5,10 +5,11 @@ import scala.concurrent.duration._
 import scala.util.matching.Regex
 import akka.{Done, NotUsed}
 import akka.actor.{ActorLogging, ActorRef, ActorSystem, Props, Stash}
+import akka.agent.Agent
 import akka.event.LoggingReceive
 import akka.stream.actor.ActorSubscriberMessage.{OnComplete, OnError, OnNext}
 import akka.stream.{FlowShape, Materializer}
-import akka.stream.actor.{ActorSubscriber, MaxInFlightRequestStrategy, RequestStrategy}
+import akka.stream.actor.{ActorSubscriber, ActorSubscriberMessage, MaxInFlightRequestStrategy, RequestStrategy}
 import akka.stream.scaladsl.{Flow, GraphDSL, Keep, Sink, Source}
 import akka.util.Timeout
 import com.codahale.metrics.{Metric, MetricFilter}
@@ -23,8 +24,8 @@ import peds.akka.envelope.pattern.ask
 import peds.akka.metrics.InstrumentedActor
 import peds.akka.stream.StreamMonitor._
 import peds.commons.log.Trace
-import demesne.{BoundedContext, DomainModel}
 import peds.akka.stream.CommonActorPublisher
+import demesne.{BoundedContext, DomainModel}
 import spotlight.analysis.outlier.OutlierDetection.DetectionResult
 import spotlight.model.outlier.{IsQuorum, OutlierPlan, Outliers, ReduceOutliers}
 import spotlight.model.timeseries.{TimeSeries, Topic}
@@ -81,6 +82,8 @@ object PlanCatalog extends LazyLogging {
         .run()
       }
 
+      subscribers send { _ + outletRef }
+
       def flowLog[T]( label: String ): FlowShape[T, T] = {
         b.add( Flow[T] map { m => logger.debug( "PlanCatalog:FLOW: {}: [{}]", label, m.toString); m } )
       }
@@ -108,6 +111,8 @@ object PlanCatalog extends LazyLogging {
 
     Flow.fromGraph( g ).named( "PlanCatalogFlow" ).watchFlow( Symbol("CatalogDetection") )
   }
+
+  val subscribers: Agent[Set[ActorRef]] = Agent( Set.empty[ActorRef] )( scala.concurrent.ExecutionContext.global )
 
   private[outlier] case class StreamMessage[P]( payload: P, subscriber: ActorRef )
 
@@ -405,8 +410,22 @@ extends ActorSubscriber with Stash with EnvelopingActor with InstrumentedActor w
       )
 
       if ( outstandingRequests == 0 ) {
-        log.info( "PlanCatalog[{}] is closing upon work completion...", self.path.name )
-//todo        context stop self
+        log.info(
+          "PlanCatalog[{}] is closing upon work completion...will notify {} subscribers",
+          self.path.name,
+          PlanCatalog.subscribers.get().size
+        )
+
+        import scala.concurrent.ExecutionContext.Implicits.global
+        PlanCatalog.subscribers.future().foreach { subs =>
+          subs foreach { s =>
+            log.debug( "propagating OnComplete to subscriber:[{}]", s.path.name )
+            s ! ActorSubscriberMessage.OnComplete
+          }
+        }
+
+        context stop self
+
         log.error( "PlanCatalog[{}] SIMULATED closing upon completion", self.path.name )
       }
     }
