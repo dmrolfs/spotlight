@@ -115,13 +115,12 @@ object Bootstrap extends Instrumented with StrictLogging {
 
   def systemConfiguration( context: BootstrapContext ): Kleisli[Future, Array[String], SystemSettings] = {
     kleisli[Future, Array[String], SystemSettings] { args =>
-      val spotlightConfig =
+      def spotlightConfig: String = Option( System getProperty "spotlight.config" ) getOrElse { "application.conf" }
+
       logger.info(
-        "spotlight.config:[{}] URL:[{}]",
-        System getProperty "spotlight.config",
-        Thread.currentThread()
-          .getContextClassLoader.asInstanceOf[java.net.URLClassLoader]
-          .findResource( System getProperty "spotlight.config" )
+        "spotlight.config: [{}] @ URL:[{}]",
+        spotlightConfig,
+        scala.util.Try { Thread.currentThread.getContextClassLoader.getResource(spotlightConfig) }
       )
 
       Settings( args, config = com.typesafe.config.ConfigFactory.load() ).disjunction map { settings =>

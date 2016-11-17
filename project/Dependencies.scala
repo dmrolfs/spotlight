@@ -89,7 +89,7 @@ object Dependencies {
     val core = module( "core" )
     val graphite = module( "graphite" )
     val metricsScala = "nl.grons" %% "metrics-scala" % "3.5.5_a2.3"
-    val hdrhistogram = "org.mpierce.metrics.reservoir" % "hdrhistogram-metrics-reservoir" % "1.1.1"
+    val hdrhistogram = "org.mpierce.metrics.reservoir" % "hdrhistogram-metrics-reservoir" % "1.1.2"
 
     object kamon {
       val version = "0.6.2"
