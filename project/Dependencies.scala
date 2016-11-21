@@ -14,7 +14,7 @@ object Dependencies {
   }
 
   object demesne {
-    val version = "2.0.4"
+    val version = "2.0.5-SNAPSHOT"
     def module( id: String ) = "com.github.dmrolfs" %% s"demesne-$id" % version
     val core = module( "core" )
     val testkit = module( "testkit" )
@@ -107,6 +107,7 @@ object Dependencies {
   }
 
   object facility {
+    val json4sJackson = "org.json4s" %% "json4s-jackson" % "3.4.2"
     val uuid = "com.eaio.uuid" % "uuid" % "3.4"
     val config = "com.typesafe" % "config" % "1.3.1"
 //    val pureConfig = "com.github.melrief" %% "pureconfig" % "0.1.5"

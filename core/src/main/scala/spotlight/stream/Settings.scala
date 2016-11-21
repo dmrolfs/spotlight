@@ -74,7 +74,76 @@ trait Settings extends LazyLogging {
 }
 
 object Settings extends LazyLogging {
+  val SettingsPathRoot = "spotlight.settings."
+
+//  def sourceAddressFrom( c: Config ): Option[InetSocketAddress] = {
+//    val Path = SettingsPathRoot + "source-address"
+//    if ( c hasPath Path ) {
+//      //todo look into InetSocketAddress to reverse string into object
+////      val addr = c getString Path
+////      Some( InetSocketAddress.createUnresolved(addr, 0) )
+//      ???
+//    } else {
+//      None
+//    }
+//  }
+
+  def clusterPortFrom( c: Config ): Option[Int] = {
+    val Path = SettingsPathRoot + "cluster-port"
+    if ( c hasPath Path ) Some( c getInt Path ) else None
+  }
+
+  def maxFrameLengthFrom( c: Config ): Option[Int] = {
+    val Path = SettingsPathRoot + "max-frame-length"
+    if ( c hasPath Path ) Some( c getInt Path ) else None
+  }
+
+//  def protocolFrom( c: Config ): Option[GraphiteSerializationProtocol] = {
+//    val Path = SettingsPathRoot + "protocol"
+//    //todo use reflection to load and instantiate object from class name
+//    if ( c hasPath Path ) Some( c getInt Path ) else None
+//  }
+
+  def windowDurationFrom( c: Config ): Option[FiniteDuration] = {
+    val Path = SettingsPathRoot + "window-duration"
+    if ( c hasPath Path ) Some( FiniteDuration(c.getDuration(Path, NANOSECONDS), NANOSECONDS) ) else None
+  }
+
+  //  def graphiteAddressFrom( c: Config ): Option[InetSocketAddress] = {
+  //    val Path = SettingsPathRoot + "graphite-address"
+  //    if ( c hasPath Path ) {
+  //      //todo look into InetSocketAddress to reverse string into object
+  ////      val addr = c getString Path
+  ////      Some( InetSocketAddress.createUnresolved(addr, 0) )
+  //      ???
+  //    } else {
+  //      None
+  //    }
+  //  }
+
+  def detectionBudgetFrom( c: Config ): Option[FiniteDuration] = {
+    val Path = SettingsPathRoot + "detection-budget"
+    if ( c hasPath Path ) Some( FiniteDuration(c.getDuration(Path, NANOSECONDS), NANOSECONDS) ) else None
+  }
+
+  def maxInDetectionCpuFactorFrom( c: Config ): Option[Double] = {
+    val Path = SettingsPathRoot + "max-in-detection-cpu-factor"
+    if ( c hasPath Path ) Some( c getDouble Path ) else None
+  }
+
+  def tcpInboundBufferSizeFrom( c: Config ): Option[Int] = {
+    val Path = SettingsPathRoot + "tcp-inbound-buffer-size"
+    if ( c hasPath Path ) Some( c getInt Path ) else None
+  }
+
+  def workflowBufferSizeFrom( c: Config ): Option[Int] = {
+    val Path = SettingsPathRoot + "workflow-buffer-size"
+    if ( c hasPath Path ) Some( c getInt Path ) else None
+  }
+
+
   type Reload = () => V[Settings]
+
 
   def reloader(
     args: Array[String]
@@ -363,74 +432,6 @@ object Settings extends LazyLogging {
 
       ( effectiveBudget( detectionBudget, 0.8D ), algorithms )
     }
-
-
-
-//    override def getEnumList[T <: Enum[T]]( enumClass: Class[T], path: String ): util.List[T] = {
-//      underlying.getEnumList[T]( enumClass, path )
-//    }
-//    override def getEnum[T <: Enum[T]]( enumClass: Class[T], path: String ): T = underlying.getEnum[T]( enumClass, path )
-//    override def getAnyRefList(s: String) = underlying.getAnyRefList(s)
-//    override def getIntList(s: String): java.util.List[Integer] = underlying.getIntList(s)
-//    override def getValue(s: String): ConfigValue = underlying.getValue(s)
-//    override def root(): ConfigObject = underlying.root()
-//    override def getAnyRef(s: String): AnyRef = underlying.getAnyRef(s)
-//    override def getConfigList(s: String): java.util.List[_ <: Config] = underlying.getConfigList(s)
-//    override def getIsNull(s: String): Boolean = underlying.getIsNull(s)
-//    override def withFallback(configMergeable: ConfigMergeable): Config = underlying.withFallback(configMergeable)
-//    override def checkValid(config: Config, strings: String*): Unit = underlying.checkValid(config, strings:_*)
-//    override def resolveWith(config: Config): Config = underlying.resolveWith(config)
-//    override def resolveWith(config: Config, configResolveOptions: ConfigResolveOptions): Config = {
-//      underlying.resolveWith(config, configResolveOptions )
-//    }
-//    override def getList(s: String): ConfigList = underlying.getList(s)
-//    override def getDouble(s: String): Double = underlying.getDouble(s)
-//    override def getLongList(s: String): java.util.List[java.lang.Long] = underlying.getLongList(s)
-//    override def getObjectList(s: String): java.util.List[_ <: ConfigObject] = underlying.getObjectList(s)
-//    override def withOnlyPath(s: String): Config = underlying.withOnlyPath(s)
-//    override def entrySet(): java.util.Set[java.util.Map.Entry[String, ConfigValue]] = underlying.entrySet()
-//    override def getDoubleList(s: String): java.util.List[java.lang.Double] = underlying.getDoubleList(s)
-//    override def hasPathOrNull(s: String): Boolean = underlying.hasPathOrNull(s)
-//    override def hasPath(s: String): Boolean = underlying.hasPath(s)
-//    override def getLong(s: String): Long = underlying.getLong(s)
-//    override def getMemorySizeList(s: String): java.util.List[ConfigMemorySize] = underlying.getMemorySizeList(s)
-//    override def getBooleanList(s: String): java.util.List[java.lang.Boolean] = underlying.getBooleanList(s)
-//    override def getBytesList(s: String): java.util.List[java.lang.Long] = underlying.getBytesList(s)
-//    override def getBoolean(s: String): Boolean = underlying.getBoolean(s)
-//    override def getConfig(s: String): Config = underlying.getConfig(s)
-//    override def getObject(s: String): ConfigObject = underlying.getObject(s)
-//    override def getStringList(s: String): java.util.List[String] = underlying.getStringList(s)
-//    override def getNumberList(s: String): java.util.List[Number] = underlying.getNumberList(s)
-//    override def atPath(s: String): Config = underlying.atPath(s)
-//    override def isResolved: Boolean = underlying.isResolved
-//    override def isEmpty: Boolean = underlying.isEmpty
-//    override def atKey(s: String): Config = underlying.atKey(s)
-//    override def getDuration(s: String, timeUnit: TimeUnit): Long = underlying.getDuration(s, timeUnit)
-//    override def getDuration( path: String ): Duration = underlying getDuration path
-//    override def withValue(s: String, configValue: ConfigValue): Config = underlying.withValue(s, configValue)
-//    override def getInt(s: String): Int = underlying.getInt(s)
-//    override def resolve(): Config = underlying.resolve()
-//    override def resolve(configResolveOptions: ConfigResolveOptions): Config = underlying.resolve(configResolveOptions)
-//    override def getNumber(s: String): Number = underlying.getNumber(s)
-//    override def getDurationList(s: String, timeUnit: TimeUnit): java.util.List[java.lang.Long] = underlying.getDurationList(s, timeUnit)
-//    override def getDurationList(s: String): java.util.List[Duration] = underlying getDurationList s
-//    override def origin(): ConfigOrigin = underlying.origin()
-//    override def withoutPath(s: String): Config = underlying.withoutPath(s)
-//    override def getMemorySize(s: String): ConfigMemorySize = underlying.getMemorySize(s)
-//    override def getBytes(s: String): java.lang.Long = underlying.getBytes(s)
-//    override def getString(s: String): String = underlying.getString(s)
-//
-//    @deprecated( "replaced by {@link #getDurationList(String, TimeUnit)}", "1.1" )
-//    override def getNanoseconds(s: String): java.lang.Long = underlying.getNanoseconds(s)
-//
-//    @deprecated( "replaced by {@link #getDurationList(String, TimeUnit)}", "1.1" )
-//    override def getNanosecondsList(s: String): java.util.List[java.lang.Long] = underlying.getNanosecondsList(s)
-//
-//    @deprecated( "replaced by {@link #getDurationList(String, TimeUnit)}", "1.1" )
-//    override def getMilliseconds(s: String): java.lang.Long = underlying.getMilliseconds(s)
-//
-//    @deprecated( "replaced by {@link #getDurationList(String, TimeUnit)}", "1.1" )
-//    override def getMillisecondsList(s: String): java.util.List[java.lang.Long] = underlying.getMillisecondsList(s)
   }
 
   case class UsageConfigurationError private[stream]( usage: String ) extends IllegalArgumentException( usage )

@@ -34,7 +34,7 @@ object DetectionAlgorithmRouter extends LazyLogging {
   val ContextKey = 'DetectionAlgorithmRouter
 
   def startTask( configuration: Config )( implicit ec: ExecutionContext ): StartTask = {
-    StartTask.withBoundTask( "load user algorithms" ){ bc: BoundedContext =>
+    StartTask.withBoundUnitTask( "load user algorithms" ){ bc: BoundedContext =>
       val t = {
         for {
           algoRoots <- loadAlgorithms( bc, configuration )
@@ -61,10 +61,16 @@ object DetectionAlgorithmRouter extends LazyLogging {
   }
 
 
-  def unsafeRootTypeFor( algorithm: Symbol ): Option[AggregateRootType] = algorithmRootTypes.get() get algorithm
+  def unsafeRootTypeFor( algorithm: Symbol ): Option[AggregateRootType] = {
+    logger.debug( "DetectionAlgorithmRouter unsafe algorithmRootTypes:[{}]", algorithmRootTypes.get.keySet )
+    algorithmRootTypes.get() get algorithm
+  }
 
   def futureRootTypeFor( algorithm: Symbol )( implicit ec: ExecutionContext ): Future[Option[AggregateRootType]] = {
-    algorithmRootTypes.future() map { _ get algorithm }
+    algorithmRootTypes.future() map { rootTable =>
+      logger.debug( "DetectionAlgorithmRouter safe algorithmRootTypes:[{}]", rootTable.keySet )
+      rootTable get algorithm
+    }
   }
 
   private lazy val algorithmRootTypes: Agent[Map[Symbol, AggregateRootType]] = {
@@ -196,7 +202,12 @@ class DetectionAlgorithmRouter extends Actor with EnvelopingActor with Instrumen
   provider: DetectionAlgorithmRouter.Provider =>
 
   var routingTable: Map[Symbol, ActorRef] = provider.initialRoutingTable
-  log.debug( "DetectionAlgorithmRouter[{}] created supporting algorithms:[{}]", routingTable.keys.mkString(",") )
+  log.info( "DetectionAlgorithmRouter[{}] created supporting algorithms:[{}]", routingTable.keys.mkString(",") )
+
+  def contains( algorithm: Symbol ): Boolean = {
+    log.info( "DetectionAlgorithmRouter[{}] looking for {} in algorithms:[{}]", algorithm, routingTable.keys.mkString(",") )
+    routingTable contains algorithm
+  }
 
   import DetectionAlgorithmRouter.{ RegisterDetectionAlgorithm, AlgorithmRegistered }
 
@@ -208,14 +219,14 @@ class DetectionAlgorithmRouter extends Actor with EnvelopingActor with Instrumen
   }
 
   val routing: Receive = {
-    case m: DetectUsing if routingTable contains m.algorithm => routingTable( m.algorithm ) forwardEnvelope m
+    case m: DetectUsing if contains( m.algorithm ) => routingTable( m.algorithm ) forwardEnvelope m
   }
 
   override val receive: Receive = LoggingReceive{ around( registration orElse routing ) }
 
   override def unhandled( message: Any ): Unit = {
     message match {
-      case m: DetectUsing => log.error( s"cannot route unregistered algorithm [${m.algorithm}]" )
+      case m: DetectUsing => log.error( s"cannot route unregistered algorithm [${m.algorithm}] routing-table:${routingTable}" )
       case m => log.error( s"ROUTER UNAWARE OF message: [{}]\nrouting table:{}", m, routingTable.toSeq.mkString("\n",",","\n") ) // super.unhandled( m )
     }
   }
