@@ -27,7 +27,7 @@ object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfig
   private val trace = Trace[GrubbsAlgorithm.type]
 
   override lazy val algorithm: Algorithm = new Algorithm {
-    override val label: Symbol = 'Grubbs
+    override val label: Symbol = 'grubbs
 
     override def prepareData( algorithmContext: Context ): Seq[DoublePoint] = {
       algorithmContext.tailAverage()( algorithmContext.data )
