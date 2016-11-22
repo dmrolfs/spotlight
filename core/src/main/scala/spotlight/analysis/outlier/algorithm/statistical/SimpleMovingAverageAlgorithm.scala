@@ -16,7 +16,7 @@ import spotlight.model.timeseries._
   */
 object SimpleMovingAverageAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfiguration { outer =>
   override lazy val algorithm: Algorithm = new Algorithm {
-    override val label: Symbol = 'SimpleMovingAverage
+    override val label: Symbol = Symbol( "simple-moving-average" )
 
     override def prepareData( algorithmContext: Context ): Seq[DoublePoint] = {
       algorithmContext.tailAverage()( algorithmContext.data )

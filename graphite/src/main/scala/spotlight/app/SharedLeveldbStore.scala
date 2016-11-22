@@ -26,7 +26,7 @@ object SharedLeveldbStore extends StrictLogging {
 
   def start( createActor: Boolean = false ): StartTask = {
     val actionLabel = if ( createActor ) "create" else "connect"
-    StartTask.withBoundTask( s"${actionLabel} shared LevelDB ${Name}" ) { implicit bc: BoundedContext =>
+    StartTask.withBoundUnitTask( s"${actionLabel} shared LevelDB ${Name}" ) { implicit bc: BoundedContext =>
       val clusterPort = {
         val ClusterPortPath = "spotlight.settings.cluster-port"
         if ( bc.configuration hasPath ClusterPortPath ) bc.configuration.getInt( ClusterPortPath ) else 2551

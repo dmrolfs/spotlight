@@ -24,7 +24,7 @@ object PastPeriodAverageAlgorithm extends AlgorithmModule with AlgorithmModule.M
   private val trace = Trace[PastPeriodAverageAlgorithm.type]
 
   override def algorithm: Algorithm = new Algorithm {
-    override val label: Symbol = 'PastPeriod
+    override val label: Symbol = Symbol( "past-period" )
 
     override def prepareData( algorithmContext: Context ): Seq[DoublePoint] = {
       algorithmContext.tailAverage()( algorithmContext.data )

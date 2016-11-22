@@ -37,14 +37,11 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
     val PlanBuffer = Symbol( "plan.buffer" )
     val ScoringPlanned = Symbol("scoring.planned")
     val ScoringUnrecognized = Symbol("scoring.unrecognized")
-//    val ScoringBatch = Symbol("scoring.batch")
-//    val ScoringAnalysisBuffer = Symbol("scoring.analysisBuffer")
-//    val ScoringGrouping = Symbol("scoring.grouping")
-//    val ScoringDetect = Symbol("scoring.detect")
+    val Catalog = 'catalog
   }
 
   def scoringGraph(
-    catalogProps: Props,
+    catalogProxyProps: Props,
     settings: Settings
   )(
     implicit system: ActorSystem,
@@ -58,10 +55,10 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
       val blockPriors = b.add( Flow[TimeSeries].filter{ ts => !isOutlierReport(ts) } )
       val broadcast = b.add( Broadcast[TimeSeries](outputPorts = 2, eagerCancel = false) )
 
-      val watchPlanned = Flow[TimeSeries].map{ identity }.watchConsumed( WatchPoints.ScoringPlanned )
+      val watchPlanned = Flow[TimeSeries].map{ identity }.watchFlow( WatchPoints.ScoringPlanned )
       val passPlanned = b.add( Flow[TimeSeries].filter{ isPlanned( _, settings.plans ) }.via( watchPlanned ) )
 
-      val watchUnrecognized = Flow[TimeSeries].map{ identity }.watchConsumed( WatchPoints.ScoringUnrecognized )
+      val watchUnrecognized = Flow[TimeSeries].map{ identity }.watchFlow( WatchPoints.ScoringUnrecognized )
       val passUnrecognized = b.add(
         Flow[TimeSeries].filter{ !isPlanned( _, settings.plans ) }.via( watchUnrecognized )
       )
@@ -70,7 +67,7 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
 
       val buffer = b.add( Flow[TimeSeries].buffer( 1000, OverflowStrategy.backpressure ).watchFlow( WatchPoints.PlanBuffer ) )
 
-      val detect = b.add( PlanCatalog.flow( catalogProps ) )
+      val detect = b.add( PlanCatalog.flow( catalogProxyProps ).watchFlow(WatchPoints.Catalog) )
 
       logMetrics ~> blockPriors ~> broadcast ~> passPlanned ~> regulator ~> buffer ~> detect
                                    broadcast ~> passUnrecognized
