@@ -242,6 +242,7 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
         case EntityMessages.Add( IdType(targetId), info ) if targetId == aggregateId => {
           persist( EntityMessages.Added(targetId, info) ) { e =>
             acceptAndPublish( e )
+            log.debug( "AnalysisPlanModule[{}]: notifying [{}] of {}", state.name, sender().path.name, e )
             sender() !+ e  // per akka docs: safe to use sender() here
           }
         }

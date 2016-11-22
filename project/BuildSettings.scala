@@ -5,7 +5,7 @@ import sbt._
 import spray.revolver.RevolverPlugin._
 
 object BuildSettings {
-  val VERSION = "2.0.4-SNAPSHOT"
+  val VERSION = "2.0.4"
 
   val defaultBuildSettings = Defaults.coreDefaultSettings ++ Format.settings ++ Revolver.settings ++ Seq(
     version := VERSION,
@@ -41,12 +41,10 @@ object BuildSettings {
     conflictManager := ConflictManager.latestRevision,
     dependencyOverrides := Dependencies.defaultDependencyOverrides,
 
-    // AllenAi Public Resolver
     resolvers += "Typesafe Repository" at "http://repo.typesafe.com/typesafe/releases/",
     resolvers += "krasserm at bintray" at "http://dl.bintray.com/krasserm/maven",
     resolvers += "omen-bintray" at "http://dl.bintray.com/omen/maven",
     resolvers += "dnvriend at bintray" at "http://dl.bintray.com/dnvriend/maven",
-    // Factorie Resolver
     resolvers += "IESL Releases" at "http://dev-iesl.cs.umass.edu/nexus/content/groups/public",
     resolvers += "spray repo" at "http://repo.spray.io",
     resolvers += "Typesafe releases" at "http://repo.typesafe.com/typesafe/releases",

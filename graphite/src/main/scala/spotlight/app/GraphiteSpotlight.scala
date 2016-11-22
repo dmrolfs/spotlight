@@ -1,13 +1,15 @@
 package spotlight.app
 
 import java.net.{InetSocketAddress, Socket}
+
 import scala.concurrent.Future
 import scala.concurrent.duration._
 import scala.util.{Failure, Success}
-import akka.NotUsed
+import akka.{Done, NotUsed}
 import akka.actor.ActorRef
 import akka.stream.scaladsl._
 import akka.stream._
+import akka.stream.scaladsl.Tcp.{IncomingConnection, ServerBinding}
 import akka.util.{ByteString, Timeout}
 import org.slf4j.LoggerFactory
 import com.typesafe.scalalogging.{Logger, StrictLogging}
@@ -20,7 +22,7 @@ import peds.akka.stream.StreamMonitor
 import spotlight.model.outlier._
 import spotlight.model.timeseries.{TimeSeries, Topic}
 import spotlight.publish.{GraphitePublisher, LogPublisher}
-import spotlight.stream.{Bootstrap, BootstrapContext, Settings, OutlierScoringModel}
+import spotlight.stream.{Bootstrap, BootstrapContext, OutlierScoringModel, Settings}
 
 
 /**
@@ -53,7 +55,7 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
     .run( args )
     .foreach { case (boundedContext, configuration, flow) =>
       execute( flow )( boundedContext, configuration ) onComplete {
-        case Success(b) => logger.info( "Server started, listening on: " + b.localAddress )
+        case Success(b) => logger.info( "Server bindings have completed" )
 
         case Failure( ex ) => {
           logger.error( "Server could not bind to source", ex )
@@ -75,10 +77,11 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
   )(
     implicit boundedContext: BoundedContext,
     settings: Settings
-  ): Future[Tcp.ServerBinding] = {
+//  ): Future[Tcp.ServerBinding] = {
+  ): Future[Done] = {
     logger.info(
       s"""
-        |\nConnection made using the following configuration:
+        |\nServer bound using the following configuration:
         |\tTCP-In Buffer Size   : ${settings.tcpInboundBufferSize}
         |\tWorkflow Buffer Size : ${settings.workflowBufferSize}
         |\tDetect Timeout       : ${settings.detectionBudget.toCoarsest}
@@ -91,8 +94,10 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
       ActorMaterializerSettings( system ) withSupervisionStrategy Bootstrap.supervisionDecider
     )
     val address = settings.sourceAddress
-    val connection = Tcp().bind( address.getHostName, address.getPort )
-    val sink = Sink.foreach[Tcp.IncomingConnection] { connection =>
+
+    val connections = Tcp().bind( address.getHostName, address.getPort )
+    connections runForeach { connection =>
+      logger.info( "New connection from: {}", connection.remoteAddress )
       val detectionFlow = {
         inlet
         .via( scoring )
@@ -102,11 +107,22 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
       connection handleWith detectionFlow
     }
 
-    import spotlight.app.GraphiteSpotlight.{ WatchPoints => GS }
-    import spotlight.stream.OutlierScoringModel.{ WatchPoints => OSM }
-    StreamMonitor.set( GS.Framing, GS.Intake, OSM.PlanBuffer, GS.PublishBuffer )
-
-    ( connection to sink ).run()
+//    val connection = Tcp().bind( address.getHostName, address.getPort )
+//    val sink = Sink.foreach[Tcp.IncomingConnection] { connection =>
+//      val detectionFlow = {
+//        inlet
+//        .via( scoring )
+//        .via( outlet )
+//      }
+//
+//      connection handleWith detectionFlow
+//    }
+//
+//    import spotlight.app.GraphiteSpotlight.{ WatchPoints => GS }
+//    import spotlight.stream.OutlierScoringModel.{ WatchPoints => OSM }
+//    StreamMonitor.set( GS.Framing, GS.Intake, OSM.PlanBuffer, GS.PublishBuffer )
+//
+//    ( connection to sink ).run()
   }
 
   def inlet( implicit boundedContext: BoundedContext, settings: Settings ): Flow[ByteString, TimeSeries, NotUsed] = {

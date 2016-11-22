@@ -2,6 +2,7 @@ package spotlight.stream
 
 import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicInteger
+
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 import scala.util.Failure
@@ -22,7 +23,7 @@ import peds.commons.log.Trace
 import spotlight.analysis.outlier.algorithm.statistical.SimpleMovingAverageAlgorithm
 import spotlight.protocol.PythonPickleProtocol
 import spotlight.testkit.ParallelAkkaSpec
-import spotlight.analysis.outlier.{AnalysisPlanModule, PlanCatalog}
+import spotlight.analysis.outlier.{AnalysisPlanModule, AnalysisPlanProtocol, PlanCatalog, PlanCatalogProxy}
 import spotlight.model.outlier._
 import spotlight.model.timeseries.TimeSeriesBase.Merging
 import spotlight.model.timeseries.{DataPoint, TimeSeries}
@@ -35,6 +36,31 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
   import OutlierScoringModelSpec._
 
 
+  override def testConfiguration( test: OneArgTest, slug: String ): Config = {
+    val tc = ConfigFactory.parseString(
+      """
+        |spotlight.workflow.detect.timeout: 10s
+        |spotlight.source.buffer: 1000
+        |spotlight.workflow.buffer: 1000
+        |spotlight.source.host: "0.0.0.0"
+        |spotlight.source.port: 2004
+        |spotlight.detection-plans {
+        | skyline {
+        |   majority: 50
+        |   default: on
+        |   algorithms: [ simple-moving-average ]
+        |   algorithm-config.simple-moving-average.publish-threshold: yes
+        | }
+        |}
+      """.stripMargin
+                                      )
+    val c = spotlight.testkit.config( systemName = slug )
+    import scala.collection.JavaConversions._
+    logger.debug( "Test Config: akka.cluster.seed-nodes=[{}]", c.getStringList("akka.cluster.seed-nodes").mkString(", "))
+    tc withFallback c
+  }
+
+
   override def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture = {
     new Fixture( config, system, slug )
   }
@@ -45,6 +71,16 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
 //    logger.debug( "config:: akka.actor.provider=[{}] origin:[{}]", config.getValue("akka.actor.provider"), config.getValue("akka.actor.provider").origin() )
 
     implicit val materializer: Materializer = ActorMaterializer()
+
+    val settings: Settings = {
+      Settings( Array("-c", "2552"),  _config ).disjunction match {
+        case scalaz.\/-( s ) => s
+        case scalaz.-\/( exs ) => {
+          exs foreach { ex => logger.info( "Setting error: [{}]", ex ) }
+          throw exs.head
+        }
+      }
+    }
 
     val protocol = new PythonPickleProtocol
     val stringFlow: Flow[ByteString, ByteString, NotUsed] = Flow[ByteString].via( protocol.framingFlow() )
@@ -77,12 +113,13 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
     )
 
     def rootTypes: Set[AggregateRootType] = Set( AnalysisPlanModule.module.rootType, SimpleMovingAverageAlgorithm.rootType )
+
     lazy val boundedContext: BoundedContext = trace.block( "boundedContext" ) {
       implicit val actorTimeout = akka.util.Timeout( 5.seconds.dilated )
       import scala.concurrent.ExecutionContext.Implicits.global
       val bc = {
         for {
-          made <- BoundedContext.make( Symbol(slug), config, rootTypes )
+          made <- BoundedContext.make( Symbol(slug), config, rootTypes, startTasks = Set() )
           started <- made.start()
         } yield started
       }
@@ -354,14 +391,22 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
         )
       )
 
-      val catalogProps = {
-        PlanCatalog.props(
+      import demesne.module.entity.{ messages => EntityMessages }
+      model.aggregateOf( AnalysisPlanModule.module.rootType, defaultPlan.id ) ! EntityMessages.Add( defaultPlan.id, Some(defaultPlan))
+
+      implicit val timeout = akka.util.Timeout( 5.seconds )
+      logger.info( "BOOTSTRAP:BEFORE BoundedContext roottypes = [{}]", boundedContext.unsafeModel.rootTypes )
+//      Thread.sleep( 10000 )
+//      logger.info( "BOOTSTRAP:AFTER BoundedContext roottypes = [{}]", boundedContext.unsafeModel.rootTypes )
+      val catalogRef = Bootstrap.makeCatalog( settings )( boundedContext )
+      logger.info( "Catalog ref = [{}]", catalogRef )
+
+      val catalogProxyProps = {
+        PlanCatalogProxy.props(
+          underlying = catalogRef,
           configuration = ConfigFactory.empty(),
           maxInFlightCpuFactor = 1.0,
-          applicationDetectionBudget = Some(2.minutes),
-          applicationPlans = Set( defaultPlan )
-        )(
-          boundedContext
+          applicationDetectionBudget = Some(2.minutes)
         )
       }
 
@@ -385,7 +430,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
 //      val graphiteFlow = OutlierScoringModel.batchSeriesByPlan( max = 1000 )
       val graphiteFlow = OutlierScoringModel.regulateByTopic( max = 1000 )
 //      val detectFlow = OutlierPlanDetectionRouter.flow( planRouter )
-      val detectFlow = PlanCatalog.flow( catalogProps )
+      val detectFlow = PlanCatalog.flow( catalogProxyProps )
 
       val flowUnderTest = {
         Flow[TimeSeries]

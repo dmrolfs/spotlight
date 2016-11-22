@@ -151,12 +151,11 @@ with StrictLogging {
   }
 
   override def withFixture( test: OneArgTest ): Outcome = {
-    val fixture = \/ fromTryCatchNonFatal {
-      val slug = testSlug( test )
-      val config = testConfiguration( test, slug )
-      val system = testSystem( test, config, slug )
-      createAkkaFixture( test, config, system, slug )
-    }
+    val slug = testSlug( test )
+    val config = testConfiguration( test, slug )
+    val system = testSystem( test, config, slug )
+
+    val fixture = \/ fromTryCatchNonFatal { createAkkaFixture( test, config, system, slug ) }
 
     val results = fixture map { f =>
       logger.debug( ".......... before test .........." )
@@ -182,6 +181,7 @@ with StrictLogging {
       case \/-( o ) => o
       case -\/( ex ) => {
         logger.error( s"test[${test.name}] failed", ex )
+        system.terminate()
         throw ex
       }
     }

@@ -10,6 +10,7 @@ description := "lorem ipsum."
 libraryDependencies ++=
   commonDependencies ++
   Seq(
+    facility.json4sJackson,
     akka.persistence
   )
 
