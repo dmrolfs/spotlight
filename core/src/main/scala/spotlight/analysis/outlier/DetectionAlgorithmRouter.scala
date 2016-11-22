@@ -202,10 +202,10 @@ class DetectionAlgorithmRouter extends Actor with EnvelopingActor with Instrumen
   provider: DetectionAlgorithmRouter.Provider =>
 
   var routingTable: Map[Symbol, ActorRef] = provider.initialRoutingTable
-  log.info( "DetectionAlgorithmRouter[{}] created supporting algorithms:[{}]", routingTable.keys.mkString(",") )
+  log.info( "DetectionAlgorithmRouter[{}] routing keys:[{}]", self.path.name, routingTable.keys.mkString(",") )
 
   def contains( algorithm: Symbol ): Boolean = {
-    log.info( "DetectionAlgorithmRouter[{}] looking for {} in algorithms:[{}]", algorithm, routingTable.keys.mkString(",") )
+    log.debug( "DetectionAlgorithmRouter[{}] looking for {} in algorithms:[{}]", self.path.name, algorithm, routingTable.keys.mkString(",") )
     routingTable contains algorithm
   }
 

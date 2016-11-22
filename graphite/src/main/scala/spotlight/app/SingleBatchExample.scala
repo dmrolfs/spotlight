@@ -126,17 +126,17 @@ object SingleBatchExample extends Instrumented with StrictLogging {
 
   def sourceData(): Source[String, NotUsed] = {
     Source(
-      """{"topic" : "foo-bar-zed_delta","points": [{"timestamp":1467762517,"value":2.0}]}""" ::
-      """{"topic" : "foo-bar-zed_delta","points": [{"timestamp":1467762518,"value":2.0}]}""" ::
-      """{"topic" : "foo-bar-zed_delta","points": [{"timestamp":1467762519,"value":2.0}]}""" ::
-      """{"topic" : "foo-bar-zed_delta","points": [{"timestamp":1467762520,"value":2.0}]}""" ::
-      """{"topic" : "foo-bar-zed_delta","points": [{"timestamp":1467762521,"value":2.0}]}""" ::
-      """{"topic" : "foo-bar-zed_delta","points": [{"timestamp":1467762522,"value":2.0}]}""" ::
-      """{"topic" : "foo-bar-zed_delta","points": [{"timestamp":1467762523,"value":2.0}]}""" ::
-      """{"topic" : "foo-bar-zed_delta","points": [{"timestamp":1467762524,"value":200.0}]}""" ::
-      """{"topic" : "foo-bar-zed_delta","points": [{"timestamp":1467762525,"value":2.0}]}""" ::
-      """{"topic" : "foo-bar-zed_delta","points": [{"timestamp":1467762526,"value":2.0}]}""" ::
-      """{"topic" : "foo-bar-zed_delta","points": [{"timestamp":1467762527,"value":2.0}]}""" ::
+      """{"topic" : "host.foo.bar.zed_delta.mean","points": [{"timestamp":1467762517,"value":2.0}]}""" ::
+      """{"topic" : "host.foo.bar.zed_delta.mean","points": [{"timestamp":1467762518,"value":2.0}]}""" ::
+      """{"topic" : "host.foo.bar.zed_delta.mean","points": [{"timestamp":1467762519,"value":2.0}]}""" ::
+      """{"topic" : "host.foo.bar.zed_delta.mean","points": [{"timestamp":1467762520,"value":2.0}]}""" ::
+      """{"topic" : "host.foo.bar.zed_delta.mean","points": [{"timestamp":1467762521,"value":2.0}]}""" ::
+      """{"topic" : "host.foo.bar.zed_delta.mean","points": [{"timestamp":1467762522,"value":2.0}]}""" ::
+      """{"topic" : "host.foo.bar.zed_delta.mean","points": [{"timestamp":1467762523,"value":2.0}]}""" ::
+      """{"topic" : "host.foo.bar.zed_delta.mean","points": [{"timestamp":1467762524,"value":200.0}]}""" ::
+      """{"topic" : "host.foo.bar.zed_delta.mean","points": [{"timestamp":1467762525,"value":2.0}]}""" ::
+      """{"topic" : "host.foo.bar.zed_delta.mean","points": [{"timestamp":1467762526,"value":2.0}]}""" ::
+      """{"topic" : "host.foo.bar.zed_delta.mean","points": [{"timestamp":1467762527,"value":2.0}]}""" ::
       Nil
     )
   }
@@ -220,8 +220,8 @@ object SingleBatchExample extends Instrumented with StrictLogging {
         C.Outlet,
         'publish,
         'filter,
-        'flatter,
-        'unwrap,
+//        'flatter,
+//        'unwrap,
         OSM.ScoringUnrecognized
       )
 
@@ -270,10 +270,10 @@ object SingleBatchExample extends Instrumented with StrictLogging {
   }
 
   def parseTopic(topic: String) : OutlierInfo = {
-    val splits = topic.split("-")
-    val metricType = splits(0)
-    val webId = splits(1).concat("-").concat(splits(2).split("_")(0))
-    val segment = splits(2).split("_")(1)
+    val splits = topic.split("""\.""")
+    val metricType = splits(1)
+    val webId = splits(2).concat( "." ).concat( splits(3).split("_")(0) )
+    val segment = splits(3).split( "_" )(1)
     OutlierInfo( metricType, webId, segment )
   }
 
