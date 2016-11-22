@@ -173,8 +173,6 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
   }
 
 
-
-
   def algorithm: Algorithm
   override lazy val aggregateIdTag: Symbol = algorithm.label
   override lazy val shardName: String = algorithm.label.name
@@ -274,6 +272,12 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
 
   override lazy val rootType: AggregateRootType = new RootType
 
+//  def toCamelCase( name: String ): String = {
+//    val regex = """-(\w)""".r
+//    val result = regex.replaceAllIn( name, m => m.subgroups.head.toUpperCase )
+//    result.head.toUpper + result.tail
+//  }
+
   class RootType extends AggregateRootType {
     override lazy val name: String = module.shardName
     override lazy val identifying: Identifying[_] = AlgorithmModule.identifying
@@ -285,6 +289,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
         (a.sourceId.id.toString, a )
       }
     }
+    override def toString: String = "Algorithm:"+name
   }
 
 
@@ -445,18 +450,6 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
           log.error( "algorithm [{}] does not recognize requested payload: [{}]", algorithm, m )
           sender() !+ UnrecognizedPayload( algorithm.label, m )
         }
-
-        case AdvancedType(m) => {
-          log.info( "TEST:[{}]: unhandled but yet matched on Advanced...", self.path )
-          log.info( "TEST: m = [{}]", m )
-          log.info( "TEST: AdvancedType:[ {} ]\tAdvancedType(m)=[{}]", AdvancedType.toString, AdvancedType.unapply(m) )
-        }
-
-//        case m => {
-//          log.info( "TEST:[{}]: working on Advanced but unknown...", self.path )
-//          log.info( "TEST: m = [{}]", m )
-//          log.info( "TEST: AdvancedType:[ {} ]\tAdvancedType(m)=[{}]", AdvancedType.toString, AdvancedType.unapply(m) )
-//        }
 
         case m => super.unhandled( m )
       }

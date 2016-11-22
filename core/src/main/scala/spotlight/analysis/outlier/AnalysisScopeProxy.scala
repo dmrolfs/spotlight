@@ -24,6 +24,8 @@ import spotlight.model.outlier.{CorrelatedData, CorrelatedSeries, OutlierPlan}
 import spotlight.model.timeseries.TimeSeriesBase.Merging
 import spotlight.model.timeseries.{TimeSeries, Topic}
 
+import scala.concurrent.ExecutionContext
+
 
 /**
   * Created by rolfsd on 5/26/16.
@@ -49,8 +51,11 @@ object AnalysisScopeProxy extends Instrumented with LazyLogging {
   with Provider {
     private val trace = Trace[Default]
 
-    override def rootTypeFor( algorithm: Symbol ): Option[AggregateRootType] = trace.block( s"rootTypeFor(${algorithm})" ) {
-      DetectionAlgorithmRouter unsafeRootTypeFor algorithm
+    log.info( "TEST: AnalysisScopeProxy.Default: scope:[{}], plan:[{}]", scope, plan )
+    override def rootTypeFor( algorithm: Symbol )( implicit ec: ExecutionContext ): Option[AggregateRootType] = trace.block( s"rootTypeFor(${algorithm})" ) {
+      DetectionAlgorithmRouter.unsafeRootTypeFor( algorithm ) orElse {
+        scala.concurrent.Await.result( DetectionAlgorithmRouter.futureRootTypeFor(algorithm), 30.seconds )
+      }
     }
   }
 
@@ -63,18 +68,18 @@ object AnalysisScopeProxy extends Instrumented with LazyLogging {
     def model: DomainModel
     def highWatermark: Int
     def bufferSize: Int
-    def rootTypeFor( algorithm: Symbol ): Option[AggregateRootType]
+    def rootTypeFor( algorithm: Symbol )( implicit ec: ExecutionContext ): Option[AggregateRootType]
 
     implicit def timeout: Timeout = Timeout( 15.seconds )
 
     def makeRouter()( implicit context: ActorContext ): ActorRef = trace.block( "makeRouter" ){
-//      val algoId = AlgorithmModule.identifying tag scope
-//      log.debug( "TEST: scope:[{}] algoId:[{}]", scope, algoId )
+      log.debug( "TEST: plan = [{}] plan.algorithms:[{}]", plan, plan.algorithms )
+      log.debug( "TEST: domain model root-types:[{}]", model.rootTypes )
 
       val algorithmRefs = for {
         name <- plan.algorithms.toSeq
       _ = log.debug( "TEST: plan algorithm name:[{}]", name )
-        rt <- rootTypeFor( name ).toSeq
+        rt <- rootTypeFor( name )( context.dispatcher ).toSeq
         algoId <- rt.identifying.castIntoTID( scope )
       _ = log.debug( "TEST: algoId [{}]", algoId )
         ref = model( rt, algoId )

@@ -4,30 +4,29 @@ import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
 import scala.util.matching.Regex
 import akka.{Done, NotUsed}
-import akka.actor.{ActorLogging, ActorRef, ActorSystem, Props, Stash}
+import akka.actor.{Actor, ActorLogging, ActorRef, ActorSystem, Props, Stash}
+import akka.agent.Agent
 import akka.event.LoggingReceive
-import akka.stream.actor.ActorSubscriberMessage.{OnComplete, OnError, OnNext}
 import akka.stream.{FlowShape, Materializer}
-import akka.stream.actor.{ActorSubscriber, MaxInFlightRequestStrategy, RequestStrategy}
 import akka.stream.scaladsl.{Flow, GraphDSL, Keep, Sink, Source}
 import akka.util.Timeout
-import com.codahale.metrics.{Metric, MetricFilter}
 
 import scalaz._
 import Scalaz._
+import scalaz.concurrent.Task
 import com.typesafe.config.{Config, ConfigObject}
 import com.typesafe.scalalogging.LazyLogging
-import nl.grons.metrics.scala.{MetricName, Timer}
+import nl.grons.metrics.scala.MetricName
 import peds.akka.envelope._
 import peds.akka.envelope.pattern.ask
 import peds.akka.metrics.InstrumentedActor
-import peds.akka.stream.StreamMonitor._
 import peds.commons.log.Trace
-import demesne.{BoundedContext, DomainModel}
 import peds.akka.stream.CommonActorPublisher
+import demesne.{BoundedContext, DomainModel, StartTask}
 import spotlight.analysis.outlier.OutlierDetection.DetectionResult
 import spotlight.model.outlier.{IsQuorum, OutlierPlan, Outliers, ReduceOutliers}
 import spotlight.model.timeseries.{TimeSeries, Topic}
+import spotlight.stream.Settings
 
 
 /**
@@ -35,14 +34,47 @@ import spotlight.model.timeseries.{TimeSeries, Topic}
   */
 object PlanCatalogProtocol {
   sealed trait CatalogMessage
-  case object WaitingForStart extends CatalogMessage
+
+  case object WaitForStart extends CatalogMessage
   case object Started extends CatalogMessage
+
+  case class Route( timeSeries: TimeSeries, subscriber: ActorRef, correlationId: Option[WorkId] = None ) extends CatalogMessage
+  case class UnknownRoute( timeSeries: TimeSeries, subscriber: ActorRef, correlationId: Option[WorkId] ) extends CatalogMessage
+  object UnknownRoute {
+    def apply( route: Route ): UnknownRoute = UnknownRoute( route.timeSeries, route.subscriber, route.correlationId )
+  }
+
   case class GetPlansForTopic( topic: Topic ) extends CatalogMessage
   case class CatalogedPlans( plans: Set[OutlierPlan.Summary], request: GetPlansForTopic ) extends CatalogMessage
 }
 
 
 object PlanCatalog extends LazyLogging {
+  def start(): StartTask = {
+    StartTask.withBoundTask( "start PlanCatalog" ) { implicit bc: BoundedContext =>
+      Task {
+        val cpuFactor = Settings.maxInDetectionCpuFactorFrom( bc.configuration ) getOrElse { 8.0 }
+        val budget = Settings.detectionBudgetFrom( bc.configuration ) getOrElse { 10.seconds }
+
+        val catalogProps = PlanCatalog.props(
+          configuration = bc.configuration,
+          maxInFlightCpuFactor = cpuFactor,
+          applicationDetectionBudget = Some(budget)
+        )
+
+        val catalog = bc.system.actorOf( catalogProps, PlanCatalog.name )
+
+        import akka.pattern.ask
+        import spotlight.analysis.outlier.PlanCatalogProtocol.{ WaitForStart, Started }
+        implicit val timeout = Timeout( 30.seconds )
+
+        val done = ( catalog ? WaitForStart ).mapTo[Started.type]
+        scala.concurrent.Await.ready( done, timeout.duration )
+        Map( Symbol(PlanCatalog.name) -> catalog )
+      }
+    }
+  }
+
   def props(
     configuration: Config,
     maxInFlightCpuFactor: Double = 8.0,
@@ -63,12 +95,18 @@ object PlanCatalog extends LazyLogging {
     // .withDispatcher( "spotlight.planCatalog.stash-dispatcher" )
   }
 
+  val name: String = "PlanCatalog"
+
   def flow(
-    catalogProps: Props
+    catalogProxyProps: Props
   )(
     implicit system: ActorSystem,
     materializer: Materializer
   ): Flow[TimeSeries, Outliers, NotUsed] = {
+    import PlanCatalogProtocol.Route
+    import peds.akka.stream.StreamMonitor._
+    import WatchPoints.{Intake, Collector, Outlet}
+
     val outletProps = CommonActorPublisher.props[DetectionResult]()
 
     val g = GraphDSL.create() { implicit b =>
@@ -81,13 +119,11 @@ object PlanCatalog extends LazyLogging {
         .run()
       }
 
-      def flowLog[T]( label: String ): FlowShape[T, T] = {
-        b.add( Flow[T] map { m => logger.debug( "PlanCatalog:FLOW: {}: [{}]", label, m.toString); m } )
-      }
+      subscribers send { _ + outletRef }
 
-      val zipWithSubscriber = b.add( Flow[TimeSeries] map { ts => StreamMessage( ts, outletRef ) } )
-      val planRouter = b.add( Sink.actorSubscriber[StreamMessage[TimeSeries]]( catalogProps ).named( "PlanCatalog" ) )
-      zipWithSubscriber ~> flowLog[StreamMessage[TimeSeries]]("before-plan-router-") ~> planRouter
+      val zipWithSubscriber = b.add( Flow[TimeSeries].map{ ts => Route( ts, outletRef ) }.watchFlow(Intake) )
+      val planRouter = b.add( Sink.actorSubscriber[Route]( catalogProxyProps ).named( "PlanCatalogProxy" ) )
+      zipWithSubscriber ~> planRouter
 
       val receiveOutliers = b.add(
         Source
@@ -95,29 +131,73 @@ object PlanCatalog extends LazyLogging {
         .map { m => logger.debug("TEST: view detection result:[{}]", m); m }
       )
 
-      val getOutliers = b.add(
+      val collect = Flow[DetectionResult].map{ identity }.watchFlow( Collector )
+
+      val toOutliers = b.add(
         Flow[DetectionResult]
         .map { m => logger.debug( "received result from collector: [{}]", m ); m }
         .map { _.outliers }
+        .watchFlow( Outlet )
       )
 
-      receiveOutliers ~> flowLog[DetectionResult]("collected-outliers") ~> getOutliers
+      receiveOutliers ~> collect ~> toOutliers
 
-      FlowShape( zipWithSubscriber.in, getOutliers.out )
+      FlowShape( zipWithSubscriber.in, toOutliers.out )
     }
 
     Flow.fromGraph( g ).named( "PlanCatalogFlow" ).watchFlow( Symbol("CatalogDetection") )
   }
 
-  private[outlier] case class StreamMessage[P]( payload: P, subscriber: ActorRef )
+  object WatchPoints {
+    val Intake = Symbol( "catalog.intake" )
+    val Collector = Symbol( "catalog.collector" )
+    val Outlet = Symbol( "catalog.outlet" )
+  }
+
+
+  val subscribers: Agent[Set[ActorRef]] = Agent( Set.empty[ActorRef] )( scala.concurrent.ExecutionContext.global )
 
   private[outlier] case class PlanRequest( subscriber: ActorRef, startNanos: Long = System.nanoTime() )
 
 
-  trait Provider {
-    def detectionBudget: FiniteDuration
+  trait PlanProvider {
     def specifiedPlans: Set[OutlierPlan]
+  }
+
+  trait ExecutionProvider {
+    def detectionBudget: FiniteDuration
     def maxInFlight: Int
+    def correlationId: WorkId
+  }
+
+  trait DefaultExecutionProvider extends ExecutionProvider { outer: EnvelopingActor with ActorLogging =>
+    def configuration: Config
+    def applicationDetectionBudget: Option[FiniteDuration]
+    def maxInFlightCpuFactor: Double
+
+    override val maxInFlight: Int = ( Runtime.getRuntime.availableProcessors() * maxInFlightCpuFactor ).toInt
+
+    override lazy val detectionBudget: FiniteDuration = {
+      applicationDetectionBudget getOrElse { loadDetectionBudget( configuration ) getOrElse 10.seconds }
+    }
+
+    private def loadDetectionBudget( specification: Config ): Option[FiniteDuration] = {
+      import Default.DetectionBudgetPath
+      if ( specification hasPath DetectionBudgetPath ) {
+        Some( FiniteDuration( specification.getDuration( DetectionBudgetPath, NANOSECONDS ), NANOSECONDS ) )
+      } else {
+        None
+      }
+    }
+
+    def correlationId: WorkId = {
+      if ( workId != WorkId.unknown ) workId
+      else {
+        workId = WorkId()
+        log.warning( "value for message workId / correlationId is UNKNOWN. setting to {}", workId )
+        workId
+      }
+    }
   }
 
 
@@ -132,26 +212,11 @@ object PlanCatalog extends LazyLogging {
     maxInFlightCpuFactor: Double = 8.0,
     applicationDetectionBudget: Option[FiniteDuration] = None,
     applicationPlans: Set[OutlierPlan] = Set.empty[OutlierPlan]
-  ) extends PlanCatalog( _boundedContext ) with Provider {
+  ) extends PlanCatalog( _boundedContext ) with DefaultExecutionProvider with PlanProvider {
     private val trace = Trace[Default]
 
-    override val maxInFlight: Int = ( Runtime.getRuntime.availableProcessors() * maxInFlightCpuFactor ).toInt
-
-    override lazy val detectionBudget: FiniteDuration = {
-      applicationDetectionBudget getOrElse { loadDetectionBudget( configuration ) getOrElse 10.seconds }
-    }
-
-    private def loadDetectionBudget( specification: Config ): Option[FiniteDuration] = trace.block( "specifyDetectionBudget" ) {
-      import Default.DetectionBudgetPath
-      if ( specification hasPath DetectionBudgetPath ) {
-        Some( FiniteDuration( specification.getDuration( DetectionBudgetPath, NANOSECONDS ), NANOSECONDS ) )
-      } else {
-        None
-      }
-    }
-
     //todo also load from plan index?
-    override lazy val specifiedPlans: Set[OutlierPlan] = trace.block( "specifiedPlans" ) { applicationPlans ++ loadPlans( configuration ) }
+    override lazy val specifiedPlans: Set[OutlierPlan] = applicationPlans ++ loadPlans( configuration )
 
     private def loadPlans( specification: Config ): Set[OutlierPlan] = {
       import Default.OutlierPlansPath
@@ -174,7 +239,7 @@ object PlanCatalog extends LazyLogging {
     }
 
     private def makePlan( name: String, planSpecification: Config )( budget: FiniteDuration ): Option[OutlierPlan] = {
-      logger.info( "PlanCatalog plan speclet: [{}]", planSpecification )
+      logger.info( "PlanCatalog making plan from specification: [{}]", planSpecification )
 
       //todo: bring initialization of plans into module init and base config on init config?
       val utilization = 0.9
@@ -302,8 +367,9 @@ object PlanCatalog extends LazyLogging {
 }
 
 class PlanCatalog( _boundedContext: BoundedContext )
-extends ActorSubscriber with Stash with EnvelopingActor with InstrumentedActor with ActorLogging { outer: PlanCatalog.Provider =>
-  import PlanCatalog.PlanRequest
+extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorLogging {
+  outer: PlanCatalog.ExecutionProvider with PlanCatalog.PlanProvider =>
+
   import spotlight.analysis.outlier.{ PlanCatalogProtocol => P }
   import spotlight.analysis.outlier.{ AnalysisPlanProtocol => AP }
 
@@ -312,206 +378,129 @@ extends ActorSubscriber with Stash with EnvelopingActor with InstrumentedActor w
   var boundedContext: BoundedContext = _boundedContext
 
   override lazy val metricBaseName: MetricName = MetricName( classOf[PlanCatalog] )
-  val catalogTimer: Timer = metrics timer "catalog"
 
-  val outstandingMetricName: String = "outstanding"
-
-  def initializeMetrics(): Unit = {
-    stripLingeringMetrics()
-    metrics.gauge( outstandingMetricName ) { outstandingRequests }
-  }
-
-  def stripLingeringMetrics(): Unit = {
-    metrics.registry.removeMatching(
-      new MetricFilter {
-        override def matches( name: String, metric: Metric ): Boolean = {
-          name.contains( classOf[PlanCatalog].getName ) && name.contains( outstandingMetricName )
-        }
-      }
-    )
+  val fallbackIndex: Agent[Map[String, OutlierPlan.Summary]] = {
+    Agent( Map.empty[String, OutlierPlan.Summary] )( scala.concurrent.ExecutionContext.global )
   }
 
 
   type PlanIndex = DomainModel.AggregateIndex[String, AnalysisPlanModule.module.TID, OutlierPlan.Summary]
-  val planIndex: PlanIndex = {
-    boundedContext
-    .unsafeModel
-    .aggregateIndexFor[String, AnalysisPlanModule.module.TID, OutlierPlan.Summary](
-      AnalysisPlanModule.module.rootType,
-      AnalysisPlanModule.namedPlanIndex
-    ) match {
-      case \/-( pindex ) => pindex
-      case -\/( ex ) => {
-        log.error( ex, "PlanCatalog[{}]: failed to initialize PlanCatalog's plan index", self.path )
-        throw ex
+  lazy val planIndex: PlanIndex = {
+    implicit val dispatcher = context.dispatcher
+    val index = boundedContext.futureModel map { model =>
+      model.aggregateIndexFor[String, AnalysisPlanModule.module.TID, OutlierPlan.Summary](
+        AnalysisPlanModule.module.rootType,
+        AnalysisPlanModule.namedPlanIndex
+      ) match {
+        case \/-( pi ) => pi
+        case -\/( ex ) => {
+          log.error( ex, "PlanCatalog[{}]: failed to initialize PlanCatalog's plan index", self.path )
+          throw ex
+        }
       }
+    }
+
+    scala.concurrent.Await.result( index, 30.seconds )
+  }
+
+  def applicablePlanExists( ts: TimeSeries )( implicit ec: ExecutionContext ): Boolean = trace.briefBlock( s"applicablePlanExists( ${ts.topic} )" ) {
+    val current = unsafeApplicablePlanExists( ts )
+    if ( current ) current
+    else {
+      val secondary = {
+        for {
+          futureCheck <- futureApplicablePlanExists( ts )
+          fallback <- fallbackIndex.future()
+        } yield {
+          if ( futureCheck ) {
+            log.info(
+              "PlanCatalog[{}]: delayed appearance of topic:[{}] in index - removing from fallback",
+              self.path.name, ts.topic
+            )
+            fallbackIndex send { _ - ts.topic.toString }
+            futureCheck
+          } else {
+            val fallbackResult = fallback contains ts.topic.toString
+            if ( fallbackResult ) {
+              log.warning(
+                "PlanCatalog[{}]: fallback plan not reflected yet in index found for topic:[{}]",
+                self.path.name, ts.topic
+              )
+            }
+
+            fallbackResult
+          }
+        }
+      }
+
+      scala.concurrent.Await.result( secondary, 30.seconds )
     }
   }
 
-  def applicablePlanExists( ts: TimeSeries ): Boolean = trace.briefBlock( s"applicablePlanExists( ${ts.topic} )" ) {
+  def unsafeApplicablePlanExists( ts: TimeSeries ): Boolean = trace.briefBlock( s"unsafeApplicablePlanExists( ${ts.topic} )" ) {
+    log.info( "PlanCatalog: unsafe look at {} plans for one that applies to topic:[{}] -- [{}]", planIndex.entries.size, ts.topic, planIndex.entries.values.mkString(", ") )
     planIndex.entries.values exists { _ appliesTo ts }
   }
 
-  //todo: associate timestamp with workId in order to reap tombstones
-  var _workRequests: Map[WorkId, PlanRequest] = Map.empty[WorkId, PlanRequest]
-  def outstandingRequests: Int = _workRequests.size
-  def addWorkRequest( correlationId: WorkId, subscriber: ActorRef ): Unit = {
-    _workRequests += ( correlationId -> PlanRequest(subscriber) )
-  }
-
-  def removeWorkRequests( correlationIds: Set[WorkId] ): Unit = {
-    for {
-      cid <- correlationIds
-      knownRequest <- _workRequests.get( cid ).toSet
-    } {
-      catalogTimer.update( System.nanoTime() - knownRequest.startNanos, scala.concurrent.duration.NANOSECONDS )
+  def futureApplicablePlanExists( ts: TimeSeries )( implicit ec: ExecutionContext ): Future[Boolean] = trace.briefBlock( s"futureApplicablePlanExists( ${ts.topic} )" ) {
+    planIndex.futureEntries map { entries =>
+      log.info( "PlanCatalog: safe look at {} plans for one that applies to topic:[{}] -- [{}]", entries.size, ts.topic, entries.values.mkString(", ") )
+      entries.values exists { _ appliesTo ts }
     }
-
-    _workRequests --= correlationIds
-  }
-
-  def knownWork: Set[WorkId] = _workRequests.keySet
-  val isKnownWork: WorkId => Boolean = _workRequests.contains( _: WorkId )
-
-  def hasWorkInProgress( workIds: Set[WorkId] ): Boolean = findOutstandingCorrelationIds( workIds ).nonEmpty
-
-  def findOutstandingWorkRequests( correlationIds: Set[WorkId] ): Set[(WorkId, PlanRequest)] = {
-    correlationIds.collect{ case cid => _workRequests.get( cid ) map { req => ( cid, req ) } }.flatten
-  }
-
-  def findOutstandingCorrelationIds( workIds: Set[WorkId] ): Set[WorkId] = trace.briefBlock( "findOutstandingCorrelationIds" ) {
-    log.debug( "outstanding work: [{}]", knownWork )
-    log.debug( "returning work: [{}]", workIds )
-    log.debug( "known intersect: [{}]", knownWork intersect workIds )
-    knownWork intersect workIds
-  }
-
-  override protected def requestStrategy: RequestStrategy = new MaxInFlightRequestStrategy( outer.maxInFlight ) {
-    override def inFlightInternally: Int = outstandingRequests
   }
 
 
   case object Initialize extends P.CatalogMessage
   override def preStart(): Unit = self ! Initialize
 
-  var isWaitingToComplete: Boolean = false
-  private def stopIfFullyComplete(): Unit = {
-    if ( isWaitingToComplete && outstandingRequests == 0 ) {
-      log.info( "PlanCatalog[{}] finished outstanding work. stopping for completion", self.path )
-      context stop self
-    }
-  }
-
+  var outstandingWork: Map[WorkId, ActorRef] = Map.empty[WorkId, ActorRef]
 
   override def receive: Receive = LoggingReceive { around( quiescent ) }
 
   val quiescent: Receive = {
     case Initialize => {
       implicit val ec = context.system.dispatcher //todo: consider moving off actor threadpool
+      implicit val timeout = Timeout( 30.seconds )
 
-      initializeMetrics()
-
-      postStartInitialization() foreach { _ =>
-        log.info( "PlanCatalog[{}] initialization completed", self.path )
-        context become LoggingReceive { around( stream orElse active orElse admin ) }
-      }
+      val task = initializePlans() map { _ => log.info( "PlanCatalog[{}] initialization completed", self.path.name ) }
+      scala.concurrent.Await.ready( task, timeout.duration )
+      context become LoggingReceive { around( /*stream orElse*/ active orElse admin ) }
     }
   }
 
-  import PlanCatalog.StreamMessage
-
   val active: Receive = {
-    case m @ StreamMessage( ts: TimeSeries, subscriber ) if applicablePlanExists( ts ) => {
+    case route @ P.Route( ts: TimeSeries, subscriber, cid ) if applicablePlanExists( ts )( context.dispatcher ) => {
       log.debug(
         "PlanCatalog:ACTIVE[{}] dispatching stream message for detection and result will go to subscriber[{}]: [{}]",
         workId,
         subscriber.path.name,
-        m
+        route
       )
-      dispatch( ts, subscriber )( context.dispatcher )
-      stopIfFullyComplete()
+      dispatch( route, sender() )( context.dispatcher )
     }
 
-    case StreamMessage( ts: TimeSeries, _ ) => {
-      //todo route unrecogonized ts
-      log.warning( "PlanCatalog:ACTIVE[{}]: no plan on record that applies to time-series:[{}]", self.path, ts.topic )
-      stopIfFullyComplete()
-    }
-
-    case ts: TimeSeries if applicablePlanExists( ts ) => {
+    case ts: TimeSeries if applicablePlanExists( ts )( context.dispatcher ) => {
       log.debug( "PlanCatalog:ACTIVE[{}] dispatching time series to sender[{}]: [{}]", workId, sender().path.name, ts )
-      dispatch( ts, sender() )( context.dispatcher )
-      stopIfFullyComplete()
+      val subscriber = sender()
+      dispatch( P.Route(ts, subscriber, Some(correlationId)), subscriber )( context.dispatcher )
+    }
+
+    case r: P.Route => {
+      //todo route unrecogonized ts
+      log.warning( "PlanCatalog:ACTIVE[{}]: no plan on record that applies to topic:[{}]", self.path, r.timeSeries.topic )
+      sender() !+ P.UnknownRoute( r )
     }
 
     case ts: TimeSeries => {
       //todo route unrecogonized ts
-      log.warning( "PlanCatalog:ACTIVE[{}]: no plan on record that applies to time-series:[{}]", self.path, ts.topic )
-      stopIfFullyComplete()
-    }
-
-    case result: DetectionResult if !hasWorkInProgress( result.correlationIds ) => {
-      log.error(
-        "PlanCatalog:ACTIVE[{}]: stashing received result for UNKNOWN workId:[{}] all-ids:[{}]: [{}]",
-        self.path.name,
-        workId,
-        knownWork.mkString(", "),
-        result
-      )
-
-      stash()
-      stopIfFullyComplete()
+      log.warning( "PlanCatalog:ACTIVE[{}]: no plan on record that applies to topic:[{}]", self.path, ts.topic )
+      val ref = sender()
+      ref !+ P.UnknownRoute( ts, ref, Some(correlationId) )
     }
 
     case result @ DetectionResult( outliers, workIds ) => {
-      log.debug(
-        "PlanCatalog:ACTIVE[{}]: received outlier result[{}] for workId:[{}] subscriber:[{}]",
-        self.path,
-        outliers.hasAnomalies,
-        workId,
-        _workRequests.get( workId ).map{ _.subscriber.path.name }
-      )
-      log.debug( "PlanCatalog:ACTIVE: received (workId:[{}] -> subscriber:[{}])  all:[{}]", workId, _workRequests.get(workId), _workRequests.mkString(", ") )
-
-      val (known, unknown) = result.correlationIds partition isKnownWork
-      if ( unknown.nonEmpty ) {
-        log.warning(
-          "PlanCatalog:ACTIVE received topic:[{}] algorithms:[{}] results for unrecognized workIds:[{}]",
-          result.outliers.topic,
-          result.outliers.algorithms.map{ _.name }.mkString( ", " ),
-          unknown.mkString(", ")
-        )
-      }
-
-      val requests = findOutstandingWorkRequests( known )
-      removeWorkRequests( result.correlationIds )
-      log.debug(
-        "PlanCatalog:ACTIVE sending result to {} subscriber{}",
-        requests.size,
-        if ( requests.size == 1 ) "" else "s"
-      )
-      requests foreach { case (_, r) => r.subscriber ! result }
-      log.debug( "PlanCatalog:ACTIVE unstashing" )
-      unstashAll()
-      stopIfFullyComplete()
-    }
-  }
-
-  val stream: Receive = {
-    case OnNext( message ) if active isDefinedAt message => {
-      log.debug( "PlanCatalog:STREAM: evaluating OnNext( {} )", message )
-      active( message )
-    }
-
-    case OnComplete => {
-      log.info( "PlanCatalog:STREAM[{}] closing on completed stream", self.path.name )
-      isWaitingToComplete = true
-      stopIfFullyComplete()
-    }
-
-    case OnError( ex ) => {
-      log.error( ex, "PlanCatalog:STREAM closing on errored stream" )
-      context stop self
+      workIds find { outstandingWork.contains } foreach { cid => outstandingWork( cid ) !+ result }
+      outstandingWork --= workIds
     }
   }
 
@@ -524,59 +513,76 @@ extends ActorSubscriber with Stash with EnvelopingActor with InstrumentedActor w
       planIndex.futureEntries
       .map { entries =>
         val ps = entries collect { case (_, p) if p appliesTo topic => p }
-        log.debug( "PlanCatalog[{}]: for topic:[{}] returning plans:[{}]", self.path, topic, ps.mkString(", ") )
+        log.debug( "PlanCatalog[{}]: for topic:[{}] returning plans:[{}]", self.path.name, topic, ps.mkString(", ") )
         log.debug( "TEST: IN GET-PLANS specified-plans:[{}]", specifiedPlans.mkString(", ") )
         P.CatalogedPlans( plans = ps.toSet, request = req )
       }
       .pipeEnvelopeTo( sender() )
     }
 
-    case P.WaitingForStart => sender() ! P.Started
+    case P.WaitForStart => sender() ! P.Started
   }
 
 
-  private def dispatch( ts: TimeSeries, subscriber: ActorRef )( implicit ec: ExecutionContext ): Unit = {
-    // pulled up future dependencies so I'm not closing over this
-    val correlationId = workId
-    val entries = planIndex.entries
-    addWorkRequest( correlationId, subscriber )
+  private def dispatch( route: P.Route, interestedRef: ActorRef )( implicit ec: ExecutionContext ): Unit = {
+    val cid = route.correlationId getOrElse outer.correlationId
+    outstandingWork += ( cid -> interestedRef ) // keep this out of future closure or use an Agent to protect against race conditions
 
     for {
       model <- boundedContext.futureModel
+      entries <- planIndex.futureEntries
     } {
-      entries.values withFilter { _ appliesTo ts } foreach { plan =>
+      entries.values withFilter { _ appliesTo route.timeSeries } foreach { plan =>
         val planRef = model( AnalysisPlanModule.module.rootType, plan.id )
         log.debug(
           "PlanCatalog:DISPATCH[{}]: sending topic[{}] to plan-module[{}] with sender:[{}]",
-          s"${self.path.name}:${correlationId}",
-          ts.topic,
-          planRef.path,
-          subscriber.path
+          s"${self.path.name}:${workId}",
+          route.timeSeries.topic,
+          planRef.path.name,
+          interestedRef.path.name
         )
-        planRef !+ AP.AcceptTimeSeries( plan.id, Set(correlationId), ts )
+        planRef !+ AP.AcceptTimeSeries( plan.id, Set(cid), route.timeSeries )
       }
     }
   }
 
-
-
-  private def postStartInitialization(): Future[Done] = {
-    implicit val ec = context.system.dispatcher
-    implicit val timeout = Timeout( 30.seconds )
-
+  private def initializePlans()( implicit ec: ExecutionContext, timeout: Timeout ): Future[Done] = {
     for {
       entries <- planIndex.futureEntries
       ( registered, missing ) = outer.specifiedPlans partition { entries contains _.name }
       _ = log.info( "PlanCatalog[{}] registered plans=[{}]", self.path.name, registered.mkString(",") )
       _ = log.info( "PlanCatalog[{}] missing plans=[{}]", self.path.name, missing.mkString(",") )
       created <- makeMissingSpecifiedPlans( missing )
+//      index <- planIndex.futureEntries
+      recorded = created.keySet intersect entries.keySet
+      remaining = created -- recorded
+      _ <- fallbackIndex alter { plans => plans ++ remaining }
     } yield {
       log.info(
-        "PlanCatalog[{}] created additional {} plans: [{}]",
-        self.path,
+        "PlanCatalog[{}] created additional {} plan(s): [{}]",
+        self.path.name,
         created.size,
         created.map{ case (n, c) => s"${n}: ${c}" }.mkString( "\n", "\n", "\n" )
       )
+
+      log.info(
+        "PlanCatalog[{}]: recorded new plans in index:[{}] remaining:[{}]",
+        self.path.name, recorded.mkString(", "), remaining.mkString(", ")
+      )
+
+      log.info(
+        "PlanCatalog[{}] index updated with additional plan(s): [{}]",
+        self.path.name,
+        created.map{ case (k, p) => s"${k}: ${p}" }.mkString( "\n", "\n", "\n" )
+      )
+
+      if ( remaining.nonEmpty ) {
+        log.warning(
+          "PlanCatalog[{}]: not all newly created plans have been recorded in index yet: [{}]",
+          self.path.name,
+          remaining.mkString( "\n", "\n", "\n" )
+        )
+      }
 
       Done
     }

@@ -25,6 +25,8 @@ import spotlight.model.outlier.OutlierPlan.Scope
 import spotlight.model.timeseries._
 import spotlight.testkit.{ParallelAkkaSpec, TestCorrelatedSeries}
 
+import scala.concurrent.ExecutionContext
+
 
 /**
   * Created by rolfsd on 6/14/16.
@@ -82,7 +84,7 @@ class AnalysisScopeProxySpec extends ParallelAkkaSpec with ScalaFutures with Moc
       override def model: DomainModel = fixture.model
       override def highWatermark: Int = 10
       override def bufferSize: Int = 1000
-      override def rootTypeFor( algorithm: Symbol ): Option[AggregateRootType] = Some( rootType )
+      override def rootTypeFor( algorithm: Symbol )( implicit ec: ExecutionContext ): Option[AggregateRootType] = Some( rootType )
 
       override def makeRouter()( implicit context: ActorContext ): ActorRef = router.ref
       override def makeDetector( routerRef: ActorRef )( implicit context: ActorContext ): ActorRef = detector.ref
