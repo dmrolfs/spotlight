@@ -51,7 +51,6 @@ object AnalysisScopeProxy extends Instrumented with LazyLogging {
   with Provider {
     private val trace = Trace[Default]
 
-    log.info( "TEST: AnalysisScopeProxy.Default: scope:[{}], plan:[{}]", scope, plan )
     override def rootTypeFor( algorithm: Symbol )( implicit ec: ExecutionContext ): Option[AggregateRootType] = trace.block( s"rootTypeFor(${algorithm})" ) {
       DetectionAlgorithmRouter.unsafeRootTypeFor( algorithm ) orElse {
         scala.concurrent.Await.result( DetectionAlgorithmRouter.futureRootTypeFor(algorithm), 30.seconds )
@@ -73,23 +72,15 @@ object AnalysisScopeProxy extends Instrumented with LazyLogging {
     implicit def timeout: Timeout = Timeout( 15.seconds )
 
     def makeRouter()( implicit context: ActorContext ): ActorRef = trace.block( "makeRouter" ){
-      log.debug( "TEST: plan = [{}] plan.algorithms:[{}]", plan, plan.algorithms )
-      log.debug( "TEST: domain model root-types:[{}]", model.rootTypes )
-
       val algorithmRefs = for {
         name <- plan.algorithms.toSeq
-      _ = log.debug( "TEST: plan algorithm name:[{}]", name )
         rt <- rootTypeFor( name )( context.dispatcher ).toSeq
         algoId <- rt.identifying.castIntoTID( scope )
-      _ = log.debug( "TEST: algoId [{}]", algoId )
         ref = model( rt, algoId )
-      _ = log.debug( "TEST: aggregate for [{}]:[{}] = [{}]", name, rt.name, ref)
       } yield {
         ref !+ AlgorithmProtocol.UseConfiguration( AlgorithmModule.identifying.tag(scope), plan.algorithmConfig )
         ( name, ref )
       }
-
-      log.debug( "TEST: for Router - algorithmRefs=[{}]", algorithmRefs.mkString(", ") )
 
       context.actorOf(
         DetectionAlgorithmRouter.props( Map(algorithmRefs:_*) ).withDispatcher( DetectionAlgorithmRouter.DispatcherPath ),

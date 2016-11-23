@@ -7,6 +7,7 @@ import akka.{Done, NotUsed}
 import akka.actor.{Actor, ActorLogging, ActorRef, ActorSystem, Props, Stash}
 import akka.agent.Agent
 import akka.event.LoggingReceive
+import akka.stream.actor.ActorSubscriberMessage
 import akka.stream.{FlowShape, Materializer}
 import akka.stream.scaladsl.{Flow, GraphDSL, Keep, Sink, Source}
 import akka.util.Timeout
@@ -19,7 +20,7 @@ import com.typesafe.scalalogging.LazyLogging
 import nl.grons.metrics.scala.MetricName
 import peds.akka.envelope._
 import peds.akka.envelope.pattern.ask
-import peds.akka.metrics.InstrumentedActor
+import peds.akka.metrics.{Instrumented, InstrumentedActor}
 import peds.commons.log.Trace
 import peds.akka.stream.CommonActorPublisher
 import demesne.{BoundedContext, DomainModel, StartTask}
@@ -49,7 +50,7 @@ object PlanCatalogProtocol {
 }
 
 
-object PlanCatalog extends LazyLogging {
+object PlanCatalog extends Instrumented with LazyLogging {
   def start(): StartTask = {
     StartTask.withBoundTask( "start PlanCatalog" ) { implicit bc: BoundedContext =>
       Task {
@@ -128,7 +129,7 @@ object PlanCatalog extends LazyLogging {
       val receiveOutliers = b.add(
         Source
         .fromPublisher[DetectionResult]( outlet ).named( "ResultCollector" )
-        .map { m => logger.debug("TEST: view detection result:[{}]", m); m }
+//        .map { m => logger.debug("TEST: view detection result:[{}]", m); m }
       )
 
       val collect = Flow[DetectionResult].map{ identity }.watchFlow( Collector )
@@ -156,6 +157,23 @@ object PlanCatalog extends LazyLogging {
 
 
   val subscribers: Agent[Set[ActorRef]] = Agent( Set.empty[ActorRef] )( scala.concurrent.ExecutionContext.global )
+  def clearSubscriber( subscriber: ActorRef )( implicit ec: ExecutionContext ): Future[Done] = {
+    Future successful Done
+//    for {
+//      subs <- subscribers.future() if subs contains subscriber
+//      _ = logger.info( "completing and clearing plan catalog subscriber:[{}]", subscriber.path.name )
+//      _ = subscriber ! ActorSubscriberMessage.OnComplete
+//      _ <- subscribers alter { oldSubs =>
+//        logger.info( "subscriber cleared: [{}]", subscriber.path.name )
+//        oldSubs - subscriber
+//      }
+//    } yield Done
+  }
+
+
+  override lazy val metricBaseName: MetricName = MetricName( classOf[PlanCatalog] )
+  metrics.gauge( "subscribers" ){ subscribers.get().size }
+
 
   private[outlier] case class PlanRequest( subscriber: ActorRef, startNanos: Long = System.nanoTime() )
 
@@ -414,7 +432,7 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
         } yield {
           if ( futureCheck ) {
             log.info(
-              "PlanCatalog[{}]: delayed appearance of topic:[{}] in index - removing from fallback",
+              "PlanCatalog[{}]: delayed appearance of topic:[{}] in plan index - removing from fallback",
               self.path.name, ts.topic
             )
             fallbackIndex send { _ - ts.topic.toString }
@@ -423,7 +441,7 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
             val fallbackResult = fallback contains ts.topic.toString
             if ( fallbackResult ) {
               log.warning(
-                "PlanCatalog[{}]: fallback plan not reflected yet in index found for topic:[{}]",
+                "PlanCatalog[{}]: fallback plan not reflected yet in plan index found for topic:[{}]",
                 self.path.name, ts.topic
               )
             }
@@ -438,13 +456,21 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
   }
 
   def unsafeApplicablePlanExists( ts: TimeSeries ): Boolean = trace.briefBlock( s"unsafeApplicablePlanExists( ${ts.topic} )" ) {
-    log.info( "PlanCatalog: unsafe look at {} plans for one that applies to topic:[{}] -- [{}]", planIndex.entries.size, ts.topic, planIndex.entries.values.mkString(", ") )
+    log.debug(
+      "PlanCatalog: unsafe look at {} plans for one that applies to topic:[{}] -- [{}]",
+      planIndex.entries.size, ts.topic, planIndex.entries.values.mkString(", ")
+    )
+
     planIndex.entries.values exists { _ appliesTo ts }
   }
 
   def futureApplicablePlanExists( ts: TimeSeries )( implicit ec: ExecutionContext ): Future[Boolean] = trace.briefBlock( s"futureApplicablePlanExists( ${ts.topic} )" ) {
     planIndex.futureEntries map { entries =>
-      log.info( "PlanCatalog: safe look at {} plans for one that applies to topic:[{}] -- [{}]", entries.size, ts.topic, entries.values.mkString(", ") )
+      log.debug(
+        "PlanCatalog: safe look at {} plans for one that applies to topic:[{}] -- [{}]",
+        entries.size, ts.topic, entries.values.mkString(", ")
+      )
+
       entries.values exists { _ appliesTo ts }
     }
   }
@@ -514,7 +540,7 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
       .map { entries =>
         val ps = entries collect { case (_, p) if p appliesTo topic => p }
         log.debug( "PlanCatalog[{}]: for topic:[{}] returning plans:[{}]", self.path.name, topic, ps.mkString(", ") )
-        log.debug( "TEST: IN GET-PLANS specified-plans:[{}]", specifiedPlans.mkString(", ") )
+//        log.debug( "TEST: IN GET-PLANS specified-plans:[{}]", specifiedPlans.mkString(", ") )
         P.CatalogedPlans( plans = ps.toSet, request = req )
       }
       .pipeEnvelopeTo( sender() )
@@ -613,10 +639,7 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
     for {
       m <- boundedContext.futureModel
       loaded <- Future.sequence( loadSpecifiedPlans(m) )
-    } yield {
-      log.info( "TEST: PlanCatalog loaded plans: [{}]", loaded.map{ case (n,p) => s"$n->$p" }.mkString(",") )
-      Map( loaded:_* )
-    }
+    } yield Map( loaded:_* )
   }
 
   def loadPlan( planId: OutlierPlan#TID )( implicit ec: ExecutionContext, to: Timeout ): Future[(String, OutlierPlan.Summary)] = {
@@ -627,7 +650,7 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
     def toInfo( message: Any ): Future[AP.PlanInfo] = {
       message match {
         case Envelope( info: AP.PlanInfo, _ ) => {
-          log.info( "PlanCataloge[{}]: fetched plan entity: [{}]", self.path, info.sourceId )
+          log.info( "PlanCatalog[{}]: fetched plan entity: [{}]", self.path, info.sourceId )
           Future successful info
         }
 

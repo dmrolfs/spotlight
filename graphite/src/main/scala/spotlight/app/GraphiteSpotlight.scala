@@ -95,14 +95,20 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
     )
     val address = settings.sourceAddress
 
+    val detectionFlow = {
+      inlet
+      .via( scoring )
+      .via( outlet )
+    }
+
+    import spotlight.app.GraphiteSpotlight.{ WatchPoints => GS }
+    import spotlight.stream.OutlierScoringModel.{ WatchPoints => OSM }
+    StreamMonitor.set( GS.Framing, GS.Intake, OSM.ScoringPlanned, OSM.Catalog, OSM.PlanBuffer, GS.PublishBuffer, OSM.ScoringUnrecognized )
+
     val connections = Tcp().bind( address.getHostName, address.getPort )
     connections runForeach { connection =>
       logger.info( "New connection from: {}", connection.remoteAddress )
-      val detectionFlow = {
-        inlet
-        .via( scoring )
-        .via( outlet )
-      }
+//      val foo: Int = connection.flow.join( detectionFlow ).run()
 
       connection handleWith detectionFlow
     }

@@ -202,7 +202,7 @@ class DetectionAlgorithmRouter extends Actor with EnvelopingActor with Instrumen
   provider: DetectionAlgorithmRouter.Provider =>
 
   var routingTable: Map[Symbol, ActorRef] = provider.initialRoutingTable
-  log.info( "DetectionAlgorithmRouter[{}] routing keys:[{}]", self.path.name, routingTable.keys.mkString(",") )
+  log.debug( "DetectionAlgorithmRouter[{}] created with routing keys:[{}]", self.path.name, routingTable.keys.mkString(",") )
 
   def contains( algorithm: Symbol ): Boolean = {
     log.debug( "DetectionAlgorithmRouter[{}] looking for {} in algorithms:[{}]", self.path.name, algorithm, routingTable.keys.mkString(",") )
@@ -226,8 +226,18 @@ class DetectionAlgorithmRouter extends Actor with EnvelopingActor with Instrumen
 
   override def unhandled( message: Any ): Unit = {
     message match {
-      case m: DetectUsing => log.error( s"cannot route unregistered algorithm [${m.algorithm}] routing-table:${routingTable}" )
-      case m => log.error( s"ROUTER UNAWARE OF message: [{}]\nrouting table:{}", m, routingTable.toSeq.mkString("\n",",","\n") ) // super.unhandled( m )
+      case m: DetectUsing => {
+        log.error(
+          "cannot route unregistered algorithm [{}] routing-table:[{}]",
+          m.algorithm,
+          routingTable.mkString("\n", "\n", "\n")
+        )
+      }
+
+      case m => {
+        log.error( "ROUTER UNAWARE OF message: [{}]\nrouting table:{}", m, routingTable.toSeq.mkString("\n",",","\n") )
+        // super.unhandled( m )
+      }
     }
   }
 }
