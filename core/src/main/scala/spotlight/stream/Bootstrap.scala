@@ -97,24 +97,22 @@ object Bootstrap extends Instrumented with StrictLogging {
     )
   }
 
-  def metricsReporterStartTask( config: Config ): StartTask = StartTask.withUnitTask( "start metrics reporter" ){
+  def metricsReporterStartTask( config: Config ): StartTask = StartTask.withFunction( "start metrics reporter" ){ bc =>
     val MetricsPath = "spotlight.metrics"
 
-    Task {
-      if ( config hasPath MetricsPath ) {
-        val metricsConfig = config getConfig MetricsPath
-        logger.info( "starting metric reporting with config: [{}]", metricsConfig )
-        val reporter = Reporter startReporter metricsConfig
-        logger.info( "metric reporter: [{}]", reporter )
-      } else {
-        logger.warn( """metric report configuration missing at "spotlight.metrics"""" )
-      }
-
-      Done
+    if ( config hasPath MetricsPath ) {
+      val metricsConfig = config getConfig MetricsPath
+      logger.info( "starting metric reporting with config: [{}]", metricsConfig )
+      val reporter = Reporter startReporter metricsConfig
+      logger.info( "metric reporter: [{}]", reporter )
+    } else {
+      logger.warn( """metric report configuration missing at "spotlight.metrics"""" )
     }
+
+    Done
   }
 
-  val kamonStartTask: StartTask = StartTask.withUnitTask( "start Kamon monitoring" ){ Task { kamon.Kamon.start(); Done } }
+  val kamonStartTask: StartTask = StartTask.withFunction( "start Kamon monitoring" ){ bc => kamon.Kamon.start(); Done }
 
 
   def systemConfiguration( context: BootstrapContext ): Kleisli[Future, Array[String], SystemSettings] = {

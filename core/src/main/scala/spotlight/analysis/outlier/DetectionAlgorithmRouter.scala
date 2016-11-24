@@ -1,7 +1,6 @@
 package spotlight.analysis.outlier
 
 import scala.concurrent.{ExecutionContext, Future}
-import akka.Done
 import akka.actor._
 import akka.agent.Agent
 import akka.event.LoggingReceive
@@ -34,16 +33,20 @@ object DetectionAlgorithmRouter extends LazyLogging {
   val ContextKey = 'DetectionAlgorithmRouter
 
   def startTask( configuration: Config )( implicit ec: ExecutionContext ): StartTask = {
-    StartTask.withBoundUnitTask( "load user algorithms" ){ bc: BoundedContext =>
-      val t = {
+    StartTask.withBoundTask( "load user algorithms" ){ bc: BoundedContext =>
+      val t: Future[StartTask.Result] = {
         for {
           algoRoots <- loadAlgorithms( bc, configuration )
           roots <- registerWithRouter( algoRoots )
+          unknowns = algoRoots.map{ case (_, rt) => rt }.toSet
+          _ = logger.info( "TEST: DetectionAlgorithmRouter: unknowns:[{}]", unknowns )
+          _ = logger.info( "TEST: EC = [{}]", implicitly[ExecutionContext] )
         } yield {
           logger.info( "DetectionAlgorithmRouter master table: [{}]", roots.mkString("\n", ", \n", "\n") )
-          Done
+          StartTask.Result( rootTypes = unknowns )
         }
       }
+
       t.toTask
     }
   }
@@ -138,7 +141,7 @@ object DetectionAlgorithmRouter extends LazyLogging {
   )(
     implicit ec: ExecutionContext
   ): Future[List[(Symbol, AggregateRootType)]] = {
-    def algorithmRootType( clazz: Class[_ <: AlgorithmModule] ): TryV[AggregateRootType] = {
+    def algorithmRootTypeFor( clazz: Class[_ <: AlgorithmModule] ): TryV[AggregateRootType] = {
       \/ fromTryCatchNonFatal {
         import scala.reflect.runtime.{universe => ru}
         val loader = getClass.getClassLoader
@@ -159,35 +162,38 @@ object DetectionAlgorithmRouter extends LazyLogging {
       exs.head
     }
 
+    def collectUnknowns(
+      algoClasses: Map[Symbol, Class[_ <: AlgorithmModule]]
+    )(
+      implicit model: DomainModel
+    ): TryV[List[(Symbol, AggregateRootType)]] = {
+      algoClasses
+      .toList
+      .traverseU { case (a, c) =>
+        algorithmRootTypeFor( c ) map { rt =>
+          if ( isKnownAlgorithm(rt) ) None
+          else {
+            logger.info( "loaded algorithm root type for [{}]: [{}]", a.name, rt )
+            Some( (a, rt) )
+          }
+        }
+      }
+      .map { _.flatten }
+    }
+
     boundedContext.futureModel
     .flatMap { implicit model =>
       val unknownRoots = {
         for {
           algorithmClasses <- userAlgos
-          unknowns <- {
-            algorithmClasses.toList
-            .traverseU { case (a, c) =>
-              algorithmRootType( c ) map { rt =>
-                if ( isKnownAlgorithm( rt ) ) None
-                else {
-                  logger.info( "loaded algorithm root type for [{}]: [{}]", a.name, rt )
-                  Some( (a, rt) )
-                }
-              }
-            }
-            .map { _.flatten }
-          }
+          unknowns <- collectUnknowns( algorithmClasses )
         } yield {
-          val bc = unknowns.foldLeft( boundedContext ){ case (b, (_, rt)) => b :+ rt }
-          //todo set new bounded context here if needed -- don't think it is per cell model.
-          //todo if needed, would need to wrap actor's boundedcontext in agent to protect from concurrency issues
-
           unknowns
         }
       }
 
       unknownRoots match {
-        case \/-(u) => Future successful u
+        case \/-( us ) => Future successful us
         case -\/(ex) => Future failed ex
       }
     }
