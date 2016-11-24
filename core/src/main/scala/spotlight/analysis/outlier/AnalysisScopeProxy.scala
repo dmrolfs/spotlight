@@ -1,5 +1,6 @@
 package spotlight.analysis.outlier
 
+import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
 import akka.NotUsed
 import akka.actor._
@@ -23,8 +24,6 @@ import spotlight.model.outlier.OutlierPlan.Scope
 import spotlight.model.outlier.{CorrelatedData, CorrelatedSeries, OutlierPlan}
 import spotlight.model.timeseries.TimeSeriesBase.Merging
 import spotlight.model.timeseries.{TimeSeries, Topic}
-
-import scala.concurrent.ExecutionContext
 
 
 /**

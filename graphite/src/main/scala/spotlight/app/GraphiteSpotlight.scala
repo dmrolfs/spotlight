@@ -77,7 +77,6 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
   )(
     implicit boundedContext: BoundedContext,
     settings: Settings
-//  ): Future[Tcp.ServerBinding] = {
   ): Future[Done] = {
     logger.info(
       s"""
@@ -103,32 +102,13 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
 
     import spotlight.app.GraphiteSpotlight.{ WatchPoints => GS }
     import spotlight.stream.OutlierScoringModel.{ WatchPoints => OSM }
-    StreamMonitor.set( GS.Framing, GS.Intake, OSM.ScoringPlanned, OSM.Catalog, OSM.PlanBuffer, GS.PublishBuffer, OSM.ScoringUnrecognized )
+    StreamMonitor.set( GS.Framing, GS.Intake, OSM.ScoringPlanned, OSM.PlanBuffer, GS.PublishBuffer, OSM.ScoringUnrecognized )
 
     val connections = Tcp().bind( address.getHostName, address.getPort )
     connections runForeach { connection =>
       logger.info( "New connection from: {}", connection.remoteAddress )
-//      val foo: Int = connection.flow.join( detectionFlow ).run()
-
       connection handleWith detectionFlow
     }
-
-//    val connection = Tcp().bind( address.getHostName, address.getPort )
-//    val sink = Sink.foreach[Tcp.IncomingConnection] { connection =>
-//      val detectionFlow = {
-//        inlet
-//        .via( scoring )
-//        .via( outlet )
-//      }
-//
-//      connection handleWith detectionFlow
-//    }
-//
-//    import spotlight.app.GraphiteSpotlight.{ WatchPoints => GS }
-//    import spotlight.stream.OutlierScoringModel.{ WatchPoints => OSM }
-//    StreamMonitor.set( GS.Framing, GS.Intake, OSM.PlanBuffer, GS.PublishBuffer )
-//
-//    ( connection to sink ).run()
   }
 
   def inlet( implicit boundedContext: BoundedContext, settings: Settings ): Flow[ByteString, TimeSeries, NotUsed] = {
