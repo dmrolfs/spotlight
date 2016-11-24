@@ -14,7 +14,7 @@ object Dependencies {
   }
 
   object demesne {
-    val version = "2.0.6-SNAPSHOT"
+    val version = "2.0.6"
     def module( id: String ) = "com.github.dmrolfs" %% s"demesne-$id" % version
     val core = module( "core" )
     val testkit = module( "testkit" )
