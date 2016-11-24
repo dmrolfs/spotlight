@@ -1,11 +1,9 @@
 package spotlight.stream
 
-import akka.actor.SupervisorStrategy.Decider
-
 import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
 import akka.{Done, NotUsed}
-import akka.actor.{ActorPath, ActorRef, ActorSystem, Props, SupervisorStrategy}
+import akka.actor.{ActorRef, ActorSystem, Props, SupervisorStrategy}
 import akka.stream.scaladsl.{Flow, GraphDSL, Sink}
 import akka.stream._
 import akka.util.Timeout
@@ -13,7 +11,6 @@ import akka.util.Timeout
 import scalaz._
 import Scalaz._
 import scalaz.Kleisli.kleisli
-import scalaz.concurrent.Task
 import shapeless.{Generic, HNil}
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.{Logger, StrictLogging}
@@ -23,7 +20,7 @@ import peds.akka.metrics.{Instrumented, Reporter}
 import peds.commons.builder.HasBuilder
 import peds.commons.util._
 import demesne.{AggregateRootType, BoundedContext, DomainModel, StartTask}
-import peds.akka.supervision.{IsolatedDefaultSupervisor, IsolatedLifeCycleSupervisor, IsolatedStopSupervisor, OneForOneStrategyFactory}
+import peds.akka.supervision.{IsolatedLifeCycleSupervisor, OneForOneStrategyFactory}
 import peds.akka.supervision.IsolatedLifeCycleSupervisor.{ChildStarted, StartChild}
 import spotlight.analysis.outlier.{AnalysisPlanModule, DetectionAlgorithmRouter, PlanCatalog, PlanCatalogProxy}
 import spotlight.analysis.outlier.algorithm.statistical.SimpleMovingAverageAlgorithm
@@ -97,24 +94,22 @@ object Bootstrap extends Instrumented with StrictLogging {
     )
   }
 
-  def metricsReporterStartTask( config: Config ): StartTask = StartTask.withUnitTask( "start metrics reporter" ){
+  def metricsReporterStartTask( config: Config ): StartTask = StartTask.withFunction( "start metrics reporter" ){ bc =>
     val MetricsPath = "spotlight.metrics"
 
-    Task {
-      if ( config hasPath MetricsPath ) {
-        val metricsConfig = config getConfig MetricsPath
-        logger.info( "starting metric reporting with config: [{}]", metricsConfig )
-        val reporter = Reporter startReporter metricsConfig
-        logger.info( "metric reporter: [{}]", reporter )
-      } else {
-        logger.warn( """metric report configuration missing at "spotlight.metrics"""" )
-      }
-
-      Done
+    if ( config hasPath MetricsPath ) {
+      val metricsConfig = config getConfig MetricsPath
+      logger.info( "starting metric reporting with config: [{}]", metricsConfig )
+      val reporter = Reporter startReporter metricsConfig
+      logger.info( "metric reporter: [{}]", reporter )
+    } else {
+      logger.warn( """metric report configuration missing at "spotlight.metrics"""" )
     }
+
+    Done
   }
 
-  val kamonStartTask: StartTask = StartTask.withUnitTask( "start Kamon monitoring" ){ Task { kamon.Kamon.start(); Done } }
+  val kamonStartTask: StartTask = StartTask.withFunction( "start Kamon monitoring" ){ bc => kamon.Kamon.start(); Done }
 
 
   def systemConfiguration( context: BootstrapContext ): Kleisli[Future, Array[String], SystemSettings] = {
@@ -210,7 +205,6 @@ object Bootstrap extends Instrumented with StrictLogging {
 
       logger.info( "TEST:BOOTSTRAP:BEFORE BoundedContext roottypes = [{}]", boundedContext.unsafeModel.rootTypes )
 
-//        val catalogRef = boundedContext.resources( Symbol(PlanCatalog.name) ).asInstanceOf[ActorRef]
       val catalogRef = makeCatalog( settings )
       val catalogProxyProps = PlanCatalogProxy.props(
         underlying = catalogRef,

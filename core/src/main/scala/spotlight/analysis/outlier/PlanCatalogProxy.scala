@@ -1,7 +1,7 @@
 package spotlight.analysis.outlier
 
 import scala.concurrent.duration._
-import akka.actor.{ActorLogging, ActorRef, Props}
+import akka.actor.{ActorLogging, ActorRef, PoisonPill, Props}
 import akka.event.LoggingReceive
 import akka.stream.actor.ActorSubscriberMessage.{OnComplete, OnError, OnNext}
 import akka.stream.actor.{ActorSubscriber, ActorSubscriberMessage, MaxInFlightRequestStrategy, RequestStrategy}
@@ -124,10 +124,11 @@ abstract class PlanCatalogProxy extends ActorSubscriber with EnvelopingActor wit
 
         import scala.concurrent.ExecutionContext.Implicits.global
         PlanCatalog.subscribers.future().foreach { subs =>
-          subs foreach { s =>
-            log.debug( "propagating OnComplete to subscriber:[{}]", s.path.name )
-            s ! ActorSubscriberMessage.OnComplete
-          }
+          subs foreach { s => PlanCatalog clearSubscriber s }
+//            log.debug( "propagating OnComplete to subscriber:[{}]", s.path.name )
+//            s ! ActorSubscriberMessage.OnComplete
+//            s ! PoisonPill //todo kill too?
+//          }
         }
 
         log.info( "PlanCatalog[{}] closing with completion", self.path.name )

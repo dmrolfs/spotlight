@@ -1,6 +1,5 @@
 package spotlight.app
 
-import scala.concurrent.Future
 import scala.concurrent.duration._
 import scala.util.{Failure, Success}
 import akka.Done
@@ -12,8 +11,6 @@ import scalaz.concurrent.Task
 import com.typesafe.scalalogging.{Logger, StrictLogging}
 import peds.commons.concurrent._
 import demesne.{BoundedContext, StartTask}
-import spotlight.stream.Settings
-
 
 
 /**
@@ -26,7 +23,7 @@ object SharedLeveldbStore extends StrictLogging {
 
   def start( createActor: Boolean = false ): StartTask = {
     val actionLabel = if ( createActor ) "create" else "connect"
-    StartTask.withBoundUnitTask( s"${actionLabel} shared LevelDB ${Name}" ) { implicit bc: BoundedContext =>
+    StartTask.withBoundTask( s"${actionLabel} shared LevelDB ${Name}" ) { implicit bc: BoundedContext =>
       val clusterPort = {
         val ClusterPortPath = "spotlight.settings.cluster-port"
         if ( bc.configuration hasPath ClusterPortPath ) bc.configuration.getInt( ClusterPortPath ) else 2551

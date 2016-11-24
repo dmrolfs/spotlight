@@ -78,7 +78,7 @@ extends EnvelopingActor with InstrumentedActor with ActorLogging { outer: Config
     case m: Outliers => {
       val source = sender()
       _fulfilled ++= m.algorithms map { _ -> m }
-      log.debug( "TEST: Quorum received [{}] from [{}] fulfilled:[{}] of total:[{}]", m.getClass.getSimpleName, source, _fulfilled.size, plan.algorithms.size )
+      log.debug( "Quorum received [{}] from [{}] fulfilled:[{}] of total:[{}]", m.getClass.getSimpleName, source, _fulfilled.size, plan.algorithms.size )
       if ( _fulfilled.size == plan.algorithms.size ) publishAndStop( _fulfilled )
     }
 
