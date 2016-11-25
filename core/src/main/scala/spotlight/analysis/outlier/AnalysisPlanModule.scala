@@ -206,7 +206,6 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
         .getOrElse {
           val proxy = outer.makeProxy( topic, state )( model, context )
           proxies += topic -> proxy
-          log.info( "TEST: Setting [{}] to watch proxy:[{}]", self, proxy )
           context watch proxy
           proxy
         }

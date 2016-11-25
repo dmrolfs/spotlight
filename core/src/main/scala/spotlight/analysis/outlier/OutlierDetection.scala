@@ -131,7 +131,6 @@ with ActorLogging {
       log.debug( "OutlierDetection received detection request[{}]: [{}:{}] subscriber=[{}]", workId, m.topic, m.plan, m.subscriber.path.name )
       dispatch( m, m.plan )( context.dispatcher ) match {
         case \/-( aggregator ) => {
-          log.debug( "TEST: OutlierDetection aggregator:[{}] for subscriber:[{}]", aggregator.path.name, m.subscriber.path.name )
           addToOutstanding( aggregator, DetectionRequest from m )
           stopIfFullyComplete( isWaitingToComplete )
         }
@@ -144,7 +143,6 @@ with ActorLogging {
       val aggregator = sender()
       val request = outstanding( aggregator )
       log.debug( "OutlierDetection sending results for [{}] to subscriber:[{}]", workId, request.subscriber )
-      log.debug( "TEST: OutlierDetection AFTER send [{}] subscriber.correlationIds=[{}]", workId, request.correlationIds )
       request.subscriber !+ DetectionResult( result, request.correlationIds )
       removeFromOutstanding( aggregator )
       detectionTimer.update( System.nanoTime() - request.startNanos, scala.concurrent.duration.NANOSECONDS )

@@ -480,7 +480,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
           \/ fromTryCatchNonFatal {
             algorithm.step( pt )
             .getOrElse {
-              logger.info( "skipping point[{}] per insufficient history for algorithm {}", pt, algorithm.label )
+              logger.debug( "skipping point[{}] per insufficient history for algorithm {}", pt, algorithm.label )
               ( false, ThresholdBoundary empty pt.timestamp.toLong )
             }
           }
