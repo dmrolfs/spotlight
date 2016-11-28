@@ -27,6 +27,14 @@ trait HistoricalStatistics extends Serializable {
   def sumLog: PointA
   def sumOfSquares: PointA
   @deprecated("replace with RecentHistory", "20161004") def lastPoints: Seq[PointA]
+  override def toString: String = {
+    s"HistoricalStatistics(" +
+    s"N:${N} " +
+    s"""m:${mean.mkString(", ")} """ +
+    s"""sd:${standardDeviation.mkString(", ")} """ +
+    s"""min-max:[${min.zip(max).mkString(", ")}]""" +
+    ")"
+  }
 }
 
 
@@ -66,13 +74,6 @@ object HistoricalStatistics {
     override def covariance: RealMatrix = all.getCovariance
     override def sumLog: PointA = all.getSumLog
     override def dimension: Int = all.getDimension
-
-    override def toString: String = {
-      s"""
-         |allStatistics: [${all.toString}]
-       """.stripMargin
-    }
-
     //todo underlying serializable ops
   }
 }

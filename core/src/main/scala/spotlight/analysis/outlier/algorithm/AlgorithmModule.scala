@@ -345,14 +345,13 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
 
     override val acceptance: Acceptance = {
       case ( AdvancedType(event), s ) => {
-        log.debug( "TEST:[{}]: accepting Advanced:[{}]", self.path, event )
         val currentState = Option(s) getOrElse {
           log.debug( "AlgorithmModule[{}]: processed first data. creating initial state", self.path )
           analysisStateCompanion zero aggregateId
         }
 //        val result = advanceLens.modify( currentState ){ case (h, ts) => (updateShape( h, event ), ts :+ event.threshold ) }
         val newState = advanceLens.modify( currentState ){ case shape => advanceShape(shape, event) }
-        log.debug( "TEST:[{}]: resultingState=[{}] aggregateId:[{}]", self.path, newState, aggregateId )
+        log.debug( "advancing [{}]: state=[{}]", aggregateId, newState )
         newState
       }
 
@@ -480,7 +479,11 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
           \/ fromTryCatchNonFatal {
             algorithm.step( pt )
             .getOrElse {
-              logger.debug( "skipping point[{}] per insufficient history for algorithm {}", pt, algorithm.label )
+              logger.debug(
+                "skipping point[{}] per insufficient history for algorithm {}",
+                s"(${pt.dateTime}:${pt.timestamp.toLong}, ${pt.value})", algorithm.label
+              )
+
               ( false, ThresholdBoundary empty pt.timestamp.toLong )
             }
           }
@@ -507,7 +510,6 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
                   analysisContext.data
                   .find { _.timestamp == pt.timestamp }
                   .map { original =>
-                    log.debug( "PT:[{}] ORIGINAL:[{}]", (pt._1.toLong, pt._2), (original._1.toLong, original._2) )
                     val event = AlgorithmProtocol.Advanced(
                       sourceId = aggregateId,
                       point = original.toDataPoint,
@@ -516,9 +518,10 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
                     )
 
                     log.debug(
-                      "LOOP-{}[{}]: AnalysisState.Advanced:[{}]",
-                      if ( isOutlier ) "HIT" else "MISS",
-                      (pt._1.toLong, pt._2),
+                      "{} STEP:{} [{}]: AnalysisState.Advanced:[{}]",
+                      algorithm.label.name,
+                      if ( isOutlier ) "ANOMALY" else "regular",
+                      s"ts:[${pt.dateTime}:${pt._1.toLong}] eff-value:[${pt.value}] orig-value:[${original.value}]",
                       event
                     )
 
