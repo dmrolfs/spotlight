@@ -1,7 +1,10 @@
 package spotlight.analysis.outlier
 
+import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
-import akka.actor.{ActorLogging, ActorRef, PoisonPill, Props}
+import akka.Done
+import akka.actor.{ActorLogging, ActorRef, Props}
+import akka.agent.Agent
 import akka.event.LoggingReceive
 import akka.stream.actor.ActorSubscriberMessage.{OnComplete, OnError, OnNext}
 import akka.stream.actor.{ActorSubscriber, ActorSubscriberMessage, MaxInFlightRequestStrategy, RequestStrategy}
@@ -10,9 +13,10 @@ import com.codahale.metrics.{Metric, MetricFilter}
 import scalaz._
 import Scalaz._
 import com.typesafe.config.Config
+import com.typesafe.scalalogging.LazyLogging
 import nl.grons.metrics.scala.{MetricName, Timer}
 import peds.akka.envelope._
-import peds.akka.metrics.InstrumentedActor
+import peds.akka.metrics.{Instrumented, InstrumentedActor}
 import peds.commons.log.Trace
 import spotlight.analysis.outlier.OutlierDetection.DetectionResult
 import spotlight.model.timeseries._
@@ -21,23 +25,54 @@ import spotlight.model.timeseries._
 /**
   * Created by rolfsd on 5/20/16.
   */
-object PlanCatalogProxy {
+object PlanCatalogProxy extends Instrumented with LazyLogging {
   def props(
     underlying: ActorRef,
     configuration: Config,
+    finishSubscriberOnComplete: Boolean = true,
     maxInFlightCpuFactor: Double = 8.0,
     applicationDetectionBudget: Option[FiniteDuration] = None
-  ): Props = Props( DefaultProxy(underlying, configuration, maxInFlightCpuFactor, applicationDetectionBudget) )
+  ): Props = {
+    Props(
+      DefaultProxy(
+        underlying,
+        configuration,
+        maxInFlightCpuFactor,
+        applicationDetectionBudget,
+        finishSubscriberOnComplete
+      )
+    )
+  }
 
   final case class DefaultProxy private[PlanCatalogProxy](
     override val underlying: ActorRef,
     override val configuration: Config,
     override val maxInFlightCpuFactor: Double,
-    override val applicationDetectionBudget: Option[FiniteDuration]
-  ) extends PlanCatalogProxy with PlanCatalog.DefaultExecutionProvider
+    override val applicationDetectionBudget: Option[FiniteDuration],
+    finishSubscriberOnComplete: Boolean = true
+  ) extends PlanCatalogProxy( finishSubscriberOnComplete ) with PlanCatalog.DefaultExecutionProvider
+
+
+  val subscribers: Agent[Set[ActorRef]] = Agent( Set.empty[ActorRef] )( scala.concurrent.ExecutionContext.global )
+  def clearSubscriber( subscriber: ActorRef )( implicit ec: ExecutionContext ): Future[Done] = {
+    for {
+      subs <- subscribers.future() if subs contains subscriber
+      _ = subscriber ! ActorSubscriberMessage.OnComplete
+      _ <- subscribers alter { oldSubs =>
+        logger.info( "PlanCatalogProxy: subscriber cleared: [{}]", subscriber.path.name )
+        oldSubs - subscriber
+      }
+    } yield Done
+  }
+
+
+  override lazy val metricBaseName: MetricName = MetricName( classOf[PlanCatalog] )
+  metrics.gauge( "subscribers" ){ subscribers.get().size }
+
 }
 
-abstract class PlanCatalogProxy extends ActorSubscriber with EnvelopingActor with InstrumentedActor with ActorLogging {
+abstract class PlanCatalogProxy( finishSubscriberOnComplete: Boolean = true )
+extends ActorSubscriber with EnvelopingActor with InstrumentedActor with ActorLogging {
   outer: PlanCatalog.ExecutionProvider =>
 
   import PlanCatalog.{ PlanRequest }
@@ -68,9 +103,11 @@ abstract class PlanCatalogProxy extends ActorSubscriber with EnvelopingActor wit
 
 
   //todo: associate timestamp with workId in order to reap tombstones
+  var _subscribersSeen: Set[ActorRef] = Set.empty[ActorRef]
   var _workRequests: Map[WorkId, PlanRequest] = Map.empty[WorkId, PlanRequest]
   def outstandingRequests: Int = _workRequests.size
   def addWorkRequest( correlationId: WorkId, subscriber: ActorRef ): Unit = {
+    _subscribersSeen += subscriber
     _workRequests += ( correlationId -> PlanRequest(subscriber) )
   }
 
@@ -106,10 +143,10 @@ abstract class PlanCatalogProxy extends ActorSubscriber with EnvelopingActor wit
   }
 
   var isWaitingToComplete: Boolean = false
-  private def stopIfFullyComplete(): Unit = {
+  private def stopIfFullyComplete()( implicit ec: ExecutionContext ): Unit = {
     if ( isWaitingToComplete ) {
       log.info(
-        "PlanCatalog[{}] waiting to complete on [{}] outstanding work: [{}]",
+        "PlanCatalogProxy[{}] waiting to complete on [{}] outstanding work: [{}]",
         self.path.name,
         outstandingRequests,
         knownWork.mkString( ", " )
@@ -117,21 +154,14 @@ abstract class PlanCatalogProxy extends ActorSubscriber with EnvelopingActor wit
 
       if ( outstandingRequests == 0 ) {
         log.info(
-          "PlanCatalog[{}] is closing upon work completion...will notify {} subscribers",
+          "PlanCatalogProxy[{}] is closing upon work completion...will notify {} subscribers",
           self.path.name,
-          PlanCatalog.subscribers.get().size
+          _subscribersSeen.size
         )
 
-        import scala.concurrent.ExecutionContext.Implicits.global
-        PlanCatalog.subscribers.future().foreach { subs =>
-          subs foreach { s => PlanCatalog clearSubscriber s }
-//            log.debug( "propagating OnComplete to subscriber:[{}]", s.path.name )
-//            s ! ActorSubscriberMessage.OnComplete
-//            s ! PoisonPill //todo kill too?
-//          }
-        }
+        if ( finishSubscriberOnComplete ) _subscribersSeen foreach { PlanCatalogProxy.clearSubscriber }
 
-        log.info( "PlanCatalog[{}] closing with completion", self.path.name )
+        log.info( "PlanCatalogProxy[{}] closing with completion", self.path.name )
         context stop self
       }
     }
@@ -157,7 +187,7 @@ abstract class PlanCatalogProxy extends ActorSubscriber with EnvelopingActor wit
     case P.UnknownRoute( ts, subscriber, cid ) => {
       log.warning( "PlanCatalogProxy[{}]: unknown route for timeseries. Dropping series for:[{}]", cid, ts.topic )
       cid foreach { id => removeWorkRequests( Set( id ) ) }
-      stopIfFullyComplete()
+      stopIfFullyComplete()( context.dispatcher )
     }
 
     case result: DetectionResult if !hasWorkInProgress( result.correlationIds ) => {
@@ -169,7 +199,7 @@ abstract class PlanCatalogProxy extends ActorSubscriber with EnvelopingActor wit
         result
       )
 
-      stopIfFullyComplete()
+      stopIfFullyComplete()( context.dispatcher )
     }
 
     case result @ DetectionResult( outliers, correlationIds ) => {
@@ -192,7 +222,7 @@ abstract class PlanCatalogProxy extends ActorSubscriber with EnvelopingActor wit
         if ( outstanding.size == 1 ) "" else "s"
       )
       outstanding foreach { case (_, r) => r.subscriber ! result }
-      stopIfFullyComplete()
+      stopIfFullyComplete()( context.dispatcher )
     }
   }
 
@@ -221,7 +251,7 @@ abstract class PlanCatalogProxy extends ActorSubscriber with EnvelopingActor wit
     case OnComplete => {
       log.info( "PlanCatalogProxy:STREAM[{}] closing on completed stream", self.path.name )
       isWaitingToComplete = true
-      stopIfFullyComplete()
+      stopIfFullyComplete()( context.dispatcher )
     }
 
     case OnError( ex ) => {
