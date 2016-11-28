@@ -74,12 +74,12 @@ object SingleBatchExample extends Instrumented with StrictLogging {
 
     start( args )
     .map { results =>
-      logger.info( "Example completed successfully and found {} result(s)", results.size )
+      logger.info("Example completed successfully and found {} result(s)", results.size )
       results
     }
     .onComplete {
-      case result => {
-        logger.info( "Example processing completed with: [{}]", result )
+      case results => {
+        logger.info( "Example finished finding: [{}]", results.map{ _.mkString("\n", "\n", "\n") } )
         actorSystem.terminate()
       }
     }
@@ -126,17 +126,17 @@ object SingleBatchExample extends Instrumented with StrictLogging {
 
   def sourceData(): Source[String, NotUsed] = {
     Source(
-      """{"topic" : "host.foo.bar.zed_delta.mean","points": [{"timestamp":1467762517,"value":2.0}]}""" ::
-      """{"topic" : "host.foo.bar.zed_delta.mean","points": [{"timestamp":1467762518,"value":2.0}]}""" ::
-      """{"topic" : "host.foo.bar.zed_delta.mean","points": [{"timestamp":1467762519,"value":2.0}]}""" ::
-      """{"topic" : "host.foo.bar.zed_delta.mean","points": [{"timestamp":1467762520,"value":2.0}]}""" ::
-      """{"topic" : "host.foo.bar.zed_delta.mean","points": [{"timestamp":1467762521,"value":2.0}]}""" ::
-      """{"topic" : "host.foo.bar.zed_delta.mean","points": [{"timestamp":1467762522,"value":2.0}]}""" ::
-      """{"topic" : "host.foo.bar.zed_delta.mean","points": [{"timestamp":1467762523,"value":2.0}]}""" ::
-      """{"topic" : "host.foo.bar.zed_delta.mean","points": [{"timestamp":1467762524,"value":200.0}]}""" ::
-      """{"topic" : "host.foo.bar.zed_delta.mean","points": [{"timestamp":1467762525,"value":2.0}]}""" ::
-      """{"topic" : "host.foo.bar.zed_delta.mean","points": [{"timestamp":1467762526,"value":2.0}]}""" ::
-      """{"topic" : "host.foo.bar.zed_delta.mean","points": [{"timestamp":1467762527,"value":2.0}]}""" ::
+      """{"topic" : "host.foo.bar.zed_delta.mean","points": [{"timestamp":1499992052518,"value":1.9}]}""" :: // 2017-07-13 17:27:32.518
+      """{"topic" : "host.foo.bar.zed_delta.mean","points": [{"timestamp":1500905822018,"value":2.0}]}""" :: // 2017-07-24 07:17:02.018
+      """{"topic" : "host.foo.bar.zed_delta.mean","points": [{"timestamp":1501766514783,"value":1.91}]}""" :: // 2017-08-03 06:21:54.783
+      """{"topic" : "host.foo.bar.zed_delta.mean","points": [{"timestamp":1501811957165,"value":2.1}]}""" :: // 2017-08-03 18:59:17.165
+      """{"topic" : "host.foo.bar.zed_delta.mean","points": [{"timestamp":1504118229872,"value":2.0}]}""" :: // 2017-08-30 11:37:09.872
+      """{"topic" : "host.foo.bar.zed_delta.mean","points": [{"timestamp":1504249200000,"value":2.01}]}""" :: // 2017-09-01 00:00:00.000
+      """{"topic" : "host.foo.bar.zed_delta.mean","points": [{"timestamp":1506841199999,"value":2.0}]}""" :: // 2017-09-30 23:59:59.999
+      """{"topic" : "host.foo.bar.zed_delta.mean","points": [{"timestamp":1506841200000,"value":2.0}]}""" :: // 2017-10-01 00:00:00.000
+      """{"topic" : "host.foo.bar.zed_delta.mean","points": [{"timestamp":1509950064783,"value":1.92}]}""" :: // 2017-11-05 22:34:24.783
+      """{"topic" : "host.foo.bar.zed_delta.mean","points": [{"timestamp":1510973520333,"value":200.0}]}""" :: // 2017-11-17 18:52:00.333
+      """{"topic" : "host.foo.bar.zed_delta.mean","points": [{"timestamp":1511367127872,"value":2.0}]}""" :: // 2017-11-22 08:12:07.872
       Nil
     )
   }
@@ -172,7 +172,7 @@ object SingleBatchExample extends Instrumented with StrictLogging {
         .watchFlow( 'timeseries )
       )
 
-      val score = scoring.watchFlow( 'scoring )
+      val score = scoring.via( watch("scoring") ).watchFlow( 'scoring )
 
       //todo remove after working
       val publishBuffer = b.add(
@@ -220,8 +220,6 @@ object SingleBatchExample extends Instrumented with StrictLogging {
         C.Outlet,
         'publish,
         'filter,
-//        'flatter,
-//        'unwrap,
         OSM.ScoringUnrecognized
       )
 

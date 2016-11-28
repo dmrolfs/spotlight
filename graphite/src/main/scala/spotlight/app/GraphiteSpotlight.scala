@@ -9,7 +9,6 @@ import akka.{Done, NotUsed}
 import akka.actor.ActorRef
 import akka.stream.scaladsl._
 import akka.stream._
-import akka.stream.scaladsl.Tcp.{IncomingConnection, ServerBinding}
 import akka.util.{ByteString, Timeout}
 import org.slf4j.LoggerFactory
 import com.typesafe.scalalogging.{Logger, StrictLogging}
@@ -51,7 +50,7 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
       .build()
     }
 
-    Bootstrap( context )
+    Bootstrap( context, finishSubscriberOnComplete = false )
     .run( args )
     .foreach { case (boundedContext, configuration, flow) =>
       execute( flow )( boundedContext, configuration ) onComplete {

@@ -7,27 +7,24 @@ import akka.{Done, NotUsed}
 import akka.actor.{Actor, ActorLogging, ActorRef, ActorSystem, Props, Stash}
 import akka.agent.Agent
 import akka.event.LoggingReceive
-import akka.stream.actor.ActorSubscriberMessage
 import akka.stream.{FlowShape, Materializer}
 import akka.stream.scaladsl.{Flow, GraphDSL, Keep, Sink, Source}
 import akka.util.Timeout
 
 import scalaz._
 import Scalaz._
-import scalaz.concurrent.Task
 import com.typesafe.config.{Config, ConfigObject}
 import com.typesafe.scalalogging.LazyLogging
 import nl.grons.metrics.scala.MetricName
 import peds.akka.envelope._
 import peds.akka.envelope.pattern.ask
-import peds.akka.metrics.{Instrumented, InstrumentedActor}
+import peds.akka.metrics.InstrumentedActor
 import peds.commons.log.Trace
 import peds.akka.stream.CommonActorPublisher
-import demesne.{BoundedContext, DomainModel, StartTask}
+import demesne.{BoundedContext, DomainModel}
 import spotlight.analysis.outlier.OutlierDetection.DetectionResult
 import spotlight.model.outlier.{IsQuorum, OutlierPlan, Outliers, ReduceOutliers}
 import spotlight.model.timeseries.{TimeSeries, Topic}
-import spotlight.stream.Settings
 
 
 /**
@@ -50,32 +47,7 @@ object PlanCatalogProtocol {
 }
 
 
-object PlanCatalog extends Instrumented with LazyLogging {
-  def start(): StartTask = {
-    StartTask.withBoundTask( "start PlanCatalog" ) { implicit bc: BoundedContext =>
-      Task {
-        val cpuFactor = Settings.maxInDetectionCpuFactorFrom( bc.configuration ) getOrElse { 8.0 }
-        val budget = Settings.detectionBudgetFrom( bc.configuration ) getOrElse { 10.seconds }
-
-        val catalogProps = PlanCatalog.props(
-          configuration = bc.configuration,
-          maxInFlightCpuFactor = cpuFactor,
-          applicationDetectionBudget = Some(budget)
-        )
-
-        val catalog = bc.system.actorOf( catalogProps, PlanCatalog.name )
-
-        import akka.pattern.ask
-        import spotlight.analysis.outlier.PlanCatalogProtocol.{ WaitForStart, Started }
-        implicit val timeout = Timeout( 30.seconds )
-
-        val done = ( catalog ? WaitForStart ).mapTo[Started.type]
-        scala.concurrent.Await.ready( done, timeout.duration )
-        Map( Symbol(PlanCatalog.name) -> catalog )
-      }
-    }
-  }
-
+object PlanCatalog extends LazyLogging {
   def props(
     configuration: Config,
     maxInFlightCpuFactor: Double = 8.0,
@@ -120,17 +92,13 @@ object PlanCatalog extends Instrumented with LazyLogging {
         .run()
       }
 
-      subscribers send { _ + outletRef }
+      PlanCatalogProxy.subscribers send { _ + outletRef }
 
       val zipWithSubscriber = b.add( Flow[TimeSeries].map{ ts => Route( ts, outletRef ) }.watchFlow(Intake) )
       val planRouter = b.add( Sink.actorSubscriber[Route]( catalogProxyProps ).named( "PlanCatalogProxy" ) )
       zipWithSubscriber ~> planRouter
 
-      val receiveOutliers = b.add(
-        Source
-        .fromPublisher[DetectionResult]( outlet ).named( "ResultCollector" )
-//        .map { m => logger.debug("TEST: view detection result:[{}]", m); m }
-      )
+      val receiveOutliers = b.add( Source.fromPublisher[DetectionResult]( outlet ).named( "ResultCollector" ) )
 
       val collect = Flow[DetectionResult].map{ identity }.watchFlow( Collector )
 
@@ -149,30 +117,12 @@ object PlanCatalog extends Instrumented with LazyLogging {
     Flow.fromGraph( g ).named( "PlanCatalogFlow" ).watchFlow( Symbol("CatalogDetection") )
   }
 
+
   object WatchPoints {
     val Intake = Symbol( "catalog.intake" )
     val Collector = Symbol( "catalog.collector" )
     val Outlet = Symbol( "catalog.outlet" )
   }
-
-
-  val subscribers: Agent[Set[ActorRef]] = Agent( Set.empty[ActorRef] )( scala.concurrent.ExecutionContext.global )
-  def clearSubscriber( subscriber: ActorRef )( implicit ec: ExecutionContext ): Future[Done] = {
-    Future successful Done
-//    for {
-//      subs <- subscribers.future() if subs contains subscriber
-//      _ = logger.info( "completing and clearing plan catalog subscriber:[{}]", subscriber.path.name )
-//      _ = subscriber ! ActorSubscriberMessage.OnComplete
-//      _ <- subscribers alter { oldSubs =>
-//        logger.info( "subscriber cleared: [{}]", subscriber.path.name )
-//        oldSubs - subscriber
-//      }
-//    } yield Done
-  }
-
-
-  override lazy val metricBaseName: MetricName = MetricName( classOf[PlanCatalog] )
-  metrics.gauge( "subscribers" ){ subscribers.get().size }
 
 
   private[outlier] case class PlanRequest( subscriber: ActorRef, startNanos: Long = System.nanoTime() )
@@ -225,12 +175,12 @@ object PlanCatalog extends Instrumented with LazyLogging {
   }
 
   final case class Default private[PlanCatalog](
-    _boundedContext: BoundedContext,
+    boundedContext: BoundedContext,
     configuration: Config,
     maxInFlightCpuFactor: Double = 8.0,
     applicationDetectionBudget: Option[FiniteDuration] = None,
     applicationPlans: Set[OutlierPlan] = Set.empty[OutlierPlan]
-  ) extends PlanCatalog( _boundedContext ) with DefaultExecutionProvider with PlanProvider {
+  ) extends PlanCatalog( boundedContext ) with DefaultExecutionProvider with PlanProvider {
     private val trace = Trace[Default]
 
     //todo also load from plan index?
@@ -384,7 +334,7 @@ object PlanCatalog extends Instrumented with LazyLogging {
   }
 }
 
-class PlanCatalog( _boundedContext: BoundedContext )
+class PlanCatalog( boundedContext: BoundedContext )
 extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorLogging {
   outer: PlanCatalog.ExecutionProvider with PlanCatalog.PlanProvider =>
 
@@ -393,7 +343,7 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
 
   private val trace = Trace[PlanCatalog]
 
-  var boundedContext: BoundedContext = _boundedContext
+//  var boundedContext: BoundedContext = _boundedContext
 
   override lazy val metricBaseName: MetricName = MetricName( classOf[PlanCatalog] )
 
@@ -540,7 +490,6 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
       .map { entries =>
         val ps = entries collect { case (_, p) if p appliesTo topic => p }
         log.debug( "PlanCatalog[{}]: for topic:[{}] returning plans:[{}]", self.path.name, topic, ps.mkString(", ") )
-//        log.debug( "TEST: IN GET-PLANS specified-plans:[{}]", specifiedPlans.mkString(", ") )
         P.CatalogedPlans( plans = ps.toSet, request = req )
       }
       .pipeEnvelopeTo( sender() )
@@ -579,7 +528,6 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
       _ = log.info( "PlanCatalog[{}] registered plans=[{}]", self.path.name, registered.mkString(",") )
       _ = log.info( "PlanCatalog[{}] missing plans=[{}]", self.path.name, missing.mkString(",") )
       created <- makeMissingSpecifiedPlans( missing )
-//      index <- planIndex.futureEntries
       recorded = created.keySet intersect entries.keySet
       remaining = created -- recorded
       _ <- fallbackIndex alter { plans => plans ++ remaining }

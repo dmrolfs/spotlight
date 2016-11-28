@@ -41,7 +41,8 @@ object PastPeriodAverageAlgorithm extends AlgorithmModule with AlgorithmModule.M
           distance = c.tolerance * sd
         )
 
-        ( threshold isOutlier point.value, threshold )
+        val isOutlier = s.shape.inCurrentPeriod( point.dateTime ) && threshold.isOutlier( point.value )
+        ( isOutlier, threshold )
       }
     }
   }
@@ -83,6 +84,7 @@ object PastPeriodAverageAlgorithm extends AlgorithmModule with AlgorithmModule.M
       override val timestamp: joda.DateTime
     ) extends Period {
       override def canEqual( rhs: Any ): Boolean = rhs.isInstanceOf[PeriodImpl]
+      override def toString: String = s"Period(${descriptor}: ${timestamp}:${timestamp.getMillis})"
     }
   }
 
@@ -97,30 +99,36 @@ object PastPeriodAverageAlgorithm extends AlgorithmModule with AlgorithmModule.M
     priorPeriods: List[PeriodValue] = List.empty[PeriodValue],
     resize: List[PeriodValue] => List[PeriodValue]
   ) {
-    def withPeriodValue( period: Period, value: Double ): Shape = {
-      if ( period.descriptor == joda.DateTime.now.getMonthOfYear ) withCurrentPeriod( period, value )
+    def inCurrentPeriod( ts: joda.DateTime ): Boolean = ts.getMonthOfYear == joda.DateTime.now.getMonthOfYear
+    def inCurrentPeriod( period: Period ): Boolean = period.descriptor == joda.DateTime.now.getMonthOfYear
+
+    def withPeriodValue( period: Period, value: Double ): Shape = trace.block( "withPeriodValue" ) {
+      if ( inCurrentPeriod(period) ) withCurrentPeriod( period, value )
       else {
-        val i = priorPeriods indexWhere { case (p, _) => Shape.isCandidateMoreRecentForPeriod( p, period ) }
-        if ( i == -1 ) withNewPriorPeriod( period, value )
-        else withUpdatedPriorPeriod( period, value, i )
+        val i = priorPeriods indexWhere { case (p, _) => p.descriptor == period.descriptor }
+        logger.debug( "TEST: prior period index for [{}] = [{}]", period, i.toString )
+        if ( i == -1 ) this.withNewPriorPeriod( period, value )
+        else if ( Shape.isCandidateMoreRecent(priorPeriods(i)._1, period) ) this.withUpdatedPriorPeriod(period, value, i)
+        else this
       }
     }
 
-    def withCurrentPeriod( p: Period, v: Double ): Shape = {
+    def withCurrentPeriod( p: Period, v: Double ): Shape = trace.block( "withCurrentPeriod" ) {
       currentPeriodValue
       .map { case (current, _) =>
-        if ( Shape.isCandidateMoreRecentForPeriod( current, p ) ) this.copy( currentPeriodValue = Some( (p, v) ) ) else this
+        if ( Shape.isCandidateMoreRecent( current, p ) ) this.copy( currentPeriodValue = Some( (p, v) ) ) else this
       }
-      .getOrElse { this }
+      .getOrElse { this.copy( currentPeriodValue = Some( (p, v) ) ) }
     }
 
-    def withUpdatedPriorPeriod( p: Period, v: Double, index: Int ): Shape = {
+    def withUpdatedPriorPeriod( p: Period, v: Double, index: Int ): Shape = trace.block( "withUpdatedPriorPeriod" ) {
       val (h, c :: t) = priorPeriods splitAt index
       val newPriors = h ::: ( (p, v) :: t )
+      logger.debug( "TEST: priorPeriods=[{}] newPriors:[{}]", priorPeriods, newPriors )
       this.copy( priorPeriods = newPriors )
     }
 
-    def withNewPriorPeriod( p: Period, v: Double ): Shape = {
+    def withNewPriorPeriod( p: Period, v: Double ): Shape = trace.block("withNewPriorPeriod") {
       val newPriors = resize( ( (p, v) :: priorPeriods ) sortBy { _._1 } )
       this.copy( priorPeriods = newPriors )
     }
@@ -132,11 +140,21 @@ object PastPeriodAverageAlgorithm extends AlgorithmModule with AlgorithmModule.M
 
     val mean: Option[Double] = stats map { _.getMean }
     val standardDeviation: Option[Double] = stats map { _.getStandardDeviation }
+
+    override def toString: String = {
+      "PastPeriodAverageAlgorithm.Shape( " +
+      s"mean:[${mean}] stddev:[${standardDeviation}] " +
+      s"current:[${currentPeriodValue}] " +
+      s"pastPeriods[${stats.map{_.getN}.getOrElse(0)}]:[${priorPeriods}] " +
+      ")"
+    }
   }
 
   object Shape {
-    def isCandidateMoreRecentForPeriod( p: Period, candidate: Period ): Boolean = {
-      p == candidate && p.timestamp < candidate.timestamp
+    def isCandidateMoreRecent( p: Period, candidate: Period ): Boolean = trace.block("isCandidateMoreRecent") {
+      logger.debug( "TEST: p.desciptor[{}] == candidate.descriptor[{}]: {}", p.descriptor.toString, candidate.descriptor.toString, (p.descriptor == candidate.descriptor).toString)
+      logger.debug( "TEST: p.timestamp[{}] < candidate.timestamp[{}]: {}", p.timestamp, candidate.timestamp, (p.timestamp < candidate.timestamp).toString)
+      ( p.descriptor == candidate.descriptor ) && ( p.timestamp < candidate.timestamp )
     }
 
     def sizeToWindow[T]( window: Int )( periods: List[T] ) = periods drop ( periods.size - window )
@@ -175,6 +193,10 @@ object PastPeriodAverageAlgorithm extends AlgorithmModule with AlgorithmModule.M
     }
 
     override def canEqual( that: Any ): Boolean = that.isInstanceOf[State]
+
+    override def toString: String = {
+      s"PastPeriodAverageAlgorithm.State( id:[${id}] window:[${window}] shape:[${shape}] )"
+    }
   }
 
   object State extends AnalysisStateCompanion {
@@ -186,6 +208,7 @@ object PastPeriodAverageAlgorithm extends AlgorithmModule with AlgorithmModule.M
 
     override def advanceShape( shape: Shape, advanced: Advanced ): Shape = {
       val (p, v) = Period assign advanced.point
+      logger.debug( "TEST: ASSIGNING point:[{}] to period:{}", advanced.point.timestamp, p )
       shape.withPeriodValue( p, v )
     }
 
@@ -204,7 +227,6 @@ object PastPeriodAverageAlgorithm extends AlgorithmModule with AlgorithmModule.M
     val RootPath = algorithm.label.name
     val WindowPath = RootPath + ".window"
     def getWindow( conf: Config ): TryV[Int] = {
-      logger.debug( "configuration[{}] getInt=[{}]", WindowPath, conf.getInt(WindowPath).toString )
       val window = if ( conf hasPath WindowPath ) conf getInt WindowPath else DefaultWindow
       if ( window > 0 ) window.right
       else AlgorithmModule.InvalidAlgorithmConfiguration( algorithm.label, WindowPath, "positive integer value" ).left
