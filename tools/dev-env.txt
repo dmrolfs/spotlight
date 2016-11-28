@@ -1,0 +1,17 @@
+ . ./tools/spotlight-local.sh spotlight.app.SingleBatchExample
+
+==================================
+
+ . ./tools/spotlight-local.sh
+
+
+
+nc -lp 20400
+
+tail -f log/monitor.csv
+tail -f log/publish.log | grep BatchAndSend
+
+tail -f log/metrics/spotlight.analysis.outlier.AnalysisScopeProxy.proxies.csv
+
+tools/graphite-stresser:
+java -jar build/libs/graphite-stresser-0.1.jar localhost 2004 1 256 1 false

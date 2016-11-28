@@ -73,11 +73,12 @@ object Bootstrap extends Instrumented with StrictLogging {
 
 
   def apply(
-    context: BootstrapContext
+    context: BootstrapContext,
+    finishSubscriberOnComplete: Boolean = true
   )(
     implicit ec: ExecutionContext
   ): Kleisli[Future, Array[String], SpotlightContext] = {
-    systemConfiguration( context ) >=> startBoundedContext( context ) >=> makeFlow()
+    systemConfiguration( context ) >=> startBoundedContext( context ) >=> makeFlow( finishSubscriberOnComplete )
   }
 
   val systemRootTypes: Set[AggregateRootType] = {
@@ -193,7 +194,7 @@ object Bootstrap extends Instrumented with StrictLogging {
     catalogChild.child
   }
 
-  def makeFlow(): Kleisli[Future, BoundedSettings, SpotlightContext] = {
+  def makeFlow( finishSubscriberOnComplete: Boolean ): Kleisli[Future, BoundedSettings, SpotlightContext] = {
     kleisli[Future, BoundedSettings, SpotlightContext] { case (boundedContext, settings) =>
       implicit val bc = boundedContext
       implicit val system = boundedContext.system
@@ -210,7 +211,8 @@ object Bootstrap extends Instrumented with StrictLogging {
         underlying = catalogRef,
         configuration = settings.config,
         maxInFlightCpuFactor = settings.maxInDetectionCpuFactor,
-        applicationDetectionBudget = Some(settings.detectionBudget)
+        applicationDetectionBudget = Some(settings.detectionBudget),
+        finishSubscriberOnComplete = finishSubscriberOnComplete
       )
 
       Future successful { ( boundedContext, settings, detectionModel(catalogProxyProps, settings) ) }
