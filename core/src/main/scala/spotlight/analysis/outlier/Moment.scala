@@ -10,7 +10,6 @@ import peds.commons.util._
   * Created by rolfsd on 1/26/16.
   */
 trait Moment {
-  def id: String
   def alpha: Double
   def centerOfMass: Double
   //    def halfLife: Double
@@ -20,15 +19,13 @@ trait Moment {
 }
 
 object Moment extends LazyLogging {
-  type ID = String
-
-  def withAlpha( id: ID, alpha: Double ): Valid[Moment] = {
-    checkAlpha( alpha ) map { a => SimpleMoment( id, alpha ) }
+  def withAlpha( alpha: Double ): Valid[Moment] = {
+    checkAlpha( alpha ) map { a => SimpleMoment( alpha ) }
   }
 
-  def withCenterOfMass( id: ID, com: Double ): Valid[Moment] = withAlpha( id, 1D / ( 1D + com / 100D ) )
+  def withCenterOfMass( com: Double ): Valid[Moment] = withAlpha( 1D / ( 1D + com / 100D ) )
 
-  def withHalfLife( id: ID, halfLife: Double ): Valid[Moment] = withAlpha( id, 1D - math.exp( math.log(0.5 ) / halfLife ) )
+  def withHalfLife( halfLife: Double ): Valid[Moment] = withAlpha( 1D - math.exp( math.log(0.5 ) / halfLife ) )
 
   def checkAlpha( alpha: Double ): Valid[Double] = {
     if ( alpha < 0D || 1D < alpha ) Validation.failureNel( InvalidMomentAlphaError( alpha ) )
@@ -37,7 +34,7 @@ object Moment extends LazyLogging {
 
 
   final case class Statistics private[outlier](
-    n: Int = 1,
+    N: Int = 1,
     alpha: Double,
     movingMax: Double,
     movingMin: Double,
@@ -51,18 +48,17 @@ object Moment extends LazyLogging {
       val newMin = math.min( movingMin, value )
       val newEWMA = (alpha * value) + (1 - alpha) * ewma
       val newEWMSD = math.sqrt( alpha * math.pow(ewmsd, 2) + (1 - alpha) * math.pow(value - ewma, 2) )
-      this.copy( n = n+1, movingMax = newMax, movingMin = newMin, ewma = newEWMA, ewmsd = newEWMSD )
+      this.copy( N = this.N + 1, movingMax = newMax, movingMin = newMin, ewma = newEWMA, ewmsd = newEWMSD )
     }
 
     override def toString: String = {
-      s"${getClass.safeSimpleName}[${n}](max:[${movingMax}] min:[${movingMin}] ewma:[${ewma}] ewmsd:[${ewmsd}] alpha:[${alpha}])"
+      s"${getClass.safeSimpleName}[${N}](max:[${movingMax}] min:[${movingMin}] ewma:[${ewma}] ewmsd:[${ewmsd}] alpha:[${alpha}])"
     }
 //      def movingVariance: Double = movingStandardDeviation * movingStandardDeviation
   }
 
 
   final case class SimpleMoment private[outlier](
-    override val id: Moment.ID,
     override val alpha: Double,
     override val statistics: Option[Moment.Statistics] = None
   ) extends Moment {

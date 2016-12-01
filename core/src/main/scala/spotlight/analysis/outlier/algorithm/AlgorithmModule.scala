@@ -477,6 +477,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
       kleisli[TryV, Context, Seq[AlgorithmProtocol.Advanced]] { implicit analysisContext =>
         def tryStep( pt: PointT )( implicit s: State ): TryV[(Boolean, ThresholdBoundary)] = {
           \/ fromTryCatchNonFatal {
+            logger.debug( "algorithm {}.step( {} ): state=[{}]", algorithm.label.name, pt, s )
             algorithm.step( pt )
             .getOrElse {
               logger.debug(

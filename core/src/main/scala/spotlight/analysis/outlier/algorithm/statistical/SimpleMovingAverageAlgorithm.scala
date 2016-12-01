@@ -23,7 +23,6 @@ object SimpleMovingAverageAlgorithm extends AlgorithmModule with AlgorithmModule
     }
 
     override def step( point: PointT )( implicit s: State, c: Context ): Option[(Boolean, ThresholdBoundary)] = {
-      logger.debug( "TEST:step( {} ): state=[{}]", point, s )
       val moving = s.statistics
       val mean = moving.getMean
       val stddev = moving.getStandardDeviation
