@@ -19,7 +19,7 @@ import peds.akka.envelope._
 import peds.akka.metrics.InstrumentedActor
 import peds.akka.publish.{EventPublisher, StackableStreamPublisher}
 import peds.archetype.domain.model.core.{Entity, EntityIdentifying}
-import peds.commons.{KOp, TryV}
+import peds.commons.{KOp, TryV, Valid}
 import peds.commons.identifier.{Identifying, TaggedID}
 import peds.commons.log.Trace
 import demesne._
@@ -80,7 +80,7 @@ object AlgorithmModule {
     def algorithm: Symbol
     def topic: Topic = scope.topic
 
-    def withConfiguration( configuration: Config ): Option[Self] = None
+    def withConfiguration( configuration: Config ): Valid[Self]
 
 //    def thresholds: Seq[ThresholdBoundary]
 //    def addThreshold( threshold: ThresholdBoundary ): Self
@@ -144,6 +144,12 @@ object AlgorithmModule {
   )
 
 
+  case class RedundantAlgorithmConfiguration[TID](
+    aggregateId: TID,
+    path: String,
+    value: Any
+  ) extends RuntimeException( s"For algorithm ${aggregateId}: ${path}:${value} is redundant" )
+
   case class InvalidAlgorithmConfiguration(
     algorithm: Symbol,
     path: String,
@@ -180,7 +186,6 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
 
   trait Algorithm {
     val label: Symbol
-//    def prepareContext( algorithmContext: Context ): Context = identity( algorithmContext )
     def prepareData( algorithmContext: Context ): Seq[DoublePoint]
     def step( point: PointT )( implicit state: State, algorithmContext: Context ): Option[(Boolean, ThresholdBoundary)]
   }
@@ -223,7 +228,6 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
       }
 
       val last = recent.points.drop( lastPos - tailLength + 1 ) map { _.value }
-      logger.debug( "tail-average: last[{}]", last.mkString(",") )
 
       points
       .map { _.timestamp }
@@ -284,10 +288,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
     override def repositoryProps( implicit model: DomainModel ): Props = Repository localProps model //todo change to clustered with multi-jvm testing of cluster
     override def maximumNrClusterNodes: Int = module.maximumNrClusterNodes
     override def aggregateIdFor: ShardRegion.ExtractEntityId = super.aggregateIdFor orElse {
-      case AdvancedType( a ) => {
-        logger.debug( "TEST: aggregateIdFor( {} ) = [{}]", a, a.sourceId.id.toString )
-        (a.sourceId.id.toString, a )
-      }
+      case AdvancedType( a ) => (a.sourceId.id.toString, a )
     }
     override def toString: String = "Algorithm:"+name
   }
@@ -357,7 +358,13 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
 
       case ( event: ConfigurationChanged, s ) => {
         val currentState = Option(s) getOrElse { analysisStateCompanion zero aggregateId }
-        currentState.withConfiguration( event.configuration ) map { _.asInstanceOf[State] } getOrElse s
+        currentState
+        .withConfiguration( event.configuration )
+        .map { _.asInstanceOf[State] }
+        .valueOr { exs =>
+          exs foreach { ex => log.error( ex, "ignoring accepted event: [{}] current-state:[{}]", event, currentState ) }
+          s
+        }
       }
     }
 
@@ -415,26 +422,22 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
         }
       }
 
-      case AdvancedType( adv ) => {
-        log.debug( "RECEIVE ADAANCED - TEST:[{}]: Algorithm[{}] HANDLING Advanced msg: [{}]", self.path, algorithm.label.name, adv )
-        persist( adv ) { accept }
-      }
+      case AdvancedType( adv ) => persist( adv ) { accept }
     }
 
     import AlgorithmProtocol.{ UseConfiguration, ConfigurationChanged, GetStateSnapshot, StateSnapshot }
 
     val stateReceiver: Receive = {
       case UseConfiguration( _, config ) => {
-        if ( Option(state).fold( true )( _.withConfiguration(config).isDefined ) ) {
+        if ( Option(state).isEmpty || state.withConfiguration(config).isDefined ) {
+          log.debug( "received and accepting UseConfiguration[{}] with state:[{}]", config, Option(state) )
           persist( ConfigurationChanged(aggregateId, config) ) { accept }
+        } else {
+          log.debug( "ignoring UseConfiguration" )
         }
       }
 
-      case _: GetStateSnapshot => {
-        val snapshot = StateSnapshot( aggregateId, Option(state) )
-        log.debug( "TEST:[{}]: Algorithm[{}] returning state snapshot: [{}]", self.path, algorithm.label.name, snapshot )
-        sender() ! snapshot
-      }
+      case _: GetStateSnapshot => sender() ! StateSnapshot( aggregateId, Option(state) )
     }
 
 
@@ -467,9 +470,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
         ctx <- ask[TryV, Context]
         data <- kleisli[TryV, Context, Seq[DoublePoint]] { c => \/ fromTryCatchNonFatal { algorithm prepareData c } }
         events <- collectOutlierPoints( data )
-      _ = log.debug( "TEST: findOutliers: events-isOutliers:[{}]", events.map{ _.isOutlier }.mkString(", ") )
         o <- makeOutliers( events )
-      _ = log.debug( "TEST: findOutliers: outliers:[{}]", o )
       } yield ( o, ctx )
     }
 

@@ -1,20 +1,19 @@
 package spotlight.analysis.outlier.algorithm.statistical
 
 import akka.actor.ActorSystem
-
 import scala.annotation.tailrec
-import scalaz.{-\/, Unzip, \/-}
+import scalaz.{-\/, \/-}
 import com.typesafe.config.{Config, ConfigFactory}
 import org.apache.commons.math3.stat.descriptive.{DescriptiveStatistics, StatisticalSummary}
 import org.joda.{time => joda}
 import org.mockito.Mockito._
 import org.scalatest.Assertion
 import org.typelevel.scalatest.{DisjunctionMatchers, DisjunctionValues}
+import peds.akka.envelope._
 import peds.commons.TryV
 import peds.commons.log.Trace
 import spotlight.analysis.outlier.RecentHistory
 import spotlight.analysis.outlier.algorithm.{AlgorithmModule, AlgorithmModuleSpec, AlgorithmProtocol => P}
-import spotlight.model.outlier.OutlierPlan
 import spotlight.model.timeseries._
 
 
@@ -149,112 +148,13 @@ with DisjunctionValues {
     }
   }
 
-//  implicit def fromAlpha( alpha: Double ): CalculationMagnet = new CalculationMagnet {
-//    case class Result( override val value: DescriptiveStatistics ) extends CalculationMagnetResult {
-//      override type Value = DescriptiveStatistics
-//      override def N: Long = value.getN
-//      override def expected: Double = value.getMean
-//      override def height: Double = value.getStandardDeviation
-//    }
-//
-////    override def apply( values: Seq[Double] ): Result = Result( new DescriptiveStatistics(values.toArray) )
-////    override def apply( points: Seq[DataPoint] ): Result = {
-////      val tolerance = 3.0
-////      val (last, current) = points splitAt ( points.size - 1 )
-////      Result( calculateControlBoundaries(current, tolerance, last).head, points.size, tolerance )
-////    }
-//    override def apply( points: Seq[DataPoint] ): Result = {
-//      Result( points.foldLeft( new DescriptiveStatistics(RecentHistory.LastN) ){ (acc, p) => acc.addValue(p.value); acc } )
-//    }
-//  }
-//todo: original impl for reference
-//  def calculateControlBoundaries(
-//                                  points: Seq[DataPoint],
-//                                  tolerance: Double,
-//                                  lastPoints: Seq[DataPoint] = Seq.empty[DataPoint]
-//                                ): Seq[ThresholdBoundary] = {
-//    val combined = lastPoints.map{ _.value } ++ points.map{ _.value }
-//    val N = combined.size
-//    val stats = new DescriptiveStatistics( combined.toArray )
-//    val mean = stats.getMean
-//    val stddev = stats.getStandardDeviation
-//    log.debug( "expected: combined:[{}]", combined.mkString(",") )
-//    log.debug( "expected statistics-N:[{}] size:[{}] mean:[{}] sttdev:[{}]", stats.getN.toString, N.toString, mean.toString, stddev.toString)
-//
-//    val tdist = new TDistribution( math.max( N - 2, 1 ) )
-//    val threshold = tdist.inverseCumulativeProbability( 0.05 / (2.0 * N) )
-//    val thresholdSquared = math.pow( threshold, 2 )
-//    val grubbs = ((N - 1) / math.sqrt(N)) * math.sqrt( thresholdSquared / (N - 2 + thresholdSquared) )
-//    log.debug( "expected threshold^2:[{}] grubbs:[{}]", thresholdSquared.toString, grubbs.toString )
-//
-//    val prevTimestamps = lastPoints.map{ _.timestamp }.toSet
-//
-//    points
-//    .filter { p => !prevTimestamps.contains(p.timestamp) }
-//    .map { case DataPoint(ts, _) => ThresholdBoundary.fromExpectedAndDistance( ts, mean, tolerance * grubbs * stddev ) }
-//  }
-//}
-
 
   bootstrapSuite()
   analysisStateSuite()
 
 
-//  //todo consider moving to AlgorithmModuleSpec as default impl
-//  case class Expected( isOutlier: Boolean, floor: Option[Double], expected: Option[Double], ceiling: Option[Double] ) {
-//    def stepResult( timestamp: joda.DateTime ): Option[(Boolean, ThresholdBoundary)] = {
-//      Some( (isOutlier, ThresholdBoundary(timestamp, floor, expected, ceiling)) )
-//    }
-//
-//    def stepResult( timestamp: Long ): Option[(Boolean, ThresholdBoundary)] = stepResult( new joda.DateTime(timestamp) )
-//  }
-//
-//  def makeExpected(
-//    data: Seq[Double],
-//    outliers: Seq[Boolean]
-//  )(
-//    implicit state: GrubbsAlgorithm.State,
-//    context: GrubbsAlgorithm.Context
-//  ): Seq[Expected] = trace.block( "makeExpected" ){
-//    logger.debug( "data:[{}]", data.mkString(", ") )
-//
-//    @tailrec def loop( values: List[(Double, Boolean)], acc: Seq[Expected] = Seq.empty[Expected] ): Seq[Expected] = {
-//      val stats = state.movingStatistics
-//      values match {
-//        case Nil => acc
-//
-//        case (v, o) :: t => {
-//
-//          val (floor, expected, ceiling) = {
-//            val threshold = for {
-//              mean <- if ( stats.getMean.isNaN ) None else Some( stats.getMean )
-//              sttdev <- if ( stats.getStandardDeviation.isNaN ) None else Some( stats.getStandardDeviation )
-//              score <- state.grubbsScore.toOption
-//            } yield {
-//              val height = math.abs( context.tolerance * score * sttdev )
-//              ( mean - height, ( mean, mean + height ) )
-//            }
-//
-//            import scalaz.std.option._
-//            Unzip[Option].unzip3( threshold )
-//          }
-//
-//          stats addValue v
-//          val e = Expected( isOutlier = o, floor = floor, expected = expected, ceiling = ceiling )
-//          logger.debug( "Grubbs[{}]: expected:[{}]", stats.getN.toString, e )
-//
-//          loop( t, acc :+ e )
-//        }
-//      }
-//    }
-//
-//    val combined = data zip outliers
-//    loop( combined.toList )
-//  }
-
-
   s"${defaultModule.algorithm.label.name} algorithm" should {
-    "change configuration" in { f: Fixture =>
+    "change configuration" taggedAs WIP in { f: Fixture =>
       import f._
       import akka.pattern.ask
       import scala.concurrent.duration._
@@ -264,15 +164,15 @@ with DisjunctionValues {
         actualVsExpectedState( actual.snapshot, None )
       }
 
-      val c1 = ConfigFactory.parseString( "Grubbs { sample-size = 7 }" )
-      aggregate ! P.UseConfiguration( id, c1 )
+      val c1 = ConfigFactory.parseString( s"${module.algorithm.label.name} { sample-size = 7 }" )
+      aggregate !+ P.UseConfiguration( id, c1 )
       whenReady( ( aggregate ? P.GetStateSnapshot(id) ).mapTo[P.StateSnapshot], timeout(5.seconds.dilated) ){ actual =>
         val expected = module.State( id, "", new DescriptiveStatistics(), 7 )
         actualVsExpectedState( actual.snapshot, Some(expected) )
         actual.snapshot.get.asInstanceOf[GrubbsAlgorithm.State].sampleSize mustBe 7
       }
 
-      val c2 = ConfigFactory.parseString( "Grubbs { sample-size = 13 }" )
+      val c2 = ConfigFactory.parseString( s"${module.algorithm.label.name} { sample-size = 13 }" )
       aggregate ! P.UseConfiguration( id, c2 )
       whenReady( ( aggregate ? P.GetStateSnapshot(id) ).mapTo[P.StateSnapshot], timeout(5.seconds.dilated) ){ actual =>
         val expected = module.State( id, "", new DescriptiveStatistics(), 13 )
@@ -340,7 +240,7 @@ with DisjunctionValues {
       }
     }
 
-    "find outliers across two batches" taggedAs WIP in { f: Fixture =>
+    "find outliers across two batches" in { f: Fixture =>
       import f._
       val dp1 = makeDataPoints( values = Seq.fill( 10 ){ 1.0 }, timeWiggle = (0.98, 1.02), valueWiggle = (0.99, 1.01) )
       val s1 = spike( scope.topic, dp1 )()

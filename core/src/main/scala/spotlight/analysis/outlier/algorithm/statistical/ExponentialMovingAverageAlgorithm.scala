@@ -1,11 +1,14 @@
 package spotlight.analysis.outlier.algorithm.statistical
 
 import scala.reflect.ClassTag
+import scalaz.{-\/, \/-}
+import scalaz.syntax.validation._
+import shapeless.{Lens, lens}
+import com.typesafe.config.Config
 import org.apache.commons.lang3.ClassUtils
 import org.apache.commons.math3.ml.clustering.DoublePoint
+import peds.commons.Valid
 import peds.commons.log.Trace
-import scalaz.{-\/, \/-}
-import shapeless.{Lens, lens}
 import spotlight.analysis.outlier.{DetectUsing, Moment}
 import spotlight.analysis.outlier.algorithm.AlgorithmModule
 import spotlight.analysis.outlier.algorithm.AlgorithmProtocol.Advanced
@@ -57,6 +60,7 @@ object ExponentialMovingAverageAlgorithm extends AlgorithmModule with AlgorithmM
     override type Self = State
 
     override def algorithm: Symbol = outer.algorithm.label  // WORK HERE remove need by having module: AlgorithmModule ref in AnalysisState?
+    override def withConfiguration( configuration: Config ): Valid[State] = this.successNel
 
     override def canEqual( that: Any ): Boolean = that.isInstanceOf[State]
     override def toString: String = s"${ClassUtils.getAbbreviatedName(getClass, 15)}( id:[${id}] moment:[${moment}] )"

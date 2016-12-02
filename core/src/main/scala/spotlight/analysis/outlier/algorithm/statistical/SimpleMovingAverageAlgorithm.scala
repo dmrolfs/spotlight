@@ -1,11 +1,14 @@
 package spotlight.analysis.outlier.algorithm.statistical
 
 import scala.reflect.ClassTag
+import scalaz.syntax.validation._
+import shapeless.{Lens, lens}
+import com.typesafe.config.Config
 import org.apache.commons.lang3.ClassUtils
 import org.apache.commons.math3.ml.clustering.DoublePoint
 import org.apache.commons.math3.stat.descriptive.SummaryStatistics
+import peds.commons.Valid
 import peds.commons.log.Trace
-import shapeless.{Lens, lens}
 import spotlight.analysis.outlier.DetectUsing
 import spotlight.analysis.outlier.algorithm.{AlgorithmModule, AlgorithmProtocol}
 import spotlight.model.timeseries._
@@ -26,17 +29,11 @@ object SimpleMovingAverageAlgorithm extends AlgorithmModule with AlgorithmModule
       val moving = s.statistics
       val mean = moving.getMean
       val stddev = moving.getStandardDeviation
-      logger.debug(
-        "Stddev from simple moving Average N[{}]: mean[{}]\tstdev[{}]\ttolerance[{}]",
-        moving.getN.toString, mean.toString, stddev.toString, c.tolerance.toString
-      )
-
       val threshold = ThresholdBoundary.fromExpectedAndDistance(
         timestamp = point.timestamp.toLong,
         expected = mean,
         distance = c.tolerance * stddev
       )
-
       Some( (threshold isOutlier point.value, threshold) )
     }
   }
@@ -54,6 +51,7 @@ object SimpleMovingAverageAlgorithm extends AlgorithmModule with AlgorithmModule
     override type Self = State
 
     override def algorithm: Symbol = outer.algorithm.label
+    override def withConfiguration( configuration: Config ): Valid[State] = this.successNel
 
     override def canEqual( that: Any ): Boolean = that.isInstanceOf[State]
     override def toString: String = {
@@ -74,8 +72,6 @@ object SimpleMovingAverageAlgorithm extends AlgorithmModule with AlgorithmModule
 
 
     override def advanceShape( statistics: Shape, advanced: AlgorithmProtocol.Advanced ): Shape = trace.block( "advanceShape" ) {
-      logger.debug( "TEST: statistics shape = [{}]", statistics )
-      logger.debug( "TEST: advanced event  = [{}]", advanced )
       val newStats = statistics.copy()
       newStats addValue advanced.point.value
       newStats
