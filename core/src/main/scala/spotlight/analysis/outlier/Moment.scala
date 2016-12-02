@@ -1,7 +1,9 @@
 package spotlight.analysis.outlier
 
-import scalaz._, Scalaz._
+import scalaz._
+import Scalaz._
 import com.typesafe.scalalogging.LazyLogging
+import org.apache.commons.math3.stat.descriptive.StatisticalSummary
 import peds.commons.Valid
 import peds.commons.util._
 
@@ -33,22 +35,40 @@ object Moment extends LazyLogging {
   }
 
 
+  object Statistics {
+    def apply( alpha: Double, values: Double* ): Statistics = {
+      values.foldLeft(
+        Statistics(alpha = alpha, N = 0, sum = 0D, movingMin = 0D, movingMax = 0D, ewma = 0D, ewmsd = 0D)
+      ) {
+        _ :+ _
+      }
+    }
+  }
+
   final case class Statistics private[outlier](
-    N: Int = 1,
+    N: Long = 1,
     alpha: Double,
+    sum: Double,
     movingMax: Double,
     movingMin: Double,
-//      movingAverage: Double = Double.NaN,
-//      movingStandardDeviation: Double = Double.NaN,
     ewma: Double,
     ewmsd: Double
-  ) {
+  ) extends StatisticalSummary {
+    override def getSum: Double = N * ewma
+    override def getMin: Double = movingMax
+    override def getStandardDeviation: Double = ewmsd
+    override def getMean: Double = ewma
+    override def getMax: Double = movingMax
+    override def getN: Long = N
+    override def getVariance: Double = ewmsd * ewmsd
+
     def :+( value: Double ): Statistics = {
-      val newMax = math.max( movingMax, value )
-      val newMin = math.min( movingMin, value )
-      val newEWMA = (alpha * value) + (1 - alpha) * ewma
-      val newEWMSD = math.sqrt( alpha * math.pow(ewmsd, 2) + (1 - alpha) * math.pow(value - ewma, 2) )
-      this.copy( N = this.N + 1, movingMax = newMax, movingMin = newMin, ewma = newEWMA, ewmsd = newEWMSD )
+      val newSum = this.sum + value
+      val newMax = math.max( this.movingMax, value )
+      val newMin = math.min( this.movingMin, value )
+      val newEWMA = (this.alpha * value) + (1 - this.alpha) * this.ewma
+      val newEWMSD = math.sqrt( this.alpha * math.pow(this.ewmsd, 2) + (1 - this.alpha) * math.pow(value - this.ewma, 2) )
+      this.copy( N = this.N + 1, sum = newSum, movingMax = newMax, movingMin = newMin, ewma = newEWMA, ewmsd = newEWMSD )
     }
 
     override def toString: String = {
@@ -64,9 +84,7 @@ object Moment extends LazyLogging {
   ) extends Moment {
     override def centerOfMass: Double = ( 1D / alpha ) - 1D
     override def :+( value: Double ): Moment = {
-      val newStatistics = statistics map { _ :+ value } getOrElse {
-        Statistics( alpha = alpha, movingMax = value, movingMin = value, ewma = value, ewmsd = 0D )
-      }
+      val newStatistics = statistics map { _ :+ value } getOrElse { Statistics( alpha, value ) }
       copy( statistics = Option(newStatistics) )
     }
   }
