@@ -6,13 +6,12 @@ import akka.actor.ActorSystem
 import akka.pattern.ask
 import akka.testkit._
 import com.typesafe.config.Config
-
 import org.scalatest.concurrent.ScalaFutures
 import org.joda.{time => joda}
 import demesne.AggregateRootType
 import demesne.testkit.AggregateRootSpec
 import org.apache.commons.math3.random.RandomDataGenerator
-import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
+import org.apache.commons.math3.stat.descriptive.{DescriptiveStatistics, StatisticalSummary}
 import org.mockito.Mockito._
 import org.scalatest.{Assertion, OptionValues}
 import peds.akka.envelope._
@@ -212,6 +211,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
           o mustBe Seq( series.points.last )
 
           t( module.algorithm.label ).zip( expectedResults ).zipWithIndex foreach { case ( ((actual, expected), i) ) =>
+            logger.info( "evaluate[{}]: actual:[{}]  expected:[{}]", i.toString, actual, expected )
             (i, actual.floor) mustBe(i, expected.floor)
             (i, actual.expected) mustBe(i, expected.expected)
             (i, actual.ceiling) mustBe(i, expected.ceiling)
@@ -280,25 +280,13 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
 
   object Expected {
     def fromStatistics( isOutlier: Boolean, tolerance: Double, result: Option[CalculationMagnetResult] ): Expected = {
-      val (f, e, c) = {
-        val expected = result map { _.expected }
-
-        val (floor, ceiling) = {
-          import scalaz.Unzip
-          import scalaz.std.option._
-
-          val fc = for {
-            e <- expected
-            d <- result map { r => math.abs( r.height * tolerance ) }
-          } yield ( e - d, e + d )
-
-          Unzip[Option] unzip fc
-        }
-
-        ( floor, expected, ceiling )
-      }
-
-      Expected( isOutlier, floor = f, expected = e, ceiling = c )
+      val tb = result map { _.thresholdBoundary }
+      Expected(
+        isOutlier,
+        floor = tb.flatMap{ _.floor },
+        expected = tb.flatMap{ _.expected },
+        ceiling = tb.flatMap{ _.ceiling }
+      )
     }
   }
 
@@ -323,6 +311,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
     val expected = outliers.zip( results.drop(history.size) ) map { case (o, r) =>
       Expected.fromStatistics( isOutlier = o, tolerance = tolerance, result = r )
     }
+    logger.info( "makeExpected: calculated result:[{}] expected:[{}]", results.last, expected.mkString("\n","\n","\n") )
     ( expected, results.last )
   }
 
@@ -332,9 +321,11 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
 
   trait CalculationMagnetResult {
     type Value
-    def N: Long
-    def expected: Double
-    def height: Double
+    def underlying: Value
+    def tolerance: Double
+    def timestamp: joda.DateTime
+    def statistics: Option[StatisticalSummary]
+    def thresholdBoundary: ThresholdBoundary
   }
 
   trait CalculationMagnet {
@@ -343,14 +334,29 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
   }
 
   abstract class CommonCalculationMagnet extends CalculationMagnet {
-    case class Result( value: DescriptiveStatistics ) extends CalculationMagnetResult {
-      override type Value = DescriptiveStatistics
-      override def N: Long = value.getN
-      override def expected: Double = value.getMean
-      override def height: Double = value.getStandardDeviation
+    case class Result(
+      override val underlying: StatisticalSummary,
+      override val timestamp: joda.DateTime,
+      override val tolerance: Double
+    ) extends CalculationMagnetResult {
+      override type Value = StatisticalSummary
+      override def statistics: Option[StatisticalSummary] = Option( underlying )
+      override def thresholdBoundary: ThresholdBoundary = {
+        ThresholdBoundary.fromExpectedAndDistance(
+          timestamp,
+          expected = underlying.getMean,
+          distance = tolerance * underlying.getStandardDeviation
+        )
+      }
     }
 
-    override def apply( points: Seq[DataPoint] ): Result = Result( new DescriptiveStatistics(points.map{ _.value }.toArray) )
+    override def apply( points: Seq[DataPoint] ): Result = {
+      Result(
+        underlying = new DescriptiveStatistics( points.map{ _.value }.toArray ),
+        timestamp = points.last.timestamp,
+        tolerance = 3.0
+      )
+    }
   }
 
   object CalculationMagnet {

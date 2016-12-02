@@ -3,6 +3,8 @@ package spotlight.analysis.outlier.algorithm.statistical
 import scala.annotation.tailrec
 import akka.actor.ActorSystem
 import com.typesafe.config.Config
+import org.joda.{time => joda}
+import org.apache.commons.math3.stat.descriptive.StatisticalSummary
 import org.scalatest.Assertion
 import spotlight.analysis.outlier.Moment
 import spotlight.analysis.outlier.algorithm.{AlgorithmModuleSpec, AlgorithmProtocol => P}
@@ -29,7 +31,7 @@ class ExponentialMovingAverageAlgorithmSpec extends AlgorithmModuleSpec[Exponent
         else {
           val l = lhs.asInstanceOf[ExponentialMovingAverageAlgorithm.Shape]
           val r = rhs.asInstanceOf[ExponentialMovingAverageAlgorithm.Shape]
-          ( l.statistics.map {_.N}.getOrElse( 0 ) - r.statistics.map {_.N}.getOrElse( 0 ) ).toInt
+          ( l.statistics.map {_.N}.getOrElse( 0L ) - r.statistics.map {_.N}.getOrElse( 0L ) ).toInt
         }
       }
     }
@@ -44,31 +46,26 @@ class ExponentialMovingAverageAlgorithmSpec extends AlgorithmModuleSpec[Exponent
       logger.info( "assertState  result:[{}]", result )
       s.moment.alpha mustBe 0.05
 
-      result match {
+      result.flatMap{ _.statistics } match {
         case None => assert( s.moment.statistics.isEmpty )
 
         case Some( r ) => {
           assert( s.moment.statistics.isDefined )
-          s.moment.statistics.value.N mustBe r.N
-          s.moment.statistics.value.ewma mustBe r.expected
-          s.moment.statistics.value.ewmsd mustBe r.height
+          s.moment.statistics.value.N mustBe r.getN
+          s.moment.statistics.value.ewma mustBe r.getMean
+          s.moment.statistics.value.ewmsd mustBe r.getStandardDeviation
         }
       }
     }
   }
 
-
-  implicit def fromAlpha( alpha: Double ): CalculationMagnet = new CalculationMagnet {
-    case class Result( value: (Long, Double, Double) ) extends CalculationMagnetResult {
-      override type Value = (Long, Double, Double)
-      override def N: Long = value._1
-      override def expected: Double = value._2
-      override def height: Double = value._3
-    }
-
+  implicit def fromAlpha( alpha: Double ): CalculationMagnet = new CommonCalculationMagnet {
     override def apply( points: Seq[DataPoint] ): Result = {
-      val m = points.foldLeft( Moment.withAlpha(alpha).toOption.get ){ _ :+ _.value }
-      Result( m.statistics.map{ s => (s.N.toLong, s.ewma, s.ewmsd) } getOrElse (0L, 0D, 0D) )
+      Result(
+        underlying = Moment.Statistics( 0.05, points.map{ _.value }:_* ),
+        timestamp = points.last.timestamp,
+        tolerance = 3.0
+      )
     }
   }
 

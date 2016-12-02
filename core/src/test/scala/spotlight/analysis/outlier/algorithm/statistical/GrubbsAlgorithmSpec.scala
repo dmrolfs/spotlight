@@ -3,18 +3,19 @@ package spotlight.analysis.outlier.algorithm.statistical
 import akka.actor.ActorSystem
 
 import scala.annotation.tailrec
-import scalaz.Unzip
+import scalaz.{-\/, Unzip, \/-}
 import com.typesafe.config.{Config, ConfigFactory}
-import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
+import org.apache.commons.math3.stat.descriptive.{DescriptiveStatistics, StatisticalSummary}
 import org.joda.{time => joda}
 import org.mockito.Mockito._
+import org.scalatest.Assertion
 import org.typelevel.scalatest.{DisjunctionMatchers, DisjunctionValues}
+import peds.commons.TryV
 import peds.commons.log.Trace
 import spotlight.analysis.outlier.RecentHistory
-import spotlight.analysis.outlier.algorithm.AlgorithmModuleSpec
-import spotlight.analysis.outlier.algorithm.{AlgorithmProtocol => P}
+import spotlight.analysis.outlier.algorithm.{AlgorithmModule, AlgorithmModuleSpec, AlgorithmProtocol => P}
 import spotlight.model.outlier.OutlierPlan
-import spotlight.model.timeseries.{DataPoint, ThresholdBoundary, TimeSeries}
+import spotlight.model.timeseries._
 
 
 /**
@@ -36,8 +37,6 @@ with DisjunctionValues {
   }
 
   class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends AlgorithmFixture( _config, _system, _slug ) {
-    val testScope: module.TID = identifying tag OutlierPlan.Scope( plan = "TestPlan", topic = "TestTopic" )
-
     override implicit val shapeOrdering: Ordering[TestShape] = new Ordering[TestShape] {
       override def compare( lhs: TestShape, rhs: TestShape ): Int = {
         val l = lhs.asInstanceOf[DescriptiveStatistics]
@@ -47,7 +46,28 @@ with DisjunctionValues {
       }
     }
 
-    override def nextId(): module.TID = testScope
+    def assertState( result: Option[CalculationMagnetResult] )( s: module.State ): Assertion = {
+      logger.info( "assertState result:[{}]", result )
+
+      s.movingStatistics.getN mustBe ( if ( result.isDefined ) result.get.statistics.get.getN else 0 )
+
+      val eh = for {
+        r <- result
+        stats <- r.statistics
+      } yield ( stats.getMean, stats.getStandardDeviation )
+
+      eh match {
+        case None => {
+          assert( s.movingStatistics.getMean.isNaN )
+          assert( s.movingStatistics.getStandardDeviation.isNaN )
+        }
+
+        case Some( (expected, standardDeviation) ) => {
+          s.movingStatistics.getMean mustBe expected
+          s.movingStatistics.getStandardDeviation mustBe standardDeviation
+        }
+      }
+    }
   }
 
 
@@ -92,6 +112,61 @@ with DisjunctionValues {
     loop( points.toList, lastPoints.map {_.value}.toArray, Seq.empty[ThresholdBoundary] )
   }
 
+  implicit def fromAlpha( alpha: Double ): CalculationMagnet = new CalculationMagnet {
+    case class Result(
+      override val underlying: StatisticalSummary,
+      override val timestamp: joda.DateTime,
+      override val tolerance: Double,
+      score: TryV[Double]
+    ) extends CalculationMagnetResult {
+      override type Value = StatisticalSummary
+      override def statistics: Option[StatisticalSummary] = Option( underlying )
+      override def thresholdBoundary: ThresholdBoundary = {
+        score match {
+          case \/-( s ) => {
+            ThresholdBoundary.fromExpectedAndDistance(
+              timestamp,
+              expected = underlying.getMean,
+              distance = math.abs( tolerance * s * underlying.getStandardDeviation )
+            )
+          }
+
+          case -\/( ex: AlgorithmModule.InsufficientDataSize ) => ThresholdBoundary empty timestamp
+
+          case -\/( ex ) => throw ex
+        }
+      }
+    }
+
+    override def apply( points: Seq[DataPoint] ): Result = {
+      implicit val context = mock[GrubbsAlgorithm.Context]
+      when( context.alpha ) thenReturn alpha
+
+      val stats = points.foldLeft( new DescriptiveStatistics(RecentHistory.LastN) ){ (s, p) => s.addValue( p.value ); s }
+      val state = stateFor( stats )
+      logger.info( "TEST: SCORE = [{}]", state.grubbsScore )
+      Result( underlying = stats, timestamp = points.last.timestamp, tolerance = 3.0, score = state.grubbsScore )
+    }
+  }
+
+//  implicit def fromAlpha( alpha: Double ): CalculationMagnet = new CalculationMagnet {
+//    case class Result( override val value: DescriptiveStatistics ) extends CalculationMagnetResult {
+//      override type Value = DescriptiveStatistics
+//      override def N: Long = value.getN
+//      override def expected: Double = value.getMean
+//      override def height: Double = value.getStandardDeviation
+//    }
+//
+////    override def apply( values: Seq[Double] ): Result = Result( new DescriptiveStatistics(values.toArray) )
+////    override def apply( points: Seq[DataPoint] ): Result = {
+////      val tolerance = 3.0
+////      val (last, current) = points splitAt ( points.size - 1 )
+////      Result( calculateControlBoundaries(current, tolerance, last).head, points.size, tolerance )
+////    }
+//    override def apply( points: Seq[DataPoint] ): Result = {
+//      Result( points.foldLeft( new DescriptiveStatistics(RecentHistory.LastN) ){ (acc, p) => acc.addValue(p.value); acc } )
+//    }
+//  }
 //todo: original impl for reference
 //  def calculateControlBoundaries(
 //                                  points: Seq[DataPoint],
@@ -125,57 +200,57 @@ with DisjunctionValues {
   analysisStateSuite()
 
 
-  //todo consider moving to AlgorithmModuleSpec as default impl
-  case class Expected( isOutlier: Boolean, floor: Option[Double], expected: Option[Double], ceiling: Option[Double] ) {
-    def stepResult( timestamp: joda.DateTime ): Option[(Boolean, ThresholdBoundary)] = {
-      Some( (isOutlier, ThresholdBoundary(timestamp, floor, expected, ceiling)) )
-    }
-
-    def stepResult( timestamp: Long ): Option[(Boolean, ThresholdBoundary)] = stepResult( new joda.DateTime(timestamp) )
-  }
-
-  def makeExpected(
-    data: Seq[Double],
-    outliers: Seq[Boolean]
-  )(
-    implicit state: GrubbsAlgorithm.State,
-    context: GrubbsAlgorithm.Context
-  ): Seq[Expected] = trace.block( "makeExpected" ){
-    logger.debug( "data:[{}]", data.mkString(", ") )
-
-    @tailrec def loop( values: List[(Double, Boolean)], acc: Seq[Expected] = Seq.empty[Expected] ): Seq[Expected] = {
-      val stats = state.movingStatistics
-      values match {
-        case Nil => acc
-
-        case (v, o) :: t => {
-
-          val (floor, expected, ceiling) = {
-            val threshold = for {
-              mean <- if ( stats.getMean.isNaN ) None else Some( stats.getMean )
-              sttdev <- if ( stats.getStandardDeviation.isNaN ) None else Some( stats.getStandardDeviation )
-              score <- state.grubbsScore.toOption
-            } yield {
-              val height = math.abs( context.tolerance * score * sttdev )
-              ( mean - height, ( mean, mean + height ) )
-            }
-
-            import scalaz.std.option._
-            Unzip[Option].unzip3( threshold )
-          }
-
-          stats addValue v
-          val e = Expected( isOutlier = o, floor = floor, expected = expected, ceiling = ceiling )
-          logger.debug( "Grubbs[{}]: expected:[{}]", stats.getN.toString, e )
-
-          loop( t, acc :+ e )
-        }
-      }
-    }
-
-    val combined = data zip outliers
-    loop( combined.toList )
-  }
+//  //todo consider moving to AlgorithmModuleSpec as default impl
+//  case class Expected( isOutlier: Boolean, floor: Option[Double], expected: Option[Double], ceiling: Option[Double] ) {
+//    def stepResult( timestamp: joda.DateTime ): Option[(Boolean, ThresholdBoundary)] = {
+//      Some( (isOutlier, ThresholdBoundary(timestamp, floor, expected, ceiling)) )
+//    }
+//
+//    def stepResult( timestamp: Long ): Option[(Boolean, ThresholdBoundary)] = stepResult( new joda.DateTime(timestamp) )
+//  }
+//
+//  def makeExpected(
+//    data: Seq[Double],
+//    outliers: Seq[Boolean]
+//  )(
+//    implicit state: GrubbsAlgorithm.State,
+//    context: GrubbsAlgorithm.Context
+//  ): Seq[Expected] = trace.block( "makeExpected" ){
+//    logger.debug( "data:[{}]", data.mkString(", ") )
+//
+//    @tailrec def loop( values: List[(Double, Boolean)], acc: Seq[Expected] = Seq.empty[Expected] ): Seq[Expected] = {
+//      val stats = state.movingStatistics
+//      values match {
+//        case Nil => acc
+//
+//        case (v, o) :: t => {
+//
+//          val (floor, expected, ceiling) = {
+//            val threshold = for {
+//              mean <- if ( stats.getMean.isNaN ) None else Some( stats.getMean )
+//              sttdev <- if ( stats.getStandardDeviation.isNaN ) None else Some( stats.getStandardDeviation )
+//              score <- state.grubbsScore.toOption
+//            } yield {
+//              val height = math.abs( context.tolerance * score * sttdev )
+//              ( mean - height, ( mean, mean + height ) )
+//            }
+//
+//            import scalaz.std.option._
+//            Unzip[Option].unzip3( threshold )
+//          }
+//
+//          stats addValue v
+//          val e = Expected( isOutlier = o, floor = floor, expected = expected, ceiling = ceiling )
+//          logger.debug( "Grubbs[{}]: expected:[{}]", stats.getN.toString, e )
+//
+//          loop( t, acc :+ e )
+//        }
+//      }
+//    }
+//
+//    val combined = data zip outliers
+//    loop( combined.toList )
+//  }
 
 
   s"${defaultModule.algorithm.label.name} algorithm" should {
@@ -258,84 +333,120 @@ with DisjunctionValues {
         testShape.getN mustBe i
         val ts = nowTimestamp.plusSeconds( 10 * i )
         val actualPair = algorithm.step( ts.getMillis.toDouble, value )
-        val expectedPair = expected.stepResult( ts.getMillis )
+        val expectedPair = expected.stepResult( i )
+//        val expectedPair = expected.stepResult( ts.getMillis )
         (i, actualPair) mustBe (i, expectedPair)
         advanceWith( value )
       }
     }
 
-    "find outliers across two batches" in { f: Fixture =>
+    "find outliers across two batches" taggedAs WIP in { f: Fixture =>
       import f._
-
-      val algorithm = module.algorithm
-      val algoProps = ConfigFactory.parseString(
-         s"""
-            |${algorithm.label.name} {
-            |  tolerance = 3
-            |  alpha = 0.05
-            |}
-         """.stripMargin
+      val dp1 = makeDataPoints( values = Seq.fill( 10 ){ 1.0 }, timeWiggle = (0.98, 1.02), valueWiggle = (0.99, 1.01) )
+      val s1 = spike( scope.topic, dp1 )()
+      val h1 = historyWith( None, s1 )
+      val (e1, r1) = makeExpected( 0.05 )( points = s1.points, outliers = Seq.fill( s1.size - 1 ){ false } :+ true )
+      evaluate(
+        hint = "first",
+        series = s1,
+        history = h1,
+        expectedResults = e1,
+        assertStateFn = assertState( r1 )( _: module.State )
       )
 
-      implicit val testContext = mock[module.Context]
-      when( testContext.alpha ) thenReturn 0.05
-      when( testContext.tolerance ) thenReturn 3.0
-
-      implicit val testState = stateFor( Seq() )
-
-      def advanceWith( v: Double ): Unit = testState.movingStatistics addValue v
-
-      def evaluateSeries(
-        state: GrubbsAlgorithm.State,
-        context: GrubbsAlgorithm.Context
-      )(
-        series: TimeSeries,
-        outliers: Seq[Boolean]
-      ): Unit = {
-        val start = state.movingStatistics.getN
-        val expectedResults = makeExpected(
-          series.points.map{ _.value },
-          outliers
-        )(
-          stateFor( state.movingStatistics.copy() ),
-          testContext
-        )
-
-        for {
-          ( (point, expected), i ) <- series.points.zip( expectedResults ).zipWithIndex
-        } {
-          val pos = start + i
-          logger.debug( "TEST: Grubbs[{}]: point:[{}] expected:[{}]", pos.toString, point, expected )
-          testState.movingStatistics.getN mustBe pos
-          val actualPair = algorithm step point
-          val expectedPair = expected stepResult point.timestamp
-          logger.debug( "Grubbs[{}]: actual  :[{}]  point:[{}]", pos.toString, actualPair, point.value.toString )
-          logger.debug( "Grubbs[{}]: expected:[{}]", pos.toString, expectedPair )
-          logger.debug( "-----------------" )
-          ( pos, actualPair ) mustBe ( pos, expectedPair )
-          advanceWith( point.value )
-        }
-      }
-
-      val eval = evaluateSeries( testState, testContext )_
-
-      val flatline1 = makeDataPoints(
-        values = IndexedSeq.fill( 10 )( 1.0 ).to[scala.collection.immutable.IndexedSeq],
-        timeWiggle = (0.98, 1.02),
-        valueWiggle = (0.99, 1.01)
-      )
-
-      val series1 = spike( "TestTopic", flatline1 )()
-      eval( series1, Seq.fill( series1.size - 1){ false } :+ true )
-
-      val flatline2 = makeDataPoints(
+      val dp2 = makeDataPoints(
         values = Seq.fill( 10 ){ 1.0 },
-        start = flatline1.last.timestamp.plusSeconds( 10 ),
-        timeWiggle = (0.98, 1.02)
+        start = dp1.last.timestamp.plusSeconds( 10 ),
+        timeWiggle =  (0.97, 1.03)
       )
-      val series2 = spike( f.testScope.id.topic, flatline2, 1000 )( 0 )
-      eval( series2, Seq.fill( series2.size ){ false } )
+      val s2 = spike( scope.topic, dp2 )( 0 )
+      val h2 = historyWith( Option(h1.recordLastPoints(s1.points)), s2 )
+      val (e2, r2) = makeExpected( 0.05 )(
+        points = s2.points,
+        outliers = Seq.fill( s2.size ){ false },
+        history = h2.lastPoints map { _.toDataPoint }
+      )
+      evaluate(
+        hint = "second",
+        series = s2,
+        history = h2,
+        expectedResults = e2,
+        assertStateFn = assertState( r2 )( _: module.State )
+      )
     }
+//
+//    "OLD find outliers across two batches" in { f: Fixture =>
+//      import f._
+//
+//      val algorithm = module.algorithm
+//      val algoProps = ConfigFactory.parseString(
+//         s"""
+//            |${algorithm.label.name} {
+//            |  tolerance = 3
+//            |  alpha = 0.05
+//            |}
+//         """.stripMargin
+//      )
+//
+//      implicit val testContext = mock[module.Context]
+//      when( testContext.alpha ) thenReturn 0.05
+//      when( testContext.tolerance ) thenReturn 3.0
+//
+//      implicit val testState = stateFor( Seq() )
+//
+//      def advanceWith( v: Double ): Unit = testState.movingStatistics addValue v
+//
+//      def evaluateSeries(
+//        state: GrubbsAlgorithm.State,
+//        context: GrubbsAlgorithm.Context
+//      )(
+//        series: TimeSeries,
+//        outliers: Seq[Boolean]
+//      ): Unit = {
+//        val start = state.movingStatistics.getN
+//        val expectedResults = makeExpected(
+//          series.points.map{ _.value },
+//          outliers
+//        )(
+//          stateFor( state.movingStatistics.copy() ),
+//          testContext
+//        )
+//
+//        for {
+//          ( (point, expected), i ) <- series.points.zip( expectedResults ).zipWithIndex
+//        } {
+//          val pos = start + i
+//          logger.debug( "TEST: Grubbs[{}]: point:[{}] expected:[{}]", pos.toString, point, expected )
+//          testState.movingStatistics.getN mustBe pos
+//          val actualPair = algorithm step point
+//          val expectedPair = expected stepResult point.timestamp
+//          logger.debug( "Grubbs[{}]: actual  :[{}]  point:[{}]", pos.toString, actualPair, point.value.toString )
+//          logger.debug( "Grubbs[{}]: expected:[{}]", pos.toString, expectedPair )
+//          logger.debug( "-----------------" )
+//          ( pos, actualPair ) mustBe ( pos, expectedPair )
+//          advanceWith( point.value )
+//        }
+//      }
+//
+//      val eval = evaluateSeries( testState, testContext )_
+//
+//      val flatline1 = makeDataPoints(
+//        values = IndexedSeq.fill( 10 )( 1.0 ).to[scala.collection.immutable.IndexedSeq],
+//        timeWiggle = (0.98, 1.02),
+//        valueWiggle = (0.99, 1.01)
+//      )
+//
+//      val series1 = spike( "TestTopic", flatline1 )()
+//      eval( series1, Seq.fill( series1.size - 1){ false } :+ true )
+//
+//      val flatline2 = makeDataPoints(
+//        values = Seq.fill( 10 ){ 1.0 },
+//        start = flatline1.last.timestamp.plusSeconds( 10 ),
+//        timeWiggle = (0.98, 1.02)
+//      )
+//      val series2 = spike( f.scope.id.topic, flatline2, 1000 )( 0 )
+//      eval( series2, Seq.fill( series2.size ){ false } )
+//    }
 
   }
 }

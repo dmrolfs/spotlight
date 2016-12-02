@@ -46,9 +46,16 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmModuleSpec[SimpleMovingA
     def assertState( result: Option[CalculationMagnetResult] )( s: module.State ): Assertion = {
       logger.info( "assertState result:[{}]", result )
 
-      s.statistics.getN mustBe ( if ( result.isDefined ) result.get.N else 0 )
+      val expectedN = for { r <- result; s <- r.statistics } yield s.getN
 
-      result map { r => (r.expected, r.height) } match {
+      s.statistics.getN mustBe ( if ( expectedN.isDefined  ) expectedN.get else 0 )
+
+      val msd = for {
+        r <- result
+        s <- r.statistics
+      } yield ( s.getMean, s.getStandardDeviation )
+
+      msd match {
         case None => {
           assert( s.statistics.getMean.isNaN )
           assert( s.statistics.getStandardDeviation.isNaN )
