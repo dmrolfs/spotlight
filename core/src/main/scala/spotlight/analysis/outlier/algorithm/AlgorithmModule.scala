@@ -1,6 +1,8 @@
 package spotlight.analysis.outlier.algorithm
 
 import scala.annotation.tailrec
+import scala.concurrent.duration.{Duration, FiniteDuration}
+import scala.util.Random
 import scala.reflect._
 import akka.actor.{ActorPath, Props}
 import akka.cluster.sharding.ShardRegion
@@ -28,9 +30,6 @@ import demesne.repository.AggregateRootRepository.{ClusteredAggregateContext, Lo
 import spotlight.analysis.outlier._
 import spotlight.model.outlier.{NoOutliers, OutlierPlan, Outliers}
 import spotlight.model.timeseries._
-
-import scala.concurrent.duration.{Duration, FiniteDuration}
-import scala.util.Random
 
 
 object AlgorithmProtocol extends AggregateProtocol[AlgorithmModule.AnalysisState#ID] {
