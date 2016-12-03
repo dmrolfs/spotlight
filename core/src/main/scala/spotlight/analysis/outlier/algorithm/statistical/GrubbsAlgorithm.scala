@@ -33,7 +33,7 @@ object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfig
       algorithmContext.tailAverage()( algorithmContext.data )
     }
 
-    override def step( point: PointT )( implicit s: State, c: Context ): Option[(Boolean, ThresholdBoundary)] = trace.block( s"step($point)" ) {
+    override def step( point: PointT )( implicit s: State, c: Context ): Option[(Boolean, ThresholdBoundary)] = {
       val result = s.grubbsScore map { grubbs =>
         val threshold = ThresholdBoundary.fromExpectedAndDistance(
           timestamp = point.timestamp.toLong,
@@ -94,7 +94,7 @@ object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfig
 
     override def algorithm: Symbol = outer.algorithm.label
 
-    def grubbsScore( implicit context: Context ): TryV[Double] = trace.block( "grubbsScore" ) {
+    def grubbsScore( implicit context: Context ): TryV[Double] = {
       for {
         size <- checkSize( movingStatistics.getN )
         critical <- criticalValue( context.alpha )
@@ -106,7 +106,7 @@ object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfig
       }
     }
 
-    def criticalValue( alpha: Double ): TryV[Double] = trace.briefBlock( s"criticalValue($alpha)" ) {
+    def criticalValue( alpha: Double ): TryV[Double] = {
       def calculateCritical( size: Long ): TryV[Double] = {
         \/ fromTryCatchNonFatal {
           val degreesOfFreedom = math.max( size - 2, 1 ) //todo: not a great idea but for now avoiding error if size <= 2
@@ -134,7 +134,7 @@ object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfig
       }
     }
 
-    override def withConfiguration( configuration: Config ): Valid[State] = trace.block( "withConfiguration" ) {
+    override def withConfiguration( configuration: Config ): Valid[State] = {
       State.getSampleSize( configuration ) match {
         case scalaz.Success( newSampleSize ) if newSampleSize != sampleSize => {
           val newStats = new DescriptiveStatistics( newSampleSize )
@@ -211,7 +211,7 @@ object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfig
 
     def makeShape(): Shape = new DescriptiveStatistics( RecentHistory.LastN ) //todo: move sample size to repository config?
 
-    override def advanceShape( statistics: Shape, advanced: Advanced ): Shape = trace.block( "State.advanceShape" ) {
+    override def advanceShape( statistics: Shape, advanced: Advanced ): Shape = {
       val newStats = statistics.copy()
       newStats addValue advanced.point.value
       newStats

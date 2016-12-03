@@ -350,3 +350,63 @@ with DisjunctionValues {
 
   }
 }
+
+
+
+//    "detect outlier through series of micro events" in { f: Fixture =>
+//      import f._
+//
+//      def detectUsing( series: TimeSeries, history: HistoricalStatistics ): DetectUsing = {
+//        DetectUsing(
+//          algorithm = algoS,
+//          payload = OutlierDetectionMessage( series, plan, subscriber.ref ).toOption.get,
+//          history = history,
+//          properties = algProps
+//        )
+//      }
+//
+//      implicit val sender = aggregator.ref
+//
+//      val analyzer = TestActorRef[GrubbsAnalyzer]( GrubbsAnalyzer.props( router.ref ) )
+//      analyzer ! DetectionAlgorithmRouter.AlgorithmRegistered( algoS )
+//
+//      val topic = "test.topic"
+//      val start = joda.DateTime.now
+//      val rnd = new RandomDataGenerator
+//
+//      @tailrec def loop( i: Int, left: Int, previous: Option[(TimeSeries, HistoricalStatistics)] = None ): Unit = {
+//        log.debug( ">>>>>>>>>  TEST-LOOP( i:[{}] left:[{}]", i, left )
+//        val dt = start plusSeconds (10 * i)
+//        val v = if ( left == 0 ) 1000.0 else rnd.nextUniform( 0.99, 1.01, true )
+//        val s = TimeSeries( topic, Seq( DataPoint(dt, v) ) )
+//        val h = {
+//          previous
+//          .map { case (ps, ph) => s.points.foldLeft( ph recordLastPoints ps.points ) { (acc, p) => acc :+ p } }
+//          .getOrElse { HistoricalStatistics.fromActivePoints( s.points, false ) }
+//        }
+//        analyzer ! detectUsing( s, h )
+//
+//        val expected: PartialFunction[Any, Unit] = {
+//          if ( left == 0 ) {
+//            case m: SeriesOutliers => {
+//              m.algorithms mustBe Set( algoS )
+//              m.source mustBe s
+//              m.hasAnomalies mustBe true
+//              m.outliers mustBe s.points
+//            }
+//          } else {
+//            case m: NoOutliers => {
+//              m.algorithms mustBe Set( algoS )
+//              m.source mustBe s
+//              m.hasAnomalies mustBe false
+//            }
+//          }
+//        }
+//
+//        aggregator.expectMsgPF( 5.seconds.dilated, s"point-$i" )( expected )
+//
+//        if ( left == 0 ) () else loop( i + 1, left - 1, Some( (s, h) ) )
+//      }
+//
+//      loop( 0, 125 )
+//    }

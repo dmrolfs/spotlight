@@ -473,6 +473,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
 
     // -- algorithm functional elements --
     val makeAlgorithmContext: KOp[DetectUsing, Context] = kleisli[TryV, DetectUsing, Context] { message =>
+      //todo: with algorithm global config support. merge with state config (probably persist and accept ConfigChanged evt)
       \/ fromTryCatchNonFatal {
         algorithmContext = module.makeContext( message, Option( state ) )
         algorithmContext
@@ -544,7 +545,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
                     ( acc :+ event, acceptance(event, ls) )
                   }
                   .getOrElse {
-                    log.debug( "NOT ORIGINAL PT:[{}]", (pt._1.toLong, pt._2) )
+                    log.error( "NOT ORIGINAL PT:[{}]", (pt._1.toLong, pt._2) )
                     ( acc, ls )
                   }
                 }

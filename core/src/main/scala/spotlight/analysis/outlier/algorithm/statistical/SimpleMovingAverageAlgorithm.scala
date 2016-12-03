@@ -71,7 +71,7 @@ object SimpleMovingAverageAlgorithm extends AlgorithmModule with AlgorithmModule
     override def zero( id: State#TID ): State = State( id = id, name = "" )
 
 
-    override def advanceShape( statistics: Shape, advanced: AlgorithmProtocol.Advanced ): Shape = trace.block( "advanceShape" ) {
+    override def advanceShape( statistics: Shape, advanced: AlgorithmProtocol.Advanced ): Shape = {
       val newStats = statistics.copy()
       newStats addValue advanced.point.value
       newStats

@@ -35,7 +35,7 @@ object ExponentialMovingAverageAlgorithm extends AlgorithmModule with AlgorithmM
           stats.ewmsd.toString,
           c.tolerance.toString
         )
-        //            math.abs( v - statistics.ewma ) > ( tol * statistics.ewmsd )
+
         val threshold = ThresholdBoundary.fromExpectedAndDistance(
           timestamp = point.dateTime,
           expected = stats.ewma,
@@ -59,7 +59,7 @@ object ExponentialMovingAverageAlgorithm extends AlgorithmModule with AlgorithmM
   ) extends AnalysisState with StrictSelf[State] {
     override type Self = State
 
-    override def algorithm: Symbol = outer.algorithm.label  // WORK HERE remove need by having module: AlgorithmModule ref in AnalysisState?
+    override def algorithm: Symbol = outer.algorithm.label  //todo remove need by having module: AlgorithmModule ref in AnalysisState?
     override def withConfiguration( configuration: Config ): Valid[State] = this.successNel
 
     override def canEqual( that: Any ): Boolean = that.isInstanceOf[State]
@@ -68,14 +68,8 @@ object ExponentialMovingAverageAlgorithm extends AlgorithmModule with AlgorithmM
 
   object State extends AnalysisStateCompanion {
     private val trace = Trace[State.type]
-
     override def zero( id: State#TID ): State = State( id = id, name = "" )
-
-    override def advanceShape( moment: Shape, advanced: Advanced ): Shape = trace.block( "advanceShape" ) {
-      logger.debug( "TEST: moment-shape:[{}] advanced-event:[{}]", moment, advanced )
-      moment :+ advanced.point.value
-    }
-
+    override def advanceShape( moment: Shape, advanced: Advanced ): Shape = moment :+ advanced.point.value
     override def shapeLens: Lens[State, Shape] = lens[State] >> 'moment
   }
 

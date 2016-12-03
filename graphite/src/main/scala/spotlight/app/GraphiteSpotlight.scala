@@ -1,7 +1,6 @@
 package spotlight.app
 
 import java.net.{InetSocketAddress, Socket}
-
 import scala.concurrent.Future
 import scala.concurrent.duration._
 import scala.util.{Failure, Success}

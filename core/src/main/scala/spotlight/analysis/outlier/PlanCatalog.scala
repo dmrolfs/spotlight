@@ -338,12 +338,9 @@ class PlanCatalog( boundedContext: BoundedContext )
 extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorLogging {
   outer: PlanCatalog.ExecutionProvider with PlanCatalog.PlanProvider =>
 
-  import spotlight.analysis.outlier.{ PlanCatalogProtocol => P }
-  import spotlight.analysis.outlier.{ AnalysisPlanProtocol => AP }
+  import spotlight.analysis.outlier.{ PlanCatalogProtocol => P, AnalysisPlanProtocol => AP }
 
   private val trace = Trace[PlanCatalog]
-
-//  var boundedContext: BoundedContext = _boundedContext
 
   override lazy val metricBaseName: MetricName = MetricName( classOf[PlanCatalog] )
 
