@@ -1,20 +1,13 @@
 package spotlight.analysis.outlier.algorithm.statistical
 
+import scala.annotation.tailrec
 import akka.actor.ActorSystem
-import akka.testkit._
 import com.typesafe.config.Config
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
-import org.joda.{time => joda}
 import org.mockito.Mockito._
-import peds.akka.envelope._
+import org.scalatest.Assertion
 import spotlight.analysis.outlier.algorithm.{AlgorithmModuleSpec, AlgorithmProtocol => P}
-import spotlight.analysis.outlier.{DetectOutliersInSeries, DetectUsing, HistoricalStatistics}
-import spotlight.model.outlier.{NoOutliers, OutlierPlan, SeriesOutliers}
-import spotlight.model.timeseries.{DataPoint, ThresholdBoundary, TimeSeries}
-import spotlight.testkit.TestCorrelatedSeries
-
-import scala.annotation.tailrec
-import scala.concurrent.duration._
+import spotlight.model.timeseries._
 
 
 /**
@@ -31,11 +24,7 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmModuleSpec[SimpleMovingA
   }
 
   class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends AlgorithmFixture( _config, _system, _slug ) {
-    val testScope: module.TID = identifying tag OutlierPlan.Scope(plan = "TestPlan", topic = "TestTopic")
-    override def nextId(): module.TID = testScope
-
-
-    override implicit val shapeOrdering: Ordering[TestShape] = new Ordering[TestShape] {
+    override implicit val shapeOrdering: Ordering[module.Shape] = new Ordering[module.Shape] {
       override def compare( lhs: TestShape, rhs: TestShape ): Int = {
         if ( lhs == rhs ) 0
         else {
@@ -52,6 +41,31 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmModuleSpec[SimpleMovingA
       val stats = s.statistics.copy()
       stats addValue event.point.value
       historicalStatsLens.set( s )( stats )
+    }
+
+    def assertState( result: Option[CalculationMagnetResult] )( s: module.State ): Assertion = {
+      logger.info( "assertState result:[{}]", result )
+
+      val expectedN = for { r <- result; s <- r.statistics } yield s.getN
+
+      s.statistics.getN mustBe ( if ( expectedN.isDefined  ) expectedN.get else 0 )
+
+      val msd = for {
+        r <- result
+        s <- r.statistics
+      } yield ( s.getMean, s.getStandardDeviation )
+
+      msd match {
+        case None => {
+          assert( s.statistics.getMean.isNaN )
+          assert( s.statistics.getStandardDeviation.isNaN )
+        }
+
+        case Some( (expected, standardDeviation) ) => {
+          s.statistics.getMean mustBe expected
+          s.statistics.getStandardDeviation mustBe standardDeviation
+        }
+      }
     }
   }
 
@@ -83,22 +97,10 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmModuleSpec[SimpleMovingA
     loop( points.toList, lastPoints.map{ _.value }.toArray, Seq.empty[ThresholdBoundary] )
   }
 
+
   bootstrapSuite()
   analysisStateSuite()
 
-  case class Expected( isOutlier: Boolean, floor: Option[Double], expected: Option[Double], ceiling: Option[Double] ) {
-    def stepResult( i: Int, intervalSeconds: Int = 10 )( implicit start: joda.DateTime ): Option[(Boolean, ThresholdBoundary)] = {
-      Some(
-        isOutlier,
-        ThresholdBoundary(
-          timestamp = start.plusSeconds( i * intervalSeconds ),
-          floor = floor,
-          expected = expected,
-          ceiling = ceiling
-        )
-      )
-    }
-  }
 
   s"${defaultModule.algorithm.label.name} algorithm" should {
     "step to find anomalies from flat signal" in { f: Fixture =>
@@ -137,148 +139,39 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmModuleSpec[SimpleMovingA
     "happy path process two batches" in { f: Fixture =>
       import f._
 
-      val destination = TestProbe()
-      val plan = mock[OutlierPlan]
-      when( plan.name ).thenReturn( f.testScope.id.plan )
-      when( plan.appliesTo ).thenReturn( appliesToAll )
-      when( plan.algorithms ).thenReturn( Set(module.algorithm.label) )
-
-
       logger.info( "****************** TEST NOW ****************" )
-      def evaluateMessage(
-        series: TimeSeries,
-        history: HistoricalStatistics,
-        expectedCalculations: Seq[Expected],
-        hint: String
-      ): Unit = {
-        aggregate.sendEnvelope(
-          DetectUsing(
-            algorithm = module.algorithm.label,
-            payload = DetectOutliersInSeries( TestCorrelatedSeries(series), plan, subscriber.ref ),
-            history = history
-          )
-        )(
-          destination.ref
-        )
 
-        val expectedAnomalies = expectedCalculations.exists{ e => e.isOutlier }
-
-        destination.expectMsgPF( 500.millis.dilated, hint ) {
-          case m @ Envelope( SeriesOutliers( a, s, p, o, t ), _ ) if expectedAnomalies => {
-            a mustBe Set( module.algorithm.label )
-            s mustBe series
-            o.size mustBe 1
-            o mustBe Seq( series.points.last )
-
-            t( module.algorithm.label ).zip( expectedCalculations ).zipWithIndex foreach { case ( ((actual, expected), i) ) =>
-              (i, actual.floor) mustBe(i, expected.floor)
-              (i, actual.expected) mustBe(i, expected.expected)
-              (i, actual.ceiling) mustBe(i, expected.ceiling)
-            }
-          }
-
-          case m @ Envelope( NoOutliers( a, s, p, t ), _ ) if !expectedAnomalies => {
-            a mustBe Set( module.algorithm.label )
-            s mustBe series
-
-            t( module.algorithm.label ).zip( expectedCalculations ).zipWithIndex foreach { case ( ((actual, expected), i) ) =>
-              logger.debug( "evaluating expectation: {}", i.toString )
-              actual.floor.isDefined mustBe expected.floor.isDefined
-              for {
-                af <- actual.floor
-                ef <- expected.floor
-              } { af mustBe ef +- 0.000001 }
-
-              actual.expected.isDefined mustBe expected.expected.isDefined
-              for {
-                ae <- actual.expected
-                ee <- expected.expected
-              } { ae mustBe ee +- 0.000001 }
-
-              actual.ceiling.isDefined mustBe expected.ceiling.isDefined
-              for {
-                ac <- actual.ceiling
-                ec <- expected.ceiling
-              } { ac mustBe ec +- 0.000001 }
-            }
-          }
-        }
-
-        import akka.pattern.ask
-
-        val actual = ( aggregate ? P.GetStateSnapshot( id ) ).mapTo[P.StateSnapshot]
-        whenReady( actual ) { a =>
-          val as = a.snapshot
-          logger.info( "{}: ACTUAL = [{}]", hint, as )
-          logger.info( "{}: EXPECTED = [{}]", hint, expectedCalculations.mkString(",\n") )
-          a.snapshot mustBe defined
-          as mustBe defined
-          as.value mustBe an [module.State]
-          val sas = as.value.asInstanceOf[module.State]
-          sas.id.id mustBe id.id
-          sas.algorithm.name mustBe module.algorithm.label.name
-//          sas.thresholds.size mustBe ( history.N )
-          logger.info( "{}: shape size = {}", hint, sas.statistics.getN.toString )
-          sas.statistics.getN mustBe ( history.N )
-          sas.statistics.getMean mustBe history.mean(1)
-
-//          sas.thresholds
-//          .drop( sas.thresholds.size - expectedCalculations.size )
-//          .zip( expectedCalculations )
-//          .zipWithIndex
-//          .foreach { case ( ((actual, expected), i) ) =>
-//            logger.info( "{}: evaluating expectation: {}", hint, i.toString )
-//            actual.floor.isDefined mustBe expected.floor.isDefined
-//            for {
-//              af <- actual.floor
-//              ef <- expected.floor
-//            } { af mustBe ef +- 0.000001 }
-//
-//            actual.expected.isDefined mustBe expected.expected.isDefined
-//            for {
-//              ae <- actual.expected
-//              ee <- expected.expected
-//            } { ae mustBe ee +- 0.000001 }
-//
-//            actual.ceiling.isDefined mustBe expected.ceiling.isDefined
-//            for {
-//              ac <- actual.ceiling
-//              ec <- expected.ceiling
-//            } { ac mustBe ec +- 0.000001 }
-//          }
-        }
-      }
-
-
-      val flatline1 = makeDataPoints( values = Seq.fill( 5 ){ 1.0 }, timeWiggle = (0.97, 1.03) )
-      val series1 = spike( f.testScope.id.topic, flatline1, 1000 )()
-      val history1 = historyWith( None, series1 )
-      val expectedCalculations1 = Seq(
-        Expected( false, None, None, None ),
-        Expected( false, Some( 1.0 ), Some( 1.0 ), Some( 1.0 ) ),
-        Expected( false, Some( 1.0 ), Some( 1.0 ), Some( 1.0 ) ),
-        Expected( false, Some( 1.0 ), Some( 1.0 ), Some( 1.0 ) ),
-        Expected( true, Some( 1.0 ), Some( 1.0 ), Some( 1.0 ) )
+      val dp1 = makeDataPoints( values = Seq.fill( 5 ){ 1.0 }, timeWiggle = (0.97, 1.03) )
+      val s1 = spike( scope.topic, dp1 )()
+      val h1 = historyWith( None, s1 )
+      val (e1, r1) = makeExpected( NoHint )( points = s1.points, outliers = Seq(false, false, false, false, true) )
+      evaluate(
+        hint = "first",
+        series = s1,
+        history = h1,
+        expectedResults = e1,
+        assertStateFn = assertState( r1 )( _: module.State )
       )
-      evaluateMessage( series1, history1, expectedCalculations1, "first-detect" )
 
-      val flatline2 = makeDataPoints(
+      val dp2 = makeDataPoints(
         values = Seq.fill( 5 ){ 1.0 },
-        start = flatline1.last.timestamp.plusSeconds( 10 ),
+        start = dp1.last.timestamp.plusSeconds( 10 ),
         timeWiggle = (0.97, 1.03)
       )
-      val series2 = spike( f.testScope.id.topic, flatline2, 1000 )( 0 )
-      val history2 = historyWith( Option(history1.recordLastPoints(series1.points)), series2 )
-      logger.error( "HISTORY2 = [{}]", history2)
-      logger.error( "HISTORY2-LAST PTS = [{}]", history2.lastPoints.mkString(",") )
-      val expectedCalculations2 = Seq(
-        Expected( false, Some(-1139.499146), Some(200.8), Some(1541.099146) ),
-        Expected( false, Some(-1213.644145), Some(334), Some(1881.644145) ),
-        Expected( false, Some(-1175.957688), Some(286.4285714), Some(1748.814831) ),
-        Expected( false, Some(-1136.59142), Some(250.75), Some(1638.09142) ),
-        Expected( false, Some(-1098.55278), Some(223), Some(1544.55278) )
+      val s2 = spike( scope.topic, dp2 )( 0 )
+      val h2 = historyWith( Option(h1.recordLastPoints(s1.points)), s2 )
+      val (e2, r2) = makeExpected( NoHint )(
+        points = s2.points,
+        outliers = Seq(false, false, false, false, false),
+        history = h2.lastPoints map { _.toDataPoint }
       )
-      evaluateMessage( series2, history2, expectedCalculations2, "second-detect" )
+      evaluate(
+        hint = "second",
+        series = s2,
+        history = h2,
+        expectedResults = e2,
+        assertStateFn = assertState( r2 )( _: module.State )
+      )
     }
   }
 }
