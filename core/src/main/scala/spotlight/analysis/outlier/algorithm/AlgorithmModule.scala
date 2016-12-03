@@ -29,6 +29,9 @@ import spotlight.analysis.outlier._
 import spotlight.model.outlier.{NoOutliers, OutlierPlan, Outliers}
 import spotlight.model.timeseries._
 
+import scala.concurrent.duration.{Duration, FiniteDuration}
+import scala.util.Random
+
 
 object AlgorithmProtocol extends AggregateProtocol[AlgorithmModule.AnalysisState#ID] {
   sealed trait AlgorithmMessage
@@ -149,6 +152,9 @@ object AlgorithmModule {
     path: String,
     requirement: String
   ) extends BadValue( path, s"For algorithm, ${algorithm.name}, ${path} must: ${requirement}" )
+
+
+  val snapshotFactorizer: Random = new Random()
 }
 
 abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmModule.ModuleConfiguration =>
@@ -279,15 +285,21 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
 //  }
 
   class RootType extends AggregateRootType {
+    //todo: make thse configuration driven for algorithms
+    override def snapshotPeriod: Option[FiniteDuration] = {
+      import scala.concurrent.duration._
+      val dur = 10.minutes + 5.minutes * AlgorithmModule.snapshotFactorizer.nextGaussian()
+      Some( FiniteDuration(dur.toMillis, MILLISECONDS)  )
+    }
+
+    override val passivateTimeout: Duration = Duration.Inf //todo: resolve replaying events with data tsunami
+
     override lazy val name: String = module.shardName
     override lazy val identifying: Identifying[_] = AlgorithmModule.identifying
     override def repositoryProps( implicit model: DomainModel ): Props = Repository localProps model //todo change to clustered with multi-jvm testing of cluster
     override def maximumNrClusterNodes: Int = module.maximumNrClusterNodes
     override def aggregateIdFor: ShardRegion.ExtractEntityId = super.aggregateIdFor orElse {
-      case AdvancedType( a ) => {
-        logger.debug( "TEST: aggregateIdFor( {} ) = [{}]", a, a.sourceId.id.toString )
-        (a.sourceId.id.toString, a )
-      }
+      case AdvancedType( a ) => ( a.sourceId.id.toString, a )
     }
     override def toString: String = "Algorithm:"+name
   }
