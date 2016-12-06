@@ -136,7 +136,7 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmModuleSpec[SimpleMovingA
       }
     }
 
-    "happy path process two batches" in { f: Fixture =>
+    "happy path process two batches" taggedAs WIP in { f: Fixture =>
       import f._
 
       logger.info( "****************** TEST NOW ****************" )

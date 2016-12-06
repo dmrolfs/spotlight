@@ -27,6 +27,41 @@ package object testkit {
         |  snapshot-store.local.dir = "${rootDir}target/snapshots"
         |}
         |
+        |akka.persistence.algorithm.journal.plugin {
+        |  class = "akka.persistence.inmemory.journal.InMemoryAsyncWriteJournal"
+        |  # ask timeout on Futures
+        |  ask-timeout = "10s"
+        |
+        |  plugin-dispatcher = "akka.actor.default-dispatcher"
+        |  recovery-event-timeout = 60m
+        |  circuit-breaker {
+        |    max-failures = 10
+        |    call-timeout = 600s
+        |    reset-timeout = 30s
+        |  }
+        |  replay-filter {
+        |    # What the filter should do when detecting invalid events.
+        |    # Supported values:
+        |    # `repair-by-discard-old` : discard events from old writers,
+        |    #                           warning is logged
+        |    # `fail` : fail the replay, error is logged
+        |    # `warn` : log warning but emit events untouched
+        |    # `off` : disable this feature completely
+        |    mode = repair-by-discard-old
+        |
+        |    # It uses a look ahead buffer for analyzing the events.
+        |    # This defines the size (in number of events) of the buffer.
+        |    window-size = 100
+        |
+        |    # How many old writerUuid to remember
+        |    max-old-writers = 10
+        |
+        |    # Set this to `on` to enable detailed debug logging of each
+        |    # replayed event.
+        |    debug = off
+        |  }
+        |}
+        |
         |akka {
         |  loggers = ["akka.event.slf4j.Slf4jLogger", "akka.testkit.TestEventListener"]
         |  logging-filter = "akka.event.DefaultLoggingFilter"

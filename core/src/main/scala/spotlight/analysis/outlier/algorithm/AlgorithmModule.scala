@@ -7,6 +7,7 @@ import scala.reflect._
 import akka.actor.{ActorPath, Props}
 import akka.cluster.sharding.ShardRegion
 import akka.event.LoggingReceive
+import akka.persistence.{DeleteMessagesFailure, DeleteMessagesSuccess, SaveSnapshotSuccess}
 
 import scalaz._
 import Scalaz._
@@ -28,6 +29,7 @@ import demesne._
 import demesne.repository.{AggregateRootRepository, EnvelopingAggregateRootRepository}
 import demesne.repository.AggregateRootRepository.{ClusteredAggregateContext, LocalAggregateContext}
 import spotlight.analysis.outlier._
+import spotlight.analysis.outlier.algorithm.AlgorithmModule.RedundantAlgorithmConfiguration
 import spotlight.model.outlier.{NoOutliers, OutlierPlan, Outliers}
 import spotlight.model.timeseries._
 
@@ -165,7 +167,6 @@ object AlgorithmModule {
 abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmModule.ModuleConfiguration =>
   private val trace = Trace[AlgorithmModule]
 
-
   type State <: AlgorithmModule.AnalysisState
 
   /**
@@ -289,10 +290,21 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
 
   class RootType extends AggregateRootType {
     //todo: make thse configuration driven for algorithms
-    override def snapshotPeriod: Option[FiniteDuration] = {
-      import scala.concurrent.duration._
-      val dur = 10.minutes + 5.minutes * AlgorithmModule.snapshotFactorizer.nextGaussian()
-      Some( FiniteDuration(dur.toMillis, MILLISECONDS)  )
+    override def snapshotPeriod: Option[FiniteDuration] = None
+    override def snapshot: Option[SnapshotSpecification] = {
+      snapshotPeriod map { _ => super.snapshot } getOrElse {
+        import scala.concurrent.duration._
+
+        Some(
+          new SnapshotSpecification {
+            override val snapshotInterval: FiniteDuration = 10.minutes
+            override val snapshotInitialDelay: FiniteDuration = {
+              val delay = snapshotInterval * AlgorithmModule.snapshotFactorizer.nextDouble()
+              FiniteDuration( delay.toMillis, MILLISECONDS )
+            }
+          }
+        )
+      }
     }
 
     override val passivateTimeout: Duration = Duration.Inf //todo: resolve replaying events with data tsunami
@@ -339,6 +351,10 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
   with InstrumentedActor {
     publisher: EventPublisher =>
 
+    override val journalPluginId: String = "akka.persistence.journal.inmem"
+//    override val journalPluginId: String = "akka.persistence.algorithm.journal.plugin"
+//    override val snapshotPluginId: String = "akka.persistence.algorithm.snapshot.plugin"
+
     override def parseId( idstr: String ): TID = {
       val identifying = AlgorithmModule.identifying
       identifying.safeParseId( idstr )( identifying.evID )
@@ -376,13 +392,23 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
         .withConfiguration( event.configuration )
         .map { _.asInstanceOf[State] }
         .valueOr { exs =>
-          exs foreach { ex => log.error( ex, "ignoring accepted event: [{}] current-state:[{}]", event, currentState ) }
+          exs foreach {
+            case ex: RedundantAlgorithmConfiguration[_] => {
+              log.debug(
+                "ignoring redundant accepted configuration event: {}={} for current-state:[{}]",
+                ex.path, ex.value, currentState
+              )
+            }
+
+            case ex => log.error( ex, "ignoring accepted event: [{}] current-state:[{}]", event, currentState )
+          }
+
           s
         }
       }
     }
 
-    override def receiveCommand: Receive = LoggingReceive { around( active orElse stateReceiver ) }
+    override def receiveCommand: Receive = LoggingReceive { around( active orElse stateReceiver orElse nonfunctional ) }
 
     val active: Receive = {
       case msg @ DetectUsing( algo, payload: DetectOutliersInSeries, history, algorithmConfig ) => {
@@ -454,6 +480,23 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
       case _: GetStateSnapshot => sender() ! StateSnapshot( aggregateId, Option(state) )
     }
 
+    val nonfunctional: Receive = {
+      case e @ SaveSnapshotSuccess( meta ) => {
+        val last = meta.sequenceNr
+
+        log.debug(
+          "[{} - {}]: successful snapshot, deleting journal messages up to sequenceNr: [{}]",
+          self.path.name, rootType.snapshotPeriod.map{ _.toCoarsest }, last
+        )
+
+        if ( last > 0 ) deleteMessages( last )
+      }
+
+      case e: DeleteMessagesSuccess => log.info( "[{}] successfully cleared journal: [{}]", self.path.name, e )
+      case e: DeleteMessagesFailure => {
+        log.warning( "[{}] FAILED to clear journal will attempt to clear on subsequent snapshot: [{}]", self.path.name, e )
+      }
+    }
 
     override def unhandled( message: Any ): Unit = {
       message match {

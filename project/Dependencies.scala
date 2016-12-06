@@ -39,6 +39,8 @@ object Dependencies {
 
     val kryo = "com.github.romix.akka" %% "akka-kryo-serialization" % "0.5.0"
     val kryoSerializers = "de.javakaffee" % "kryo-serializers" % "0.41"
+
+    val inMemory = "com.github.dnvriend" %% "akka-persistence-inmemory" % "1.3.16"
   }
 
   object persistence {
@@ -153,7 +155,6 @@ object Dependencies {
     }
 
     object persistence {
-      val inMemory = "com.github.dnvriend" %% "akka-persistence-inmemory" % "1.3.8"
       val testkit = "com.github.krasserm" %% "akka-persistence-testkit" % "0.3.4"
     }
   }
