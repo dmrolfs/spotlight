@@ -11,7 +11,8 @@ libraryDependencies ++=
   commonDependencies ++
   Seq(
     facility.json4sJackson,
-    akka.persistence
+    akka.persistence,
+    akka.inMemory
   )
 
 testOptions in Test += Tests.Argument( "-oDF" )
@@ -32,6 +33,7 @@ assemblyMergeStrategy in assembly := {
   case PathList( "META-INF", "maven", "com.fasterxml.jackson.core", xs @ _* ) => MergeStrategy.discard
   case PathList( "META-INF", "maven", "commons-logging", xs @ _* ) => MergeStrategy.discard
   case PathList( "META-INF", "maven", "org.apache.avro", xs @ _* ) => MergeStrategy.discard
+  case PathList( "META-INF", "io.netty.versions.properties" ) => MergeStrategy.last
 
   case "reference.conf" => MergeStrategy.concat
 
@@ -62,7 +64,7 @@ dockerfile in docker := {
   val artifact = ( assemblyOutputPath in assembly ).value
   val targetBase = "/app"
   val artifactTargetPath = s"${targetBase}/${artifact.name}"
-  val coreosPath = baseDirectory.value / ".." / "coreos"
+  val coreosPath = baseDirectory.value / "coreos"
   val dockerPath = baseDirectory.value / "docker"
   val entryScript = ( dockerPath ** "spotlight.sh" ).get.headOption
   val aspectjArtifactName = ( coreosPath ** "aspectjweaver-*.jar" ).get.headOption

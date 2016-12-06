@@ -1,7 +1,6 @@
 package spotlight.app
 
 import java.net.{InetSocketAddress, Socket}
-
 import scala.concurrent.Future
 import scala.concurrent.duration._
 import scala.util.{Failure, Success}
@@ -45,7 +44,7 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
       BootstrapContext
       .builder
       .set( BC.Name, ActorSystemName )
-      .set( BC.StartTasks, Set( SharedLeveldbStore.start( true ), Bootstrap.kamonStartTask ) )
+//      .set( BC.StartTasks, Set( SharedLeveldbStore.start( true ), Bootstrap.kamonStartTask ) )
       .set( BC.Timeout, Timeout(30.seconds) )
       .build()
     }

@@ -1,20 +1,20 @@
 package spotlight.analysis.outlier.algorithm.statistical
 
 import scala.reflect.ClassTag
-import scalaz.syntax.either._
-import scalaz.{-\/, \/, \/-}
+import scalaz._, Scalaz._
 import com.typesafe.config.Config
 import org.apache.commons.lang3.ClassUtils
 import org.apache.commons.math3.distribution.TDistribution
 import org.apache.commons.math3.ml.clustering.DoublePoint
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
-import peds.commons.TryV
+import peds.commons.{TryV, Valid}
 import peds.commons.log.Trace
 import shapeless.{Lens, lens}
 import spotlight.analysis.outlier.algorithm.AlgorithmModule
 import spotlight.analysis.outlier.algorithm.AlgorithmProtocol.Advanced
 import spotlight.analysis.outlier.{DetectUsing, RecentHistory}
 import spotlight.model.timeseries._
+import spotlight.analysis.outlier.algorithm.AlgorithmModule.RedundantAlgorithmConfiguration
 
 
 /**
@@ -33,10 +33,7 @@ object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfig
       algorithmContext.tailAverage()( algorithmContext.data )
     }
 
-    override def step( point: PointT )( implicit s: State, c: Context ): Option[(Boolean, ThresholdBoundary)] = trace.block( s"step($point)" ) {
-      // original version set expected at context stats mean and stddev
-      logger.debug( "TEST: state=[{}]", s )
-
+    override def step( point: PointT )( implicit s: State, c: Context ): Option[(Boolean, ThresholdBoundary)] = {
       val result = s.grubbsScore map { grubbs =>
         val threshold = ThresholdBoundary.fromExpectedAndDistance(
           timestamp = point.timestamp.toLong,
@@ -71,7 +68,6 @@ object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfig
     val AlphaPath = "alpha"
 
     def getAlpha( conf: Config ): TryV[Double] = {
-      logger.debug( "configuration[{}] getDouble = [{}]", AlphaPath, conf.getDouble(AlphaPath).toString )
       val alpha = if ( conf hasPath AlphaPath ) conf getDouble AlphaPath else 0.05
       alpha.right
     }
@@ -92,30 +88,25 @@ object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfig
     override val id: TID,
     override val name: String,
     movingStatistics: DescriptiveStatistics,
-//    override val thresholds: Seq[ThresholdBoundary] = Seq.empty[ThresholdBoundary]
     sampleSize: Int = RecentHistory.LastN
   ) extends AlgorithmModule.AnalysisState with AlgorithmModule.StrictSelf[State] {
     override type Self = State
 
     override def algorithm: Symbol = outer.algorithm.label
-//    override def addThreshold( threshold: ThresholdBoundary ): State = this.copy( thresholds = this.thresholds :+ threshold )
 
-    def grubbsScore( implicit context: Context ): TryV[Double] = trace.block( "grubbsScore" ) {
+    def grubbsScore( implicit context: Context ): TryV[Double] = {
       for {
         size <- checkSize( movingStatistics.getN )
         critical <- criticalValue( context.alpha )
       } yield {
         val mean = movingStatistics.getMean
         val sd = movingStatistics.getStandardDeviation
-        logger.debug( "Grubbs movingStatistics: N:[{}] mean:[{}] stddev:[{}]", size.toString, mean.toString, sd.toString )
-
         val thresholdSquared = math.pow( critical, 2 )
-        logger.debug( "Grubbs threshold^2:[{}]", thresholdSquared )
         ((size - 1) / math.sqrt(size)) * math.sqrt( thresholdSquared / (size - 2 + thresholdSquared) )
       }
     }
 
-    def criticalValue( alpha: Double ): TryV[Double] = trace.briefBlock( s"criticalValue($alpha)" ) {
+    def criticalValue( alpha: Double ): TryV[Double] = {
       def calculateCritical( size: Long ): TryV[Double] = {
         \/ fromTryCatchNonFatal {
           val degreesOfFreedom = math.max( size - 2, 1 ) //todo: not a great idea but for now avoiding error if size <= 2
@@ -143,26 +134,28 @@ object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfig
       }
     }
 
-    override def withConfiguration( configuration: Config ): Option[State] = {
+    override def withConfiguration( configuration: Config ): Valid[State] = {
       State.getSampleSize( configuration ) match {
-        case \/-( newSampleSize ) if newSampleSize != sampleSize => {
+        case scalaz.Success( newSampleSize ) if newSampleSize != sampleSize => {
           val newStats = new DescriptiveStatistics( newSampleSize )
           DescriptiveStatistics.copy( this.movingStatistics, newStats )
-          Some( this.copy(sampleSize = newSampleSize, movingStatistics = newStats) )
+          copy( sampleSize = newSampleSize, movingStatistics = newStats ).successNel
         }
 
-        case \/-( _ ) => {
+        case scalaz.Success( duplicateSampleSize ) => {
           logger.debug( "ignoring duplicate configuration: sample-size:[{}]", sampleSize )
-          None
+          Validation.failureNel( RedundantAlgorithmConfiguration(id, path = State.SampleSizePath, value = duplicateSampleSize) )
         }
 
-        case -\/( ex ) => {
-          logger.info(
-            "ignoring configuration provided without properties relevant to {} algorithm: [{}]",
-            outer.algorithm.label,
-            configuration
-          )
-          None
+        case scalaz.Failure( exs ) => {
+          exs foreach { ex =>
+            logger.error(
+              s"ignoring configuration provided without properties relevant to ${algorithm.name} algorithm: [${configuration}]",
+              ex
+            )
+          }
+
+          exs.failure
         }
       }
     }
@@ -218,29 +211,27 @@ object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfig
 
     def makeShape(): Shape = new DescriptiveStatistics( RecentHistory.LastN ) //todo: move sample size to repository config?
 
-    override def advanceShape( statistics: Shape, advanced: Advanced ): Shape = trace.block( "State.advanceShape" ) {
-      logger.debug( "TEST: statistics shape = [{}]", statistics )
-      logger.debug( "TEST: advanced event  = [{}]", advanced )
+    override def advanceShape( statistics: Shape, advanced: Advanced ): Shape = {
       val newStats = statistics.copy()
       newStats addValue advanced.point.value
       newStats
     }
 
     override def shapeLens: Lens[State, Shape] = lens[State] >> 'movingStatistics
-//    override def thresholdLens: Lens[State, Seq[ThresholdBoundary]] = lens[State] >> 'thresholds
 
     val RootPath = algorithm.label.name
     val SampleSizePath = RootPath + ".sample-size"
-    def getSampleSize( conf: Config ): TryV[Int] = {
-      logger.debug( "configuration[{}] getInt=[{}]", SampleSizePath, conf.getInt(SampleSizePath).toString )
+    def getSampleSize( conf: Config ): Valid[Int] = {
       val sampleSize = if ( conf hasPath SampleSizePath ) conf getInt SampleSizePath else RecentHistory.LastN
-      if ( MinimumDataPoints <= sampleSize ) sampleSize.right
+      if ( MinimumDataPoints <= sampleSize ) sampleSize.successNel
       else {
-        AlgorithmModule.InvalidAlgorithmConfiguration(
-          algorithm.label,
-          SampleSizePath,
-          s"integer greater than or equals to ${MinimumDataPoints}"
-        ).left
+        Validation.failureNel(
+          AlgorithmModule.InvalidAlgorithmConfiguration(
+            algorithm.label,
+            SampleSizePath,
+            s"integer greater than or equals to ${MinimumDataPoints}"
+          )
+        )
       }
     }
   }

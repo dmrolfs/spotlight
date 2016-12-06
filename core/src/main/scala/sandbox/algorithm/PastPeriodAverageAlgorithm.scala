@@ -1,18 +1,19 @@
 package sandbox.algorithm
 
 import scala.reflect.ClassTag
-import scalaz.{-\/, \/-}
-import scalaz.syntax.either._
+import scalaz.Validation
+import scalaz.syntax.validation._
 import shapeless.{Lens, lens}
 import com.typesafe.config.Config
 import org.apache.commons.math3.ml.clustering.DoublePoint
 import org.joda.{time => joda}
 import com.github.nscala_time.time.Imports._
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
-import peds.commons.TryV
+import peds.commons.Valid
 import peds.commons.log.Trace
 import spotlight.analysis.outlier.DetectUsing
 import spotlight.analysis.outlier.algorithm.AlgorithmModule
+import spotlight.analysis.outlier.algorithm.AlgorithmModule.RedundantAlgorithmConfiguration
 import spotlight.analysis.outlier.algorithm.AlgorithmProtocol.Advanced
 import spotlight.model.timeseries._
 
@@ -172,22 +173,24 @@ object PastPeriodAverageAlgorithm extends AlgorithmModule with AlgorithmModule.M
     override type Self = State
     override def algorithm: Symbol = outer.algorithm.label
 
-    override def withConfiguration( configuration: Config ): Option[State] = {
+    override def withConfiguration( configuration: Config ): Valid[State] = {
       State.getWindow( configuration ) match {
-        case \/-( newWindow ) if newWindow != window => Some( State.windowLens.set(this)(newWindow) )
+        case scalaz.Success( newWindow ) if newWindow != window => State.windowLens.set( this )( newWindow ).successNel
 
-        case \/-( _ ) => {
+        case scalaz.Success( dup ) => {
           logger.debug( "ignoring duplicate configuration: window:[{}]", window )
-          None
+          Validation.failureNel( RedundantAlgorithmConfiguration(id, path = State.WindowPath, value = dup) )
         }
 
-        case -\/( ex ) => {
-          logger.info(
-            "ignoring configuration provided without properties relevant to {} algorithm: [{}]",
-            outer.algorithm.label,
-            configuration
-          )
-          None
+        case scalaz.Failure( exs ) => {
+          exs foreach { ex =>
+            logger.error(
+              s"ignoring configuration provided without properties relevant to ${algorithm.name} algorithm: [${configuration}]",
+              ex
+            )
+          }
+
+          exs.failure
         }
       }
     }
@@ -226,10 +229,14 @@ object PastPeriodAverageAlgorithm extends AlgorithmModule with AlgorithmModule.M
 
     val RootPath = algorithm.label.name
     val WindowPath = RootPath + ".window"
-    def getWindow( conf: Config ): TryV[Int] = {
+    def getWindow( conf: Config ): Valid[Int] = {
       val window = if ( conf hasPath WindowPath ) conf getInt WindowPath else DefaultWindow
-      if ( window > 0 ) window.right
-      else AlgorithmModule.InvalidAlgorithmConfiguration( algorithm.label, WindowPath, "positive integer value" ).left
+      if ( window > 0 ) window.successNel
+      else {
+        Validation.failureNel(
+          AlgorithmModule.InvalidAlgorithmConfiguration( algorithm.label, WindowPath, "positive integer value" )
+        )
+      }
     }
   }
 
