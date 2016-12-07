@@ -21,6 +21,8 @@ import spotlight.model.timeseries.{DataPoint, ThresholdBoundary, TimeSeries}
 import spotlight.protocol.GraphiteSerializationProtocol
 import spotlight.stream.{Bootstrap, BootstrapContext, Settings}
 
+import scala.util.{Failure, Success}
+
 
 case class OutlierInfo( metricName: String, metricWebId: String, metricSegment: String )
 
@@ -78,8 +80,15 @@ object SingleBatchExample extends Instrumented with StrictLogging {
       results
     }
     .onComplete {
-      case results => {
-        logger.info( "Example finished finding: [{}]", results.map{ _.mkString("\n", "\n", "\n") } )
+      case Success( results ) => {
+        println( s"\nbatch completed finding ${results.size} outliers:" )
+        results.zipWithIndex foreach { case (o, i) => println( s"${i}: ${o}") }
+        println
+        actorSystem.terminate()
+      }
+
+      case Failure( ex ) => {
+        println( "\n batch completed with ERROR: ${ex}" )
         actorSystem.terminate()
       }
     }

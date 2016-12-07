@@ -25,5 +25,5 @@ leveldb:
     file: docker-compose.yml
     service: data
   volumes:
-    - /Users/rolfsd/spotlight/data/journal:/var/lib/spotlight/data/leveldb/shared-journal
+    - /Users/rolfsd/spotlight/data/journal:/var/lib/spotlight/data/leveldb/journal
     - /Users/rolfsd/spotlight/data/snapshots:/var/lib/spotlight/data/leveldb/snapshots

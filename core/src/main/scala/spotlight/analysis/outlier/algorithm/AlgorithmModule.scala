@@ -1,13 +1,14 @@
 package spotlight.analysis.outlier.algorithm
 
 import scala.annotation.tailrec
-import scala.concurrent.duration.{Duration, FiniteDuration}
+import scala.concurrent.duration.{Duration, FiniteDuration, NANOSECONDS}
 import scala.util.Random
 import scala.reflect._
 import akka.actor.{ActorPath, Props}
+import akka.agent.Agent
 import akka.cluster.sharding.ShardRegion
 import akka.event.LoggingReceive
-import akka.persistence.{DeleteMessagesFailure, DeleteMessagesSuccess, SaveSnapshotSuccess}
+import akka.persistence.{DeleteMessagesFailure, DeleteMessagesSuccess, SaveSnapshotFailure, SaveSnapshotSuccess}
 
 import scalaz._
 import Scalaz._
@@ -17,9 +18,9 @@ import com.typesafe.config.Config
 import com.typesafe.config.ConfigException.BadValue
 import com.typesafe.scalalogging.LazyLogging
 import org.apache.commons.math3.ml.clustering.DoublePoint
-import nl.grons.metrics.scala.{MetricName, Timer}
+import nl.grons.metrics.scala.{Meter, MetricName, Timer}
 import peds.akka.envelope._
-import peds.akka.metrics.InstrumentedActor
+import peds.akka.metrics.{Instrumented, InstrumentedActor}
 import peds.akka.publish.{EventPublisher, StackableStreamPublisher}
 import peds.archetype.domain.model.core.{Entity, EntityIdentifying}
 import peds.commons.{KOp, TryV, Valid}
@@ -28,10 +29,13 @@ import peds.commons.log.Trace
 import demesne._
 import demesne.repository.{AggregateRootRepository, EnvelopingAggregateRootRepository}
 import demesne.repository.AggregateRootRepository.{ClusteredAggregateContext, LocalAggregateContext}
+import peds.commons.collection.BloomFilter
 import spotlight.analysis.outlier._
 import spotlight.analysis.outlier.algorithm.AlgorithmModule.RedundantAlgorithmConfiguration
 import spotlight.model.outlier.{NoOutliers, OutlierPlan, Outliers}
 import spotlight.model.timeseries._
+
+import scala.concurrent.ExecutionContext
 
 
 object AlgorithmProtocol extends AggregateProtocol[AlgorithmModule.AnalysisState#ID] {
@@ -67,7 +71,7 @@ object AlgorithmProtocol extends AggregateProtocol[AlgorithmModule.AnalysisState
 /**
   * Created by rolfsd on 6/5/16.
   */
-object AlgorithmModule {
+object AlgorithmModule extends Instrumented with LazyLogging {
   trait StrictSelf[T <: StrictSelf[T]] { self: T =>
     type Self >: self.type <: T
   }
@@ -162,6 +166,31 @@ object AlgorithmModule {
 
 
   val snapshotFactorizer: Random = new Random()
+  override lazy val metricBaseName: MetricName = MetricName( classOf[AlgorithmModule] )
+
+  val _uniqueCalculations: Agent[BloomFilter[AlgorithmModule.ID]] = {
+    Agent( BloomFilter[AlgorithmModule.ID](maxFalsePosProbability = 0.01, size = 10000000) )( ExecutionContext.global )
+  }
+
+  metrics.gauge( "unique-calculations" ){ _uniqueCalculations.map{ _.size }.get() }
+
+  def addUniqueCalculation( id: AlgorithmModule.ID ): Unit = {
+    _uniqueCalculations send { cs =>
+      if ( cs.has_?(id) ) cs
+      else {
+        logger.info( "TEST: adding UNIQUE CALCULATION: [{}]", id )
+        cs + id
+      }
+    }
+  }
+
+  val snapshotTimer: Timer = metrics.timer( "snapshot" )
+  val snapshotSuccesses: Meter = metrics.meter( "snapshot", "successes" )
+  val snapshotFailures: Meter = metrics.meter( "snapshot", "failures" )
+
+  val journalSweepTimer: Timer = metrics.timer( "journal-sweep" )
+  val journalSweepSuccesses: Meter = metrics.meter( "journal-sweep", "successes" )
+  val journalSweepFailures: Meter = metrics.meter( "journal-sweep", "failures" )
 }
 
 abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmModule.ModuleConfiguration =>
@@ -351,9 +380,13 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
   with InstrumentedActor {
     publisher: EventPublisher =>
 
-    override val journalPluginId: String = "akka.persistence.journal.inmem"
-//    override val journalPluginId: String = "akka.persistence.algorithm.journal.plugin"
-//    override val snapshotPluginId: String = "akka.persistence.algorithm.snapshot.plugin"
+    override val journalPluginId: String = "akka.persistence.algorithm.journal.plugin"
+    override val snapshotPluginId: String = "akka.persistence.algorithm.snapshot.plugin"
+
+    override def preStart(): Unit = {
+      super.preStart()
+      AlgorithmModule addUniqueCalculation aggregateId
+    }
 
     override def parseId( idstr: String ): TID = {
       val identifying = AlgorithmModule.identifying
@@ -480,20 +513,66 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
       case _: GetStateSnapshot => sender() ! StateSnapshot( aggregateId, Option(state) )
     }
 
+    var _snapshotStarted: Long = -1
+    def startSnapshotTimer(): Unit = { _snapshotStarted = System.nanoTime() }
+    def stopSnapshotTimer( event: Any ): Unit = {
+      if ( 0 < _snapshotStarted ) {
+        AlgorithmModule.snapshotTimer.update( System.nanoTime() - _snapshotStarted, NANOSECONDS )
+        _snapshotStarted = 0L
+      }
+
+      event match {
+        case _: SaveSnapshotSuccess => AlgorithmModule.snapshotSuccesses.mark()
+        case _: SaveSnapshotFailure => AlgorithmModule.snapshotFailures.mark()
+        case _ => { }
+      }
+    }
+
+    var _journalSweepStarted: Long = -1
+    def startSweepTimer(): Unit = { _journalSweepStarted = System.nanoTime() }
+    def stopSweepTimer( event: Any ): Unit = {
+      if ( 0 < _journalSweepStarted ) {
+        AlgorithmModule.journalSweepTimer.update( System.nanoTime() - _journalSweepStarted, NANOSECONDS )
+        _journalSweepStarted = 0L
+      }
+
+      event match {
+        case _: DeleteMessagesSuccess => AlgorithmModule.journalSweepSuccesses.mark()
+        case _: DeleteMessagesFailure => AlgorithmModule.journalSweepFailures.mark()
+        case _ => { }
+      }
+    }
+
+
+    override def saveSnapshot( snapshot: Any ): Unit = {
+      startSnapshotTimer()
+      super.saveSnapshot( snapshot )
+    }
+
     val nonfunctional: Receive = {
       case e @ SaveSnapshotSuccess( meta ) => {
-        val last = meta.sequenceNr
+        stopSnapshotTimer( e )
 
         log.debug(
           "[{} - {}]: successful snapshot, deleting journal messages up to sequenceNr: [{}]",
-          self.path.name, rootType.snapshotPeriod.map{ _.toCoarsest }, last
+          self.path.name, rootType.snapshotPeriod.map{ _.toCoarsest }, meta.sequenceNr
         )
 
-        if ( last > 0 ) deleteMessages( last )
+        startSweepTimer()
+        deleteMessages( meta.sequenceNr )
       }
 
-      case e: DeleteMessagesSuccess => log.info( "[{}] successfully cleared journal: [{}]", self.path.name, e )
+      case e @ SaveSnapshotFailure( meta, ex ) => {
+        stopSnapshotTimer( e )
+        log.warning( "[{}] failed to save snapshot. meta:[{}] cause:[{}]", meta, ex )
+      }
+
+      case e: DeleteMessagesSuccess => {
+        stopSweepTimer( e )
+        log.info( "[{}] successfully cleared journal: [{}]", self.path.name, e )
+      }
       case e: DeleteMessagesFailure => {
+        stopSweepTimer( e )
         log.warning( "[{}] FAILED to clear journal will attempt to clear on subsequent snapshot: [{}]", self.path.name, e )
       }
     }
