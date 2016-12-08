@@ -78,7 +78,7 @@ object AnalysisScopeProxy extends Instrumented with LazyLogging {
         ref = model( rt, algoId )
       } yield {
         ref !+ AlgorithmProtocol.UseConfiguration( AlgorithmModule.identifying.tag(scope), plan.algorithmConfig )
-        ( name, ref )
+        ( name, DetectionAlgorithmRouter.DirectResolver(ref) )
       }
 
       context.actorOf(

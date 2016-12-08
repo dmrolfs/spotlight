@@ -85,7 +85,7 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
 
   override def preStart(): Unit = {
     context watch router
-    router ! DetectionAlgorithmRouter.RegisterDetectionAlgorithm( algorithm, self )
+    router ! DetectionAlgorithmRouter.RegisterAlgorithmReference( algorithm, self )
   }
 
   override def detect: Receive = {
