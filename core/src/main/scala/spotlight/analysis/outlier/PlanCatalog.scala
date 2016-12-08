@@ -424,20 +424,31 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
 
 
   case object Initialize extends P.CatalogMessage
+  case object InitializeCompleted extends P.CatalogMessage
+
   override def preStart(): Unit = self ! Initialize
 
   var outstandingWork: Map[WorkId, ActorRef] = Map.empty[WorkId, ActorRef]
 
-  override def receive: Receive = LoggingReceive { around( quiescent ) }
+  override def receive: Receive = LoggingReceive { around( quiescent() ) }
 
-  val quiescent: Receive = {
+  def quiescent( waiting: Set[ActorRef] = Set.empty[ActorRef] ): Receive = {
     case Initialize => {
+      import akka.pattern.pipe
       implicit val ec = context.system.dispatcher //todo: consider moving off actor threadpool
       implicit val timeout = Timeout( 30.seconds )
+      initializePlans() map { _ => InitializeCompleted } pipeTo self
+    }
 
-      val task = initializePlans() map { _ => log.info( "PlanCatalog[{}] initialization completed", self.path.name ) }
-      scala.concurrent.Await.ready( task, timeout.duration )
-      context become LoggingReceive { around( /*stream orElse*/ active orElse admin ) }
+    case InitializeCompleted => {
+      log.info( "PlanCatalog[{}] initialization completed", self.path.name )
+      waiting foreach { _ ! P.Started }
+      context become LoggingReceive { around( active orElse admin ) }
+    }
+
+    case P.WaitForStart => {
+      log.debug( "received WaitForStart request - adding [{}] to waiting queue", sender() )
+      context become LoggingReceive { around( quiescent( waiting + sender() ) ) }
     }
   }
 
