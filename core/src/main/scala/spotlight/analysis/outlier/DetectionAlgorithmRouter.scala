@@ -59,7 +59,7 @@ object DetectionAlgorithmRouter extends LazyLogging {
   def props( routingTable: Map[Symbol, AlgorithmResolver] ): Props = Props( new Default( routingTable ) )
   val DispatcherPath: String = OutlierDetection.DispatcherPath
 
-  def name( scope: String ): String = "DetectionRouter-" + scope
+  def name( suffix: String ): String = "DetectionRouter-" + suffix
 
 
   trait Provider {

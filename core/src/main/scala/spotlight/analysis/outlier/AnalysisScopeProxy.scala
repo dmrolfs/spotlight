@@ -89,7 +89,7 @@ object AnalysisScopeProxy extends Instrumented with LazyLogging {
 
     def makeDetector( routerRef: ActorRef )( implicit context: ActorContext ): ActorRef = {
       context.actorOf(
-        OutlierDetection.props( routerRef, provider.scope.toString ).withDispatcher( OutlierDetection.DispatcherPath ),
+        OutlierDetection.props( routerRef ).withDispatcher( OutlierDetection.DispatcherPath ),
         OutlierDetection.name( provider.scope.toString )
       )
     }
