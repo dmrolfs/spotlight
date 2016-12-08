@@ -198,8 +198,8 @@
     <appender-ref ref="DEBUG_FILE" />
   </logger>
 
-  <root level="WARN">
-  <!--<root level="DEBUG">-->
+  <!--<root level="WARN">-->
+  <root level="DEBUG">
   <!--<root level="INFO">-->
     <appender-ref ref="STDOUT" />
     <appender-ref ref="FILE" />
