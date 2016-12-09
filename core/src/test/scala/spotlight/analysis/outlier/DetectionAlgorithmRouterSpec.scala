@@ -25,17 +25,18 @@ class DetectionAlgorithmRouterSpec extends ParallelAkkaSpec with MockitoSugar {
   class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends AkkaFixture( _config, _system, _slug ) {
     val algo = 'foo
     val algorithm = TestProbe()
-    val router = TestActorRef[DetectionAlgorithmRouter]( DetectionAlgorithmRouter.props( Map(algo -> algorithm.ref) ) )
+    val resolver = DetectionAlgorithmRouter.DirectResolver( algorithm.ref )
+    val router = TestActorRef[DetectionAlgorithmRouter]( DetectionAlgorithmRouter.props( Map(algo -> resolver) ) )
     val subscriber = TestProbe()
   }
 
 
   "DetectionAlgorithmRouter" should {
-    import DetectionAlgorithmRouter.{ AlgorithmRegistered, RegisterDetectionAlgorithm }
+    import DetectionAlgorithmRouter._
     "register algorithms" in { f: Fixture =>
       import f._
       val probe = TestProbe()
-      router.receive( RegisterDetectionAlgorithm('foo, probe.ref), probe.ref )
+      router.receive( RegisterAlgorithmReference('foo, probe.ref), probe.ref )
       probe.expectMsgPF( hint = "register", max = 200.millis.dilated ) {
         case Envelope( AlgorithmRegistered(actual), _ ) => actual.name mustBe Symbol("foo").name
       }
@@ -43,7 +44,7 @@ class DetectionAlgorithmRouterSpec extends ParallelAkkaSpec with MockitoSugar {
 
     "route detection messages" in { f: Fixture =>
       import f._
-      router.receive( RegisterDetectionAlgorithm(algo, algorithm.ref) )
+      router.receive( RegisterAlgorithmReference(algo, algorithm.ref) )
 
       val myPoints = Seq(
         DataPoint( new joda.DateTime(448), 8.46 ),

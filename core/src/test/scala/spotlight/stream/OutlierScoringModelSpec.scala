@@ -398,7 +398,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
       logger.info( "BOOTSTRAP:BEFORE BoundedContext roottypes = [{}]", boundedContext.unsafeModel.rootTypes )
 //      Thread.sleep( 10000 )
 //      logger.info( "BOOTSTRAP:AFTER BoundedContext roottypes = [{}]", boundedContext.unsafeModel.rootTypes )
-      val catalogRef = Bootstrap.makeCatalog( settings )( boundedContext )
+      val catalogRef = Await.result( Bootstrap.makeCatalog( settings )( boundedContext ), 3.seconds )
       logger.info( "Catalog ref = [{}]", catalogRef )
 
       val catalogProxyProps = {

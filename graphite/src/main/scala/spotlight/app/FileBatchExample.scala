@@ -1,10 +1,12 @@
 package spotlight.app
 
+import java.nio.file.Paths
+
 import scala.concurrent.Future
 import akka.NotUsed
 import akka.actor.{Actor, ActorSystem, DeadLetter, Props}
 import akka.event.LoggingReceive
-import akka.stream.scaladsl.{Flow, GraphDSL, Sink, Source}
+import akka.stream.scaladsl.{FileIO, Flow, Framing, GraphDSL, Keep, Sink, Source}
 import akka.stream._
 import akka.util.ByteString
 import com.typesafe.scalalogging.{Logger, StrictLogging}
@@ -27,7 +29,7 @@ import scala.util.{Failure, Success}
 /**
   * Created by rolfsd on 11/17/16.
   */
-object SingleBatchExample extends Instrumented with StrictLogging {
+object FileBatchExample extends Instrumented with StrictLogging {
   def main( args: Array[String] ): Unit = {
     import scala.concurrent.ExecutionContext.Implicits.global
 
@@ -106,6 +108,7 @@ object SingleBatchExample extends Instrumented with StrictLogging {
   override protected val logger: Logger = Logger( LoggerFactory.getLogger("DetectionFlow") )
 
 
+
   def start( args: Array[String] )( implicit system: ActorSystem, materializer: Materializer ): Future[Seq[SimpleFlattenedOutlier]] = {
 
     logger.debug("starting the detecting flow logic ")
@@ -122,36 +125,25 @@ object SingleBatchExample extends Instrumented with StrictLogging {
       .build()
     }
 
-    Bootstrap( context )
+    Bootstrap( context, finishSubscriberOnComplete = false )
     .run( args )
     .map { e => logger.debug( "bootstrapping process..." ); e }
     .flatMap { case ( boundedContext, configuration, flow ) =>
       logger.debug("process bootstrapped. processing data...")
 
       sourceData()
-      .limit( 100 )
-      .map { e => logger.debug("after the source ingestion step"); e }
-      .map { m => akka.util.ByteString( m.getBytes ) }
-      .via( detectionWorkflow(boundedContext,configuration,flow) )
+      .map { e => logger.debug("after the source ingestion step: [{}]", e); e }
+      .via( detectionWorkflow(boundedContext, configuration, flow) )
+      .map { e => logger.debug("AFTER DETECTION: [{}]", e); e }
       .runWith( Sink.seq )
     }
   }
 
-  def sourceData(): Source[String, NotUsed] = {
-    Source(
-      """{"topic" : "host.foo.bar.zed_delta.mean","points": [{"timestamp":1499992052518,"value":1.9}]}""" :: // 2017-07-13 17:27:32.518
-      """{"topic" : "host.foo.bar.zed_delta.mean","points": [{"timestamp":1500905822018,"value":2.0}]}""" :: // 2017-07-24 07:17:02.018
-      """{"topic" : "host.foo.bar.zed_delta.mean","points": [{"timestamp":1501766514783,"value":1.91}]}""" :: // 2017-08-03 06:21:54.783
-      """{"topic" : "host.foo.bar.zed_delta.mean","points": [{"timestamp":1501811957165,"value":2.1}]}""" :: // 2017-08-03 18:59:17.165
-      """{"topic" : "host.foo.bar.zed_delta.mean","points": [{"timestamp":1504118229872,"value":2.0}]}""" :: // 2017-08-30 11:37:09.872
-      """{"topic" : "host.foo.bar.zed_delta.mean","points": [{"timestamp":1504249200000,"value":2.01}]}""" :: // 2017-09-01 00:00:00.000
-      """{"topic" : "host.foo.bar.zed_delta.mean","points": [{"timestamp":1506841199999,"value":2.0}]}""" :: // 2017-09-30 23:59:59.999
-      """{"topic" : "host.foo.bar.zed_delta.mean","points": [{"timestamp":1506841200000,"value":2.0}]}""" :: // 2017-10-01 00:00:00.000
-      """{"topic" : "host.foo.bar.zed_delta.mean","points": [{"timestamp":1509950064783,"value":1.92}]}""" :: // 2017-11-05 22:34:24.783
-      """{"topic" : "host.foo.bar.zed_delta.mean","points": [{"timestamp":1510973520333,"value":200.0}]}""" :: // 2017-11-17 18:52:00.333
-      """{"topic" : "host.foo.bar.zed_delta.mean","points": [{"timestamp":1511367127872,"value":2.0}]}""" :: // 2017-11-22 08:12:07.872
-      Nil
-    )
+  def sourceData(): Source[String, Future[IOResult]] = {
+    FileIO
+    .fromPath( Paths.get( "source.txt" ) )
+    .via( Framing.delimiter(ByteString("\n"), maximumFrameLength = 1024) )
+    .map { _.utf8String }
   }
 
 
@@ -162,7 +154,7 @@ object SingleBatchExample extends Instrumented with StrictLogging {
   )(
     implicit system: ActorSystem,
     materializer: Materializer
-  ): Flow[ByteString, SimpleFlattenedOutlier, NotUsed] = {
+  ): Flow[String, SimpleFlattenedOutlier, NotUsed] = {
     val conf = configuration
 
     val graph = GraphDSL.create() { implicit b =>
@@ -172,13 +164,13 @@ object SingleBatchExample extends Instrumented with StrictLogging {
       def watch[T]( label: String ): Flow[T, T, NotUsed] = Flow[T].map { e => logger.debug( s"${label}: ${e}" ); e }
 
       val intakeBuffer = b.add(
-        Flow[ByteString]
+        Flow[String]
         .buffer(conf.tcpInboundBufferSize, OverflowStrategy.backpressure)
         .watchFlow( 'intake )
       )
 
       val timeSeries = b.add(
-        Flow[ByteString]
+        Flow[String]
         .via( watch("unpacking") )
         .via( unmarshalTimeSeriesData )
         .via( watch("unpacked") )
@@ -288,17 +280,17 @@ object SingleBatchExample extends Instrumented with StrictLogging {
     OutlierInfo( metricType, webId, segment )
   }
 
-  def unmarshalTimeSeriesData: Flow[ByteString, TimeSeries, NotUsed] = {
-    Flow[ByteString]
+  def unmarshalTimeSeriesData: Flow[String, TimeSeries, NotUsed] = {
+    Flow[String]
     .mapConcat { toTimeSeries }
     .withAttributes( ActorAttributes.supervisionStrategy(GraphiteSerializationProtocol.decider) )
   }
 
-  def toTimeSeries( bytes: ByteString ): List[TimeSeries] = {
+  def toTimeSeries( bytes: String ): List[TimeSeries] = {
     import spotlight.model.timeseries._
 
     for {
-      JObject( obj ) <- JsonMethods parse bytes.utf8String
+      JObject( obj ) <- JsonMethods parse bytes
       JField( "topic", JString(topic) ) <- obj
       JField( "points", JArray(points) ) <- obj
     } yield {

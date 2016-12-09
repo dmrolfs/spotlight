@@ -40,7 +40,7 @@ trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
   override def preStart(): Unit = {
     context watch router
     log.info( "attempting to register [{}] @ [{}] with {}", algorithm.name, self.path, sender().path )
-    router ! DetectionAlgorithmRouter.RegisterDetectionAlgorithm( algorithm, self )
+    router ! DetectionAlgorithmRouter.RegisterAlgorithmReference( algorithm, self )
   }
 
   override def receive: Receive = LoggingReceive{ around( quiescent ) }
@@ -53,7 +53,7 @@ trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
       implicit val timeout = akka.util.Timeout( 15.seconds )
       implicit val ec = context.dispatcher
 
-      val resp = ( routerRef ? DetectionAlgorithmRouter.RegisterDetectionAlgorithm( algorithm, self ) )
+      val resp = ( routerRef ? DetectionAlgorithmRouter.RegisterAlgorithmReference( algorithm, self ) )
       val registered = resp map { case DetectionAlgorithmRouter.AlgorithmRegistered( a ) if a == algorithm =>
         AlgorithmProtocolOLD.Registered( scopeId )
       }

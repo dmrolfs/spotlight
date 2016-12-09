@@ -5,7 +5,7 @@
  . ./tools/spotlight-local.sh
 
 
-
+Running via Java:
 nc -lp 20400
 
 tail -f log/monitor.csv

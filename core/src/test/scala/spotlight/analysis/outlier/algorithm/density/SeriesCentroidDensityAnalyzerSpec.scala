@@ -52,7 +52,7 @@ class SeriesCentroidDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSug
       import f._
       val analyzer = TestActorRef[SeriesCentroidDensityAnalyzer]( SeriesCentroidDensityAnalyzer.props(router.ref) )
       router.expectMsgPF( 1.second.dilated, "register" ) {
-        case DetectionAlgorithmRouter.RegisterDetectionAlgorithm(algorithm, _) => algorithm must equal( algoS )
+        case DetectionAlgorithmRouter.RegisterAlgorithmReference(algorithm, _) => algorithm must equal( algoS )
       }
     }
 

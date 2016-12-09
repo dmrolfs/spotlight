@@ -19,6 +19,7 @@ import peds.akka.envelope._
 import peds.akka.metrics.{Instrumented, InstrumentedActor}
 import peds.commons.log.Trace
 import spotlight.analysis.outlier.OutlierDetection.DetectionResult
+import spotlight.analysis.outlier.PlanCatalogProtocol.{Started, WaitForStart}
 import spotlight.model.timeseries._
 
 
@@ -168,11 +169,21 @@ extends ActorSubscriber with EnvelopingActor with InstrumentedActor with ActorLo
   }
 
 
-  override def preStart(): Unit = initializeMetrics()
+  override def preStart(): Unit = {
+    initializeMetrics()
+    underlying ! WaitForStart
+  }
 
   import spotlight.analysis.outlier.{ PlanCatalogProtocol => P }
 
-  override def receive: Receive = LoggingReceive { around( stream orElse active ) }
+  override def receive: Receive = LoggingReceive { around( quiscent ) }
+
+  val quiscent: Receive = {
+    case Started => {
+      log.info( "starting PlanCatalogProxy stream..." )
+      context.become( LoggingReceive{ around( stream orElse active ) } )
+    }
+  }
 
   val active: Receive = {
     case route @ P.Route( _, subscriber, rcid ) => {

@@ -164,7 +164,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       import f._
       val analyzer = TestActorRef[SeriesDensityAnalyzer]( SeriesDensityAnalyzer.props(router.ref) )
       router.expectMsgPF( 1.second.dilated, "register" ) {
-        case DetectionAlgorithmRouter.RegisterDetectionAlgorithm(algorithm, _) => algorithm must equal( algoS )
+        case DetectionAlgorithmRouter.RegisterAlgorithmReference(algorithm, _) => algorithm must equal( algoS )
       }
     }
 

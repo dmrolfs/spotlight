@@ -23,6 +23,7 @@ import demesne.{AggregateRootType, BoundedContext, DomainModel, StartTask}
 import peds.akka.supervision.{IsolatedLifeCycleSupervisor, OneForOneStrategyFactory}
 import peds.akka.supervision.IsolatedLifeCycleSupervisor.{ChildStarted, StartChild}
 import spotlight.analysis.outlier.{AnalysisPlanModule, DetectionAlgorithmRouter, PlanCatalog, PlanCatalogProxy}
+import spotlight.analysis.outlier.{PlanCatalogProtocol => CP}
 import spotlight.analysis.outlier.algorithm.statistical.SimpleMovingAverageAlgorithm
 import spotlight.model.outlier.Outliers
 import spotlight.model.timeseries.TimeSeries
@@ -161,7 +162,7 @@ object Bootstrap extends Instrumented with StrictLogging {
   }
 
 
-  def makeCatalog( settings: Settings )( implicit bc: BoundedContext ): ActorRef = {
+  def makeCatalog( settings: Settings )( implicit bc: BoundedContext ): Future[ActorRef] = {
     val catalogSupervisor = bc.system.actorOf(
       Props(
         new IsolatedLifeCycleSupervisor with OneForOneStrategyFactory {
@@ -186,12 +187,17 @@ object Bootstrap extends Instrumented with StrictLogging {
     )
 
     import akka.pattern.ask
+    implicit val ec = bc.system.dispatcher
     implicit val timeout = Timeout( 30.seconds )
-    val catalogChild = scala.concurrent.Await.result(
-      ( catalogSupervisor ? StartChild(catalogProps, PlanCatalog.name) ).mapTo[ChildStarted],
-      timeout.duration
-    )
-    catalogChild.child
+
+    for {
+      ChildStarted( catalog ) <- ( catalogSupervisor ? StartChild(catalogProps, PlanCatalog.name) ).mapTo[ChildStarted]
+    _ = logger.info( "CATALOG STARTED: [{}]", catalog )
+      _ <- ( catalog ? CP.WaitForStart ).mapTo[CP.Started.type]
+    } yield {
+      logger.info( "CATALOG INITIALIZATION FINISHED" )
+      catalog
+    }
   }
 
   def makeFlow( finishSubscriberOnComplete: Boolean ): Kleisli[Future, BoundedSettings, SpotlightContext] = {
@@ -206,16 +212,21 @@ object Bootstrap extends Instrumented with StrictLogging {
 
       logger.info( "TEST:BOOTSTRAP:BEFORE BoundedContext roottypes = [{}]", boundedContext.unsafeModel.rootTypes )
 
-      val catalogRef = makeCatalog( settings )
-      val catalogProxyProps = PlanCatalogProxy.props(
-        underlying = catalogRef,
-        configuration = settings.config,
-        maxInFlightCpuFactor = settings.maxInDetectionCpuFactor,
-        applicationDetectionBudget = Some(settings.detectionBudget),
-        finishSubscriberOnComplete = finishSubscriberOnComplete
-      )
+      makeCatalog( settings ) map { catalogRef =>
+        val catalogProxyProps = PlanCatalogProxy.props(
+          underlying = catalogRef,
+          configuration = settings.config,
+          maxInFlightCpuFactor = settings.maxInDetectionCpuFactor,
+          applicationDetectionBudget = Some(settings.detectionBudget),
+          finishSubscriberOnComplete = finishSubscriberOnComplete
+        )
 
-      Future successful { ( boundedContext, settings, detectionModel(catalogProxyProps, settings) ) }
+        (
+          boundedContext,
+          settings,
+          detectionModel( catalogProxyProps, settings )
+        )
+      }
     }
   }
 

@@ -24,24 +24,25 @@ import spotlight.model.outlier.{CorrelatedData, OutlierPlan, Outliers}
 
 
 object OutlierDetection extends Instrumented with StrictLogging {
-  def props( routerRef: ActorRef, scope: String ): Props = Props( new Default(routerRef, scope) )
+  sealed trait DetectionProtocol
+  case class DetectionResult( outliers: Outliers, correlationIds: Set[WorkId] ) extends DetectionProtocol
+  case class UnrecognizedTopic( topic: Topic ) extends DetectionProtocol
+  case class DetectionTimedOut( topic: Topic, plan: OutlierPlan ) extends DetectionProtocol
+
+
+  def props( routerRef: ActorRef ): Props = Props( new Default(routerRef) )
+
+  def name( suffix: String ): String = "OutlierDetector-" + suffix
+
   val DispatcherPath: String = "spotlight.dispatchers.outlier-detection-dispatcher"
 
-  def name( scope: String ): String = "OutlierDetector-" + scope
 
-  private class Default( routerRef: ActorRef, _scope: String ) extends OutlierDetection( _scope ) with ConfigurationProvider {
-    override def router: ActorRef = routerRef
+  private class Default( override val router: ActorRef ) extends OutlierDetection with ConfigurationProvider
+
+  trait ConfigurationProvider {
+    def router: ActorRef
   }
 
-
-  override lazy val metricBaseName: MetricName = MetricName( classOf[OutlierDetection] )
-
-  lazy val timeoutMeter: Meter = metrics meter "timeouts"
-  val totalOutstanding: Agent[Int] = Agent( 0 )( scala.concurrent.ExecutionContext.global )
-  metrics.gauge( "outstanding" ){ totalOutstanding.get() }
-
-  def incrementTotalOutstanding(): Unit = totalOutstanding send { _ + 1 }
-  def decrementTotalOutstanding(): Unit = totalOutstanding send { _ - 1 }
 
   val decider: Supervision.Decider = {
     case ex: AskTimeoutException => {
@@ -56,26 +57,12 @@ object OutlierDetection extends Instrumented with StrictLogging {
   }
 
 
-  object WatchPoints {
-    val DetectionFlow: Symbol = Symbol( "detection" )
-  }
-
-  sealed trait DetectionProtocol
-  case class DetectionResult( outliers: Outliers, correlationIds: Set[WorkId] ) extends DetectionProtocol
-  case class UnrecognizedTopic( topic: Topic ) extends DetectionProtocol
-  case class DetectionTimedOut( topic: Topic, plan: OutlierPlan ) extends DetectionProtocol
-
-
   val extractOutlierDetectionTopic: OutlierPlan.ExtractTopic = {
     case e @ Envelope( payload, _ ) if extractOutlierDetectionTopic isDefinedAt payload => extractOutlierDetectionTopic( payload )
     case m: OutlierDetectionMessage => Some(m.topic)
     case CorrelatedData( ts: TimeSeriesBase, _, _ ) => Some( ts.topic )
     case ts: TimeSeriesBase => Some(ts.topic)
     case t: Topic => Some(t)
-  }
-
-  trait ConfigurationProvider {
-    def router: ActorRef
   }
 
   case class DetectionRequest private[OutlierDetection](
@@ -95,14 +82,25 @@ object OutlierDetection extends Instrumented with StrictLogging {
       DetectionRequest( m.subscriber, wids )
     }
   }
+
+
+  override lazy val metricBaseName: MetricName = MetricName( classOf[OutlierDetection] )
+
+  lazy val timeoutMeter: Meter = metrics meter "timeouts"
+  val totalOutstanding: Agent[Int] = Agent( 0 )( scala.concurrent.ExecutionContext.global )
+  metrics.gauge( "outstanding" ){ totalOutstanding.get() }
+
+  def incrementTotalOutstanding(): Unit = totalOutstanding send { _ + 1 }
+  def decrementTotalOutstanding(): Unit = totalOutstanding send { _ - 1 }
+
+
+  object WatchPoints {
+    val DetectionFlow: Symbol = Symbol( "detection" )
+  }
 }
 
 
-class OutlierDetection( scope: String )
-extends Actor
-with EnvelopingActor
-with InstrumentedActor
-with ActorLogging {
+class OutlierDetection extends Actor with EnvelopingActor with InstrumentedActor with ActorLogging {
   outer: OutlierDetection.ConfigurationProvider =>
 
   import OutlierDetection._

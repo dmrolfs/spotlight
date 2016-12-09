@@ -448,15 +448,20 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
         val aggregator = sender()
         val toOutliers = kleisli[TryV, (Outliers, Context), Outliers] { case (o, _) => o.right }
 
-        val start = System.currentTimeMillis()
+        val start = System.nanoTime()
+        @inline def stopTimer( start: Long ): Unit = {
+          algorithmTimer.update( System.nanoTime() - start, scala.concurrent.duration.NANOSECONDS )
+        }
+
         ( makeAlgorithmContext >=> findOutliers >=> toOutliers ).run( msg ) match {
           case \/-( r ) => {
+            stopTimer( start )
             log.debug( "[{}] sending detect result to aggregator[{}]: [{}]", workId, aggregator.path.name, r )
-            algorithmTimer.update( System.currentTimeMillis() - start, scala.concurrent.duration.MILLISECONDS )
             aggregator !+ r
           }
 
           case -\/( ex: AlgorithmModule.InsufficientDataSize ) => {
+            stopTimer( start )
             log.error(
               ex,
               "[{}] skipped [{}] analysis on [{}] @ [{}] due to insufficient data - no outliers marked for interval",
@@ -476,6 +481,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
           }
 
           case -\/( ex ) => {
+            stopTimer( start )
             log.error(
               ex,
               "[{}] failed [{}] analysis on [{}] @ [{}] - no outliers marked for interval",
