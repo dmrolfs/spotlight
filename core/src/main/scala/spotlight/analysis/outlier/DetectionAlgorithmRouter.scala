@@ -69,6 +69,10 @@ object DetectionAlgorithmRouter extends LazyLogging {
   private class Default( override val initialRoutingTable: Map[Symbol, AlgorithmResolver] )
   extends DetectionAlgorithmRouter with Provider
 
+  def rootTypeFor( algorithm: Symbol )( implicit ec: ExecutionContext ): Option[AggregateRootType] = {
+    import scala.concurrent.duration._
+    unsafeRootTypeFor( algorithm ) orElse { scala.concurrent.Await.result( futureRootTypeFor(algorithm), 30.seconds ) }
+  }
 
   def unsafeRootTypeFor( algorithm: Symbol ): Option[AggregateRootType] = {
     logger.debug( "DetectionAlgorithmRouter unsafe algorithmRootTypes:[{}]", algorithmRootTypes.get.keySet )

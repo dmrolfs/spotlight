@@ -68,15 +68,15 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[OutlierPlan] { 
     with ProxyProvider
     with StackableStreamPublisher
     with StackableIndexBusPublisher {
-      override def makeProxy(
-        topic: Topic,
-        plan: OutlierPlan
-      )(
-        implicit model: DomainModel,
-        context: ActorContext
-      ): ActorRef = {
-        proxyProbe.ref
-      }
+//      override def makeProxy(
+//        topic: Topic,
+//        plan: OutlierPlan
+//      )(
+//        implicit model: DomainModel,
+//        context: ActorContext
+//      ): ActorRef = {
+//        proxyProbe.ref
+//      }
     }
 
 

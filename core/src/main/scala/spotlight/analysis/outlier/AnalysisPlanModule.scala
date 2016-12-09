@@ -75,11 +75,11 @@ object AnalysisPlanProtocol extends AggregateProtocol[OutlierPlan#ID]{
     def toSummary: OutlierPlan.Summary = OutlierPlan.Summary( id = sourceId, name = info.name, appliesTo = info.appliesTo )
   }
 
-  private[outlier] case class GetProxies( override val targetId: GetProxies#TID ) extends AnalysisPlanCommand
-  private[outlier] case class Proxies(
-    override val sourceId: Proxies#TID,
-    scopeProxies: Map[Topic, ActorRef]
-  ) extends AnalysisPlanEvent
+//  private[outlier] case class GetProxies( override val targetId: GetProxies#TID ) extends AnalysisPlanCommand
+//  private[outlier] case class Proxies(
+//    override val sourceId: Proxies#TID,
+//    scopeProxies: Map[Topic, ActorRef]
+//  ) extends AnalysisPlanEvent
 }
 
 
@@ -158,24 +158,16 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
         def highWatermark: Int = 10 * Runtime.getRuntime.availableProcessors()
         def bufferSize: Int = 1000
 
-        def makeProxy(
-          topic: Topic,
-          plan: OutlierPlan
-        )(
-          implicit model: DomainModel,
-          context: ActorContext
-        ): ActorRef = {
-          val scope = OutlierPlan.Scope( plan, topic )
-          log.debug( "making analysis proxy for scope: [{}]", scope )
+        def makeProxy( plan: OutlierPlan )( implicit model: DomainModel, context: ActorContext ): ActorRef = {
+          log.debug( "making analysis proxy for plan: [{}]", plan.name )
           context.actorOf(
-            AnalysisScopeProxy.props(
-              scope = scope,
-              plan = plan,
-              model = model,
+            AnalysisProxy.props(
+              model,
+              plan,
               highWatermark = provider.highWatermark,
               bufferSize = provider.bufferSize
             ),
-            name = AnalysisScopeProxy.name( scope )
+            name = AnalysisProxy.name( plan )
           )
         }
       }
@@ -190,25 +182,14 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
 
       private val trace = Trace[OutlierPlanActor]
 
-      override def preDisable(): Unit = {
-        proxies.values foreach { _ ! PoisonPill }
-        proxies = Map.empty[Topic, ActorRef]
-      }
+      override def preDisable(): Unit = { proxy ! PoisonPill }
 
       override var state: OutlierPlan = _
       override val evState: ClassTag[OutlierPlan] = ClassTag( classOf[OutlierPlan] )
 
-      var proxies: Map[Topic, ActorRef] = Map.empty[Topic, ActorRef]
-
-      def proxyFor( topic: Topic ): ActorRef = {
-        proxies
-        .get( topic )
-        .getOrElse {
-          val proxy = outer.makeProxy( topic, state )( model, context )
-          proxies += topic -> proxy
-          context watch proxy
-          proxy
-        }
+      lazy val proxy: ActorRef = {
+        val p = outer.makeProxy( state )( model, context )
+        context watch p
       }
 
       override def acceptance: Acceptance = entityAcceptance orElse {
@@ -271,7 +252,7 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
             s"${self.path.name}:${workId}==?${correlationIds}=>${correlationIds.exists(_ == workId)}", ts.topic, sender().path.name
           )
 
-          proxyFor( ts.topic ) forwardEnvelope m.withScope( Some(OutlierPlan.Scope(plan = state, topic = ts.topic)) )
+          proxy forwardEnvelope m.withScope( Some(OutlierPlan.Scope(plan = state, topic = ts.topic)) )
         }
       }
 
@@ -283,8 +264,7 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
         case P.UseAlgorithms( id, algorithms, config ) => {
           persist( P.AlgorithmsChanged(id, algorithms, config) ) { e =>
             acceptAndPublish( e )
-            log.info( "notifying {} plan constituents of algorithm change", proxies.keySet.size )
-            proxies foreach { case (_, proxy) => proxy !+ e }
+            proxy !+ e
           }
         }
 
@@ -294,15 +274,11 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
       }
 
       val maintenance: Receive = {
-        case Terminated( deadActor ) => {
-          log.info( "[{}] notified of dead actor at:[{}]", aggregateId, deadActor.path )
-          proxies find { case (_, ref) => ref == deadActor } foreach { case (t, _) =>
-            log.warning( "removing record of dead proxy for topic:[{}]", t )
-            proxies = proxies - t
-          }
+        case Terminated( deadActor ) if deadActor == proxy => {
+          log.warning( "[{}] notified of dead proxy at:[{}]", aggregateId, deadActor.path )
         }
 
-        case _: P.GetProxies => sender() ! P.Proxies( aggregateId, proxies )
+//        case _: P.GetProxies => sender() ! P.Proxies( aggregateId, proxies )
       }
 
       override def unhandled( message: Any ): Unit = {

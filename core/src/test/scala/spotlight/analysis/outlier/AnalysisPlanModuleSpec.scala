@@ -96,15 +96,15 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] with OptionVa
       )
     }
 
-    def proxiesFrom( ar: ActorRef, tid: module.TID ): Map[Topic, ActorRef] = {
-      import scala.concurrent.ExecutionContext.Implicits.global
-      import akka.pattern.ask
-
-      Await.result(
-        ( ar ? P.GetProxies(tid) ).mapTo[P.Proxies].map{ _.scopeProxies },
-        2.seconds.dilated
-      )
-    }
+//    def proxiesFrom( ar: ActorRef, tid: module.TID ): Map[Topic, ActorRef] = {
+//      import scala.concurrent.ExecutionContext.Implicits.global
+//      import akka.pattern.ask
+//
+//      Await.result(
+//        ( ar ? P.GetProxies(tid) ).mapTo[P.Proxies].map{ _.scopeProxies },
+//        2.seconds.dilated
+//      )
+//    }
   }
 
   class DefaultFixture( _config: Config, _system: ActorSystem, _slug: String ) extends Fixture( _config, _system, _slug ) {
@@ -112,28 +112,29 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] with OptionVa
 
     val proxyProbe = TestProbe()
 
-    def testProps( model: DomainModel, rootType: AggregateRootType )( proxy: ActorRef ): Props = {
-      Props( new TestOutlierPlanActor( model, rootType, proxy ) )
+    def testProps( model: DomainModel, rootType: AggregateRootType ): Props = {
+      Props( new TestOutlierPlanActor( model, rootType ) )
     }
 
-    class TestOutlierPlanActor( model: DomainModel, rootType: AggregateRootType, proxy: ActorRef )
+    class TestOutlierPlanActor( model: DomainModel, rootType: AggregateRootType )
     extends OutlierPlanActor( model, rootType )
     with ProxyProvider
     with StackableStreamPublisher
     with StackableIndexBusPublisher {
-      override def makeProxy(
-        topic: Topic,
-        plan: OutlierPlan
-      )(
-        implicit model: DomainModel,
-        context: ActorContext
-      ): ActorRef = {
-        proxy
-      }
+      override lazy val proxy: ActorRef = proxyProbe.ref
+//      override def makeProxy(
+//        topic: Topic,
+//        plan: OutlierPlan
+//      )(
+//        implicit model: DomainModel,
+//        context: ActorContext
+//      ): ActorRef = {
+//        proxy
+//      }
     }
 
     class Module extends FixtureModule {
-      override def aggregateRootPropsOp: AggregateRootProps = testProps( _, _ )( proxyProbe.ref )
+      override def aggregateRootPropsOp: AggregateRootProps = testProps( _, _ )
     }
 
     override val module: Module = new Module
@@ -142,18 +143,20 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] with OptionVa
   class WorkflowFixture( _config: Config, _system: ActorSystem, _slug: String ) extends Fixture( _config, _system, _slug ) {
     override protected val trace = Trace[WorkflowFixture]
 
-    var proxyProbes = Map.empty[Topic, TestProbe]
+//    var proxyProbes = Map.empty[Topic, TestProbe]
+    val proxyProbe = TestProbe( "proxy" )
 
     class FixtureOutlierPlanActor( model: DomainModel, rootType: AggregateRootType)
     extends AnalysisPlanModule.AggregateRoot.OutlierPlanActor( model, rootType )
     with AnalysisPlanModule.AggregateRoot.OutlierPlanActor.ProxyProvider
     with StackableStreamPublisher {
-      override def makeProxy(topic: Topic, plan: OutlierPlan)( implicit model: DomainModel, context: ActorContext ): ActorRef = {
-        val probe = TestProbe( topic.name )
-        logger.debug( "TEST: making proxy probe: [{}]", probe )
-        proxyProbes += topic -> probe
-        probe.ref
-      }
+      override lazy val proxy: ActorRef = proxyProbe.ref
+//      override def makeProxy(topic: Topic, plan: OutlierPlan)( implicit model: DomainModel, context: ActorContext ): ActorRef = {
+//        val probe = TestProbe( topic.name )
+//        logger.debug( "TEST: making proxy probe: [{}]", probe )
+//        proxyProbes += topic -> probe
+//        probe.ref
+//      }
 
       override def active: Receive = {
         case m if super.active isDefinedAt m => {
@@ -193,60 +196,60 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] with OptionVa
 
 
   "AnalysisPlanModule" should {
-    "make proxy for topic" in { f: Fixture =>
-      import f._
-      val planRef = TestActorRef[AnalysisPlanModule.AggregateRoot.OutlierPlanActor](
-        AnalysisPlanModule.AggregateRoot.OutlierPlanActor.props( model, module.rootType )
-      )
+//    "make proxy for topic" in { f: Fixture =>
+//      import f._
+//      val planRef = TestActorRef[AnalysisPlanModule.AggregateRoot.OutlierPlanActor](
+//        AnalysisPlanModule.AggregateRoot.OutlierPlanActor.props( model, module.rootType )
+//      )
+//
+//      planRef.underlyingActor.state = plan
+//      val actual = planRef.underlyingActor.proxyFor( "test" )
+//      actual must not be null
+//      val a2 = planRef.underlyingActor.proxyFor( "test" )
+//      actual must be theSameInstanceAs a2
+//    }
 
-      planRef.underlyingActor.state = plan
-      val actual = planRef.underlyingActor.proxyFor( "test" )
-      actual must not be null
-      val a2 = planRef.underlyingActor.proxyFor( "test" )
-      actual must be theSameInstanceAs a2
-    }
+//    "dead proxy must be cleared" taggedAs WIP in { f: Fixture =>
+//      import f._
+//
+//      entity ! EntityMessages.Add( tid, Some(plan) )
+//      bus.expectMsgType[EntityMessages.Added]
+//      proxiesFrom( entity, tid ) mustBe empty
+//
+//      entity ! P.AcceptTimeSeries( tid, Set.empty[WorkId], TimeSeries( "test" ) )
+//      val p1 = proxiesFrom( entity, tid )
+//      p1.keys must contain ( "test".toTopic )
+//
+//      val proxy = p1( "test" )
+//      proxy ! PoisonPill
+//      logger.debug( "TEST: waiting a bit for Terminated to propagate..." )
+//      Thread.sleep( 5000 )
+//      logger.info( "TEST: checking proxy..." )
+//
+//      val p2 = proxiesFrom( entity, tid )
+//      logger.debug( "TEST: p2 = [{}]", p2.mkString(", ") )
+//      p2 mustBe empty
+//
+//      entity ! P.AcceptTimeSeries( tid, Set.empty[WorkId], TimeSeries( "test" ) )
+//      val p3 = proxiesFrom( entity, tid )
+//      p3.keys must contain ( "test".toTopic )
+//    }
 
-    "dead proxy must be cleared" taggedAs WIP in { f: Fixture =>
-      import f._
-
-      entity ! EntityMessages.Add( tid, Some(plan) )
-      bus.expectMsgType[EntityMessages.Added]
-      proxiesFrom( entity, tid ) mustBe empty
-
-      entity ! P.AcceptTimeSeries( tid, Set.empty[WorkId], TimeSeries( "test" ) )
-      val p1 = proxiesFrom( entity, tid )
-      p1.keys must contain ( "test".toTopic )
-
-      val proxy = p1( "test" )
-      proxy ! PoisonPill
-      logger.debug( "TEST: waiting a bit for Terminated to propagate..." )
-      Thread.sleep( 5000 )
-      logger.info( "TEST: checking proxy..." )
-
-      val p2 = proxiesFrom( entity, tid )
-      logger.debug( "TEST: p2 = [{}]", p2.mkString(", ") )
-      p2 mustBe empty
-
-      entity ! P.AcceptTimeSeries( tid, Set.empty[WorkId], TimeSeries( "test" ) )
-      val p3 = proxiesFrom( entity, tid )
-      p3.keys must contain ( "test".toTopic )
-    }
-
-    "handle workflow" taggedAs( WORKFLOW, WIP ) in { f: Fixture =>
+    "handle workflow" taggedAs( WORKFLOW ) in { f: Fixture =>
       import f._
       logger.debug( "TEST: fixture class: [{}]", f.getClass )
 
       entity !+ EntityMessages.Add( tid, Some(plan) )
 
-      proxiesFrom( entity, tid ) mustBe empty
+//      proxiesFrom( entity, tid ) mustBe empty
 
       val wid1 = Set( WorkId() )
       entity ! P.AcceptTimeSeries( tid, wid1, TimeSeries( "test" ) )
-      val p1 = proxiesFrom( entity, tid )
-      p1.keys must contain ( "test".toTopic )
+//      val p1 = proxiesFrom( entity, tid )
+//      p1.keys must contain ( "test".toTopic )
 
-      f.asInstanceOf[WorkflowFixture].proxyProbes must have size 1
-      val testProbe = f.asInstanceOf[WorkflowFixture].proxyProbes( "test".toTopic )
+//      f.asInstanceOf[WorkflowFixture].proxyProbes must have size 1
+      val testProbe = f.asInstanceOf[WorkflowFixture].proxyProbe
       testProbe.expectMsgPF( hint = "accept test time series" ) {
         case Envelope( P.AcceptTimeSeries(pid, cids, ts: TimeSeries, s), _ ) => {
           pid mustBe tid
@@ -259,9 +262,9 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] with OptionVa
 
       val wid2 = wid1 + WorkId()
       entity ! P.AcceptTimeSeries( tid, wid2, TimeSeries( "test" ) )
-      val p2 = proxiesFrom( entity, tid )
-      p2.keys must contain ( "test".toTopic )
-      f.asInstanceOf[WorkflowFixture].proxyProbes must have size 1
+//      val p2 = proxiesFrom( entity, tid )
+//      p2.keys must contain ( "test".toTopic )
+//      f.asInstanceOf[WorkflowFixture].proxyProbes must have size 1
       testProbe.expectMsgPF( hint = "accept test time series" ) {
         case Envelope( P.AcceptTimeSeries(pid, cids, ts: TimeSeries, s), _ ) => {
           pid mustBe tid
@@ -274,10 +277,11 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] with OptionVa
 
       val wid3 = wid2 + WorkId()
       entity ! P.AcceptTimeSeries( tid, wid3, TimeSeries( "foo" ) )
-      val p3 = proxiesFrom( entity, tid )
-      p3.keys must contain allOf ( "test".toTopic, "foo".toTopic )
-      f.asInstanceOf[WorkflowFixture].proxyProbes must have size 2
-      val fooProbe = f.asInstanceOf[WorkflowFixture].proxyProbes( "foo".toTopic )
+//      val p3 = proxiesFrom( entity, tid )
+//      p3.keys must contain allOf ( "test".toTopic, "foo".toTopic )
+//      f.asInstanceOf[WorkflowFixture].proxyProbes must have size 2
+//      val fooProbe = f.asInstanceOf[WorkflowFixture].proxyProbes( "foo".toTopic )
+      val fooProbe = testProbe
       fooProbe.expectMsgPF( hint = "accept foo time series" ) {
         case Envelope( P.AcceptTimeSeries(pid, cids, ts: TimeSeries, s), _ ) => {
           pid mustBe tid
@@ -406,7 +410,7 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] with OptionVa
       actual.reduce must be theSameInstanceAs reduce
     }
 
-    "accept time series" in { f: Fixture =>
+    "accept time series" taggedAs WIP in { f: Fixture =>
       val df = f.asInstanceOf[DefaultFixture]
       import df._
 
