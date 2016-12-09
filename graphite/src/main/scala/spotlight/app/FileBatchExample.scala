@@ -3,6 +3,8 @@ package spotlight.app
 import java.nio.file.Paths
 
 import scala.concurrent.Future
+import scala.concurrent.duration._
+import scala.util.{Failure, Success, Try}
 import akka.NotUsed
 import akka.actor.{Actor, ActorSystem, DeadLetter, Props}
 import akka.event.LoggingReceive
@@ -16,20 +18,23 @@ import org.slf4j.LoggerFactory
 import org.json4s._
 import org.json4s.jackson.JsonMethods
 import peds.akka.metrics.Instrumented
-import demesne.BoundedContext
 import peds.akka.stream.StreamMonitor
+import demesne.BoundedContext
+import peds.commons.TryV
+import peds.commons.log.Trace
 import spotlight.model.outlier.{Outliers, SeriesOutliers}
 import spotlight.model.timeseries.{DataPoint, ThresholdBoundary, TimeSeries}
 import spotlight.protocol.GraphiteSerializationProtocol
 import spotlight.stream.{Bootstrap, BootstrapContext, Settings}
 
-import scala.util.{Failure, Success}
+import scalaz.{-\/, \/, \/-}
 
 
 /**
   * Created by rolfsd on 11/17/16.
   */
 object FileBatchExample extends Instrumented with StrictLogging {
+  private val trace = Trace[FileBatchExample.type]
   def main( args: Array[String] ): Unit = {
     import scala.concurrent.ExecutionContext.Implicits.global
 
@@ -49,17 +54,17 @@ object FileBatchExample extends Instrumented with StrictLogging {
     }
     .onComplete {
       case Success( results ) => {
-        println( "\n\n  ********************************************** " )
-        println( s"\nbatch completed finding ${results.size} outliers:" )
+        println( "\n\nAPP:  ********************************************** " )
+        println( s"\nAPP:batch completed finding ${results.size} outliers:" )
         results.zipWithIndex foreach { case (o, i) => println( s"${i+1}: ${o}") }
-        println( "  **********************************************\n\n" )
+        println( "APP:  **********************************************\n\n" )
         actorSystem.terminate()
       }
 
       case Failure( ex ) => {
-        println( "\n\n  ********************************************** " )
-        println( s"\n batch completed with ERROR: ${ex}" )
-        println( "  **********************************************\n\n" )
+        println( "\n\nAPP:  ********************************************** " )
+        println( s"\nAPP: batch completed with ERROR: ${ex}" )
+        println( "APP:  **********************************************\n\n" )
         actorSystem.terminate()
       }
     }
@@ -108,7 +113,6 @@ object FileBatchExample extends Instrumented with StrictLogging {
   override protected val logger: Logger = Logger( LoggerFactory.getLogger("DetectionFlow") )
 
 
-
   def start( args: Array[String] )( implicit system: ActorSystem, materializer: Materializer ): Future[Seq[SimpleFlattenedOutlier]] = {
 
     logger.debug("starting the detecting flow logic ")
@@ -125,16 +129,16 @@ object FileBatchExample extends Instrumented with StrictLogging {
       .build()
     }
 
-    Bootstrap( context, finishSubscriberOnComplete = false )
+    Bootstrap( context, finishSubscriberOnComplete = true )
     .run( args )
     .map { e => logger.debug( "bootstrapping process..." ); e }
     .flatMap { case ( boundedContext, configuration, flow ) =>
       logger.debug("process bootstrapped. processing data...")
 
       sourceData()
-      .map { e => logger.debug("after the source ingestion step: [{}]", e); e }
+      .map { e => logger.info("after the sourceData step: [{}]", e); e }
       .via( detectionWorkflow(boundedContext, configuration, flow) )
-      .map { e => logger.debug("AFTER DETECTION: [{}]", e); e }
+      .map { e => logger.info("AFTER DETECTION: [{}]", e); e }
       .runWith( Sink.seq )
     }
   }
@@ -143,7 +147,10 @@ object FileBatchExample extends Instrumented with StrictLogging {
     FileIO
     .fromPath( Paths.get( "source.txt" ) )
     .via( Framing.delimiter(ByteString("\n"), maximumFrameLength = 1024) )
+    .map { b => logger.info( "sourceData: bytes = [{}]", b); b }
     .map { _.utf8String }
+    .map { s => logger.info( "sourceData: utf8String = [{}]", s); s }
+    .delay( 5.seconds )
   }
 
 
@@ -161,7 +168,7 @@ object FileBatchExample extends Instrumented with StrictLogging {
       import GraphDSL.Implicits._
       import peds.akka.stream.StreamMonitor._
 
-      def watch[T]( label: String ): Flow[T, T, NotUsed] = Flow[T].map { e => logger.debug( s"${label}: ${e}" ); e }
+      def watch[T]( label: String ): Flow[T, T, NotUsed] = Flow[T].map { e => logger.info( s"${label}: ${e}" ); e }
 
       val intakeBuffer = b.add(
         Flow[String]
@@ -194,12 +201,20 @@ object FileBatchExample extends Instrumented with StrictLogging {
           case s: SeriesOutliers => s
         }
         .map { m => logger.info( "FILTER:AFTER class:[{}] message:[{}]", m.getClass.getCanonicalName, m ); m }
-        .watchFlow( 'filter )
+        .watchFlow( 'results )
      )
 
       val flatter: Flow[SeriesOutliers, List[SimpleFlattenedOutlier], NotUsed] = {
         Flow[SeriesOutliers]
-        .map(s => flattenObject(s))
+        .map { s =>
+          flattenObject( s ) match {
+            case \/-( f ) => logger.info( "Success: flatter.flattenObject = [{}]", f ); f
+            case -\/( ex ) => {
+              logger.error( s"Failure: flatter.flattenObject[${s}]:", ex )
+              throw ex
+            }
+          }
+        }
         .watchFlow( 'flatter )
       }
 
@@ -224,7 +239,7 @@ object FileBatchExample extends Instrumented with StrictLogging {
         C.Collector,
         C.Outlet,
         'publish,
-        'filter,
+        'results,
         OSM.ScoringUnrecognized
       )
 
@@ -243,12 +258,19 @@ object FileBatchExample extends Instrumented with StrictLogging {
 
   def flatten: Flow[SeriesOutliers , List[SimpleFlattenedOutlier],NotUsed] = {
     Flow[SeriesOutliers ]
-    .map[List[SimpleFlattenedOutlier]](flattenObject)
+    .map[List[SimpleFlattenedOutlier]] { so =>
+      flattenObject( so ) match {
+        case \/-( f ) => logger.info( "Success: flatten.flattenObject = [{}]", f ); f
+        case -\/( ex ) => {
+          logger.error( s"Failure: flatten.flattenObject[${so}]:", ex )
+          throw ex
+        }
+      }
+    }
   }
 
-  def flattenObject(outlier: SeriesOutliers): List[SimpleFlattenedOutlier] = {
-    val details = parseTopic( outlier.topic.name )
-    val list = {
+  def flattenObject(outlier: SeriesOutliers): TryV[List[SimpleFlattenedOutlier]] = trace.briefBlock("flattenObject"){
+    parseTopic( outlier.topic.name ) map { details =>
       outlier.algorithms.toList.map{ a =>
         SimpleFlattenedOutlier(
           algorithm = a,
@@ -261,46 +283,58 @@ object FileBatchExample extends Instrumented with StrictLogging {
         )
       }
     }
-    list
   }
 
-  def parseThresholdBoundaries(thresholdBoundaries: Seq[ThresholdBoundary]) : Seq[Threshold] = {
+  def parseThresholdBoundaries(thresholdBoundaries: Seq[ThresholdBoundary]) : Seq[Threshold] = trace.briefBlock(s"parseThresholdBoundaries(${thresholdBoundaries})"){
     thresholdBoundaries map { a => Threshold(a.timestamp, a.ceiling, a.expected, a.floor ) }
   }
 
-  def parseOutlierObject(dataPoints: Seq[DataPoint]) : Seq[OutlierTimeSeriesObject] = {
+  def parseOutlierObject(dataPoints: Seq[DataPoint]) : Seq[OutlierTimeSeriesObject] = trace.briefBlock( s"parseOutlierObject(${dataPoints})"){
     dataPoints map { a => OutlierTimeSeriesObject( a.timestamp, a.value ) }
   }
 
-  def parseTopic(topic: String) : OutlierInfo = {
-    val splits = topic.split("""\.""")
-    val metricType = splits(1)
-    val webId = splits(2).concat( "." ).concat( splits(3).split("_")(0) )
-    val segment = splits(3).split( "_" )(1)
-    OutlierInfo( metricType, webId, segment )
+  def parseTopic( topic: String ) : TryV[OutlierInfo] = trace.briefBlock( s"parseTopic(${topic})" ) {
+    \/ fromTryCatchNonFatal {
+      val splits = topic.split("""\.""")
+      val metricType = splits(1)
+      val webId = splits(2).concat( "." ).concat( splits(3).split("_")(0) )
+      val segment = splits(3).split( "_" )(1)
+      OutlierInfo( metricType, webId, segment )
+    }
   }
 
   def unmarshalTimeSeriesData: Flow[String, TimeSeries, NotUsed] = {
     Flow[String]
-    .mapConcat { toTimeSeries }
+    .mapConcat { s =>
+      toTimeSeries( s ) match {
+        case \/-( tss ) => logger.info( "Success: unmarshalTimeSeries.toTimeSeries = [{}]", tss ); tss
+        case -\/( ex ) => {
+          logger.error( s"Failure: unmarshalTimeSeries.toTimeSeries[${s}]:", ex )
+          throw ex
+        }
+      }
+    }
+    .map { ts => logger.info( "unmarshalled time series: [{}]", ts ); ts }
     .withAttributes( ActorAttributes.supervisionStrategy(GraphiteSerializationProtocol.decider) )
   }
 
-  def toTimeSeries( bytes: String ): List[TimeSeries] = {
+  def toTimeSeries( bytes: String ): TryV[List[TimeSeries]] = trace.briefBlock( "toTimeSeries" ) {
     import spotlight.model.timeseries._
 
-    for {
-      JObject( obj ) <- JsonMethods parse bytes
-      JField( "topic", JString(topic) ) <- obj
-      JField( "points", JArray(points) ) <- obj
-    } yield {
-      val datapoints = for {
-        JObject( point ) <- points
-        JField( "timestamp", JInt(ts) ) <- point
-        JField( "value", JDouble(v) ) <- point
-      } yield DataPoint( new DateTime( ts.toLong ), v )
+    \/ fromTryCatchNonFatal {
+      for {
+        JObject( obj ) <- JsonMethods parse bytes
+        JField( "topic", JString(topic) ) <- obj
+        JField( "points", JArray(points) ) <- obj
+      } yield {
+        val datapoints = for {
+          JObject( point ) <- points
+          JField( "timestamp", JInt(ts) ) <- point
+          JField( "value", JDouble(v) ) <- point
+        } yield DataPoint( new DateTime( ts.toLong ), v )
 
-      TimeSeries.apply( topic, datapoints )
+        TimeSeries.apply( topic, datapoints )
+      }
     }
   }
 }
