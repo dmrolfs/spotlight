@@ -79,7 +79,7 @@ object Bootstrap extends Instrumented with StrictLogging {
   )(
     implicit ec: ExecutionContext
   ): Kleisli[Future, Array[String], SpotlightContext] = {
-    systemConfiguration( context ) >=> startBoundedContext( context ) >=> makeFlow( finishSubscriberOnComplete )
+    systemConfiguration( context ) >=> startBoundedContext( context ) >=> makeFlow2( finishSubscriberOnComplete )
   }
 
   val systemRootTypes: Set[AggregateRootType] = {
@@ -200,6 +200,22 @@ object Bootstrap extends Instrumented with StrictLogging {
     }
   }
 
+  def makeFlow2( finishSubscriberOnComplete: Boolean ): Kleisli[Future, BoundedSettings, SpotlightContext] = {
+    kleisli[Future, BoundedSettings, SpotlightContext] { case (boundedContext, settings) =>
+      implicit val bc = boundedContext
+      implicit val system = boundedContext.system
+      implicit val dispatcher = system.dispatcher
+      implicit val timeout = Timeout( 5.seconds )
+      implicit val materializer = ActorMaterializer(
+        ActorMaterializerSettings( system ) withSupervisionStrategy supervisionDecider
+      )
+
+      logger.info( "TEST:BOOTSTRAP:BEFORE BoundedContext roottypes = [{}]", boundedContext.unsafeModel.rootTypes )
+      makeCatalog( settings ) map { catalogRef => ( boundedContext, settings, detectionModel2(catalogRef, settings) ) }
+    }
+  }
+
+
   def makeFlow( finishSubscriberOnComplete: Boolean ): Kleisli[Future, BoundedSettings, SpotlightContext] = {
     kleisli[Future, BoundedSettings, SpotlightContext] { case (boundedContext, settings) =>
       implicit val bc = boundedContext
@@ -229,6 +245,35 @@ object Bootstrap extends Instrumented with StrictLogging {
       }
     }
   }
+
+  def detectionModel2(
+    catalogRef: ActorRef,
+    settings: Settings
+  )(
+    implicit system: ActorSystem,
+    materializer: Materializer
+  ): Flow[TimeSeries, Outliers, NotUsed] = {
+    val graph = GraphDSL.create() { implicit b =>
+      import GraphDSL.Implicits._
+
+      //todo add support to watch FlowShapes
+
+      val scoring = b.add( OutlierScoringModel.scoringGraph2(catalogRef, settings) )
+      val logUnrecognized = b.add(
+        OutlierScoringModel.logMetric( Logger( LoggerFactory getLogger "Unrecognized" ), settings.plans )
+      )
+
+      val termUnrecognized = b.add( Sink.ignore )
+
+      scoring.in
+      scoring.out1 ~> logUnrecognized ~> termUnrecognized
+
+      FlowShape( scoring.in, scoring.out0 )
+    }
+
+    Flow.fromGraph( graph ).withAttributes( ActorAttributes supervisionStrategy supervisionDecider )
+  }
+
 
   def detectionModel(
     catalogProxyProps: Props,

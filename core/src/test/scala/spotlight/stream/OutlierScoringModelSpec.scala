@@ -401,14 +401,14 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
       val catalogRef = Await.result( Bootstrap.makeCatalog( settings )( boundedContext ), 3.seconds )
       logger.info( "Catalog ref = [{}]", catalogRef )
 
-      val catalogProxyProps = {
-        PlanCatalogProxy.props(
-          underlying = catalogRef,
-          configuration = ConfigFactory.empty(),
-          maxInFlightCpuFactor = 1.0,
-          applicationDetectionBudget = Some(2.minutes)
-        )
-      }
+//      val catalogProxyProps = {
+//        PlanCatalogProxy.props(
+//          underlying = catalogRef,
+//          configuration = ConfigFactory.empty(),
+//          maxInFlightCpuFactor = 1.0,
+//          applicationDetectionBudget = Some(2.minutes)
+//        )
+//      }
 
       val now = new joda.DateTime( 2016, 3, 25, 10, 38, 40, 81 ) // new joda.DateTime( joda.DateTime.now.getMillis / 1000L * 1000L )
       logger.debug( "USE NOW = {}", now )
@@ -430,7 +430,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
 //      val graphiteFlow = OutlierScoringModel.batchSeriesByPlan( max = 1000 )
       val graphiteFlow = OutlierScoringModel.regulateByTopic( max = 1000 )
 //      val detectFlow = OutlierPlanDetectionRouter.flow( planRouter )
-      val detectFlow = PlanCatalog.flow( catalogProxyProps )
+      val detectFlow = PlanCatalog.flow2( catalogRef )
 
       val flowUnderTest = {
         Flow[TimeSeries]

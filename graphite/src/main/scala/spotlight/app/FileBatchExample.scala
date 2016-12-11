@@ -75,12 +75,12 @@ object FileBatchExample extends Instrumented with StrictLogging {
 
   case class OutlierTimeSeriesObject( timeStamp: DateTime, value: Double )
 
-  case class Threshold( timeStamp: DateTime, ceiling: Option[Double], expected: Option[Double], floor: Option[Double] )
+//  case class Threshold( timeStamp: DateTime, ceiling: Option[Double], expected: Option[Double], floor: Option[Double] )
 
   case class SimpleFlattenedOutlier(
     algorithm: Symbol,
     outliers: Seq[OutlierTimeSeriesObject],
-    threshold: Seq[Threshold],
+    threshold: Seq[ThresholdBoundary],
     topic: String,
     metricName: String,
     webId: String,
@@ -113,6 +113,14 @@ object FileBatchExample extends Instrumented with StrictLogging {
   override protected val logger: Logger = Logger( LoggerFactory.getLogger("DetectionFlow") )
 
 
+  object WatchPoints {
+    val Data = 'data
+    val Intake = 'intake
+    val Scoring = 'scoring
+    val Publish = 'publish
+    val Results = 'results
+  }
+
   def start( args: Array[String] )( implicit system: ActorSystem, materializer: Materializer ): Future[Seq[SimpleFlattenedOutlier]] = {
 
     logger.debug("starting the detecting flow logic ")
@@ -132,12 +140,31 @@ object FileBatchExample extends Instrumented with StrictLogging {
     Bootstrap( context, finishSubscriberOnComplete = true )
     .run( args )
     .map { e => logger.debug( "bootstrapping process..." ); e }
-    .flatMap { case ( boundedContext, configuration, flow ) =>
+    .flatMap { case ( boundedContext, configuration, f ) =>
       logger.debug("process bootstrapped. processing data...")
 
+      import StreamMonitor._
+      import WatchPoints._
+      import spotlight.stream.OutlierScoringModel.{ WatchPoints => OSM }
+      import spotlight.analysis.outlier.PlanCatalog.{ WatchPoints => C }
+      StreamMonitor.set(
+        Data,
+        Intake,
+        Scoring,
+        OSM.Catalog,
+        C.Intake,
+        C.Collector,
+        C.Outlet,
+        Publish,
+        Results,
+        OSM.ScoringUnrecognized
+      )
+
+
       sourceData()
+      .via( Flow[String].map{ identity }.watchFlow( Data ) )
       .map { e => logger.info("after the sourceData step: [{}]", e); e }
-      .via( detectionWorkflow(boundedContext, configuration, flow) )
+      .via( detectionWorkflow(boundedContext, configuration, f) )
       .map { e => logger.info("AFTER DETECTION: [{}]", e); e }
       .runWith( Sink.seq )
     }
@@ -180,7 +207,8 @@ object FileBatchExample extends Instrumented with StrictLogging {
         Flow[String]
         .via( watch("unpacking") )
         .via( unmarshalTimeSeriesData )
-        .via( watch("unpacked") )
+        .zipWithIndex
+        .map{ case (ts, i) => logger.info( "UNPACKED[ {} ]: [{}]", i.toString, ts ); ts }
         .watchFlow( 'timeseries )
       )
 
@@ -229,20 +257,6 @@ object FileBatchExample extends Instrumented with StrictLogging {
 
       intakeBuffer ~> timeSeries ~> score ~> publishBuffer ~> filterOutliers ~> flatterFlow ~> unwrap
 
-      import spotlight.stream.OutlierScoringModel.{ WatchPoints => OSM }
-      import spotlight.analysis.outlier.PlanCatalog.{ WatchPoints => C }
-      StreamMonitor.set(
-        'intake,
-        'scoring,
-        OSM.Catalog,
-        C.Intake,
-        C.Collector,
-        C.Outlet,
-        'publish,
-        'results,
-        OSM.ScoringUnrecognized
-      )
-
       FlowShape( intakeBuffer.in, unwrap.out )
     }
 
@@ -269,38 +283,51 @@ object FileBatchExample extends Instrumented with StrictLogging {
     }
   }
 
-  def flattenObject(outlier: SeriesOutliers): TryV[List[SimpleFlattenedOutlier]] = trace.briefBlock("flattenObject"){
+  def flattenObject( outlier: SeriesOutliers ): TryV[List[SimpleFlattenedOutlier]] = trace.briefBlock("flattenObject"){
     parseTopic( outlier.topic.name ) map { details =>
       outlier.algorithms.toList.map{ a =>
+        val o = parseOutlierObject( outlier.outliers )
+        val t = outlier.thresholdBoundaries.get(a) getOrElse {
+          outlier.source.points.map{ dp => ThresholdBoundary.empty(dp.timestamp) }
+        }
+        val topic = outlier.topic.name
+        val name = details.metricName
+        val webId = details.metricWebId
+        val segment = details.metricSegment
+
         SimpleFlattenedOutlier(
           algorithm = a,
-          outliers = parseOutlierObject(outlier.outliers),
-          threshold = parseThresholdBoundaries(outlier.thresholdBoundaries(a)) ,
-          topic = outlier.topic.name,
-          metricName = details.metricName,
-          webId = details.metricWebId,
-          segment = details.metricSegment
+          outliers = o,
+          threshold = t,
+          topic = topic,
+          metricName = name,
+          webId = webId,
+          segment = segment
         )
       }
     }
   }
 
-  def parseThresholdBoundaries(thresholdBoundaries: Seq[ThresholdBoundary]) : Seq[Threshold] = trace.briefBlock(s"parseThresholdBoundaries(${thresholdBoundaries})"){
-    thresholdBoundaries map { a => Threshold(a.timestamp, a.ceiling, a.expected, a.floor ) }
-  }
+//  def parseThresholdBoundaries( thresholdBoundaries: Seq[ThresholdBoundary] ) : Seq[Threshold] = trace.briefBlock(s"parseThresholdBoundaries(${thresholdBoundaries})"){
+//    thresholdBoundaries map { a => Threshold(a.timestamp, a.ceiling, a.expected, a.floor ) }
+//  }
 
   def parseOutlierObject(dataPoints: Seq[DataPoint]) : Seq[OutlierTimeSeriesObject] = trace.briefBlock( s"parseOutlierObject(${dataPoints})"){
     dataPoints map { a => OutlierTimeSeriesObject( a.timestamp, a.value ) }
   }
 
   def parseTopic( topic: String ) : TryV[OutlierInfo] = trace.briefBlock( s"parseTopic(${topic})" ) {
-    \/ fromTryCatchNonFatal {
-      val splits = topic.split("""\.""")
+    val result = \/ fromTryCatchNonFatal {
+      val splits = topic.split("""[.-]""")
       val metricType = splits(1)
       val webId = splits(2).concat( "." ).concat( splits(3).split("_")(0) )
       val segment = splits(3).split( "_" )(1)
       OutlierInfo( metricType, webId, segment )
     }
+
+    result.leftMap( ex => logger.error( s"PARSE_TOPIC ERROR on [${topic}]", ex ))
+
+    result
   }
 
   def unmarshalTimeSeriesData: Flow[String, TimeSeries, NotUsed] = {

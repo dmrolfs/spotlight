@@ -16,7 +16,7 @@ import peds.akka.metrics.{Instrumented, InstrumentedActor}
 import peds.commons.log.Trace
 import demesne.DomainModel
 import peds.akka.stream.StreamIngress
-import spotlight.model.outlier.{CorrelatedData, CorrelatedSeries, OutlierPlan}
+import spotlight.model.outlier.{CorrelatedData, CorrelatedSeries, OutlierPlan, Outliers}
 import spotlight.model.timeseries.TimeSeriesBase.Merging
 import spotlight.model.timeseries._
 
@@ -152,7 +152,8 @@ class AnalysisProxy extends ActorSubscriber with EnvelopingActor with Instrument
       .map { _.ingressRef }
       .getOrElse {
         log.debug( "making graph for subscriber:[{}]", subscriber.path.name )
-        val (ingressRef, graph) = makeGraph( subscriber )
+//        val (ingressRef, graph) = makeGraph( subscriber )
+        val (ingressRef, graph) = makeTestGraph( subscriber )
         graphs += ( subscriber -> PlanGraph(ingressRef, graph) )
         AnalysisProxy registerProxyGraph ingressRef.path
         ingressRef
@@ -161,6 +162,61 @@ class AnalysisProxy extends ActorSubscriber with EnvelopingActor with Instrument
 
     log.debug( "AnalysisProxy: [{} {}] ingress = {}", plan.name, subscriber.path.name, ingress.path.name )
     ingress
+  }
+
+  def makeTestGraph(
+    subscriber: ActorRef
+  )(
+    implicit m: Merging[TimeSeries],
+    system: ActorSystem,
+    materializer: Materializer
+  ): (ActorRef, RunnableGraph[NotUsed]) = {
+    val (ingressRef, ingress) = {
+      Source
+      .actorPublisher[CorrelatedSeries]( StreamIngress.props[CorrelatedSeries] )
+      .toMat( Sink.asPublisher(false) )( Keep.both )
+      .run()
+    }
+
+    val graph = GraphDSL.create() { implicit b =>
+      import GraphDSL.Implicits._
+
+      val ingressPublisher = b.add( Source.fromPublisher( ingress ) )
+      val random = new scala.util.Random( System.nanoTime() )
+      val delay = b.add(
+        Flow[CorrelatedSeries]
+        .map { cs =>
+          val base = 15L
+          val offset = ( 5 * random.nextGaussian() ).toLong
+          Thread.sleep( base + offset )
+          cs
+        }
+      )
+
+      val result = b.add(
+        Sink foreach[CorrelatedSeries] { cs =>
+          val outlierPoints = if ( random.nextDouble() < 0.10 ) cs.data.points.take(1) else Seq.empty[DataPoint]
+
+          val outliers = Outliers.forSeries(
+            algorithms = outer.plan.algorithms,
+            plan = outer.plan,
+            source = cs.data,
+            outliers = outlierPoints,
+            thresholdBoundaries = Map.empty[Symbol, Seq[ThresholdBoundary]]
+          ).toOption.get
+
+          subscriber !+ spotlight.analysis.outlier.OutlierDetection.DetectionResult( outliers, cs.correlationIds )
+        }
+      )
+      ingressPublisher ~> delay ~> result
+
+      ClosedShape
+    }
+
+    val runnable = RunnableGraph.fromGraph( graph ).named( s"PlanDetection-${outer.plan.name}-${subscriber.path}" )
+    runnable.run()
+    context watch ingressRef
+    ( ingressRef, runnable )
   }
 
   def makeGraph(
@@ -230,13 +286,14 @@ class AnalysisProxy extends ActorSubscriber with EnvelopingActor with Instrument
     .mapConcat { identity }
   }
 
+//todo  WORK HERE TO VERIFY HOW RESULT RETURNS -- can use mapAsync???
   def detectionFlow(
     p: OutlierPlan,
     subscriber: ActorRef,
     w: Workers
   )(
     implicit system: ActorSystem
-  ): Sink[CorrelatedData[TimeSeries], NotUsed] = {
+  ): Sink[CorrelatedSeries, NotUsed] = {
     val label = Symbol( OutlierDetection.WatchPoints.DetectionFlow.name + "." + p.name )
 
     Flow[CorrelatedData[TimeSeries]]
