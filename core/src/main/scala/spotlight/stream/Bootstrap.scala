@@ -2,10 +2,10 @@ package spotlight.stream
 
 import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
-import akka.{Done, NotUsed}
+import akka.Done
 import akka.actor.{ActorRef, ActorSystem, Props, SupervisorStrategy}
-import akka.stream.scaladsl.{Flow, GraphDSL, Sink}
 import akka.stream._
+import akka.stream.scaladsl.{Flow, GraphDSL, Sink}
 import akka.util.Timeout
 
 import scalaz._
@@ -14,19 +14,16 @@ import scalaz.Kleisli.kleisli
 import shapeless.{Generic, HNil}
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.{Logger, StrictLogging}
-import org.slf4j.LoggerFactory
 import nl.grons.metrics.scala.{Meter, MetricName}
 import peds.akka.metrics.{Instrumented, Reporter}
 import peds.commons.builder.HasBuilder
 import peds.commons.util._
 import demesne.{AggregateRootType, BoundedContext, DomainModel, StartTask}
+import org.slf4j.LoggerFactory
 import peds.akka.supervision.{IsolatedLifeCycleSupervisor, OneForOneStrategyFactory}
 import peds.akka.supervision.IsolatedLifeCycleSupervisor.{ChildStarted, StartChild}
-import spotlight.analysis.outlier.{AnalysisPlanModule, DetectionAlgorithmRouter, PlanCatalog, PlanCatalogProxy}
-import spotlight.analysis.outlier.{PlanCatalogProtocol => CP}
+import spotlight.analysis.outlier.{AnalysisPlanModule, DetectFlow, DetectionAlgorithmRouter, PlanCatalog, PlanCatalogProtocol => CP}
 import spotlight.analysis.outlier.algorithm.statistical.SimpleMovingAverageAlgorithm
-import spotlight.model.outlier.Outliers
-import spotlight.model.timeseries.TimeSeries
 
 
 /**
@@ -70,7 +67,7 @@ object Bootstrap extends Instrumented with StrictLogging {
 
   type SystemSettings = ( ActorSystem, Settings )
   type BoundedSettings = ( BoundedContext, Settings )
-  type SpotlightContext = ( BoundedContext, Settings, Flow[TimeSeries, Outliers, NotUsed] )
+  type SpotlightContext = ( BoundedContext, Settings, DetectFlow )
 
 
   def apply(
@@ -79,7 +76,7 @@ object Bootstrap extends Instrumented with StrictLogging {
   )(
     implicit ec: ExecutionContext
   ): Kleisli[Future, Array[String], SpotlightContext] = {
-    systemConfiguration( context ) >=> startBoundedContext( context ) >=> makeFlow2( finishSubscriberOnComplete )
+    systemConfiguration( context ) >=> startBoundedContext( context ) >=> makeFlow( finishSubscriberOnComplete )
   }
 
   val systemRootTypes: Set[AggregateRootType] = {
@@ -162,6 +159,25 @@ object Bootstrap extends Instrumented with StrictLogging {
   }
 
 
+  def makeFlow( finishSubscriberOnComplete: Boolean ): Kleisli[Future, BoundedSettings, SpotlightContext] = {
+    kleisli[Future, BoundedSettings, SpotlightContext] { case (boundedContext, settings) =>
+      implicit val bc = boundedContext
+      implicit val system = boundedContext.system
+      implicit val dispatcher = system.dispatcher
+      implicit val timeout = Timeout( 5.seconds )
+      implicit val materializer = ActorMaterializer(
+        ActorMaterializerSettings( system ) withSupervisionStrategy supervisionDecider
+      )
+
+      logger.info( "TEST:BOOTSTRAP:BEFORE BoundedContext roottypes = [{}]", boundedContext.unsafeModel.rootTypes )
+
+      for {
+        catalog <- makeCatalog( settings )
+        catalogFlow <- PlanCatalog.flow( catalog, settings.maxInDetectionCpuFactor )
+      } yield ( boundedContext, settings, detectFlowFrom(catalogFlow, settings) )
+    }
+  }
+
   def makeCatalog( settings: Settings )( implicit bc: BoundedContext ): Future[ActorRef] = {
     val catalogSupervisor = bc.system.actorOf(
       Props(
@@ -200,65 +216,18 @@ object Bootstrap extends Instrumented with StrictLogging {
     }
   }
 
-  def makeFlow2( finishSubscriberOnComplete: Boolean ): Kleisli[Future, BoundedSettings, SpotlightContext] = {
-    kleisli[Future, BoundedSettings, SpotlightContext] { case (boundedContext, settings) =>
-      implicit val bc = boundedContext
-      implicit val system = boundedContext.system
-      implicit val dispatcher = system.dispatcher
-      implicit val timeout = Timeout( 5.seconds )
-      implicit val materializer = ActorMaterializer(
-        ActorMaterializerSettings( system ) withSupervisionStrategy supervisionDecider
-      )
-
-      logger.info( "TEST:BOOTSTRAP:BEFORE BoundedContext roottypes = [{}]", boundedContext.unsafeModel.rootTypes )
-      makeCatalog( settings ) map { catalogRef => ( boundedContext, settings, detectionModel2(catalogRef, settings) ) }
-    }
-  }
-
-
-  def makeFlow( finishSubscriberOnComplete: Boolean ): Kleisli[Future, BoundedSettings, SpotlightContext] = {
-    kleisli[Future, BoundedSettings, SpotlightContext] { case (boundedContext, settings) =>
-      implicit val bc = boundedContext
-      implicit val system = boundedContext.system
-      implicit val dispatcher = system.dispatcher
-      implicit val timeout = Timeout( 5.seconds )
-      implicit val materializer = ActorMaterializer(
-        ActorMaterializerSettings( system ) withSupervisionStrategy supervisionDecider
-      )
-
-      logger.info( "TEST:BOOTSTRAP:BEFORE BoundedContext roottypes = [{}]", boundedContext.unsafeModel.rootTypes )
-
-      makeCatalog( settings ) map { catalogRef =>
-        val catalogProxyProps = PlanCatalogProxy.props(
-          underlying = catalogRef,
-          configuration = settings.config,
-          maxInFlightCpuFactor = settings.maxInDetectionCpuFactor,
-          applicationDetectionBudget = Some(settings.detectionBudget),
-          finishSubscriberOnComplete = finishSubscriberOnComplete
-        )
-
-        (
-          boundedContext,
-          settings,
-          detectionModel( catalogProxyProps, settings )
-        )
-      }
-    }
-  }
-
-  def detectionModel2(
-    catalogRef: ActorRef,
+  def detectFlowFrom(
+    catalogFlow: DetectFlow,
     settings: Settings
   )(
     implicit system: ActorSystem,
     materializer: Materializer
-  ): Flow[TimeSeries, Outliers, NotUsed] = {
+  ): DetectFlow = {
     val graph = GraphDSL.create() { implicit b =>
       import GraphDSL.Implicits._
 
       //todo add support to watch FlowShapes
-
-      val scoring = b.add( OutlierScoringModel.scoringGraph2(catalogRef, settings) )
+      val scoring = b.add( OutlierScoringModel.scoringGraph( catalogFlow, settings) )
       val logUnrecognized = b.add(
         OutlierScoringModel.logMetric( Logger( LoggerFactory getLogger "Unrecognized" ), settings.plans )
       )
@@ -271,37 +240,12 @@ object Bootstrap extends Instrumented with StrictLogging {
       FlowShape( scoring.in, scoring.out0 )
     }
 
-    Flow.fromGraph( graph ).withAttributes( ActorAttributes supervisionStrategy supervisionDecider )
+    Flow
+    .fromGraph( graph )
+    .named( "DetectionFlow" )
+    .withAttributes( ActorAttributes supervisionStrategy supervisionDecider )
   }
 
-
-  def detectionModel(
-    catalogProxyProps: Props,
-    settings: Settings
-  )(
-    implicit system: ActorSystem,
-    materializer: Materializer
-  ): Flow[TimeSeries, Outliers, NotUsed] = {
-    val graph = GraphDSL.create() { implicit b =>
-      import GraphDSL.Implicits._
-
-      //todo add support to watch FlowShapes
-
-      val scoring = b.add( OutlierScoringModel.scoringGraph( catalogProxyProps, settings) )
-      val logUnrecognized = b.add(
-        OutlierScoringModel.logMetric( Logger( LoggerFactory getLogger "Unrecognized" ), settings.plans )
-      )
-
-      val termUnrecognized = b.add( Sink.ignore )
-
-      scoring.in
-      scoring.out1 ~> logUnrecognized ~> termUnrecognized
-
-      FlowShape( scoring.in, scoring.out0 )
-    }
-
-    Flow.fromGraph( graph ).withAttributes( ActorAttributes supervisionStrategy supervisionDecider )
-  }
 
   val supervisionDecider: Supervision.Decider = {
     case ex => {

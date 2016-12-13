@@ -16,6 +16,7 @@ import org.json4s.jackson.JsonMethods
 import peds.akka.metrics.Instrumented
 import demesne.BoundedContext
 import peds.akka.stream.StreamMonitor
+import spotlight.analysis.outlier.DetectFlow
 import spotlight.model.outlier.{Outliers, SeriesOutliers}
 import spotlight.model.timeseries.{DataPoint, ThresholdBoundary, TimeSeries}
 import spotlight.protocol.GraphiteSerializationProtocol
@@ -132,7 +133,7 @@ object SingleBatchExample extends Instrumented with StrictLogging {
       .limit( 100 )
       .map { e => logger.debug("after the source ingestion step"); e }
       .map { m => akka.util.ByteString( m.getBytes ) }
-      .via( detectionWorkflow(boundedContext,configuration,flow) )
+      .via( detectionWorkflow(boundedContext, configuration, flow) )
       .runWith( Sink.seq )
     }
   }
@@ -158,7 +159,7 @@ object SingleBatchExample extends Instrumented with StrictLogging {
   def detectionWorkflow(
     context: BoundedContext,
     configuration: Settings,
-    scoring: Flow[TimeSeries, Outliers, NotUsed]
+    scoring: DetectFlow
   )(
     implicit system: ActorSystem,
     materializer: Materializer

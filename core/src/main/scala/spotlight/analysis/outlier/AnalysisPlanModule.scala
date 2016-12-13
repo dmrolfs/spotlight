@@ -1,11 +1,17 @@
 package spotlight.analysis.outlier
 
 import scala.reflect._
-import akka.actor.{Actor, ActorContext, ActorLogging, ActorRef, PoisonPill, Props, Terminated}
-import shapeless.{Lens, lens}
+import akka.NotUsed
+import akka.actor._
+import akka.stream.{Materializer, OverflowStrategy}
+import akka.stream.scaladsl.Flow
+import akka.util.Timeout
+import shapeless.Lens
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.LazyLogging
+import nl.grons.metrics.scala.{Meter, MetricName}
 import peds.akka.envelope._
+import peds.akka.envelope.pattern.ask
 import peds.akka.publish.{EventPublisher, StackableStreamPublisher}
 import peds.archetype.domain.model.core.{EntityIdentifying, EntityLensProvider}
 import peds.commons.identifier.ShortUUID
@@ -13,19 +19,37 @@ import peds.commons.log.Trace
 import demesne.module.entity.EntityAggregateModule
 import demesne.module.entity.EntityAggregateModule.MakeIndexSpec
 import demesne.module.entity.{messages => EntityMessages}
+import demesne.AggregateMessage
 import demesne.index.local.IndexLocalAgent
 import demesne.{AggregateProtocol, AggregateRootType, DomainModel}
 import demesne.index.{Directive, IndexBusSubscription, StackableIndexBusPublisher}
 import demesne.module.LocalAggregate
+import peds.akka.metrics.InstrumentedActor
+import spotlight.analysis.outlier.AnalysisPlanProtocol.{AnalysisFlow, MakeFlow}
+import spotlight.analysis.outlier.OutlierDetection.DetectionResult
 import spotlight.model.outlier.OutlierPlan.Scope
 import spotlight.model.outlier._
-import spotlight.model.timeseries.{TimeSeries, Topic}
+import spotlight.model.timeseries.TimeSeriesBase.Merging
+import spotlight.model.timeseries._
 
 
 object AnalysisPlanProtocol extends AggregateProtocol[OutlierPlan#ID]{
   sealed trait AnalysisPlanMessage
   sealed abstract class AnalysisPlanCommand extends AnalysisPlanMessage with CommandMessage
   sealed abstract class AnalysisPlanEvent extends AnalysisPlanMessage with EventMessage
+
+  case class MakeFlow(
+    override val targetId: AnalysisPlanModule.module.TID,
+    parallelismFactor: Double,
+    system: ActorSystem,
+    timeout: Timeout,
+    materializer: Materializer
+  ) extends AggregateMessage with AnalysisPlanMessage {
+    override type ID = AnalysisPlanModule.module.ID
+  }
+
+  case class AnalysisFlow( flow: DetectFlow ) extends AnalysisPlanMessage
+
 
   case class AcceptTimeSeries(
     override val targetId: AcceptTimeSeries#TID,
@@ -74,12 +98,6 @@ object AnalysisPlanProtocol extends AggregateProtocol[OutlierPlan#ID]{
   case class PlanInfo( override val sourceId: PlanInfo#TID, info: OutlierPlan ) extends AnalysisPlanEvent {
     def toSummary: OutlierPlan.Summary = OutlierPlan.Summary( id = sourceId, name = info.name, appliesTo = info.appliesTo )
   }
-
-//  private[outlier] case class GetProxies( override val targetId: GetProxies#TID ) extends AnalysisPlanCommand
-//  private[outlier] case class Proxies(
-//    override val sourceId: Proxies#TID,
-//    scopeProxies: Map[Topic, ActorRef]
-//  ) extends AnalysisPlanEvent
 }
 
 
@@ -141,9 +159,12 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
 
       private class Default( model: DomainModel, rootType: AggregateRootType )
       extends OutlierPlanActor( model, rootType )
-      with ProxyProvider
+      with WorkerProvider
+      with FlowConfigurationProvider
       with StackableStreamPublisher
       with StackableIndexBusPublisher {
+        override val bufferSize: Int = 1000
+
         override protected def onPersistRejected( cause: Throwable, event: Any, seqNr: Long ): Unit = {
           log.error(
             "Rejected to persist event type [{}] with sequence number [{}] for persistenceId [{}] due to [{}].",
@@ -154,20 +175,30 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
       }
 
 
-      trait ProxyProvider { provider: Actor with ActorLogging =>
-        def highWatermark: Int = 10 * Runtime.getRuntime.availableProcessors()
-        def bufferSize: Int = 1000
+      trait FlowConfigurationProvider {
+        def bufferSize: Int
+      }
 
-        def makeProxy( plan: OutlierPlan )( implicit model: DomainModel, context: ActorContext ): ActorRef = {
-          log.debug( "making analysis proxy for plan: [{}]", plan.name )
+      trait WorkerProvider { provider: Actor with ActorLogging =>
+        def model: DomainModel
+        def plan: OutlierPlan
+
+        def makeRouter()( implicit context: ActorContext ): ActorRef = {
+          val algorithmRefs = for {
+            name <- plan.algorithms.toSeq
+            rt <- DetectionAlgorithmRouter.rootTypeFor( name )( context.dispatcher ).toSeq
+          } yield ( name, DetectionAlgorithmRouter.RootTypeResolver(rt, model) )
+
           context.actorOf(
-            AnalysisProxy.props(
-              model,
-              plan,
-              highWatermark = provider.highWatermark,
-              bufferSize = provider.bufferSize
-            ),
-            name = AnalysisProxy.name( plan )
+            DetectionAlgorithmRouter.props( Map(algorithmRefs:_*) ).withDispatcher( DetectionAlgorithmRouter.DispatcherPath ),
+            DetectionAlgorithmRouter.name( provider.plan.name )
+          )
+        }
+
+        def makeDetector( routerRef: ActorRef )( implicit context: ActorContext ): ActorRef = {
+          context.actorOf(
+            OutlierDetection.props( routerRef ).withDispatcher( OutlierDetection.DispatcherPath ),
+            OutlierDetection.name( plan.name )
           )
         }
       }
@@ -175,22 +206,26 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
 
     class OutlierPlanActor( override val model: DomainModel, override val rootType: AggregateRootType )
     extends module.EntityAggregateActor
+    with InstrumentedActor
     with demesne.AggregateRoot.Provider {
-      outer: OutlierPlanActor.ProxyProvider with EventPublisher =>
+      outer: OutlierPlanActor.FlowConfigurationProvider with OutlierPlanActor.WorkerProvider with EventPublisher =>
 
       import spotlight.analysis.outlier.{ AnalysisPlanProtocol => P }
 
       private val trace = Trace[OutlierPlanActor]
 
-      override def preDisable(): Unit = { proxy ! PoisonPill }
+      override lazy val metricBaseName: MetricName = MetricName( classOf[OutlierPlanActor] )
+      val failuresMeter: Meter = metrics.meter( "failures" )
 
       override var state: OutlierPlan = _
+      override def plan: OutlierPlan = state
       override val evState: ClassTag[OutlierPlan] = ClassTag( classOf[OutlierPlan] )
 
-      lazy val proxy: ActorRef = {
-        val p = outer.makeProxy( state )( model, context )
-        context watch p
+      lazy val ( detector, router ) = {
+        val r = outer.makeRouter()
+        ( outer.makeDetector(r), r )
       }
+
 
       override def acceptance: Acceptance = entityAcceptance orElse {
         case (e: P.ScopeChanged, s) => {
@@ -241,18 +276,11 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
         }
       }
 
-      override def active: Receive = trace.block( "active" ) {
-        workflow orElse maintenance orElse planEntity orElse super.active
-      }
+      override def active: Receive = workflow orElse planEntity orElse super.active
 
       val workflow: Receive = {
-        case m @ CorrelatedData( ts: TimeSeries, correlationIds, _ ) => {
-          log.debug(
-            "AnalysisPlanModule[{}] routing data for topic:[{}] sender:[{}]",
-            s"${self.path.name}:${workId}==?${correlationIds}=>${correlationIds.exists(_ == workId)}", ts.topic, sender().path.name
-          )
-
-          proxy forwardEnvelope m.withScope( Some(OutlierPlan.Scope(plan = state, topic = ts.topic)) )
+        case MakeFlow( _, parallelism, system, timeout, materializer ) => {
+          sender() ! AnalysisFlow( makeFlow(parallelism)(system, timeout, materializer) )
         }
       }
 
@@ -264,7 +292,6 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
         case P.UseAlgorithms( id, algorithms, config ) => {
           persist( P.AlgorithmsChanged(id, algorithms, config) ) { e =>
             acceptAndPublish( e )
-            proxy !+ e
           }
         }
 
@@ -273,23 +300,14 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
         }
       }
 
-      val maintenance: Receive = {
-        case Terminated( deadActor ) if deadActor == proxy => {
-          log.warning( "[{}] notified of dead proxy at:[{}]", aggregateId, deadActor.path )
-        }
-
-//        case _: P.GetProxies => sender() ! P.Proxies( aggregateId, proxies )
-      }
-
       override def unhandled( message: Any ): Unit = {
         val total = active
         log.error(
-          "[{}] UNHANDLED: [{}] (workflow,maintenance,planEntity,super):[{}] total:[{}]",
+          "[{}] UNHANDLED: [{}] (workflow,planEntity,super):[{}] total:[{}]",
           aggregateId,
           message,
           (
             workflow.isDefinedAt(message),
-            maintenance.isDefinedAt(message),
             planEntity.isDefinedAt(message),
             super.active.isDefinedAt(message)
           ),
@@ -297,6 +315,94 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
         )
         super.unhandled( message )
       }
+
+
+      def makeFlow(
+        parallelismFactor: Double
+      )(
+        implicit system: ActorSystem,
+        timeout: Timeout,
+        materializer: Materializer
+      ): DetectFlow = {
+
+        val entry = Flow[TimeSeries] filter { state.appliesTo }
+        val withGrouping = state.grouping map { g => entry.via( batchSeries(g) ) } getOrElse entry
+        withGrouping
+        .buffer( outer.bufferSize, OverflowStrategy.backpressure )
+        .via( detectionFlow(state, parallelismFactor) )
+      }
+
+      def batchSeries(
+        grouping: OutlierPlan.Grouping
+      )(
+        implicit tsMerging: Merging[TimeSeries]
+      ): Flow[TimeSeries, TimeSeries, NotUsed] = {
+        log.debug( "batchSeries grouping = [{}]", grouping )
+        Flow[TimeSeries]
+        .groupedWithin( n = grouping.limit, d = grouping.window )
+        .map {
+          _
+          .groupBy { _.topic }
+          .map { case (_, tss) =>
+            tss.tail.foldLeft( tss.head ){ case (acc, ts) => tsMerging.merge( acc, ts ) valueOr { exs => throw exs.head }}
+          }
+        }
+        .mapConcat { identity }
+      }
+
+      def detectionFlow(
+        p: OutlierPlan,
+        parallelismFactor: Double
+      )(
+        implicit system: ActorSystem,
+        timeout: Timeout
+      ): DetectFlow = {
+        val parallelism = ( parallelismFactor * Runtime.getRuntime.availableProcessors() ).toInt
+
+        Flow[TimeSeries]
+        .map { ts => log.debug( "AnalysisPlanModule:FLOW-DETECT: before-filter: [{}]", ts.toString); ts }
+        .map { ts => OutlierDetectionMessage( ts, p ).disjunction }
+        .collect { case scalaz.\/-( m ) => m }
+        .map { m => log.debug( "AnalysisPlanModule:FLOW-DETECT: on-to-detection-grid: [{}]", m.toString); m }
+        .mapAsync( parallelism ){ m => ( detector ?+ m ) }
+        .collect {
+          case Envelope( DetectionResult(outliers, _), _ ) => outliers
+          case DetectionResult( outliers, _ ) => outliers
+        }
+      }
+
+      override val supervisorStrategy: SupervisorStrategy = OneForOneStrategy( maxNrOfRetries = -1 ) {
+        case ex: ActorInitializationException => {
+          log.error( ex, "AnalysisProxy[{}] stopping actor on caught initialization error", self.path )
+          failuresMeter.mark()
+          SupervisorStrategy.Stop
+        }
+
+        case ex: ActorKilledException => {
+          log.error( ex, "AnalysisProxy[{}] stopping killed actor on caught actor killed exception", self.path )
+          failuresMeter.mark()
+          SupervisorStrategy.Stop
+        }
+
+        case ex: InvalidActorNameException => {
+          log.error( ex, "AnalysisProxy[{}] restarting on caught invalid actor name", self.path )
+          failuresMeter.mark()
+          SupervisorStrategy.Restart
+        }
+
+        case ex: Exception => {
+          log.error( ex, "AnalysisProxy[{}] restarting on caught exception from child", self.path )
+          failuresMeter.mark()
+          SupervisorStrategy.Restart
+        }
+
+        case ex => {
+          log.error( ex, "AnalysisProxy[{}] restarting on unknown error from child", self.path )
+          failuresMeter.mark()
+          SupervisorStrategy.Escalate
+        }
+      }
+
     }
   }
 }

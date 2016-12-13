@@ -1,6 +1,7 @@
 package spotlight.app
 
 import java.nio.file.Paths
+import java.util.concurrent.atomic.AtomicInteger
 
 import scala.concurrent.Future
 import scala.concurrent.duration._
@@ -11,6 +12,8 @@ import akka.event.LoggingReceive
 import akka.stream.scaladsl.{FileIO, Flow, Framing, GraphDSL, Keep, Sink, Source}
 import akka.stream._
 import akka.util.ByteString
+
+import scalaz.{-\/, \/, \/-}
 import com.typesafe.scalalogging.{Logger, StrictLogging}
 import nl.grons.metrics.scala.MetricName
 import org.joda.time.DateTime
@@ -22,12 +25,11 @@ import peds.akka.stream.StreamMonitor
 import demesne.BoundedContext
 import peds.commons.TryV
 import peds.commons.log.Trace
+import spotlight.analysis.outlier.DetectFlow
 import spotlight.model.outlier.{Outliers, SeriesOutliers}
 import spotlight.model.timeseries.{DataPoint, ThresholdBoundary, TimeSeries}
 import spotlight.protocol.GraphiteSerializationProtocol
 import spotlight.stream.{Bootstrap, BootstrapContext, Settings}
-
-import scalaz.{-\/, \/, \/-}
 
 
 /**
@@ -35,6 +37,8 @@ import scalaz.{-\/, \/, \/-}
   */
 object FileBatchExample extends Instrumented with StrictLogging {
   private val trace = Trace[FileBatchExample.type]
+
+
   def main( args: Array[String] ): Unit = {
     import scala.concurrent.ExecutionContext.Implicits.global
 
@@ -49,13 +53,13 @@ object FileBatchExample extends Instrumented with StrictLogging {
 
     start( args )
     .map { results =>
-      logger.info("Example completed successfully and found {} result(s)", results.size )
+      logger.info("APP: Example processed {} records successfully and found {} result(s)", count.get().toString, results.size.toString )
       results
     }
     .onComplete {
       case Success( results ) => {
         println( "\n\nAPP:  ********************************************** " )
-        println( s"\nAPP:batch completed finding ${results.size} outliers:" )
+        println( s"\nAPP:${count.get()} batch completed finding ${results.size} outliers:" )
         results.zipWithIndex foreach { case (o, i) => println( s"${i+1}: ${o}") }
         println( "APP:  **********************************************\n\n" )
         actorSystem.terminate()
@@ -63,7 +67,7 @@ object FileBatchExample extends Instrumented with StrictLogging {
 
       case Failure( ex ) => {
         println( "\n\nAPP:  ********************************************** " )
-        println( s"\nAPP: batch completed with ERROR: ${ex}" )
+        println( s"\nAPP: ${count.get()} batch completed with ERROR: ${ex}" )
         println( "APP:  **********************************************\n\n" )
         actorSystem.terminate()
       }
@@ -121,6 +125,8 @@ object FileBatchExample extends Instrumented with StrictLogging {
     val Results = 'results
   }
 
+  val count: AtomicInteger = new AtomicInteger( 0 )
+
   def start( args: Array[String] )( implicit system: ActorSystem, materializer: Materializer ): Future[Seq[SimpleFlattenedOutlier]] = {
 
     logger.debug("starting the detecting flow logic ")
@@ -140,7 +146,7 @@ object FileBatchExample extends Instrumented with StrictLogging {
     Bootstrap( context, finishSubscriberOnComplete = true )
     .run( args )
     .map { e => logger.debug( "bootstrapping process..." ); e }
-    .flatMap { case ( boundedContext, configuration, f ) =>
+    .flatMap { case ( boundedContext, configuration, scoring ) =>
       logger.debug("process bootstrapped. processing data...")
 
       import StreamMonitor._
@@ -150,21 +156,22 @@ object FileBatchExample extends Instrumented with StrictLogging {
       StreamMonitor.set(
         Data,
         Intake,
+        C.Intake,
         Scoring,
         OSM.Catalog,
-        C.Intake,
-        C.Collector,
         C.Outlet,
         Publish,
         Results,
         OSM.ScoringUnrecognized
       )
 
+      val publish = Flow[SimpleFlattenedOutlier].map{ identity }.watchFlow( Publish )
 
       sourceData()
       .via( Flow[String].map{ identity }.watchFlow( Data ) )
       .map { e => logger.info("after the sourceData step: [{}]", e); e }
-      .via( detectionWorkflow(boundedContext, configuration, f) )
+      .via( detectionWorkflow(boundedContext, configuration, scoring) )
+      .via( publish )
       .map { e => logger.info("AFTER DETECTION: [{}]", e); e }
       .runWith( Sink.seq )
     }
@@ -177,14 +184,14 @@ object FileBatchExample extends Instrumented with StrictLogging {
     .map { b => logger.info( "sourceData: bytes = [{}]", b); b }
     .map { _.utf8String }
     .map { s => logger.info( "sourceData: utf8String = [{}]", s); s }
-    .delay( 5.seconds )
+//    .delay( 1.seconds )
   }
 
 
   def detectionWorkflow(
     context: BoundedContext,
     configuration: Settings,
-    scoring: Flow[TimeSeries, Outliers, NotUsed]
+    scoring: DetectFlow
   )(
     implicit system: ActorSystem,
     materializer: Materializer
@@ -200,15 +207,15 @@ object FileBatchExample extends Instrumented with StrictLogging {
       val intakeBuffer = b.add(
         Flow[String]
         .buffer(conf.tcpInboundBufferSize, OverflowStrategy.backpressure)
-        .watchFlow( 'intake )
+        .watchFlow( WatchPoints.Intake )
       )
 
       val timeSeries = b.add(
         Flow[String]
         .via( watch("unpacking") )
         .via( unmarshalTimeSeriesData )
-        .zipWithIndex
-        .map{ case (ts, i) => logger.info( "UNPACKED[ {} ]: [{}]", i.toString, ts ); ts }
+        .map { ( _, count.incrementAndGet() ) }
+        .map { case (ts, i) => logger.info( "UNPACKED[ {} ]: [{}]", (i + 1 ).toString, ts ); ts }
         .watchFlow( 'timeseries )
       )
 
@@ -219,7 +226,7 @@ object FileBatchExample extends Instrumented with StrictLogging {
         Flow[Outliers]
         .via(watch("spotlightoutliers"))
         .buffer(1000, OverflowStrategy.backpressure)
-        .watchFlow( 'publish )
+        .watchFlow( WatchPoints.Publish )
       )
 
       val filterOutliers : FlowShape[Outliers,SeriesOutliers] = b.add(
@@ -229,7 +236,7 @@ object FileBatchExample extends Instrumented with StrictLogging {
           case s: SeriesOutliers => s
         }
         .map { m => logger.info( "FILTER:AFTER class:[{}] message:[{}]", m.getClass.getCanonicalName, m ); m }
-        .watchFlow( 'results )
+        .watchFlow( WatchPoints.Results )
      )
 
       val flatter: Flow[SeriesOutliers, List[SimpleFlattenedOutlier], NotUsed] = {

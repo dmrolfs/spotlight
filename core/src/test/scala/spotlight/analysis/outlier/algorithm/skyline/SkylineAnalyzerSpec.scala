@@ -14,6 +14,7 @@ import org.joda.{time => joda}
 import org.mockito.Mockito._
 import org.scalatest.Tag
 import org.scalatest.mock.MockitoSugar
+import peds.akka.envelope.WorkId
 import spotlight.testkit.TestCorrelatedSeries
 
 
@@ -66,7 +67,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
       implicit val sender = aggregator.ref
       analyzer ! DetectUsing(
         algoS,
-        DetectOutliersInSeries(TestCorrelatedSeries(series), plan, subscriber.ref),
+        DetectOutliersInSeries(series, plan, Option(subscriber.ref), Set.empty[WorkId]),
         history1,
         algProps
       )
@@ -91,7 +92,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
 
       analyzer ! DetectUsing(
         algoS,
-        DetectOutliersInSeries(TestCorrelatedSeries(series2), plan, subscriber.ref),
+        DetectOutliersInSeries(series2, plan, Option(subscriber.ref), Set.empty[WorkId]),
         history2,
         algProps
       )
@@ -126,7 +127,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
       implicit val sender = aggregator.ref
       analyzer ! DetectUsing(
         algoS,
-        DetectOutliersInSeries(TestCorrelatedSeries(series), plan, subscriber.ref),
+        DetectOutliersInSeries(series, plan, Option(subscriber.ref), Set.empty[WorkId]),
         history1,
         algProps
       )
@@ -153,7 +154,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
 
       analyzer ! DetectUsing(
         algoS,
-        DetectOutliersInSeries(TestCorrelatedSeries(series2), plan, subscriber.ref),
+        DetectOutliersInSeries(series2, plan, Option(subscriber.ref), Set.empty[WorkId]),
         history2,
         algProps
       )
@@ -188,7 +189,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
       implicit val sender = aggregator.ref
       analyzer ! DetectUsing(
         algoS,
-        DetectOutliersInSeries(TestCorrelatedSeries(series), plan, subscriber.ref),
+        DetectOutliersInSeries(series, plan, Option(subscriber.ref), Set.empty[WorkId]),
         history1,
         algProps
       )
@@ -220,7 +221,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
 
       analyzer ! DetectUsing(
         algoS,
-        DetectOutliersInSeries(TestCorrelatedSeries(series2), plan, subscriber.ref),
+        DetectOutliersInSeries(series2, plan, Option(subscriber.ref), Set.empty[WorkId]),
         history2,
         algProps
       )
@@ -263,7 +264,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
       implicit val sender = aggregator.ref
       analyzer ! DetectUsing(
         algoS,
-        DetectOutliersInSeries(TestCorrelatedSeries(series), plan, subscriber.ref),
+        DetectOutliersInSeries(series, plan, Option(subscriber.ref), Set.empty[WorkId]),
         history1,
         algProps
       )
@@ -291,7 +292,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
 
       analyzer ! DetectUsing(
         algoS,
-        DetectOutliersInSeries(TestCorrelatedSeries(series2), plan, subscriber.ref),
+        DetectOutliersInSeries(series2, plan, Option(subscriber.ref), Set.empty[WorkId]),
         history2,
         algProps
       )
@@ -331,7 +332,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
       implicit val sender = aggregator.ref
       analyzer ! DetectUsing(
         algoS,
-        DetectOutliersInSeries(TestCorrelatedSeries(series), plan, subscriber.ref),
+        DetectOutliersInSeries(series, plan, Option(subscriber.ref), Set.empty[WorkId]),
         history1,
         algProps
       )
@@ -357,7 +358,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
 
       analyzer ! DetectUsing(
         algoS,
-        DetectOutliersInSeries(TestCorrelatedSeries(series2), plan, subscriber.ref),
+        DetectOutliersInSeries(series2, plan, Option(subscriber.ref), Set.empty[WorkId]),
         history2,
         algProps
       )
@@ -384,7 +385,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
 
       analyzer ! DetectUsing(
         algoS,
-        DetectOutliersInSeries(TestCorrelatedSeries(series3), plan, subscriber.ref),
+        DetectOutliersInSeries(series3, plan, Option(subscriber.ref), Set.empty[WorkId]),
         history3,
         algProps
       )

@@ -8,6 +8,7 @@ import scala.concurrent.duration._
 import scala.util.Failure
 import akka.{NotUsed, pattern}
 import akka.actor.ActorSystem
+import akka.pattern.ask
 import akka.stream.{ActorMaterializer, Materializer, OverflowStrategy}
 import akka.stream.testkit.scaladsl.{TestSink, TestSource}
 import akka.stream.scaladsl._
@@ -23,7 +24,7 @@ import peds.commons.log.Trace
 import spotlight.analysis.outlier.algorithm.statistical.SimpleMovingAverageAlgorithm
 import spotlight.protocol.PythonPickleProtocol
 import spotlight.testkit.ParallelAkkaSpec
-import spotlight.analysis.outlier.{AnalysisPlanModule, AnalysisPlanProtocol, PlanCatalog, PlanCatalogProxy}
+import spotlight.analysis.outlier.{AnalysisPlanModule, AnalysisPlanProtocol, PlanCatalog, PlanCatalogProtocol, PlanCatalogProxy}
 import spotlight.model.outlier._
 import spotlight.model.timeseries.TimeSeriesBase.Merging
 import spotlight.model.timeseries.{DataPoint, TimeSeries}
@@ -394,6 +395,8 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
       import demesne.module.entity.{ messages => EntityMessages }
       model.aggregateOf( AnalysisPlanModule.module.rootType, defaultPlan.id ) ! EntityMessages.Add( defaultPlan.id, Some(defaultPlan))
 
+      Thread.sleep( 250 ) // ugh let plan added
+
       implicit val timeout = akka.util.Timeout( 5.seconds )
       logger.info( "BOOTSTRAP:BEFORE BoundedContext roottypes = [{}]", boundedContext.unsafeModel.rootTypes )
 //      Thread.sleep( 10000 )
@@ -401,14 +404,11 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
       val catalogRef = Await.result( Bootstrap.makeCatalog( settings )( boundedContext ), 3.seconds )
       logger.info( "Catalog ref = [{}]", catalogRef )
 
-//      val catalogProxyProps = {
-//        PlanCatalogProxy.props(
-//          underlying = catalogRef,
-//          configuration = ConfigFactory.empty(),
-//          maxInFlightCpuFactor = 1.0,
-//          applicationDetectionBudget = Some(2.minutes)
-//        )
-//      }
+      import PlanCatalogProtocol.{ MakeFlow, CatalogFlow }
+      val CatalogFlow( flowUnderTest ) = Await.result(
+        ( catalogRef ? MakeFlow( 2.0, system, timeout, materializer) ).mapTo[CatalogFlow],
+        5.seconds
+      )
 
       val now = new joda.DateTime( 2016, 3, 25, 10, 38, 40, 81 ) // new joda.DateTime( joda.DateTime.now.getMillis / 1000L * 1000L )
       logger.debug( "USE NOW = {}", now )
@@ -427,17 +427,17 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
       )
 //      val expected = TimeSeries( "foo", (dp1 ++ dp3).sortBy( _.timestamp ) )
 
-//      val graphiteFlow = OutlierScoringModel.batchSeriesByPlan( max = 1000 )
-      val graphiteFlow = OutlierScoringModel.regulateByTopic( max = 1000 )
-//      val detectFlow = OutlierPlanDetectionRouter.flow( planRouter )
-      val detectFlow = PlanCatalog.flow2( catalogRef )
+////      val graphiteFlow = OutlierScoringModel.batchSeriesByPlan( max = 1000 )
+//      val graphiteFlow = OutlierScoringModel.regulateByTopic( max = 1000 )
+////      val detectFlow = OutlierPlanDetectionRouter.flow( planRouter )
+//      val detectFlow = PlanCatalog.flow2( catalogRef )
 
-      val flowUnderTest = {
-        Flow[TimeSeries]
-//        .map{ ts => (ts, OutlierPlan.Scope(defaultPlan, ts.topic)) }
-        .via( graphiteFlow )
-        .via( detectFlow )
-      }
+//      val flowUnderTest = {
+//        Flow[TimeSeries]
+////        .map{ ts => (ts, OutlierPlan.Scope(defaultPlan, ts.topic)) }
+//        .via( graphiteFlow )
+//        .via( detectFlow )
+//      }
 
       val (pub, sub) = {
         TestSource.probe[TimeSeries]
