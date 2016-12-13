@@ -635,14 +635,14 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
 
       case e: DeleteMessagesSuccess => {
         stopSweepTimer( e )
-        log.info( "[{}] on passivation successfully cleared journal: [{}]", self.path.name, e )
+        log.debug( "[{}] on passivation successfully cleared journal: [{}]", self.path.name, e )
         stopPassivationTimer( e )
         context stop self
       }
 
       case e: DeleteMessagesFailure => {
         stopSweepTimer( e )
-        log.warning(
+        log.info(
           "[{}] on passivation FAILED to clear journal will attempt to clear on subsequent snapshot: [{}]",
           self.path.name,
           e
@@ -655,7 +655,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
 
     override def unhandled( message: Any ): Unit = {
       message match {
-        case m: DetectUsing if Option(state).isDefined && m.algorithm == state.algorithm && m.scope == state.id => {
+        case m: DetectUsing if Option(state).isDefined && m.algorithm.name == state.algorithm.name && m.scope == state.id => {
           val ex = AlgorithmProtocol.AlgorithmUsedBeforeRegistrationError( aggregateId, algorithm.label, self.path )
           log.error( ex, "algorithm actor [{}] not registered for scope:[{}]", algorithm.label, aggregateId )
         }
