@@ -75,7 +75,7 @@ object FileBatchExample extends Instrumented with StrictLogging {
   }
 
 
-  case class OutlierInfo( metricName: String, metricWebId: String, metricSegment: String )
+//  case class OutlierInfo( metricName: String, metricWebId: String, metricSegment: String )
 
   case class OutlierTimeSeriesObject( timeStamp: DateTime, value: Double )
 
@@ -85,10 +85,7 @@ object FileBatchExample extends Instrumented with StrictLogging {
     algorithm: Symbol,
     outliers: Seq[OutlierTimeSeriesObject],
     threshold: Seq[ThresholdBoundary],
-    topic: String,
-    metricName: String,
-    webId: String,
-    segment: String
+    topic: String
   )
 
 
@@ -291,26 +288,14 @@ object FileBatchExample extends Instrumented with StrictLogging {
   }
 
   def flattenObject( outlier: SeriesOutliers ): TryV[List[SimpleFlattenedOutlier]] = trace.briefBlock("flattenObject"){
-    parseTopic( outlier.topic.name ) map { details =>
+    \/ fromTryCatchNonFatal {
       outlier.algorithms.toList.map{ a =>
         val o = parseOutlierObject( outlier.outliers )
         val t = outlier.thresholdBoundaries.get(a) getOrElse {
           outlier.source.points.map{ dp => ThresholdBoundary.empty(dp.timestamp) }
         }
-        val topic = outlier.topic.name
-        val name = details.metricName
-        val webId = details.metricWebId
-        val segment = details.metricSegment
 
-        SimpleFlattenedOutlier(
-          algorithm = a,
-          outliers = o,
-          threshold = t,
-          topic = topic,
-          metricName = name,
-          webId = webId,
-          segment = segment
-        )
+        SimpleFlattenedOutlier( algorithm = a, outliers = o, threshold = t, topic = outlier.topic.toString )
       }
     }
   }
@@ -323,19 +308,19 @@ object FileBatchExample extends Instrumented with StrictLogging {
     dataPoints map { a => OutlierTimeSeriesObject( a.timestamp, a.value ) }
   }
 
-  def parseTopic( topic: String ) : TryV[OutlierInfo] = trace.briefBlock( s"parseTopic(${topic})" ) {
-    val result = \/ fromTryCatchNonFatal {
-      val splits = topic.split("""[.-]""")
-      val metricType = splits(1)
-      val webId = splits(2).concat( "." ).concat( splits(3).split("_")(0) )
-      val segment = splits(3).split( "_" )(1)
-      OutlierInfo( metricType, webId, segment )
-    }
-
-    result.leftMap( ex => logger.error( s"PARSE_TOPIC ERROR on [${topic}]", ex ))
-
-    result
-  }
+//  def parseTopic( topic: String ) : TryV[OutlierInfo] = trace.briefBlock( s"parseTopic(${topic})" ) {
+//    val result = \/ fromTryCatchNonFatal {
+//      val splits = topic.split("""[.-]""")
+//      val metricType = splits(0)
+//      val webId = splits(1).concat( "." ).concat( splits(2).split("_")(0) )
+//      val segment = splits(2).split( "_" )(1)
+//      OutlierInfo( metricType, webId, segment )
+//    }
+//
+//    result.leftMap( ex => logger.error( s"PARSE_TOPIC ERROR on [${topic}]", ex ))
+//
+//    result
+//  }
 
   def unmarshalTimeSeriesData: Flow[String, TimeSeries, NotUsed] = {
     Flow[String]
