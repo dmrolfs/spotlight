@@ -135,12 +135,12 @@ object FileBatchExample extends Instrumented with StrictLogging {
       BootstrapContext
       .builder
       .set( BootstrapContext.Name, "DetectionFlow" )
-      .set( BootstrapContext.StartTasks, Set( SharedLeveldbStore.start(true) /*, Bootstrap.kamonStartTask*/ ) )
+//      .set( BootstrapContext.StartTasks, Set( /*SharedLeveldbStore.start(true), Bootstrap.kamonStartTask*/ ) )
       .set( BootstrapContext.System, Some(system) )
       .build()
     }
 
-    Bootstrap( context, finishSubscriberOnComplete = true )
+    Bootstrap( context )
     .run( args )
     .map { e => logger.debug( "bootstrapping process..." ); e }
     .flatMap { case ( boundedContext, configuration, scoring ) =>
@@ -213,16 +213,15 @@ object FileBatchExample extends Instrumented with StrictLogging {
         .via( unmarshalTimeSeriesData )
         .map { ( _, count.incrementAndGet() ) }
         .map { case (ts, i) => logger.info( "UNPACKED[ {} ]: [{}]", (i + 1 ).toString, ts ); ts }
-        .watchFlow( 'timeseries )
+        .buffer( 1000, OverflowStrategy.backpressure ).watchFlow( WatchPoints.Scoring )
       )
 
-      val score = scoring.via( watch("scoring") ).watchFlow( 'scoring )
+      val score = b.add( scoring )
 
       //todo remove after working
       val publishBuffer = b.add(
         Flow[Outliers]
-        .via(watch("spotlightoutliers"))
-        .buffer(1000, OverflowStrategy.backpressure)
+        .buffer( 1000, OverflowStrategy.backpressure )
         .watchFlow( WatchPoints.Publish )
       )
 
@@ -234,7 +233,7 @@ object FileBatchExample extends Instrumented with StrictLogging {
         }
         .map { m => logger.info( "FILTER:AFTER class:[{}] message:[{}]", m.getClass.getCanonicalName, m ); m }
         .watchFlow( WatchPoints.Results )
-     )
+      )
 
       val flatter: Flow[SeriesOutliers, List[SimpleFlattenedOutlier], NotUsed] = {
         Flow[SeriesOutliers]
@@ -250,7 +249,7 @@ object FileBatchExample extends Instrumented with StrictLogging {
         .watchFlow( 'flatter )
       }
 
-      val flatterFlow: FlowShape[SeriesOutliers, List[SimpleFlattenedOutlier]] = b.add(flatter)
+      val flatterFlow: FlowShape[SeriesOutliers, List[SimpleFlattenedOutlier]] = b.add( flatter )
 
       val unwrap = b.add(
         Flow[List[SimpleFlattenedOutlier]]

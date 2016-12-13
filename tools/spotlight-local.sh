@@ -18,5 +18,7 @@ java -cp graphite/target/scala-2.11/com.github.dmrolfs-spotlight-graphite-*.jar 
   -Dconfig.resource=$SPOTLIGHT_CONFIG \
   -Djava.library.path=native \
   -javaagent:graphite/coreos/aspectjweaver-1.8.8.jar \
+  -Xms4096m \
+  -Xmx4096m \
   -XX:MaxMetaspaceSize=512m \
   ${1:-spotlight.app.GraphiteSpotlight} -c 2552
