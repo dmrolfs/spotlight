@@ -1,7 +1,7 @@
 package spotlight.analysis.outlier.algorithm
 
 import scala.annotation.tailrec
-import scala.concurrent.duration.{Duration, FiniteDuration, NANOSECONDS}
+import scala.concurrent.duration.{Duration, FiniteDuration, MINUTES, NANOSECONDS}
 import scala.util.Random
 import scala.reflect._
 import akka.actor.{ActorPath, Props}
@@ -191,6 +191,8 @@ object AlgorithmModule extends Instrumented with LazyLogging {
   val journalSweepTimer: Timer = metrics.timer( "journal-sweep" )
   val journalSweepSuccesses: Meter = metrics.meter( "journal-sweep", "successes" )
   val journalSweepFailures: Meter = metrics.meter( "journal-sweep", "failures" )
+
+  val passivationTimer: Timer = metrics.timer( "passivation" )
 }
 
 abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmModule.ModuleConfiguration =>
@@ -336,7 +338,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
       }
     }
 
-    override val passivateTimeout: Duration = Duration.Inf //todo: resolve replaying events with data tsunami
+    override val passivateTimeout: Duration = Duration( 1, MINUTES ) // Duration.Inf //todo: resolve replaying events with data tsunami
 
     override lazy val name: String = module.shardName
     override lazy val identifying: Identifying[_] = AlgorithmModule.identifying
@@ -519,7 +521,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
       case _: GetStateSnapshot => sender() ! StateSnapshot( aggregateId, Option(state) )
     }
 
-    var _snapshotStarted: Long = -1
+    var _snapshotStarted: Long = -1L
     def startSnapshotTimer(): Unit = { _snapshotStarted = System.nanoTime() }
     def stopSnapshotTimer( event: Any ): Unit = {
       if ( 0 < _snapshotStarted ) {
@@ -534,7 +536,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
       }
     }
 
-    var _journalSweepStarted: Long = -1
+    var _journalSweepStarted: Long = -1L
     def startSweepTimer(): Unit = { _journalSweepStarted = System.nanoTime() }
     def stopSweepTimer( event: Any ): Unit = {
       if ( 0 < _journalSweepStarted ) {
@@ -549,6 +551,23 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
       }
     }
 
+    var _passivationStarted: Long = -1L
+    def startPassivationTimer(): Unit = { _passivationStarted = System.nanoTime() }
+    def stopPassivationTimer( event: Any ): Unit = {
+      if ( 0 < _passivationStarted ) {
+        AlgorithmModule.passivationTimer.update( System.nanoTime() - _passivationStarted, NANOSECONDS )
+        _passivationStarted = 0L
+      }
+
+      event match {
+        case e: demesne.PassivationSpecification.StopAggregateRoot[_] => {
+          log.warning( "[{}] received repeated passivation message: [{}]", self.path.name, e )
+        }
+
+        case _ => { }
+      }
+    }
+
 
     override def saveSnapshot( snapshot: Any ): Unit = {
       startSnapshotTimer()
@@ -556,6 +575,12 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
     }
 
     val nonfunctional: Receive = {
+      case e: demesne.PassivationSpecification.StopAggregateRoot[_] => {
+        startPassivationTimer()
+        saveSnapshot( state )
+        context become LoggingReceive { around( passivating ) }
+      }
+
       case e @ SaveSnapshotSuccess( meta ) => {
         stopSnapshotTimer( e )
 
@@ -577,9 +602,54 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
         stopSweepTimer( e )
         log.info( "[{}] successfully cleared journal: [{}]", self.path.name, e )
       }
+
       case e: DeleteMessagesFailure => {
         stopSweepTimer( e )
         log.warning( "[{}] FAILED to clear journal will attempt to clear on subsequent snapshot: [{}]", self.path.name, e )
+      }
+    }
+
+    val passivating: Receive = {
+      case e: demesne.PassivationSpecification.StopAggregateRoot[_] => {
+        stopPassivationTimer( e )
+        context stop self
+      }
+
+      case e @ SaveSnapshotSuccess( meta ) => {
+        stopSnapshotTimer( e )
+
+        log.debug(
+          "[{} - {}]: successful passivation snapshot, deleting journal messages up to sequenceNr: [{}]",
+          self.path.name, rootType.snapshotPeriod.map{ _.toCoarsest }, meta.sequenceNr
+        )
+
+        startSweepTimer()
+        deleteMessages( meta.sequenceNr )
+      }
+
+      case e @ SaveSnapshotFailure( meta, ex ) => {
+        stopSnapshotTimer( e )
+        log.warning( "[{}] failed to save passivation snapshot. meta:[{}] cause:[{}]", meta, ex )
+      }
+
+
+      case e: DeleteMessagesSuccess => {
+        stopSweepTimer( e )
+        log.info( "[{}] on passivation successfully cleared journal: [{}]", self.path.name, e )
+        stopPassivationTimer( e )
+        context stop self
+      }
+
+      case e: DeleteMessagesFailure => {
+        stopSweepTimer( e )
+        log.warning(
+          "[{}] on passivation FAILED to clear journal will attempt to clear on subsequent snapshot: [{}]",
+          self.path.name,
+          e
+        )
+
+        stopPassivationTimer( e )
+        context stop self
       }
     }
 
