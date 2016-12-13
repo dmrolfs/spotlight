@@ -8,12 +8,13 @@ import akka.actor._
 import akka.stream.scaladsl._
 import akka.stream._
 import akka.stream.stage._
+import akka.util.Timeout
 import com.typesafe.scalalogging.{Logger, StrictLogging}
 import org.slf4j.LoggerFactory
 import peds.akka.metrics.Instrumented
 import peds.akka.stream.StreamMonitor
 import peds.commons.collection.BloomFilter
-import spotlight.analysis.outlier.PlanCatalog
+import spotlight.analysis.outlier.DetectFlow
 import spotlight.model.outlier._
 import spotlight.model.timeseries.TimeSeriesBase.Merging
 import spotlight.model.timeseries._
@@ -41,33 +42,35 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
   }
 
   def scoringGraph(
-    catalogProxyProps: Props,
+    catalogFlow: DetectFlow,
     settings: Settings
   )(
     implicit system: ActorSystem,
     materializer: Materializer
   ): Graph[ScoringShape[TimeSeries, Outliers, TimeSeries], NotUsed] = {
-    import akka.stream.scaladsl.GraphDSL.Implicits._
+    import GraphDSL.Implicits._
     import StreamMonitor._
+
+    val parallelism = settings.maxInDetectionCpuFactor
+    val budget: FiniteDuration = FiniteDuration( (settings.detectionBudget * 1.25).toMillis, MILLISECONDS )
+    implicit val timeout = Timeout( budget )
 
     GraphDSL.create() { implicit b =>
       val logMetrics = b.add( logMetric( Logger(LoggerFactory getLogger "Metrics"), settings.plans ) )
-      val blockPriors = b.add( Flow[TimeSeries].filter{ ts => !isOutlierReport(ts) } )
+      val blockPriors = b.add( Flow[TimeSeries] filter { notReportedBySpotlight } )
       val broadcast = b.add( Broadcast[TimeSeries](outputPorts = 2, eagerCancel = false) )
 
-      val watchPlanned = Flow[TimeSeries].map{ identity }.watchFlow( WatchPoints.ScoringPlanned )
+      val watchPlanned = Flow[TimeSeries].map{ identity }.watchSourced( WatchPoints.ScoringPlanned )
       val passPlanned = b.add( Flow[TimeSeries].filter{ isPlanned( _, settings.plans ) }.via( watchPlanned ) )
 
-      val watchUnrecognized = Flow[TimeSeries].map{ identity }.watchFlow( WatchPoints.ScoringUnrecognized )
+      val watchUnrecognized = Flow[TimeSeries].map{ identity }.watchSourced( WatchPoints.ScoringUnrecognized )
       val passUnrecognized = b.add(
         Flow[TimeSeries].filter{ !isPlanned( _, settings.plans ) }.via( watchUnrecognized )
       )
 
       val regulator = b.add( Flow[TimeSeries].via( regulateByTopic(100000) ) )
-
       val buffer = b.add( Flow[TimeSeries].buffer( 1000, OverflowStrategy.backpressure ).watchFlow( WatchPoints.PlanBuffer ) )
-
-      val detect = b.add( PlanCatalog.flow( catalogProxyProps ).watchFlow(WatchPoints.Catalog) )
+      val detect = b.add( catalogFlow.watchFlow(WatchPoints.Catalog) )
 
       logMetrics ~> blockPriors ~> broadcast ~> passPlanned ~> regulator ~> buffer ~> detect
                                    broadcast ~> passUnrecognized
@@ -80,7 +83,6 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
       )
     }
   }
-
 
   def logMetric(
     destination: Logger,
@@ -131,7 +133,7 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
     }
   }
 
-  def isOutlierReport( ts: TimeSeriesBase ): Boolean = ts.topic.name startsWith OutlierMetricPrefix
+  def notReportedBySpotlight(ts: TimeSeriesBase ): Boolean = ts.topic.name.startsWith( OutlierMetricPrefix ) == false
   def isPlanned( ts: TimeSeriesBase, plans: Set[OutlierPlan] ): Boolean = plans exists { _ appliesTo ts }
 
   val debugLogger = Logger( LoggerFactory getLogger "Debug" )
@@ -172,6 +174,33 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
     .map { case (acc, count) => acc }
     .mapConcat { _.values.to[scala.collection.immutable.Iterable] }
   }
+
+
+
+  def batchSeriesByWindow(
+    windowSize: FiniteDuration = 1.minute,
+    parallelism: Int = 4
+  )(
+    implicit system: ActorSystem,
+    tsMerging: Merging[TimeSeries],
+    materializer: Materializer
+  ): Flow[TimeSeries, TimeSeries, NotUsed] = {
+    val numTopics = 1
+
+    val n = if ( numTopics * windowSize.toMicros.toInt < 0 ) { numTopics * windowSize.toMicros.toInt } else { Int.MaxValue }
+    logger.debug( "n = [{}] for windowSize=[{}]", n.toString, windowSize.toCoarsest )
+    Flow[TimeSeries]
+    .groupedWithin( n, d = windowSize ) // max elems = 1 per micro; duration = windowSize
+    .map {
+      _.groupBy{ _.topic }
+      .map { case (topic, tss) =>
+        tss.tail.foldLeft( tss.head ){ (acc, e) => tsMerging.merge( acc, e ) valueOr { exs => throw exs.head } }
+      }
+    }
+    .mapConcat { identity }
+  }
+}
+
 
 //  def batchSeriesByPlan(
 //    max: Long
@@ -239,26 +268,43 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
 //  }
 
 
-  def batchSeriesByWindow(
-    windowSize: FiniteDuration = 1.minute,
-    parallelism: Int = 4
-  )(
-    implicit system: ActorSystem,
-    tsMerging: Merging[TimeSeries],
-    materializer: Materializer
-  ): Flow[TimeSeries, TimeSeries, NotUsed] = {
-    val numTopics = 1
-
-    val n = if ( numTopics * windowSize.toMicros.toInt < 0 ) { numTopics * windowSize.toMicros.toInt } else { Int.MaxValue }
-    logger.debug( "n = [{}] for windowSize=[{}]", n.toString, windowSize.toCoarsest )
-    Flow[TimeSeries]
-    .groupedWithin( n, d = windowSize ) // max elems = 1 per micro; duration = windowSize
-    .map {
-      _.groupBy{ _.topic }
-      .map { case (topic, tss) =>
-        tss.tail.foldLeft( tss.head ){ (acc, e) => tsMerging.merge( acc, e ) valueOr { exs => throw exs.head } }
-      }
-    }
-    .mapConcat { identity }
-  }
-}
+//def scoringGraph(
+//catalogProxyProps: Props,
+//settings: Settings
+//)(
+//implicit system: ActorSystem,
+//materializer: Materializer
+//): Graph[ScoringShape[TimeSeries, Outliers, TimeSeries], NotUsed] = {
+//  import akka.stream.scaladsl.GraphDSL.Implicits._
+//  import StreamMonitor._
+//
+//  GraphDSL.create() { implicit b =>
+//  val logMetrics = b.add( logMetric( Logger(LoggerFactory getLogger "Metrics"), settings.plans ) )
+//  val blockPriors = b.add( Flow[TimeSeries] filter { notReportedBySpotlight } )
+//  val broadcast = b.add( Broadcast[TimeSeries](outputPorts = 2, eagerCancel = false) )
+//
+//  val watchPlanned = Flow[TimeSeries].map{ identity }.watchFlow( WatchPoints.ScoringPlanned )
+//  val passPlanned = b.add( Flow[TimeSeries].filter{ isPlanned( _, settings.plans ) }.via( watchPlanned ) )
+//
+//  val watchUnrecognized = Flow[TimeSeries].map{ identity }.watchFlow( WatchPoints.ScoringUnrecognized )
+//  val passUnrecognized = b.add(
+//  Flow[TimeSeries].filter{ !isPlanned( _, settings.plans ) }.via( watchUnrecognized )
+//  )
+//
+//  val regulator = b.add( Flow[TimeSeries].via( regulateByTopic(100000) ) )
+//
+//  val buffer = b.add( Flow[TimeSeries].buffer( 1000, OverflowStrategy.backpressure ).watchFlow( WatchPoints.PlanBuffer ) )
+//
+//  val detect = b.add( PlanCatalog.flow( catalogProxyProps ).watchFlow(WatchPoints.Catalog) )
+//
+//  logMetrics ~> blockPriors ~> broadcast ~> passPlanned ~> regulator ~> buffer ~> detect
+//  broadcast ~> passUnrecognized
+//
+//  ScoringShape(
+//  FanOutShape.Ports(
+//  inlet = logMetrics.in,
+//  outlets = scala.collection.immutable.Seq( detect.out, passUnrecognized.out )
+//  )
+//  )
+//}
+//}

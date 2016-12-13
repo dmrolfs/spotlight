@@ -190,11 +190,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
       aggregate.sendEnvelope(
         DetectUsing(
           algorithm = module.algorithm.label,
-          payload = DetectOutliersInSeries(
-            TestCorrelatedSeries( series ),
-            plan,
-            subscriber.ref
-          ),
+          payload = DetectOutliersInSeries( series, plan, Option(subscriber.ref), Set.empty[WorkId] ),
           history = history
         )
       )(

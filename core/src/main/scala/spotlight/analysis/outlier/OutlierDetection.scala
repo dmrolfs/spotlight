@@ -73,13 +73,13 @@ object OutlierDetection extends Instrumented with StrictLogging {
 
   private[OutlierDetection] object DetectionRequest {
     private val trace = Trace[DetectionResult.type]
-    def from( m: OutlierDetectionMessage )( implicit wid: WorkId ): DetectionRequest = trace.block( "from" ) {
+    def from( m: OutlierDetectionMessage, subscriber: ActorRef )( implicit wid: WorkId ): DetectionRequest = {
       logger.debug( "req = [{}]", m )
       logger.debug( "req.correlationIds = [{}]", m.correlationIds )
       logger.debug( "workId:[{}]", wid )
       val wids = if ( m.correlationIds.nonEmpty ) m.correlationIds else Set( wid )
       logger.debug( "request correlationIds = [{}]", wids )
-      DetectionRequest( m.subscriber, wids )
+      DetectionRequest( subscriber, wids )
     }
   }
 
@@ -126,10 +126,10 @@ class OutlierDetection extends Actor with EnvelopingActor with InstrumentedActor
 
   def detection( isWaitingToComplete: Boolean = false ): Receive = {
     case m: OutlierDetectionMessage => {
-      log.debug( "OutlierDetection received detection request[{}]: [{}:{}] subscriber=[{}]", workId, m.topic, m.plan, m.subscriber.path.name )
+      log.debug( "OutlierDetection received detection request[{}]: topic[{}] plan:[{}]", workId, m.topic, m.plan )
       dispatch( m, m.plan )( context.dispatcher ) match {
         case \/-( aggregator ) => {
-          addToOutstanding( aggregator, DetectionRequest from m )
+          addToOutstanding( aggregator, DetectionRequest.from(m, sender()) )
           stopIfFullyComplete( isWaitingToComplete )
         }
         case -\/( ex ) => log.error( ex, "OutlierDetector failed to create aggregator for topic:[{}]", m.topic )
@@ -137,7 +137,7 @@ class OutlierDetection extends Actor with EnvelopingActor with InstrumentedActor
     }
 
     case result: Outliers if outstanding.contains( sender() ) => {
-      log.debug( "OutlierDetection[{}} results: [{}:{}]", workId, result.topic, result.plan )
+      log.debug( "OutlierDetection[{}} scope:[{}] results:[{}]", workId, OutlierPlan.Scope(result.plan, result.topic), result )
       val aggregator = sender()
       val request = outstanding( aggregator )
       log.debug( "OutlierDetection sending results for [{}] to subscriber:[{}]", workId, request.subscriber )

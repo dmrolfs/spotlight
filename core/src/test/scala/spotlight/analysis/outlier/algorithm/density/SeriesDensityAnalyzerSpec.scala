@@ -15,6 +15,7 @@ import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import org.joda.{time => joda}
 import org.mockito.Mockito._
 import org.scalatest.mockito.MockitoSugar
+import peds.akka.envelope.WorkId
 import peds.commons.V
 import shapeless._
 import spotlight.analysis.outlier._
@@ -176,7 +177,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       analyzer.receive(
         DetectUsing(
           algoS,
-          DetectOutliersInSeries( TestCorrelatedSeries(TimeSeries("series", points)), plan, subscriber.ref ),
+          DetectOutliersInSeries( TimeSeries("series", points), plan, Option(subscriber.ref), Set.empty[WorkId] ),
           HistoricalStatistics(2, false),
           ConfigFactory.parseString(
             s"""
@@ -207,7 +208,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       implicit val sender = aggregator.ref
       analyzer ! DetectUsing(
         algoS,
-        DetectOutliersInSeries( TestCorrelatedSeries(series), plan, subscriber.ref ),
+        DetectOutliersInSeries( series, plan, Option(subscriber.ref), Set.empty[WorkId] ),
         HistoricalStatistics(2, false),
         algProps
       )
@@ -265,7 +266,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       implicit val sender = aggregator.ref
       analyzer ! DetectUsing(
         algoS,
-        DetectOutliersInSeries( TestCorrelatedSeries(series), plan, subscriber.ref ),
+        DetectOutliersInSeries( series, plan, Option(subscriber.ref), Set.empty[WorkId] ),
         HistoricalStatistics(2, false),
         algProps
       )
@@ -286,7 +287,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       def detectUsing( series: TimeSeries, history: HistoricalStatistics ): DetectUsing = {
         DetectUsing(
           algorithm = algoS,
-          payload = OutlierDetectionMessage( TestCorrelatedSeries(series), plan, subscriber.ref ).toOption.get,
+          payload = OutlierDetectionMessage( series, plan, Option(subscriber.ref), Set.empty[WorkId] ).toOption.get,
           history = history,
           properties = ConfigFactory.parseString(
             s"""
@@ -442,9 +443,10 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       val detectHistoryA = HistoricalStatistics.fromActivePoints( pointsA, false )
       val msgA = detectUsing(
         message = OutlierDetectionMessage(
-          TestCorrelatedSeries(TimeSeries(topic = metric, points = pointsA)),
+          TimeSeries(topic = metric, points = pointsA),
           plan,
-          subscriber.ref
+          Option(subscriber.ref),
+          Set.empty[WorkId]
         ).toOption.get,
         history = detectHistoryA
       )
@@ -473,9 +475,10 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
 
       val msgAB = detectUsing(
         message = OutlierDetectionMessage(
-          TestCorrelatedSeries(TimeSeries( topic = metric, points = pointsB )),
+          TimeSeries( topic = metric, points = pointsB ),
           plan,
-          subscriber.ref
+          Option(subscriber.ref),
+          Set.empty[WorkId]
         ).toOption.get,
         history = detectHistoryAB
       )
@@ -592,7 +595,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       implicit val sender = aggregator.ref
       analyzer ! DetectUsing(
         algoS,
-        DetectOutliersInSeries( TestCorrelatedSeries(series), plan, subscriber.ref ),
+        DetectOutliersInSeries( series, plan, Option(subscriber.ref), Set.empty[WorkId] ),
         HistoricalStatistics(2, false),
         algProps
       )

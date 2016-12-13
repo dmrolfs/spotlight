@@ -10,6 +10,7 @@ import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import org.mockito.Mockito._
 import org.joda.{time => joda}
 import com.github.nscala_time.time.JodaImplicits._
+import peds.akka.envelope.WorkId
 import spotlight.analysis.outlier.algorithm.CommonAnalyzer
 import spotlight.analysis.outlier.{DetectOutliersInSeries, DetectUsing, DetectionAlgorithmRouter}
 import spotlight.model.outlier.{OutlierPlan, SeriesOutliers}
@@ -123,7 +124,7 @@ class SkylineFirstHourAverageSpec extends SkylineBaseSpec {
       implicit val sender = aggregator.ref
       analyzer ! DetectUsing(
         algoS,
-        DetectOutliersInSeries(TestCorrelatedSeries(series), plan, subscriber.ref),
+        DetectOutliersInSeries(series, plan, Option(subscriber.ref), Set.empty[WorkId]),
         history1,
         algProps
       )
@@ -152,7 +153,7 @@ class SkylineFirstHourAverageSpec extends SkylineBaseSpec {
 
       analyzer ! DetectUsing(
         algoS,
-        DetectOutliersInSeries(TestCorrelatedSeries(series2), plan, subscriber.ref),
+        DetectOutliersInSeries(series2, plan, Option(subscriber.ref), Set.empty[WorkId]),
         history2,
         algProps
       )
@@ -191,7 +192,7 @@ class SkylineFirstHourAverageSpec extends SkylineBaseSpec {
       implicit val sender = aggregator.ref
       analyzer ! DetectUsing(
           algoS,
-          DetectOutliersInSeries(TestCorrelatedSeries(series), plan, subscriber.ref),
+          DetectOutliersInSeries(series, plan, Option(subscriber.ref), Set.empty[WorkId]),
           history1,
           algProps
         )
@@ -220,7 +221,7 @@ class SkylineFirstHourAverageSpec extends SkylineBaseSpec {
 
       analyzer ! DetectUsing(
         algoS,
-        DetectOutliersInSeries(TestCorrelatedSeries(series2), plan, subscriber.ref),
+        DetectOutliersInSeries(series2, plan, Option(subscriber.ref), Set.empty[WorkId]),
         history2,
         algProps
       )
@@ -261,7 +262,7 @@ class SkylineFirstHourAverageSpec extends SkylineBaseSpec {
       implicit val sender = aggregator.ref
       analyzer ! DetectUsing(
         algoS,
-        DetectOutliersInSeries(TestCorrelatedSeries(series), plan, subscriber.ref),
+        DetectOutliersInSeries(series, plan, Option(subscriber.ref), Set.empty[WorkId]),
         history1,
         algProps
       )
@@ -286,7 +287,7 @@ class SkylineFirstHourAverageSpec extends SkylineBaseSpec {
 
       analyzer ! DetectUsing(
         algoS,
-        DetectOutliersInSeries(TestCorrelatedSeries(series2), plan, subscriber.ref),
+        DetectOutliersInSeries(series2, plan, Option(subscriber.ref), Set.empty[WorkId]),
         history2,
         algProps
       )

@@ -7,8 +7,9 @@ import akka.{Done, NotUsed}
 import akka.actor.{Actor, ActorLogging, ActorRef, ActorSystem, Props, Stash}
 import akka.agent.Agent
 import akka.event.LoggingReceive
+import akka.pattern.{ask, pipe}
 import akka.stream.{FlowShape, Materializer}
-import akka.stream.scaladsl.{Flow, GraphDSL, Keep, Sink, Source}
+import akka.stream.scaladsl.{Broadcast, Flow, GraphDSL, Keep, Merge, Sink, Source}
 import akka.util.Timeout
 
 import scalaz._
@@ -17,14 +18,16 @@ import com.typesafe.config.{Config, ConfigObject}
 import com.typesafe.scalalogging.LazyLogging
 import nl.grons.metrics.scala.MetricName
 import peds.akka.envelope._
-import peds.akka.envelope.pattern.ask
+import peds.akka.envelope.pattern.{ask => envAsk}
 import peds.akka.metrics.InstrumentedActor
 import peds.commons.log.Trace
 import peds.akka.stream.CommonActorPublisher
 import demesne.{BoundedContext, DomainModel}
 import spotlight.analysis.outlier.OutlierDetection.DetectionResult
+import spotlight.analysis.outlier.PlanCatalog.WatchPoints
 import spotlight.model.outlier.{IsQuorum, OutlierPlan, Outliers, ReduceOutliers}
 import spotlight.model.timeseries.{TimeSeries, Topic}
+import sun.security.pkcs11.Secmod.Module
 
 
 /**
@@ -36,10 +39,19 @@ object PlanCatalogProtocol {
   case object WaitForStart extends CatalogMessage
   case object Started extends CatalogMessage
 
-  case class Route( timeSeries: TimeSeries, subscriber: ActorRef, correlationId: Option[WorkId] = None ) extends CatalogMessage
-  case class UnknownRoute( timeSeries: TimeSeries, subscriber: ActorRef, correlationId: Option[WorkId] ) extends CatalogMessage
+  case class MakeFlow(
+    parallelismFactor: Double,
+    system: ActorSystem,
+    timeout: Timeout,
+    materializer: Materializer
+  ) extends CatalogMessage
+  case class CatalogFlow( flow: DetectFlow ) extends CatalogMessage
+
+  case class Route( timeSeries: TimeSeries, correlationId: Option[WorkId] = None ) extends CatalogMessage
+
+  case class UnknownRoute( timeSeries: TimeSeries, correlationId: Option[WorkId] ) extends CatalogMessage
   object UnknownRoute {
-    def apply( route: Route ): UnknownRoute = UnknownRoute( route.timeSeries, route.subscriber, route.correlationId )
+    def apply( route: Route ): UnknownRoute = UnknownRoute( route.timeSeries, route.correlationId )
   }
 
   case class GetPlansForTopic( topic: Topic ) extends CatalogMessage
@@ -71,54 +83,25 @@ object PlanCatalog extends LazyLogging {
   val name: String = "PlanCatalog"
 
   def flow(
-    catalogProxyProps: Props
+    catalogRef: ActorRef,
+    parallelismCpuFactor: Double = 2.0
   )(
     implicit system: ActorSystem,
+    timeout: Timeout,
     materializer: Materializer
-  ): Flow[TimeSeries, Outliers, NotUsed] = {
-    import PlanCatalogProtocol.Route
-    import peds.akka.stream.StreamMonitor._
-    import WatchPoints.{Intake, Collector, Outlet}
+  ): Future[Flow[TimeSeries, Outliers, NotUsed]] = {
+    import spotlight.analysis.outlier.{PlanCatalogProtocol => P}
+    implicit val ec = system.dispatcher
 
-    val outletProps = CommonActorPublisher.props[DetectionResult]()
-
-    val g = GraphDSL.create() { implicit b =>
-      import akka.stream.scaladsl.GraphDSL.Implicits._
-
-      val (outletRef, outlet) = {
-        Source
-        .actorPublisher[DetectionResult]( outletProps ).named( "PlanCatalogFlowOutlet" )
-        .toMat( Sink.asPublisher(true) )( Keep.both )
-        .run()
-      }
-
-      PlanCatalogProxy.subscribers send { _ + outletRef }
-
-      val zipWithSubscriber = b.add( Flow[TimeSeries].map{ ts => Route( ts, outletRef ) }.watchFlow(Intake) )
-      val planRouter = b.add( Sink.actorSubscriber[Route]( catalogProxyProps ).named( "PlanCatalogProxy" ) )
-      zipWithSubscriber ~> planRouter
-
-      val receiveOutliers = b.add( Source.fromPublisher[DetectionResult]( outlet ).named( "ResultCollector" ) )
-
-      val collect = Flow[DetectionResult].map{ identity }.watchFlow( Collector )
-
-      val toOutliers = b.add(
-        Flow[DetectionResult]
-        .map { m => logger.debug( "received result from collector: [{}]", m ); m }
-        .map { _.outliers }
-        .watchFlow( Outlet )
-      )
-
-      receiveOutliers ~> collect ~> toOutliers
-
-      FlowShape( zipWithSubscriber.in, toOutliers.out )
-    }
-
-    Flow.fromGraph( g ).named( "PlanCatalogFlow" ).watchFlow( Symbol("CatalogDetection") )
+    for {
+      _ <- ( catalogRef ? P.WaitForStart )
+      cf <- ( catalogRef ? P.MakeFlow( parallelismCpuFactor, system, timeout, materializer ) ).mapTo[P.CatalogFlow]
+    } yield { cf.flow }
   }
 
 
   object WatchPoints {
+    val Catalog = 'catalog
     val Intake = Symbol( "catalog.intake" )
     val Collector = Symbol( "catalog.collector" )
     val Outlet = Symbol( "catalog.outlet" )
@@ -368,6 +351,15 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
     scala.concurrent.Await.result( index, 30.seconds )
   }
 
+  def collectPlans()( implicit ec: ExecutionContext ): Future[Set[OutlierPlan.Summary]] = {
+    for {
+      fromIndex <- planIndex.futureEntries.map{ _.values.toSet }
+      _ = log.debug( "PlanCatalog fromIndex: [{}]", fromIndex )
+      fromFallback <- fallbackIndex.map{ _.values.toSet }.future()
+      _ = log.debug( "PlanCatalog fromFallback: [{}]", fromFallback )
+    } yield fromIndex ++ fromFallback
+  }
+
   def applicablePlanExists( ts: TimeSeries )( implicit ec: ExecutionContext ): Boolean = trace.briefBlock( s"applicablePlanExists( ${ts.topic} )" ) {
     val current = unsafeApplicablePlanExists( ts )
     if ( current ) current
@@ -453,20 +445,21 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
   }
 
   val active: Receive = {
-    case route @ P.Route( ts: TimeSeries, subscriber, cid ) if applicablePlanExists( ts )( context.dispatcher ) => {
-      log.debug(
-        "PlanCatalog:ACTIVE[{}] dispatching stream message for detection and result will go to subscriber[{}]: [{}]",
-        workId,
-        subscriber.path.name,
-        route
-      )
+    case P.MakeFlow( parallelism, system, timeout, materializer ) => {
+      implicit val ec = context.dispatcher
+      val requester = sender()
+      makeFlow( parallelism )( system, timeout, materializer ) map { P.CatalogFlow.apply } pipeTo requester
+    }
+
+
+    case route @ P.Route( ts: TimeSeries, _ ) if applicablePlanExists( ts )( context.dispatcher ) => {
+      log.debug( "PlanCatalog:ACTIVE[{}] dispatching stream message for detection: [{}]", workId, route )
       dispatch( route, sender() )( context.dispatcher )
     }
 
     case ts: TimeSeries if applicablePlanExists( ts )( context.dispatcher ) => {
       log.debug( "PlanCatalog:ACTIVE[{}] dispatching time series to sender[{}]: [{}]", workId, sender().path.name, ts )
-      val subscriber = sender()
-      dispatch( P.Route(ts, subscriber, Some(correlationId)), subscriber )( context.dispatcher )
+      dispatch( P.Route(ts, Some(correlationId)), sender() )( context.dispatcher )
     }
 
     case r: P.Route => {
@@ -478,12 +471,20 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
     case ts: TimeSeries => {
       //todo route unrecogonized ts
       log.warning( "PlanCatalog:ACTIVE[{}]: no plan on record that applies to topic:[{}]", self.path, ts.topic )
-      val ref = sender()
-      ref !+ P.UnknownRoute( ts, ref, Some(correlationId) )
+      sender() !+ P.UnknownRoute( ts, Some(correlationId) )
     }
 
     case result @ DetectionResult( outliers, workIds ) => {
-      workIds find { outstandingWork.contains } foreach { cid => outstandingWork( cid ) !+ result }
+      if ( 1 < workIds.size ) {
+        log.warning( "PlanCatalog received DetectionResult with multiple workIds[{}]:[{}]", workIds.size, workIds.mkString(", ") )
+      }
+
+      workIds find { outstandingWork.contains } foreach { cid =>
+        val subscriber = outstandingWork( cid )
+        log.debug( "FLOW2: sending result to subscriber:[{}] : [{}]", subscriber, result )
+        subscriber !+ result
+      }
+
       outstandingWork --= workIds
     }
   }
@@ -505,6 +506,69 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
 
     case P.WaitForStart => sender() ! P.Started
   }
+
+  def makeFlow(
+    parallelismFactor: Double
+  )(
+    implicit system: ActorSystem,
+    timeout: Timeout,
+    materializer: Materializer
+  ): Future[DetectFlow] = {
+    import peds.akka.stream.StreamMonitor._
+
+    implicit val ec = context.dispatcher
+    def collectPlanFlows( model: DomainModel, plans: Set[OutlierPlan.Summary] ): Future[Set[DetectFlow]] = {
+      Future sequence {
+        plans map { p =>
+          val ref = model( AnalysisPlanModule.module.rootType, p.id )
+
+          ( ref ?+ AP.MakeFlow( p.id, parallelismFactor, system, timeout, materializer ) )
+          .mapTo[AP.AnalysisFlow]
+          .map { af =>
+            log.debug( "PlanCatalog: created analysis flow for: [{}]", p.id )
+            af.flow
+          }
+        }
+      }
+    }
+
+    def detectFrom( planFlows: Set[DetectFlow] ): DetectFlow = {
+      val nrFlows = planFlows.size
+      log.debug( "making PlanCatalog graph with [{}] plans", nrFlows )
+
+      val g = GraphDSL.create() { implicit b =>
+        import GraphDSL.Implicits._
+
+        val broadcast = b.add( Broadcast[TimeSeries]( nrFlows ) )
+        val merge = b.add( Merge[Outliers]( nrFlows ) )
+        val intake = b.add( Flow[TimeSeries].map{ identity }.watchFlow( WatchPoints.Intake ) )
+        val outlet = b.add( Flow[Outliers].map{ identity }.watchFlow( WatchPoints.Outlet ) )
+
+        intake ~> broadcast.in
+        planFlows.zipWithIndex foreach { case (pf, i) =>
+          log.debug( "adding to catalog flow, order undefined analysis flow [{}]", i )
+          val flow = b.add( pf )
+          broadcast.out( i ) ~> flow ~> merge.in( i )
+        }
+        merge.out ~> outlet
+        FlowShape( intake.in, outlet.out )
+      }
+
+      Flow.fromGraph( g ).named( "PlanCatalogFlow" ).watchFlow( WatchPoints.Catalog )
+    }
+
+    for {
+      model <- boundedContext.futureModel
+      plans <- collectPlans()
+      _ = log.debug( "PlanCatalog: collect plans: [{}]", plans )
+      planFlows <- collectPlanFlows( model, plans )
+    } yield {
+      val f = detectFrom( planFlows )
+      log.debug( "PlanCatalog detect flow graph created: [{}]", f.toString )
+      f
+    }
+  }
+
 
 
   private def dispatch( route: P.Route, interestedRef: ActorRef )( implicit ec: ExecutionContext ): Unit = {
@@ -628,3 +692,88 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
     } yield info
   }
 }
+
+
+//def flow2(
+//catalogRef: ActorRef,
+//parallelismCpuFactor: Double = 2.0
+//)(
+//implicit system: ActorSystem,
+//timeout: Timeout,
+//materializer: Materializer
+//): Flow[TimeSeries, Outliers, NotUsed] = {
+//  import PlanCatalogProtocol.Route
+//  import peds.akka.stream.StreamMonitor._
+//  import WatchPoints.{ Intake, Outlet }
+//
+//  implicit val ec = system.dispatcher
+//
+//  //todo wrap flow with Dynamic Stages & kill switch
+//  val intake = Flow[TimeSeries].map{ ts => Route(ts) }.watchFlow( Intake )
+//  val toOutliers = Flow[DetectionResult].map { _.outliers }.watchFlow( WatchPoints.Outlet )
+//  val parallelism = ( parallelismCpuFactor * Runtime.getRuntime.availableProcessors ).toInt
+//
+//  Flow[TimeSeries]
+//  .via( intake )
+//  .mapAsync( parallelism ) { route =>
+//  logger.info( "FLOW2.BEFORE: time-series=[{}]", route )
+//  ( catalogRef ?+ route ) map { result =>
+//  logger.info( "FLOW2.AFTER: result=[{}]", result )
+//  result
+//}
+//}
+//  .collect {
+//  case m: DetectionResult => logger.info( "FLOW2.collect - DetectionResult: [{}]", m ); m
+//  case Envelope( m: DetectionResult, _ ) => logger.info( "FLOW2.collect - Envelope: [{}]", m ); m
+//}
+//  .map { m => logger.debug( "received result from collector: [{}]", m ); m }
+//  .via( toOutliers )
+//  .named( "PlanCatalogFlow" )
+//  .watchFlow( Symbol("CatalogDetection") )
+//}
+//
+//
+//  def flow(
+//  catalogProxyProps: Props
+//  )(
+//  implicit system: ActorSystem,
+//  materializer: Materializer
+//  ): Flow[TimeSeries, Outliers, NotUsed] = {
+//  import PlanCatalogProtocol.Route
+//  import peds.akka.stream.StreamMonitor._
+//  import WatchPoints.{Intake, Collector, Outlet}
+//
+//  val outletProps = CommonActorPublisher.props[DetectionResult]()
+//
+//  val g = GraphDSL.create() { implicit b =>
+//  import akka.stream.scaladsl.GraphDSL.Implicits._
+//
+//  val (outletRef, outlet) = {
+//  Source
+//  .actorPublisher[DetectionResult]( outletProps ).named( "PlanCatalogFlowOutlet" )
+//  .toMat( Sink.asPublisher(true) )( Keep.both )
+//  .run()
+//}
+//
+//  PlanCatalogProxy.subscribers send { _ + outletRef }
+//
+//  val zipWithSubscriber = b.add( Flow[TimeSeries].map{ ts => Route(ts) }.watchFlow(Intake) )
+//  val planRouter = b.add( Sink.actorSubscriber[Route]( catalogProxyProps ).named( "PlanCatalogProxy" ) )
+//  zipWithSubscriber ~> planRouter
+//
+//  val receiveOutliers = b.add( Source.fromPublisher[DetectionResult]( outlet ).named( "ResultCollector" ) )
+//  val collect = b.add( Flow[DetectionResult].map{ identity }.watchFlow( Collector ) )
+//  val toOutliers = b.add(
+//  Flow[DetectionResult]
+//  .map { m => logger.debug( "received result from collector: [{}]", m ); m }
+//  .map { _.outliers }
+//  .watchFlow( Outlet )
+//  )
+//
+//  receiveOutliers ~> collect ~> toOutliers
+//
+//  FlowShape( zipWithSubscriber.in, toOutliers.out )
+//}
+//
+//  Flow.fromGraph( g ).named( "PlanCatalogFlow" ).watchFlow( Symbol("CatalogDetection") )
+//}

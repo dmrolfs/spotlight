@@ -1,8 +1,10 @@
 package spotlight.analysis
 
+import akka.NotUsed
+import akka.stream.scaladsl.Flow
 import org.apache.commons.math3.ml.distance.{DistanceMeasure, EuclideanDistance}
 import peds.commons.math.MahalanobisDistance
-import spotlight.model.outlier.OutlierPlan
+import spotlight.model.outlier.{OutlierPlan, Outliers}
 import spotlight.model.timeseries.{TimeSeries, TimeSeriesBase}
 
 
@@ -10,6 +12,8 @@ import spotlight.model.timeseries.{TimeSeries, TimeSeriesBase}
  * Created by rolfsd on 10/4/15.
  */
 package object outlier {
+  type DetectFlow = Flow[TimeSeries, Outliers, NotUsed]
+
   type TimeSeriesScope = (TimeSeries, OutlierPlan.Scope)
 
 
