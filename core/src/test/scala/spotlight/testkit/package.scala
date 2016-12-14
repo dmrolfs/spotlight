@@ -9,22 +9,31 @@ import peds.commons.identifier.ShortUUID
   */
 package object testkit {
   def config( rootDir: String = ".", systemName: String ): Config = {
-    val testConfig = ConfigFactory.parseString(
-      s"""
+    val testConfig = {
+      val algoJournal = "${inmemory-journal}"
+      val algoSnapshot = "${inmemory-snapshot-store}"
+
+      ConfigFactory.parseString(
+     s"""
+        |cassandra-snapshot-store {}
         |akka.persistence {
-        |#  journal.plugin = "akka.persistence.journal.leveldb-shared"
-        |  journal.plugin = "akka.persistence.journal.leveldb"
-        |  journal.leveldb-shared.store {
-        |    # DO NOT USE 'native = off' IN PRODUCTION !!!
-        |    native = off
-        |    dir = "${rootDir}/target/shared-journal"
-        |  }
+        |  algorithm.journal.plugin = ${algoJournal}
+        |  algorithm.snapshot.plugin = ${algoSnapshot}
+        |
+        |  journal.plugin = "inmemory-journal"
+        |  snapshot.plugin = "inmemory-snapshot-store"
+        |
+        |#  journal.leveldb-shared.store {
+        |#    # DO NOT USE 'native = off' IN PRODUCTION !!!
+        |#    native = off
+        |#    dir = "${rootDir}/target/shared-journal"
+        |#  }
         |  journal.leveldb {
         |    # DO NOT USE 'native = off' IN PRODUCTION !!!
         |    native = off
         |    dir = "${rootDir}/target/journal/${ShortUUID()}"
         |  }
-        |  snapshot-store.local.dir = "${rootDir}target/snapshots"
+        |  snapshot-store.local.dir = "${rootDir}/target/snapshots"
         |}
         |
         |akka.persistence.algorithm.journal.plugin {
@@ -151,10 +160,53 @@ package object testkit {
         |  }
         |}
         |
+        |inmemory-journal {
+        |  class = "akka.persistence.inmemory.journal.InMemoryAsyncWriteJournal"
+        |  # ask timeout on Futures
+        |  ask-timeout = "10s"
+        |}
+        |
+        |# the akka-persistence-snapshot-store in use
+        |inmemory-snapshot-store {
+        |  class = "akka.persistence.inmemory.snapshot.InMemorySnapshotStore"
+        |  # ask timeout on Futures
+        |  ask-timeout = "10s"
+        |}
+        |
+        |inmemory-read-journal {
+        |  # Implementation class of the InMemory ReadJournalProvider
+        |  class = "akka.persistence.inmemory.query.InMemoryReadJournalProvider"
+        |
+        |  # Absolute path to the write journal plugin configuration section to get the event adapters from
+        |  write-plugin = "inmemory-journal"
+        |
+        |  # there are two modes; 'sequence' or 'uuid'.
+        |  #
+        |  # | mode     | offset        | description                                      |
+        |  # | -------- | --------------| ------------------------------------------------ |
+        |  # | sequence | NoOffset      | the query will return Sequence offset types      |
+        |  # | sequence | Sequence      | the query will return Sequence offset types      |
+        |  # | uuid     | NoOffset      | the query will return TimeBasedUUID offset types |
+        |  # | uuid     | TimeBasedUUID | the query will return TimeBasedUUID offset types |
+        |  #
+        |  offset-mode = "sequence"
+        |
+        |  # ask timeout on Futures
+        |  ask-timeout = "10s"
+        |
+        |  # New events are retrieved (polled) with this interval.
+        |  refresh-interval = "100ms"
+        |
+        |  # How many events to fetch in one query (replay) and keep buffered until they
+        |  # are delivered downstreams.
+        |  max-buffer-size = "100"
+        |}
+        |
       """.stripMargin
-    )
+                               )
+    }
 
-    testConfig.withFallback( ConfigFactory.load( "reference.conf" ) )
+    testConfig.resolve().withFallback( ConfigFactory.load( "reference.conf" ) )
   }
 //  def config( rootDir: String = "." ): Config = ConfigFactory.parseString(
 //    s"""

@@ -406,7 +406,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
 
       import PlanCatalogProtocol.{ MakeFlow, CatalogFlow }
       val CatalogFlow( flowUnderTest ) = Await.result(
-        ( catalogRef ? MakeFlow( 2.0, system, timeout, materializer) ).mapTo[CatalogFlow],
+        ( catalogRef ? MakeFlow( 2, system, timeout, materializer) ).mapTo[CatalogFlow],
         5.seconds
       )
 

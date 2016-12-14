@@ -23,6 +23,7 @@ import org.json4s.jackson.JsonMethods
 import peds.akka.metrics.Instrumented
 import peds.akka.stream.StreamMonitor
 import demesne.BoundedContext
+import peds.akka.stream.Limiter
 import peds.commons.TryV
 import peds.commons.log.Trace
 import spotlight.analysis.outlier.DetectFlow
@@ -117,6 +118,7 @@ object FileBatchExample extends Instrumented with StrictLogging {
   object WatchPoints {
     val Data = 'data
     val Intake = 'intake
+    val Rate = 'rate
     val Scoring = 'scoring
     val Publish = 'publish
     val Results = 'results
@@ -153,6 +155,7 @@ object FileBatchExample extends Instrumented with StrictLogging {
       StreamMonitor.set(
         Data,
         Intake,
+        Rate,
         C.Intake,
         Scoring,
         OSM.Catalog,
@@ -195,6 +198,17 @@ object FileBatchExample extends Instrumented with StrictLogging {
   ): Flow[String, SimpleFlattenedOutlier, NotUsed] = {
     val conf = configuration
 
+    // parallelism * 2, 50ms, 1 => 20/s == slows at 8m
+    // parallelism , 50ms, 1 => ?/s == slows at 10000 files
+    val limiterRef = system.actorOf(
+      Limiter.props(
+        Runtime.getRuntime.availableProcessors(),
+        50.milliseconds,
+        Runtime.getRuntime.availableProcessors()
+      ),
+      "rate-limiter"
+    )
+
     val graph = GraphDSL.create() { implicit b =>
       import GraphDSL.Implicits._
       import peds.akka.stream.StreamMonitor._
@@ -216,6 +230,8 @@ object FileBatchExample extends Instrumented with StrictLogging {
         .buffer( 1000, OverflowStrategy.backpressure ).watchFlow( WatchPoints.Scoring )
       )
 
+      val limiter = b.add( Limiter.limitGlobal[TimeSeries](limiterRef, 30.seconds)( system.dispatcher ) )
+
       val score = b.add( scoring )
 
       //todo remove after working
@@ -225,7 +241,7 @@ object FileBatchExample extends Instrumented with StrictLogging {
         .watchFlow( WatchPoints.Publish )
       )
 
-      val filterOutliers : FlowShape[Outliers,SeriesOutliers] = b.add(
+      val filterOutliers = b.add(
         Flow[Outliers]
         .map { m => logger.info( "FILTER:BEFORE class:[{}] message:[{}]", m.getClass.getCanonicalName, m ); m }
         .collect {
@@ -235,7 +251,7 @@ object FileBatchExample extends Instrumented with StrictLogging {
         .watchFlow( WatchPoints.Results )
       )
 
-      val flatter: Flow[SeriesOutliers, List[SimpleFlattenedOutlier], NotUsed] = {
+      val flatter = b.add(
         Flow[SeriesOutliers]
         .map { s =>
           flattenObject( s ) match {
@@ -247,9 +263,7 @@ object FileBatchExample extends Instrumented with StrictLogging {
           }
         }
         .watchFlow( 'flatter )
-      }
-
-      val flatterFlow: FlowShape[SeriesOutliers, List[SimpleFlattenedOutlier]] = b.add( flatter )
+      )
 
       val unwrap = b.add(
         Flow[List[SimpleFlattenedOutlier]]
@@ -258,7 +272,7 @@ object FileBatchExample extends Instrumented with StrictLogging {
         .watchFlow('unwrap)
       )
 
-      intakeBuffer ~> timeSeries ~> score ~> publishBuffer ~> filterOutliers ~> flatterFlow ~> unwrap
+      intakeBuffer ~> timeSeries ~> limiter ~> score ~> publishBuffer ~> filterOutliers ~> flatter ~> unwrap
 
       FlowShape( intakeBuffer.in, unwrap.out )
     }

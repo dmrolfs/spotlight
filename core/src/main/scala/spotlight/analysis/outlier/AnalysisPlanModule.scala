@@ -40,7 +40,7 @@ object AnalysisPlanProtocol extends AggregateProtocol[OutlierPlan#ID]{
 
   case class MakeFlow(
     override val targetId: AnalysisPlanModule.module.TID,
-    parallelismFactor: Double,
+    parallelism: Int,
     system: ActorSystem,
     timeout: Timeout,
     materializer: Materializer
@@ -318,7 +318,7 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
 
 
       def makeFlow(
-        parallelismFactor: Double
+        parallelism: Int
       )(
         implicit system: ActorSystem,
         timeout: Timeout,
@@ -329,7 +329,7 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
         val withGrouping = state.grouping map { g => entry.via( batchSeries(g) ) } getOrElse entry
         withGrouping
         .buffer( outer.bufferSize, OverflowStrategy.backpressure )
-        .via( detectionFlow(state, parallelismFactor) )
+        .via( detectionFlow(state, parallelism) )
       }
 
       def batchSeries(
@@ -350,15 +350,7 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
         .mapConcat { identity }
       }
 
-      def detectionFlow(
-        p: OutlierPlan,
-        parallelismFactor: Double
-      )(
-        implicit system: ActorSystem,
-        timeout: Timeout
-      ): DetectFlow = {
-        val parallelism = ( parallelismFactor * Runtime.getRuntime.availableProcessors() ).toInt
-
+      def detectionFlow( p: OutlierPlan, parallelism: Int )( implicit system: ActorSystem, timeout: Timeout ): DetectFlow = {
         Flow[TimeSeries]
         .map { ts => log.debug( "AnalysisPlanModule:FLOW-DETECT: before-filter: [{}]", ts.toString); ts }
         .map { ts => OutlierDetectionMessage( ts, p ).disjunction }

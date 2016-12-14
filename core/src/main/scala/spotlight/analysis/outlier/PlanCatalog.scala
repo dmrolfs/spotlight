@@ -40,7 +40,7 @@ object PlanCatalogProtocol {
   case object Started extends CatalogMessage
 
   case class MakeFlow(
-    parallelismFactor: Double,
+    parallelism: Int,
     system: ActorSystem,
     timeout: Timeout,
     materializer: Materializer
@@ -84,7 +84,7 @@ object PlanCatalog extends LazyLogging {
 
   def flow(
     catalogRef: ActorRef,
-    parallelismCpuFactor: Double = 2.0
+    parallelism: Int
   )(
     implicit system: ActorSystem,
     timeout: Timeout,
@@ -95,7 +95,7 @@ object PlanCatalog extends LazyLogging {
 
     for {
       _ <- ( catalogRef ? P.WaitForStart )
-      cf <- ( catalogRef ? P.MakeFlow( parallelismCpuFactor, system, timeout, materializer ) ).mapTo[P.CatalogFlow]
+      cf <- ( catalogRef ? P.MakeFlow( parallelism, system, timeout, materializer ) ).mapTo[P.CatalogFlow]
     } yield { cf.flow }
   }
 
@@ -508,7 +508,7 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
   }
 
   def makeFlow(
-    parallelismFactor: Double
+    parallelism: Int
   )(
     implicit system: ActorSystem,
     timeout: Timeout,
@@ -522,7 +522,7 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
         plans map { p =>
           val ref = model( AnalysisPlanModule.module.rootType, p.id )
 
-          ( ref ?+ AP.MakeFlow( p.id, parallelismFactor, system, timeout, materializer ) )
+          ( ref ?+ AP.MakeFlow( p.id, parallelism, system, timeout, materializer ) )
           .mapTo[AP.AnalysisFlow]
           .map { af =>
             log.debug( "PlanCatalog: created analysis flow for: [{}]", p.id )
