@@ -31,6 +31,7 @@ trait Settings extends LazyLogging {
   def planOrigin: ConfigOrigin
   def tcpInboundBufferSize: Int
   def workflowBufferSize: Int
+  def parallelism: Int = ( maxInDetectionCpuFactor * Runtime.getRuntime.availableProcessors() ).toInt
 
   def config: Config
 

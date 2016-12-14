@@ -173,7 +173,7 @@ object Bootstrap extends Instrumented with StrictLogging {
 
       for {
         catalog <- makeCatalog( settings )
-        catalogFlow <- PlanCatalog.flow( catalog, settings.maxInDetectionCpuFactor )
+        catalogFlow <- PlanCatalog.flow( catalog, settings.parallelism )
       } yield ( boundedContext, settings, detectFlowFrom(catalogFlow, settings) )
     }
   }
