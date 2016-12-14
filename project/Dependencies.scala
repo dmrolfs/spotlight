@@ -3,7 +3,7 @@ import sbt._
 
 object Dependencies {
   object peds {
-    val version = "0.4.2"
+    val version = "0.4.3"
     def module( id: String ) = "com.github.dmrolfs" %% s"peds-$id" % version
     def all = Seq( commons, akka, archetype )
 
@@ -14,14 +14,14 @@ object Dependencies {
   }
 
   object demesne {
-    val version = "2.0.6"
+    val version = "2.0.8"
     def module( id: String ) = "com.github.dmrolfs" %% s"demesne-$id" % version
     val core = module( "core" )
     val testkit = module( "testkit" )
   }
 
   object akka {
-    val version = "2.4.12"
+    val version = "2.4.14"
     def module( id: String ) = "com.typesafe.akka" %% s"akka-$id" % version
     val all: Seq[ModuleID] = Seq( actor, stream, agent, cluster, clusterSharding, contrib, persistence, remote, slf4j )
 
@@ -40,17 +40,17 @@ object Dependencies {
     val kryo = "com.github.romix.akka" %% "akka-kryo-serialization" % "0.5.0"
     val kryoSerializers = "de.javakaffee" % "kryo-serializers" % "0.41"
 
-    val inMemory = "com.github.dnvriend" %% "akka-persistence-inmemory" % "1.3.16"
+    val inMemory = "com.github.dnvriend" %% "akka-persistence-inmemory" % "1.3.17"
   }
 
   object persistence {
+    val cassandra = "com.typesafe.akka" %% "akka-persistence-cassandra" % "0.22"
     val leveldb = "org.iq80.leveldb" % "leveldb" % "0.7" // "org.iq80.leveldb" % "leveldb" % "0.9"
     val leveldbjni = "org.fusesource.leveldbjni" % "leveldbjni-all" % "1.8" // "org.fusesource.leveldbjni" % "leveldbjni-all" % "1.8"
-    val all: Seq[ModuleID] = Seq( leveldb, leveldbjni )
   }
 
   object scalaz {
-    val version = "7.2.6"
+    val version = "7.2.8"
     def module( id: String ) = "org.scalaz" %% s"scalaz-$id" % version
 
     val core = module( "core" )
@@ -109,7 +109,7 @@ object Dependencies {
   }
 
   object facility {
-    val json4sJackson = "org.json4s" %% "json4s-jackson" % "3.4.2"
+    val json4sJackson = "org.json4s" %% "json4s-jackson" % "3.5.0"
     val uuid = "com.eaio.uuid" % "uuid" % "3.4"
     val config = "com.typesafe" % "config" % "1.3.1"
 //    val pureConfig = "com.github.melrief" %% "pureconfig" % "0.1.5"
@@ -155,7 +155,7 @@ object Dependencies {
     }
 
     object persistence {
-      val testkit = "com.github.krasserm" %% "akka-persistence-testkit" % "0.3.4"
+      val testkit = "com.github.krasserm" % "akka-persistence-testkit_2.11" % "0.3.4"
     }
   }
 
@@ -164,7 +164,6 @@ object Dependencies {
     log.all ++
     peds.all ++
     time.all ++
-    persistence.all ++
     Seq(
       akka.actor,
       akka.stream,

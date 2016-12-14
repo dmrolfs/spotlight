@@ -15,3 +15,9 @@ tail -f log/metrics/spotlight.analysis.outlier.AnalysisScopeProxy.proxies.csv
 
 tools/graphite-stresser:
 java -jar build/libs/graphite-stresser-0.1.jar localhost 2004 1 256 1 false
+
+
+
+
+
+docker run --name cassandra -v ~/spotlight/data:/var/lib/cassandra -d cassandra:3

@@ -64,7 +64,7 @@ class SeriesCentroidDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSug
       analyzer.receive(
         DetectUsing(
           algoS,
-          DetectOutliersInSeries( TestCorrelatedSeries(TimeSeries("series", points)), plan, subscriber.ref ),
+          DetectOutliersInSeries( TimeSeries("series", points), plan, Option(subscriber.ref), Set.empty[WorkId] ),
           HistoricalStatistics(2, false ),
           ConfigFactory.parseString(
             s"""
@@ -96,7 +96,7 @@ class SeriesCentroidDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSug
       implicit val sender = aggregator.ref
       analyzer ! DetectUsing(
         algoS,
-        DetectOutliersInSeries( TestCorrelatedSeries(series), plan, subscriber.ref ),
+        DetectOutliersInSeries( series, plan, Option(subscriber.ref), Set.empty[WorkId] ),
         HistoricalStatistics(2, false ),
         algProps
       )
@@ -134,7 +134,7 @@ class SeriesCentroidDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSug
       implicit val sender = aggregator.ref
       analyzer ! DetectUsing(
         algoS,
-        DetectOutliersInSeries( TestCorrelatedSeries(series), plan, subscriber.ref ),
+        DetectOutliersInSeries( series, plan, Option(subscriber.ref), Set.empty[WorkId] ),
         history,
         algProps
       )
@@ -189,7 +189,7 @@ class SeriesCentroidDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSug
       implicit val sender = aggregator.ref
       analyzer ! DetectUsing(
         algoS,
-        DetectOutliersInSeries( TestCorrelatedSeries(series), plan, subscriber.ref ),
+        DetectOutliersInSeries( series, plan, Option(subscriber.ref), Set.empty[WorkId] ),
         HistoricalStatistics(2, false),
         algProps
       )

@@ -118,6 +118,7 @@ extends ActorSubscriber with EnvelopingActor with InstrumentedActor with ActorLo
       knownRequest <- _workRequests.get( cid ).toSet
     } {
       catalogTimer.update( System.nanoTime() - knownRequest.startNanos, scala.concurrent.duration.NANOSECONDS )
+      _subscribersSeen -= knownRequest.subscriber
     }
 
     _workRequests --= correlationIds
@@ -186,16 +187,16 @@ extends ActorSubscriber with EnvelopingActor with InstrumentedActor with ActorLo
   }
 
   val active: Receive = {
-    case route @ P.Route( _, subscriber, rcid ) => {
+    case route @ P.Route( _, rcid ) => {
       val cid = correlationId
       for { rid <- rcid if rid != cid } { log.warning( "PlanCatalogProxy: incoming cid[{}] != dispatching cid[{}]", rid, cid ) }
 
-      addWorkRequest( cid, subscriber )
+      addWorkRequest( cid, sender() )
       log.debug( "PlanCatalogProxy:ACTIVE: forwarding StreamMessage to PlanCatalog" )
       underlying !+ route.copy( correlationId = Some(cid) )
     }
 
-    case P.UnknownRoute( ts, subscriber, cid ) => {
+    case P.UnknownRoute( ts, cid ) => {
       log.warning( "PlanCatalogProxy[{}]: unknown route for timeseries. Dropping series for:[{}]", cid, ts.topic )
       cid foreach { id => removeWorkRequests( Set( id ) ) }
       stopIfFullyComplete()( context.dispatcher )

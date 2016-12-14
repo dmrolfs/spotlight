@@ -73,7 +73,7 @@ class DetectionAlgorithmRouterSpec extends ParallelAkkaSpec with MockitoSugar {
       val plan = mock[OutlierPlan]
       val msg = DetectUsing(
         'foo,
-        DetectOutliersInSeries(AcceptTimeSeries(null, Set.empty[WorkId], series), plan, subscriber.ref),
+        DetectOutliersInSeries(series, plan, Option(subscriber.ref), Set.empty[WorkId]),
         HistoricalStatistics(2, false)
       )
 
