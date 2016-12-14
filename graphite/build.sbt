@@ -10,6 +10,9 @@ description := "lorem ipsum."
 libraryDependencies ++=
   commonDependencies ++
   Seq(
+    persistence.cassandra,
+    persistence.leveldb,
+    persistence.leveldbjni,
     facility.json4sJackson,
     akka.persistence,
     akka.inMemory

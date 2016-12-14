@@ -40,14 +40,13 @@ object Dependencies {
     val kryo = "com.github.romix.akka" %% "akka-kryo-serialization" % "0.5.0"
     val kryoSerializers = "de.javakaffee" % "kryo-serializers" % "0.41"
 
-    val inMemory = "com.github.dnvriend" %% "akka-persistence-inmemory" % "1.3.16"
+    val inMemory = "com.github.dnvriend" %% "akka-persistence-inmemory" % "1.3.17"
   }
 
   object persistence {
     val cassandra = "com.typesafe.akka" %% "akka-persistence-cassandra" % "0.22"
     val leveldb = "org.iq80.leveldb" % "leveldb" % "0.7" // "org.iq80.leveldb" % "leveldb" % "0.9"
     val leveldbjni = "org.fusesource.leveldbjni" % "leveldbjni-all" % "1.8" // "org.fusesource.leveldbjni" % "leveldbjni-all" % "1.8"
-    val all: Seq[ModuleID] = Seq( cassandra, leveldb, leveldbjni )
   }
 
   object scalaz {
@@ -165,7 +164,6 @@ object Dependencies {
     log.all ++
     peds.all ++
     time.all ++
-    persistence.all ++
     Seq(
       akka.actor,
       akka.stream,
