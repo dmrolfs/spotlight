@@ -561,7 +561,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
 
       event match {
         case e: demesne.PassivationSpecification.StopAggregateRoot[_] => {
-          log.warning( "[{}] received repeated passivation message: [{}]", self.path.name, e )
+          log.info( "[{}] received repeated passivation message: [{}]", self.path.name, e )
         }
 
         case _ => { }
@@ -605,7 +605,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
 
       case e: DeleteMessagesFailure => {
         stopSweepTimer( e )
-        log.warning( "[{}] FAILED to clear journal will attempt to clear on subsequent snapshot: [{}]", self.path.name, e )
+        log.info( "[{}] FAILED to clear journal will attempt to clear on subsequent snapshot: [{}]", self.path.name, e )
       }
     }
 
