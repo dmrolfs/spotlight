@@ -48,12 +48,13 @@ object AlgorithmProtocol extends AggregateProtocol[AlgorithmModule.AnalysisState
   case class GetTopicShapeSnapshot( override val targetId: GetTopicShapeSnapshot#TID, topic: Topic ) extends AlgorithmCommand
   case class TopicShapeSnapshot(
     override val sourceId: TopicShapeSnapshot#TID,
+    algorithm: Symbol,
     topic: Topic,
     snapshot: Option[AlgorithmModule#Shape]
   ) extends AlgorithmEvent
 
   case class GetStateSnapshot( override val targetId: GetStateSnapshot#TID ) extends AlgorithmCommand
-  case class StateSnapshots( override val sourceId: StateSnapshots#TID, snapshot: AnalysisState) extends AlgorithmEvent
+  case class StateSnapshot(override val sourceId: StateSnapshot#TID, snapshot: AnalysisState) extends AlgorithmEvent
 
   case class Advanced(
     override val sourceId: Advanced#TID,
@@ -244,6 +245,8 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
     override def name: String = algorithm.name
 
     override def withTopicShape( topic: Topic, shape: Shape ): Self = copy( shapes = shapes + (topic -> shape) )
+
+    override def toString: String = s"""State( algorithm:${algorithm.name} id:[${id}] shapes:[${shapes.mkString(", ")}] )"""
   }
 
 
@@ -435,6 +438,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
 
     override val acceptance: Acceptance = {
       case ( AdvancedType(event), cs ) => {
+        log.debug( "TEST: ACCEPTANCE: event:[{}] current-state:[{}]", event, cs )
         val s = cs.shapes.get( event.topic ) getOrElse shapeCompanion.zero( None )
         cs.withTopicShape( event.topic, shapeCompanion.advance(s, event) )
       }
@@ -504,11 +508,14 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
 
     val toOutliers = kleisli[TryV, (Outliers, Context), Outliers] { case (o, _) => o.right }
 
-    import AlgorithmProtocol.{ GetTopicShapeSnapshot, TopicShapeSnapshot, GetStateSnapshot, StateSnapshots }
+    import AlgorithmProtocol.{ GetTopicShapeSnapshot, TopicShapeSnapshot, GetStateSnapshot, StateSnapshot }
 
     val stateReceiver: Receive = {
-      case GetTopicShapeSnapshot( _, topic ) => sender() ! TopicShapeSnapshot( aggregateId, topic, state.shapes.get(topic) )
-      case _: GetStateSnapshot => sender() ! StateSnapshots( aggregateId, state )
+      case GetTopicShapeSnapshot( _, topic ) => {
+        sender() ! TopicShapeSnapshot( aggregateId, algorithm.label, topic, state.shapes.get(topic) )
+      }
+
+      case _: GetStateSnapshot => sender() ! StateSnapshot( aggregateId, state )
     }
 
 
@@ -674,21 +681,21 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
       for {
         ctx <- ask[TryV, Context]
         data <- kleisli[TryV, Context, Seq[DoublePoint]] { c => \/ fromTryCatchNonFatal { algorithm prepareData c } }
-        events <- collectOutlierPoints( data )
+        events <- collectOutlierPoints( data ) >=> recordAdvancements
         o <- makeOutliers( events )
       } yield ( o, ctx )
     }
 
-    case class Accumulation( state: State, topic: Topic, shape: Shape, advances: Seq[Advanced] = Seq.empty[Advanced] )
+    case class Accumulation( topic: Topic, shape: Shape, advances: Seq[Advanced] = Seq.empty[Advanced] )
 
     private def collectOutlierPoints( points: Seq[DoublePoint] ): KOp[Context, Seq[Advanced]] = {
       kleisli[TryV, Context, Seq[Advanced]] { implicit analysisContext =>
-        def tryStep( pt: PointT, shape: Shape )( implicit s: State ): TryV[(Boolean, ThresholdBoundary)] = {
+        def tryStep( pt: PointT, shape: Shape ): TryV[(Boolean, ThresholdBoundary)] = {
           \/ fromTryCatchNonFatal {
             logger.debug( "algorithm {}.step( {} ): before-shape=[{}]", algorithm.label.name, pt, shape.toString )
 
             algorithm
-            .step( pt, shape )
+            .step( pt, shape )( state, analysisContext )
             .getOrElse {
               logger.debug(
                 "skipping point[{}] per insufficient history for algorithm {}",
@@ -700,7 +707,6 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
           }
         }
 
-
         @tailrec def loop( points: List[DoublePoint], accumulation: TryV[Accumulation] ): TryV[Seq[Advanced]] = {
           points match {
             case Nil => accumulation map { _.advances }
@@ -709,7 +715,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
               val newAcc = {
                 for {
                   acc <- accumulation
-                  ot <- tryStep( pt, acc.shape )( acc.state )
+                  ot <- tryStep( pt, acc.shape )
                   (isOutlier, threshold) = ot
                 } yield {
                   analysisContext.data
@@ -732,7 +738,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
                     )
 
                     acc.copy(
-                      state = acceptance(event, acc.state),
+//                      state = acceptance(event, acc.state),
                       shape = shapeCompanion.advance(acc.shape, event),
                       advances = acc.advances :+ event
                     )
@@ -749,26 +755,22 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
           }
         }
 
-        val events = loop(
+        loop(
           points = points.toList,
           accumulation = Accumulation(
-            state = state,
+//            state = state,
             topic = analysisContext.topic,
             shape = state.shapes.get(analysisContext.topic) getOrElse shapeCompanion.zero( Option(analysisContext.configuration) )
           ).right
         )
-
-        events foreach { persistAdvancements }
-        events
       }
     }
 
-    private def persistAdvancements( events: Seq[Advanced] ): Unit = {
-      events foreach { evt =>
-        persist( evt ){ e =>
-          val newState = accept( e )
-          log.debug( "advanced [{}]: to state=[{}]", aggregateId, newState )
-        }
+    private val recordAdvancements: KOp[Seq[Advanced], Seq[Advanced]] = {
+      kleisli[TryV, Seq[Advanced], Seq[Advanced]] { advances =>
+        log.debug( "TEST: recordAdvancements: [{}]", advances.mkString("\n", "\n", "\n") )
+        advances foreach { evt => persist( evt ){ accept } }
+        advances.right
       }
     }
 

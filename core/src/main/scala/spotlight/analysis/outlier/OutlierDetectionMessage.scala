@@ -18,10 +18,10 @@ import spotlight.model.outlier.OutlierPlan.Scope
   * Created by rolfsd on 9/21/16.
   */
 sealed trait OutlierDetectionMessage extends CommandLike {
-  override type ID = OutlierPlan.Scope
+  override type ID = AnalysisPlanModule.module.ID
   //todo: detect message is routed to many algorithms, each with own tag. This targetId is set to a dummy tag knowing that
   // aggregate routing uses id portion only and ignores tag.
-  override def targetId: TID = TaggedID( 'detect, OutlierPlan.Scope(plan, topic) )
+  override def targetId: TID = plan.id
   def topic: Topic
   type Source <: TimeSeriesBase
   def evSource: ClassTag[Source]

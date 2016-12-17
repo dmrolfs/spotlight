@@ -315,6 +315,9 @@ object PlanCatalog extends LazyLogging {
       }
     }
   }
+
+
+  case object NoRegisteredPlansError extends IllegalStateException("Cannot create detection model without registered plans")
 }
 
 class PlanCatalog( boundedContext: BoundedContext )
@@ -532,29 +535,37 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
       }
     }
 
-    def detectFrom( planFlows: Set[DetectFlow] ): DetectFlow = {
+    def detectFrom( planFlows: Set[DetectFlow] ): Future[DetectFlow] = {
       val nrFlows = planFlows.size
       log.debug( "making PlanCatalog graph with [{}] plans", nrFlows )
 
-      val g = GraphDSL.create() { implicit b =>
-        import GraphDSL.Implicits._
+      val graph = Future {
+        GraphDSL.create() { implicit b =>
+          import GraphDSL.Implicits._
 
-        val broadcast = b.add( Broadcast[TimeSeries]( nrFlows ) )
-        val merge = b.add( Merge[Outliers]( nrFlows ) )
-        val intake = b.add( Flow[TimeSeries].map{ identity }.watchFlow( WatchPoints.Intake ) )
-        val outlet = b.add( Flow[Outliers].map{ identity }.watchFlow( WatchPoints.Outlet ) )
+          val intake = b.add( Flow[TimeSeries].map{ identity }.watchFlow( WatchPoints.Intake ) )
+          val outlet = b.add( Flow[Outliers].map{ identity }.watchFlow( WatchPoints.Outlet ) )
 
-        intake ~> broadcast.in
-        planFlows.zipWithIndex foreach { case (pf, i) =>
-          log.debug( "adding to catalog flow, order undefined analysis flow [{}]", i )
-          val flow = b.add( pf )
-          broadcast.out( i ) ~> flow ~> merge.in( i )
+          if ( planFlows.nonEmpty ) {
+            val broadcast = b.add( Broadcast[TimeSeries]( nrFlows ) )
+            val merge = b.add( Merge[Outliers]( nrFlows ) )
+
+            intake ~> broadcast.in
+            planFlows.zipWithIndex foreach { case (pf, i) =>
+              log.debug( "adding to catalog flow, order undefined analysis flow [{}]", i )
+              val flow = b.add( pf )
+              broadcast.out( i ) ~> flow ~> merge.in( i )
+            }
+            merge.out ~> outlet
+          } else {
+            throw PlanCatalog.NoRegisteredPlansError
+          }
+
+          FlowShape( intake.in, outlet.out )
         }
-        merge.out ~> outlet
-        FlowShape( intake.in, outlet.out )
       }
 
-      Flow.fromGraph( g ).named( "PlanCatalogFlow" ).watchFlow( WatchPoints.Catalog )
+      graph map { g => Flow.fromGraph( g ).named( "PlanCatalogFlow" ).watchFlow( WatchPoints.Catalog ) }
     }
 
     for {
@@ -562,8 +573,8 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
       plans <- collectPlans()
       _ = log.debug( "PlanCatalog: collect plans: [{}]", plans )
       planFlows <- collectPlanFlows( model, plans )
+      f <- detectFrom( planFlows )
     } yield {
-      val f = detectFrom( planFlows )
       log.debug( "PlanCatalog detect flow graph created: [{}]", f.toString )
       f
     }

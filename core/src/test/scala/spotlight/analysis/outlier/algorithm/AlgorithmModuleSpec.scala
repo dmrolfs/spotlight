@@ -2,7 +2,7 @@ package spotlight.analysis.outlier.algorithm
 
 import scala.concurrent.duration._
 import scala.reflect.ClassTag
-import akka.actor.ActorSystem
+import akka.actor.{ActorRef, ActorSystem}
 import akka.pattern.ask
 import akka.testkit._
 import com.typesafe.config.Config
@@ -17,12 +17,15 @@ import org.scalatest.{Assertion, OptionValues}
 import peds.akka.envelope._
 import peds.archetype.domain.model.core.EntityIdentifying
 import peds.commons.V
+import peds.commons.identifier.ShortUUID
 import peds.commons.log.Trace
 import spotlight.analysis.outlier.{DetectOutliersInSeries, DetectUsing, HistoricalStatistics}
 import spotlight.analysis.outlier.algorithm.{AlgorithmProtocol => P}
 import spotlight.model.outlier._
 import spotlight.model.timeseries._
 import spotlight.testkit.TestCorrelatedSeries
+
+import scala.concurrent.Await
 
 
 /**
@@ -93,24 +96,20 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
 
     lazy val id: module.TID = nextId()
 
-    val scope: module.TID = identifying tag OutlierPlan.Scope( plan = "TestPlan", topic = "test.topic" )
+    val scope = OutlierPlan.Scope( plan = "TestPlan", topic = "test.topic" )
     val plan = mock[OutlierPlan]
-    when( plan.name ).thenReturn( scope.id.plan )
+    when( plan.id ).thenReturn( fixture.id )
+    when( plan.name ).thenReturn( scope.plan )
     when( plan.appliesTo ).thenReturn( fixture.appliesToAll )
     when( plan.algorithms ).thenReturn( Set( module.algorithm.label ) )
 
-    lazy val aggregate = module aggregateOf id
+    lazy val aggregate: ActorRef = {
+      val r = module aggregateOf id
+      logger.info( "TEST: AGGREGATE id:[{}] from module ref:[{}]", id, r )
+      r
+    }
 
-    override def nextId(): module.TID = fixture.scope
-
-    //    override def nextId(): TID = identifying.nextIdAs[TID] match {
-    //      case \/-( tid ) => tid
-    //      case -\/( ex ) => {
-    //        logger.error( "failed to create next ID", ex )
-    //        throw ex
-    //      }
-    //    }
-
+    override def nextId(): module.TID = AlgorithmModule.identifying.tag( ShortUUID() )
 
     override def before(test: OneArgTest): Unit = {
       super.before( test )
@@ -119,35 +118,20 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
 
     type Module = outer.Module
     override lazy val module: Module = outer.defaultModule
-    implicit val evState: ClassTag[module.State] = module.evState.asInstanceOf[ClassTag[module.State]]
+    implicit val evShape: ClassTag[module.Shape] = module.evShape
 
     override def rootTypes: Set[AggregateRootType] = Set( module.rootType )
 
 
     type TestState = module.State
-    type TestAdvanced = P.Advanced
     type TestShape = module.Shape
-    val shapeLens = module.analysisStateCompanion.shapeLens
+
+//    val shapeLens = module.analysisStateCompanion.shapeLens
     //    val thresholdLens = module.analysisStateCompanion.thresholdLens
     //    val advancedLens = shapeLens ~ thresholdLens
-    val advancedLens = shapeLens
+//    val advancedLens = shapeLens
 
-    def expectedUpdatedState(state: TestState, event: TestAdvanced): TestState = trace.block( s"expectedUpdatedState" ) {
-      logger.debug( "TEST: argument state=[{}]", state )
-      val result = advancedLens.modify( state ) { case shape =>
-        logger.debug( "TEST: in advancedLens: BEFORE shape=[{}]", shape )
-        val newShape = module.analysisStateCompanion.advanceShape( shape, event )
-        logger.debug( "TEST: in advancedLens: AFTER shape=[{}]", newShape )
-
-        newShape
-        //        (
-        //          newShape,
-        //          thresholds :+ event.threshold
-        //        )
-      }
-      logger.debug( "TEST: MODIFIED State Shape:[{}]", shapeLens get result )
-      result
-    }
+    def expectedUpdatedShape( shape: TestShape, event: P.Advanced): TestShape
 
     import AlgorithmModule.AnalysisState
 
@@ -172,7 +156,12 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
 
     implicit val shapeOrdering: Ordering[TestShape]
 
-    def actualVsExpectedShape(actual: TestShape, expected: TestShape)(implicit ordering: Ordering[TestShape]): Unit = {
+    def actualVsExpectedShape(
+      actual: TestShape,
+      expected: TestShape
+    )(
+      implicit ordering: Ordering[TestShape]
+    ): Unit = {
       logger.debug( "TEST: actualVsExpected SHAPE:\n  Actual:[{}]\nExpected:[{}]", actual.toString, expected.toString )
       assert( ordering.equiv( actual, expected ) )
       assert( ordering.equiv( expected, actual ) )
@@ -184,9 +173,10 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
       series: TimeSeries,
       history: HistoricalStatistics,
       expectedResults: Seq[Expected],
-      assertStateFn: ( module.State ) => Assertion = (_: module.State) => succeed
+      assertShapeFn: ( TestShape ) => Assertion = (_: TestShape) => succeed
     ): Unit = {
       import scala.concurrent.duration._
+      logger.info( "TEST: ShortUUID id:[{}] aggregate.path:[{}]", id, aggregate.path )
       aggregate.sendEnvelope(
         DetectUsing(
           algorithm = module.algorithm.label,
@@ -200,7 +190,8 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
       val expectedAnomalies = expectedResults.exists { e => e.isOutlier }
 
       sender.expectMsgPF( 500.millis.dilated, hint ) {
-        case m@Envelope( SeriesOutliers( a, s, p, o, t ), _ ) if expectedAnomalies => {
+        case m @ Envelope( SeriesOutliers( a, s, p, o, t ), _ ) if expectedAnomalies => {
+          logger.info( "evaluate EXPECTED ANOMALIES..." )
           a mustBe Set( module.algorithm.label )
           s mustBe series
           o.size mustBe 1
@@ -214,7 +205,8 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
           }
         }
 
-        case m@Envelope( NoOutliers( a, s, p, t ), _ ) if !expectedAnomalies => {
+        case m @ Envelope( NoOutliers( a, s, p, t ), _ ) if !expectedAnomalies => {
+          logger.info( "evaluate EXPECTED normal..." )
           a mustBe Set( module.algorithm.label )
           s mustBe series
 
@@ -241,20 +233,23 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
         }
       }
 
+      logger.info( "TEST: --- AFTER DETECTUSING ---")
+
       import akka.pattern.ask
 
-      val actual = ( aggregate ? P.GetStateSnapshot( id ) ).mapTo[P.StateSnapshot]
+      logger.info( "TEST: --  GETTING SNAPSHOT ---")
+
+      val actual = ( aggregate ? P.GetTopicShapeSnapshot( id, series.topic ) ).mapTo[P.TopicShapeSnapshot]
       whenReady( actual, timeout( 15.seconds.dilated ) ) { a =>
         val as = a.snapshot
         logger.info( "{}: ACTUAL = [{}]", hint, as )
-        a.snapshot mustBe defined
         as mustBe defined
-        as.value mustBe an[module.State]
-        val sas = as.value.asInstanceOf[module.State]
-        sas.id.id mustBe id.id
-        sas.algorithm.name mustBe module.algorithm.label.name
+        as.value mustBe an[TestShape]
+        val sas = as.value.asInstanceOf[TestShape]
+        a.sourceId.id mustBe id.id
+        a.algorithm.name mustBe module.algorithm.label.name
         logger.info( "asserting state: {}", sas )
-        assertStateFn( sas )
+        assertShapeFn( sas )
       }
     }
   }
@@ -443,7 +438,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
         import f._
 
         logger.debug( "aggregate = [{}]", aggregate )
-        val actual = ( aggregate ? P.GetStateSnapshot( id ) ).mapTo[P.StateSnapshot]
+        val actual = ( aggregate ? P.GetTopicShapeSnapshot( id, scope.topic ) ).mapTo[P.TopicShapeSnapshot]
         whenReady( actual, timeout(5.seconds) ) { a =>
           a.sourceId.id mustBe id.id
           a.snapshot mustBe None
@@ -455,15 +450,18 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
 
         val pt = DataPoint( nowTimestamp, 3.14159 )
         val t = ThresholdBoundary( nowTimestamp, Some(1.1), Some(2.2), Some(3.3) )
-        val adv = P.Advanced( id, pt, true, t )
+        val adv = P.Advanced( id, scope.topic, pt, true, t )
         logger.debug( "TEST: Advancing: [{}] for id:[{}]", adv, id )
         aggregate ! adv
 
         Thread.sleep(1000)
         logger.debug( "TEST: getting current state of id:[{}]...", id )
-        whenReady( ( aggregate ? P.GetStateSnapshot(id) ).mapTo[P.StateSnapshot], timeout(15.seconds.dilated) ){ s1 =>
-          val zero = module.analysisStateCompanion.zero( id )
-          actualVsExpectedState( s1.snapshot, Option(expectedUpdatedState(zero, adv)) )
+        whenReady(
+          ( aggregate ? P.GetTopicShapeSnapshot( id, adv.topic ) ).mapTo[P.TopicShapeSnapshot],
+          timeout( 15.seconds.dilated
+        ) ){ s1 =>
+          val zero = module.shapeCompanion.zero( None )
+          actualVsExpectedShape( s1.snapshot.get.asInstanceOf[TestShape], expectedUpdatedShape(zero, adv) )
         }
       }
     }
@@ -471,40 +469,34 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
 
 
   def analysisStateSuite(): Unit = {
-    s"${defaultModule.algorithm.label.name} state" should {
-      "advance state" in { f: Fixture =>
-        import f._
-        val zero = module.analysisStateCompanion.zero( id )
-        val pt = DataPoint( nowTimestamp, 3.14159 )
-        val t = ThresholdBoundary( nowTimestamp, Some(1.1), Some(2.2), Some(3.3) )
-        val adv = P.Advanced( id, pt, false, t )
-//        val zeroWithThreshold = thresholdLens.modify( zero ){ _ :+ t }
-        val zeroWithThreshold = zero
-        val actual = shapeLens.modify( zeroWithThreshold ){ s => module.analysisStateCompanion.advanceShape(s, adv) }
-        val expected = expectedUpdatedState( zero, adv )
-        logger.debug( "TEST: expectedState=[{}]", expected )
-        actualVsExpectedState( Option(actual), Option(expected) )
-      }
+    s"${defaultModule.algorithm.label.name}" should {
+//      "advance state" in { f: Fixture =>
+//        import f._
+//        val zero = module.shapeCompanion.zero( None )
+//        val pt = DataPoint( nowTimestamp, 3.14159 )
+//        val t = ThresholdBoundary( nowTimestamp, Some(1.1), Some(2.2), Some(3.3) )
+//        val adv = P.Advanced( id, scope.topic, pt, false, t )
+////        val zeroWithThreshold = thresholdLens.modify( zero ){ _ :+ t }
+//        val zeroWithThreshold = zero
+//        val actual = module.shapeCompanion.advance( zeroWithThreshold, adv )
+////        val actual = shapeLens.modify( zeroWithThreshold ){ s => module.analysisStateCompanion.advanceShape(s, adv) }
+//        val expected = expectedUpdatedShape( zero, adv )
+//        logger.debug( "TEST: expectedState=[{}]", expected )
+//        actualVsExpectedShape( actual, expected )
+//      }
 
       "advance shape" in { f: Fixture =>
         import f._
-        val zero = module.analysisStateCompanion.zero( id )
+        val zero = module.shapeCompanion.zero( None )
         logger.debug( "TEST: zero=[{}]", zero)
         val pt = DataPoint( nowTimestamp, 3.14159 )
         val t = ThresholdBoundary( nowTimestamp, Some(1.1), Some(2.2), Some(3.3) )
-        val adv = P.Advanced( id, pt, false, t )
-        val expected = advancedLens.modify( zero ){ case shape =>
-//          (
-//            module.analysisStateCompanion.updateShape( shape, adv ),
-//            thresholds :+ adv.threshold
-//          )
-          module.analysisStateCompanion.advanceShape( shape, adv )
-        }
+        val adv = P.Advanced( id, scope.topic, pt, false, t )
+        val expected = expectedUpdatedShape( zero, adv )
         logger.debug( "TEST: expectedState=[{}]", expected )
 
-        val zeroShape = shapeLens.get( zero )
-        val actualShape = module.analysisStateCompanion.advanceShape( zeroShape, adv )
-        actualVsExpectedShape( actualShape, shapeLens get expected )
+        val actual = module.shapeCompanion.advance( zero, adv )
+        actualVsExpectedShape( actual, expected )
       }
     }
   }

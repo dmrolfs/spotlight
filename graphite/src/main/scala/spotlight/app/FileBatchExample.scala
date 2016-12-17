@@ -203,7 +203,7 @@ object FileBatchExample extends Instrumented with StrictLogging {
     val limiterRef = system.actorOf(
       Limiter.props(
         Runtime.getRuntime.availableProcessors(),
-        50.milliseconds,
+        100.milliseconds,
         Runtime.getRuntime.availableProcessors()
       ),
       "rate-limiter"

@@ -35,35 +35,27 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmModuleSpec[SimpleMovingA
       }
     }
 
-    override def expectedUpdatedState( state: module.State, event: P.Advanced ): module.State = {
-      val historicalStatsLens = module.State.shapeLens
-      val s = super.expectedUpdatedState( state, event ).asInstanceOf[SimpleMovingAverageAlgorithm.State]
-      val stats = s.statistics.copy()
-      stats addValue event.point.value
-      historicalStatsLens.set( s )( stats )
+    override def expectedUpdatedShape( shape: TestShape, event: P.Advanced ): TestShape = {
+      val newShape = shape.copy()
+      newShape addValue event.point.value
+      newShape
     }
 
-    def assertState( result: Option[CalculationMagnetResult] )( s: module.State ): Assertion = {
+    def assertShape( result: Option[CalculationMagnetResult], topic: Topic )( s: TestShape ): Assertion = {
       logger.info( "assertState result:[{}]", result )
 
-      val expectedN = for { r <- result; s <- r.statistics } yield s.getN
+      val expectedStats = for { r <- result; s <- r.statistics } yield ( s.getN, s.getMean, s.getStandardDeviation )
 
-      s.statistics.getN mustBe ( if ( expectedN.isDefined  ) expectedN.get else 0 )
-
-      val msd = for {
-        r <- result
-        s <- r.statistics
-      } yield ( s.getMean, s.getStandardDeviation )
-
-      msd match {
+      expectedStats match {
         case None => {
-          assert( s.statistics.getMean.isNaN )
-          assert( s.statistics.getStandardDeviation.isNaN )
+          assert( s.getMean.isNaN )
+          assert( s.getStandardDeviation.isNaN )
         }
 
-        case Some( (expected, standardDeviation) ) => {
-          s.statistics.getMean mustBe expected
-          s.statistics.getStandardDeviation mustBe standardDeviation
+        case Some( (size, mean, standardDeviation) ) => {
+          s.getN mustBe size
+          s.getMean mustBe mean
+          s.getStandardDeviation mustBe standardDeviation
         }
       }
     }
@@ -109,12 +101,12 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmModuleSpec[SimpleMovingA
       logger.info( "************** TEST NOW ************" )
       val algorithm = module.algorithm
       implicit val testContext = mock[module.Context]
-      val testHistory: module.Shape = module.makeShape()
+      val testShape: module.Shape = module.shapeCompanion.zero( None )
 
       implicit val testState = mock[module.State]
-      when( testState.statistics ).thenReturn( testHistory )
+      when( testState.shapes ).thenReturn( Map(scope.topic -> testShape) )
 
-      def advanceWith( v: Double ): Unit = testHistory addValue v
+      def advanceWith( v: Double ): Unit = testShape addValue v
 
       val data = Seq[Double](1, 1, 1, 1, 1000)
       val expected = Seq(
@@ -129,9 +121,9 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmModuleSpec[SimpleMovingA
       for {
         ( (value, expected), i ) <- dataAndExpected.zipWithIndex
       } {
-        testHistory.getN mustBe i
+        testShape.getN mustBe i
         val ts = nowTimestamp.plusSeconds( 10 * i )
-        algorithm.step( ts.getMillis.toDouble, value ) mustBe expected.stepResult( i )
+        algorithm.step( (ts.getMillis.toDouble, value), testShape ) mustBe expected.stepResult( i )
         advanceWith( value )
       }
     }
@@ -150,7 +142,7 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmModuleSpec[SimpleMovingA
         series = s1,
         history = h1,
         expectedResults = e1,
-        assertStateFn = assertState( r1 )( _: module.State )
+        assertShapeFn = assertShape( r1, scope.topic )( _: TestShape )
       )
 
       val dp2 = makeDataPoints(
@@ -170,7 +162,7 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmModuleSpec[SimpleMovingA
         series = s2,
         history = h2,
         expectedResults = e2,
-        assertStateFn = assertState( r2 )( _: module.State )
+        assertShapeFn = assertShape( r2, scope.topic )( _: TestShape )
       )
     }
   }

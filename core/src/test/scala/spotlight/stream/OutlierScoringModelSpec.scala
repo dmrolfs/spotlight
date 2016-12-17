@@ -395,7 +395,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
       import demesne.module.entity.{ messages => EntityMessages }
       model.aggregateOf( AnalysisPlanModule.module.rootType, defaultPlan.id ) ! EntityMessages.Add( defaultPlan.id, Some(defaultPlan))
 
-      Thread.sleep( 250 ) // ugh let plan added
+      Thread.sleep( 1000 ) // ugh let plan added
 
       implicit val timeout = akka.util.Timeout( 5.seconds )
       logger.info( "BOOTSTRAP:BEFORE BoundedContext roottypes = [{}]", boundedContext.unsafeModel.rootTypes )
@@ -404,11 +404,15 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
       val catalogRef = Await.result( Bootstrap.makeCatalog( settings )( boundedContext ), 3.seconds )
       logger.info( "Catalog ref = [{}]", catalogRef )
 
-      import PlanCatalogProtocol.{ MakeFlow, CatalogFlow }
-      val CatalogFlow( flowUnderTest ) = Await.result(
-        ( catalogRef ? MakeFlow( 2, system, timeout, materializer) ).mapTo[CatalogFlow],
-        5.seconds
-      )
+      import PlanCatalogProtocol.{ MakeFlow, CatalogFlow, WaitForStart, Started }
+      val catalogFlow = {
+        for {
+          _ <- catalogRef ? WaitForStart
+          CatalogFlow( f ) <- ( catalogRef ? MakeFlow( 2, system, timeout, materializer) ).mapTo[CatalogFlow]
+        } yield f
+      }
+
+      val flowUnderTest = Await.result( catalogFlow, 5.seconds )
 
       val now = new joda.DateTime( 2016, 3, 25, 10, 38, 40, 81 ) // new joda.DateTime( joda.DateTime.now.getMillis / 1000L * 1000L )
       logger.debug( "USE NOW = {}", now )
