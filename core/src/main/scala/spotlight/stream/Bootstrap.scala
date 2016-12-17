@@ -197,7 +197,7 @@ object Bootstrap extends Instrumented with StrictLogging {
 
     val catalogProps = PlanCatalog.props(
       configuration = settings.toConfig,
-      maxInFlightCpuFactor = settings.maxInDetectionCpuFactor, //todo different yet same
+      maxInFlightCpuFactor = settings.parallelismFactor, //todo different yet same
       applicationDetectionBudget = Some( settings.detectionBudget ),
       applicationPlans = settings.plans
     )

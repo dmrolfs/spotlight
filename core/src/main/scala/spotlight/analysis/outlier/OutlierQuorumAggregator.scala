@@ -1,8 +1,9 @@
 package spotlight.analysis.outlier
 
-import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.duration.{Duration, FiniteDuration}
 import akka.actor.{Actor, ActorLogging, Cancellable, Props}
 import akka.event.LoggingReceive
+
 import scalaz.{-\/, \/-}
 import com.typesafe.scalalogging.Logger
 import org.slf4j.LoggerFactory
@@ -31,9 +32,12 @@ object OutlierQuorumAggregator {
 
   trait ConfigurationProvider {
     def warningsBeforeTimeout: Int
-    def attemptBudget( planBudget: FiniteDuration ): FiniteDuration = {
-      if ( warningsBeforeTimeout == 0 ) planBudget
-      else planBudget / warningsBeforeTimeout.toLong
+    def attemptBudget( planBudget: Duration ): Duration = {
+      planBudget match {
+        case b if b.isFinite() && warningsBeforeTimeout == 0 => b
+        case b if b.isFinite() => b / warningsBeforeTimeout
+        case b => b
+      }
     }
   }
 }
@@ -56,11 +60,14 @@ extends EnvelopingActor with InstrumentedActor with ActorLogging { outer: Config
   implicit val ec = context.system.dispatcher
 
   var pendingWhistle: Option[Cancellable] = None
-  scheduleWhistle()
+  scheduleWhistle( attemptBudget(plan.timeout) )
 
-  def scheduleWhistle( duration: FiniteDuration = attemptBudget(plan.timeout) ): Unit = {
+  def scheduleWhistle( duration: Duration ): Unit = {
     cancelWhistle()
-    pendingWhistle = Some( context.system.scheduler.scheduleOnce(duration, self, AnalysisTimedOut(source.topic, plan)) )
+    if ( duration.isFinite() ) {
+      val budget = FiniteDuration( duration._1, duration._2 )
+      pendingWhistle = Some( context.system.scheduler.scheduleOnce(budget, self, AnalysisTimedOut(source.topic, plan)) )
+    }
   }
 
   def cancelWhistle(): Unit = {
@@ -103,7 +110,7 @@ extends EnvelopingActor with InstrumentedActor with ActorLogging { outer: Config
         )
       }
 
-      scheduleWhistle()
+      scheduleWhistle( attemptBudget(plan.timeout) )
       context become LoggingReceive { around( quorum(retriesLeft) ) }
     }
 

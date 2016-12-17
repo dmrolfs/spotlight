@@ -25,13 +25,13 @@ trait Settings extends LazyLogging {
   def protocol: GraphiteSerializationProtocol
   def windowDuration: FiniteDuration
   def graphiteAddress: Option[InetSocketAddress]
-  def detectionBudget: FiniteDuration
-  def maxInDetectionCpuFactor: Double
+  def detectionBudget: Duration
+  def parallelismFactor: Double
   def plans: Set[OutlierPlan]
   def planOrigin: ConfigOrigin
   def tcpInboundBufferSize: Int
   def workflowBufferSize: Int
-  def parallelism: Int = ( maxInDetectionCpuFactor * Runtime.getRuntime.availableProcessors() ).toInt
+  def parallelism: Int = ( parallelismFactor * Runtime.getRuntime.availableProcessors() ).toInt
 
   def config: Config
 
@@ -46,7 +46,8 @@ trait Settings extends LazyLogging {
          |   window-duration: ${windowDuration}
          |   ${graphiteAddress.map{ ga => "graphite-address:\""+ga.toString+"\"" } getOrElse "" }
          |   detection-budget: ${detectionBudget}
-         |   max-in-detection-cpu-factor: ${maxInDetectionCpuFactor}
+         |   parallelism-factor: ${parallelismFactor}
+         |   parallelism: ${parallelism}
          |   tcp-inbound-buffer-size: ${tcpInboundBufferSize}
          |   workflow-buffer-size: ${workflowBufferSize}
          | }
@@ -122,9 +123,8 @@ object Settings extends LazyLogging {
   //    }
   //  }
 
-  def detectionBudgetFrom( c: Config ): Option[FiniteDuration] = {
-    val Path = SettingsPathRoot + "detection-budget"
-    if ( c hasPath Path ) Some( FiniteDuration(c.getDuration(Path, NANOSECONDS), NANOSECONDS) ) else None
+  def detectionBudgetFrom( c: Config ): Option[Duration] = {
+    spotlight.analysis.outlier.durationFrom( c, SettingsPathRoot + "detection-budget" )
   }
 
   def maxInDetectionCpuFactorFrom( c: Config ): Option[Double] = {
@@ -310,11 +310,9 @@ object Settings extends LazyLogging {
   ) extends Settings with LazyLogging {
     override def clusterPort: Int = config.getInt( SimpleSettings.AkkaRemotePortPath )
 
-    override def detectionBudget: FiniteDuration = {
-      FiniteDuration( config.getDuration(Directory.DETECTION_BUDGET, MILLISECONDS), MILLISECONDS )
-    }
+    override def detectionBudget: Duration = spotlight.analysis.outlier.durationFrom( config, Directory.DETECTION_BUDGET ).get
 
-    override def maxInDetectionCpuFactor: Double = {
+    override def parallelismFactor: Double = {
       val path = "spotlight.workflow.detect.max-in-flight-cpu-factor"
       if ( config hasPath path ) config.getDouble( path ) else 1.0
     }
@@ -417,12 +415,14 @@ object Settings extends LazyLogging {
       result.flatten.toSet
     }
 
-    private def pullCommonPlanFacets( spec: Config ): (FiniteDuration, Set[Symbol]) = {
+    private def pullCommonPlanFacets( spec: Config ): (Duration, Set[Symbol]) = {
       import scala.collection.JavaConversions._
 
-      def effectiveBudget( budget: FiniteDuration, utilization: Double ): FiniteDuration = {
-        val utilized = budget * utilization
-        if ( utilized.isFinite ) utilized.asInstanceOf[FiniteDuration] else budget
+      def effectiveBudget( budget: Duration, utilization: Double ): Duration = {
+        budget match {
+          case b if b.isFinite() => utilization * b
+          case b => b
+        }
       }
 
       val AlgorithmsPath = "algorithms"

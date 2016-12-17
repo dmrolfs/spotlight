@@ -51,7 +51,7 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
     import GraphDSL.Implicits._
     import StreamMonitor._
 
-    val parallelism = settings.maxInDetectionCpuFactor
+    val parallelism = settings.parallelismFactor
     val budget: FiniteDuration = FiniteDuration( (settings.detectionBudget * 1.25).toMillis, MILLISECONDS )
     implicit val timeout = Timeout( budget )
 
