@@ -3,7 +3,8 @@ package spotlight.analysis.outlier
 import scala.reflect._
 import akka.NotUsed
 import akka.actor._
-import akka.stream.{Materializer, OverflowStrategy}
+import akka.stream.Supervision.{Decider, Directive}
+import akka.stream.{ActorAttributes, Materializer, OverflowStrategy}
 import akka.stream.scaladsl.Flow
 import akka.util.Timeout
 import shapeless.Lens
@@ -24,9 +25,9 @@ import demesne.index.local.IndexLocalAgent
 import demesne.{AggregateProtocol, AggregateRootType, DomainModel}
 import demesne.index.{Directive, IndexBusSubscription, StackableIndexBusPublisher}
 import demesne.module.LocalAggregate
-import peds.akka.metrics.InstrumentedActor
+import peds.akka.metrics.{Instrumented, InstrumentedActor}
 import spotlight.analysis.outlier.AnalysisPlanProtocol.{AnalysisFlow, MakeFlow}
-import spotlight.analysis.outlier.OutlierDetection.DetectionResult
+import spotlight.analysis.outlier.OutlierDetection.{DetectionResult, DetectionTimedOut}
 import spotlight.model.outlier.OutlierPlan.Scope
 import spotlight.model.outlier._
 import spotlight.model.timeseries.TimeSeriesBase.Merging
@@ -104,7 +105,13 @@ object AnalysisPlanProtocol extends AggregateProtocol[OutlierPlan#ID]{
 /**
   * Created by rolfsd on 5/26/16.
   */
-object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLogging {
+object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumented with LazyLogging {
+  override lazy val metricBaseName: MetricName = MetricName( getClass )
+
+  val droppedSeriesMeter: Meter = metrics.meter( "dropped", "series" )
+  val droppedPointsMeter: Meter = metrics.meter( "dropped", "points" )
+
+
   implicit val identifying: EntityIdentifying[OutlierPlan] = {
     new EntityIdentifying[OutlierPlan] with ShortUUID.ShortUuidIdentifying[OutlierPlan] {
       override val evEntity: ClassTag[OutlierPlan] = classTag[OutlierPlan]
@@ -154,22 +161,23 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
 
 
   object AggregateRoot {
-    object OutlierPlanActor {
-      def props( model: DomainModel, rootType: AggregateRootType ): Props = Props( new Default(model, rootType) )
 
-      private class Default( model: DomainModel, rootType: AggregateRootType )
-      extends OutlierPlanActor( model, rootType )
-      with WorkerProvider
-      with FlowConfigurationProvider
-      with StackableStreamPublisher
-      with StackableIndexBusPublisher {
+    object OutlierPlanActor {
+      def props(model: DomainModel, rootType: AggregateRootType): Props = Props( new Default( model, rootType ) )
+
+      private class Default(model: DomainModel, rootType: AggregateRootType)
+        extends OutlierPlanActor( model, rootType )
+                with WorkerProvider
+                with FlowConfigurationProvider
+                with StackableStreamPublisher
+                with StackableIndexBusPublisher {
         override val bufferSize: Int = 1000
 
-        override protected def onPersistRejected( cause: Throwable, event: Any, seqNr: Long ): Unit = {
+        override protected def onPersistRejected(cause: Throwable, event: Any, seqNr: Long): Unit = {
           log.error(
-            "Rejected to persist event type [{}] with sequence number [{}] for persistenceId [{}] due to [{}].",
-            event.getClass.getName, seqNr, persistenceId, cause
-          )
+                     "Rejected to persist event type [{}] with sequence number [{}] for persistenceId [{}] due to [{}].",
+                     event.getClass.getName, seqNr, persistenceId, cause
+                   )
           throw cause
         }
       }
@@ -179,38 +187,42 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
         def bufferSize: Int
       }
 
-      trait WorkerProvider { provider: Actor with ActorLogging =>
+      trait WorkerProvider {
+        provider: Actor with ActorLogging =>
         def model: DomainModel
+
         def plan: OutlierPlan
 
-        def makeRouter()( implicit context: ActorContext ): ActorRef = {
+        def makeRouter()(implicit context: ActorContext): ActorRef = {
           val algorithmRefs = for {
             name <- plan.algorithms.toSeq
             rt <- DetectionAlgorithmRouter.rootTypeFor( name )( context.dispatcher ).toSeq
-          } yield ( name, DetectionAlgorithmRouter.RootTypeResolver(rt, model) )
+          } yield (name, DetectionAlgorithmRouter.RootTypeResolver( rt, model ))
 
           context.actorOf(
-            DetectionAlgorithmRouter.props( Map(algorithmRefs:_*) ).withDispatcher( DetectionAlgorithmRouter.DispatcherPath ),
+            DetectionAlgorithmRouter.props( Map( algorithmRefs: _* ) ).withDispatcher( DetectionAlgorithmRouter.DispatcherPath ),
             DetectionAlgorithmRouter.name( provider.plan.name )
           )
         }
 
-        def makeDetector( routerRef: ActorRef )( implicit context: ActorContext ): ActorRef = {
+        def makeDetector(routerRef: ActorRef)(implicit context: ActorContext): ActorRef = {
           context.actorOf(
             OutlierDetection.props( routerRef ).withDispatcher( OutlierDetection.DispatcherPath ),
             OutlierDetection.name( plan.name )
           )
         }
       }
+
     }
 
-    class OutlierPlanActor( override val model: DomainModel, override val rootType: AggregateRootType )
+    class OutlierPlanActor(override val model: DomainModel, override val rootType: AggregateRootType)
     extends module.EntityAggregateActor
     with InstrumentedActor
     with demesne.AggregateRoot.Provider {
       outer: OutlierPlanActor.FlowConfigurationProvider with OutlierPlanActor.WorkerProvider with EventPublisher =>
 
-      import spotlight.analysis.outlier.{ AnalysisPlanProtocol => P }
+      import akka.stream.Supervision
+      import spotlight.analysis.outlier.{AnalysisPlanProtocol => P}
 
       private val trace = Trace[OutlierPlanActor]
 
@@ -218,12 +230,14 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
       val failuresMeter: Meter = metrics.meter( "failures" )
 
       override var state: OutlierPlan = _
+
       override def plan: OutlierPlan = state
+
       override val evState: ClassTag[OutlierPlan] = ClassTag( classOf[OutlierPlan] )
 
-      lazy val ( detector, router ) = {
+      lazy val (detector, router) = {
         val r = outer.makeRouter()
-        ( outer.makeDetector(r), r )
+        (outer.makeDetector( r ), r)
       }
 
 
@@ -235,30 +249,25 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
 
         case (e: P.AlgorithmsChanged, s) => {
           //todo: cast for expediency. my ideal is to define a Lens in the OutlierPlan trait; minor solace is this module is in the same package
-          s.asInstanceOf[OutlierPlan.SimpleOutlierPlan].copy(
-            algorithms = e.algorithms,
-            algorithmConfig = e.algorithmConfig
-          )
+          s.asInstanceOf[OutlierPlan.SimpleOutlierPlan].copy( algorithms = e.algorithms, algorithmConfig = e.algorithmConfig )
         }
 
-        case (e: P.AnalysisResolutionChanged, s) =>{
+        case (e: P.AnalysisResolutionChanged, s) => {
           //todo: cast for expediency. my ideal is to define a Lens in the OutlierPlan trait; minor solace is this module is in the same package
-          s.asInstanceOf[OutlierPlan.SimpleOutlierPlan].copy(
-            isQuorum = e.isQuorum,
-            reduce = e.reduce
-          )
+          s.asInstanceOf[OutlierPlan.SimpleOutlierPlan].copy( isQuorum = e.isQuorum, reduce = e.reduce )
         }
       }
 
       val IdType = identifying.evTID
 
-      import demesne.module.entity.{ messages => EntityMessages }
+      import demesne.module.entity.{messages => EntityMessages}
+
       override def quiescent: Receive = {
-        case EntityMessages.Add( IdType(targetId), info ) if targetId == aggregateId => {
-          persist( EntityMessages.Added(targetId, info) ) { e =>
+        case EntityMessages.Add( IdType( targetId ), info ) if targetId == aggregateId => {
+          persist( EntityMessages.Added( targetId, info ) ) { e =>
             acceptAndPublish( e )
             log.debug( "AnalysisPlanModule[{}]: notifying [{}] of {}", state.name, sender().path.name, e )
-            sender() !+ e  // per akka docs: safe to use sender() here
+            sender() !+ e // per akka docs: safe to use sender() here
           }
         }
 
@@ -280,38 +289,34 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
 
       val workflow: Receive = {
         case MakeFlow( _, parallelism, system, timeout, materializer ) => {
-          sender() ! AnalysisFlow( makeFlow(parallelism)(system, timeout, materializer) )
+          sender() ! AnalysisFlow( makeFlow( parallelism )( system, timeout, materializer ) )
         }
       }
 
       val planEntity: Receive = {
         case _: P.GetPlan => sender() !+ P.PlanInfo( state.id, state )
 
-        case P.ApplyTo( id, appliesTo ) => persist( P.ScopeChanged(id, appliesTo) ) { acceptAndPublish }
+        case P.ApplyTo( id, appliesTo ) => persist( P.ScopeChanged( id, appliesTo ) ) {acceptAndPublish}
 
         case P.UseAlgorithms( id, algorithms, config ) => {
-          persist( P.AlgorithmsChanged(id, algorithms, config) ) { e =>
+          persist( P.AlgorithmsChanged( id, algorithms, config ) ) { e =>
             acceptAndPublish( e )
           }
         }
 
         case P.ResolveVia( id, isQuorum, reduce ) => {
-          persist( P.AnalysisResolutionChanged(id, isQuorum, reduce) ) { acceptAndPublish }
+          persist( P.AnalysisResolutionChanged( id, isQuorum, reduce ) ) {acceptAndPublish}
         }
       }
 
-      override def unhandled( message: Any ): Unit = {
+      override def unhandled(message: Any): Unit = {
         val total = active
         log.error(
           "[{}] UNHANDLED: [{}] (workflow,planEntity,super):[{}] total:[{}]",
           aggregateId,
           message,
-          (
-            workflow.isDefinedAt(message),
-            planEntity.isDefinedAt(message),
-            super.active.isDefinedAt(message)
-          ),
-          total.isDefinedAt(message)
+          ( workflow.isDefinedAt(message), planEntity.isDefinedAt(message), super.active.isDefinedAt(message) ),
+          total.isDefinedAt( message )
         )
         super.unhandled( message )
       }
@@ -324,12 +329,12 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
         timeout: Timeout,
         materializer: Materializer
       ): DetectFlow = {
-
         val entry = Flow[TimeSeries] filter { state.appliesTo }
-        val withGrouping = state.grouping map { g => entry.via( batchSeries(g) ) } getOrElse entry
+
+        val withGrouping = state.grouping map { g => entry.via( batchSeries( g ) ) } getOrElse entry
         withGrouping
         .buffer( outer.bufferSize, OverflowStrategy.backpressure )
-        .via( detectionFlow(state, parallelism) )
+        .via( detectionFlow( state, parallelism ) )
       }
 
       def batchSeries(
@@ -342,59 +347,48 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with LazyLoggi
         .groupedWithin( n = grouping.limit, d = grouping.window )
         .map {
           _
-          .groupBy { _.topic }
+          .groupBy {_.topic}
           .map { case (_, tss) =>
-            tss.tail.foldLeft( tss.head ){ case (acc, ts) => tsMerging.merge( acc, ts ) valueOr { exs => throw exs.head }}
+            tss.tail.foldLeft( tss.head ) { case (acc, ts) => tsMerging.merge( acc, ts ) valueOr { exs => throw exs.head } }
           }
         }
-        .mapConcat { identity }
+        .mapConcat {identity}
       }
 
-      def detectionFlow( p: OutlierPlan, parallelism: Int )( implicit system: ActorSystem, timeout: Timeout ): DetectFlow = {
+      def detectionFlow(p: OutlierPlan, parallelism: Int)(implicit system: ActorSystem, timeout: Timeout): DetectFlow = {
         Flow[TimeSeries]
-        .map { ts => log.debug( "AnalysisPlanModule:FLOW-DETECT: before-filter: [{}]", ts.toString); ts }
+        .map { ts => log.debug( "AnalysisPlanModule:FLOW-DETECT: before-filter: [{}]", ts.toString ); ts }
         .map { ts => OutlierDetectionMessage( ts, p ).disjunction }
         .collect { case scalaz.\/-( m ) => m }
-        .map { m => log.debug( "AnalysisPlanModule:FLOW-DETECT: on-to-detection-grid: [{}]", m.toString); m }
-        .mapAsync( parallelism ){ m => ( detector ?+ m ) }
+        .map { m => log.debug( "AnalysisPlanModule:FLOW-DETECT: on-to-detection-grid: [{}]", m.toString ); m }
+        .mapAsync( parallelism ) { m =>( detector ?+ m ) }.withAttributes( ActorAttributes supervisionStrategy detectorDecider )
+        .filter {
+          case Envelope( DetectionResult( outliers, _ ), _ ) => true
+          case DetectionResult( outliers, _ ) => true
+          case Envelope( DetectionTimedOut(s, _), _ ) => {
+            droppedSeriesMeter.mark()
+            droppedPointsMeter.mark( s.points.size )
+            false
+          }
+          case DetectionTimedOut( s, _ ) => {
+            droppedSeriesMeter.mark()
+            droppedPointsMeter.mark( s.points.size )
+            false
+          }
+        }
         .collect {
-          case Envelope( DetectionResult(outliers, _), _ ) => outliers
+          case Envelope( DetectionResult( outliers, _ ), _ ) => outliers
           case DetectionResult( outliers, _ ) => outliers
         }
       }
 
-      override val supervisorStrategy: SupervisorStrategy = OneForOneStrategy( maxNrOfRetries = -1 ) {
-        case ex: ActorInitializationException => {
-          log.error( ex, "AnalysisProxy[{}] stopping actor on caught initialization error", self.path )
-          failuresMeter.mark()
-          SupervisorStrategy.Stop
-        }
-
-        case ex: ActorKilledException => {
-          log.error( ex, "AnalysisProxy[{}] stopping killed actor on caught actor killed exception", self.path )
-          failuresMeter.mark()
-          SupervisorStrategy.Stop
-        }
-
-        case ex: InvalidActorNameException => {
-          log.error( ex, "AnalysisProxy[{}] restarting on caught invalid actor name", self.path )
-          failuresMeter.mark()
-          SupervisorStrategy.Restart
-        }
-
-        case ex: Exception => {
-          log.error( ex, "AnalysisProxy[{}] restarting on caught exception from child", self.path )
-          failuresMeter.mark()
-          SupervisorStrategy.Restart
-        }
-
-        case ex => {
-          log.error( ex, "AnalysisProxy[{}] restarting on unknown error from child", self.path )
-          failuresMeter.mark()
-          SupervisorStrategy.Escalate
+      val detectorDecider: Decider = new Decider {
+        override def apply( ex: Throwable ): Supervision.Directive = {
+          log.error( ex, "error in detection dropping series" )
+          droppedSeriesMeter.mark()
+          Supervision.Resume
         }
       }
-
     }
   }
 }

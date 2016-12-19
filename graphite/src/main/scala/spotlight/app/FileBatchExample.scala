@@ -200,14 +200,8 @@ object FileBatchExample extends Instrumented with StrictLogging {
 
     // parallelism * 2, 50ms, 1 => 20/s == slows at 8m
     // parallelism , 50ms, 1 => ?/s == slows at 10000 files
-    val limiterRef = system.actorOf(
-      Limiter.props(
-        Runtime.getRuntime.availableProcessors(),
-        100.milliseconds,
-        Runtime.getRuntime.availableProcessors()
-      ),
-      "rate-limiter"
-    )
+    val parallelism = Runtime.getRuntime.availableProcessors()
+    val limiterRef = system.actorOf( Limiter.props( parallelism, 50.milliseconds, parallelism ), "rate-limiter" )
 
     val graph = GraphDSL.create() { implicit b =>
       import GraphDSL.Implicits._
@@ -230,7 +224,10 @@ object FileBatchExample extends Instrumented with StrictLogging {
         .buffer( 1000, OverflowStrategy.backpressure ).watchFlow( WatchPoints.Scoring )
       )
 
-      val limiter = b.add( Limiter.limitGlobal[TimeSeries](limiterRef, 30.seconds)( system.dispatcher ) )
+      val limitDuration = 10.minutes // ( configuration.detectionBudget * 1.1 )
+      val limitWait = FiniteDuration( limitDuration._1, limitDuration._2 )
+      val limiter = b.add( Limiter.limitGlobal[TimeSeries](limiterRef, limitWait)( system.dispatcher ) )
+      // val limiter = b.add( Flow[TimeSeries].map{ identity } )
 
       val score = b.add( scoring )
 

@@ -190,6 +190,7 @@ object AlgorithmModule extends Instrumented with StrictLogging {
 
 
   val snapshotFactorizer: Random = new Random()
+
   override lazy val metricBaseName: MetricName = MetricName( classOf[AlgorithmModule] )
 
   val _uniqueCalculations: Agent[BloomFilter[AlgorithmModule.ID]] = {
@@ -360,7 +361,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
 
         Some(
           new SnapshotSpecification {
-            override val snapshotInterval: FiniteDuration = 10.minutes
+            override val snapshotInterval: FiniteDuration = 3.minutes
             override val snapshotInitialDelay: FiniteDuration = {
               val delay = snapshotInterval * AlgorithmModule.snapshotFactorizer.nextDouble()
               FiniteDuration( delay.toMillis, MILLISECONDS )
@@ -593,7 +594,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
 
       case e @ SaveSnapshotFailure( meta, ex ) => {
         stopSnapshotTimer( e )
-        log.warning( "[{}] failed to save snapshot. meta:[{}] cause:[{}]", meta, ex )
+        log.warning( "[{}] failed to save snapshot. meta:[{}] cause:[{}]", self.path.name, meta, ex )
       }
 
       case e: DeleteMessagesSuccess => {

@@ -127,7 +127,7 @@ extends EnvelopingActor with InstrumentedActor with ActorLogging { outer: Config
           plan.summary
         )
 
-        context.parent ! timeout
+        context.parent ! OutlierDetection.DetectionTimedOut( source, timeout.plan )
         context stop self
       }
     }

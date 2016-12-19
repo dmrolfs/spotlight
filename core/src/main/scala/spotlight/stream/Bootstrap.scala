@@ -164,7 +164,7 @@ object Bootstrap extends Instrumented with StrictLogging {
       implicit val bc = boundedContext
       implicit val system = boundedContext.system
       implicit val dispatcher = system.dispatcher
-      implicit val timeout = Timeout( 1.minute ) //todo: define in Settings
+      implicit val detectionTimeout = Timeout( 10.minutes ) //todo: define in Settings
       implicit val materializer = ActorMaterializer(
         ActorMaterializerSettings( system ) withSupervisionStrategy supervisionDecider
       )
