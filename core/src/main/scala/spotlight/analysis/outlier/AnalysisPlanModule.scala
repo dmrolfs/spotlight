@@ -151,7 +151,7 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
     .builder
     .set( BTag, identifying.idTag )
     .set( Environment, LocalAggregate )
-    .set( BProps, AggregateRoot.OutlierPlanActor.props(_, _) )
+    .set( BProps, AggregateRoot.PlanActor.props(_, _) )
     .set( Indexes, indexes )
     .set( IdLens, OutlierPlan.idLens )
     .set( NameLens, OutlierPlan.nameLens )
@@ -162,22 +162,22 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
 
   object AggregateRoot {
 
-    object OutlierPlanActor {
-      def props(model: DomainModel, rootType: AggregateRootType): Props = Props( new Default( model, rootType ) )
+    object PlanActor {
+      def props( model: DomainModel, rootType: AggregateRootType ): Props = Props( new Default( model, rootType ) )
 
       private class Default(model: DomainModel, rootType: AggregateRootType)
-        extends OutlierPlanActor( model, rootType )
-                with WorkerProvider
-                with FlowConfigurationProvider
-                with StackableStreamPublisher
-                with StackableIndexBusPublisher {
+      extends PlanActor( model, rootType )
+      with WorkerProvider
+      with FlowConfigurationProvider
+      with StackableStreamPublisher
+      with StackableIndexBusPublisher {
         override val bufferSize: Int = 1000
 
         override protected def onPersistRejected(cause: Throwable, event: Any, seqNr: Long): Unit = {
           log.error(
-                     "Rejected to persist event type [{}] with sequence number [{}] for persistenceId [{}] due to [{}].",
-                     event.getClass.getName, seqNr, persistenceId, cause
-                   )
+            "Rejected to persist event type [{}] with sequence number [{}] for persistenceId [{}] due to [{}].",
+            event.getClass.getName, seqNr, persistenceId, cause
+          )
           throw cause
         }
       }
@@ -193,7 +193,7 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
 
         def plan: OutlierPlan
 
-        def makeRouter()(implicit context: ActorContext): ActorRef = {
+        def makeRouter()( implicit context: ActorContext ): ActorRef = {
           val algorithmRefs = for {
             name <- plan.algorithms.toSeq
             rt <- DetectionAlgorithmRouter.rootTypeFor( name )( context.dispatcher ).toSeq
@@ -205,7 +205,7 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
           )
         }
 
-        def makeDetector(routerRef: ActorRef)(implicit context: ActorContext): ActorRef = {
+        def makeDetector( routerRef: ActorRef )( implicit context: ActorContext ): ActorRef = {
           context.actorOf(
             OutlierDetection.props( routerRef ).withDispatcher( OutlierDetection.DispatcherPath ),
             OutlierDetection.name( plan.name )
@@ -215,18 +215,18 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
 
     }
 
-    class OutlierPlanActor(override val model: DomainModel, override val rootType: AggregateRootType)
+    class PlanActor( override val model: DomainModel, override val rootType: AggregateRootType )
     extends module.EntityAggregateActor
     with InstrumentedActor
     with demesne.AggregateRoot.Provider {
-      outer: OutlierPlanActor.FlowConfigurationProvider with OutlierPlanActor.WorkerProvider with EventPublisher =>
+      outer: PlanActor.FlowConfigurationProvider with PlanActor.WorkerProvider with EventPublisher =>
 
       import akka.stream.Supervision
       import spotlight.analysis.outlier.{AnalysisPlanProtocol => P}
 
-      private val trace = Trace[OutlierPlanActor]
+      private val trace = Trace[PlanActor]
 
-      override lazy val metricBaseName: MetricName = MetricName( classOf[OutlierPlanActor] )
+      override lazy val metricBaseName: MetricName = MetricName( classOf[PlanActor] )
       val failuresMeter: Meter = metrics.meter( "failures" )
 
       override var state: OutlierPlan = _
@@ -309,7 +309,7 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
         }
       }
 
-      override def unhandled(message: Any): Unit = {
+      override def unhandled( message: Any ): Unit = {
         val total = active
         log.error(
           "[{}] UNHANDLED: [{}] (workflow,planEntity,super):[{}] total:[{}]",
@@ -333,7 +333,7 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
 
         val withGrouping = state.grouping map { g => entry.via( batchSeries( g ) ) } getOrElse entry
         withGrouping
-        .buffer( outer.bufferSize, OverflowStrategy.backpressure )
+//        .buffer( outer.bufferSize, OverflowStrategy.backpressure )
         .via( detectionFlow( state, parallelism ) )
       }
 
@@ -387,6 +387,18 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
           log.error( ex, "error in detection dropping series" )
           droppedSeriesMeter.mark()
           Supervision.Resume
+        }
+      }
+
+      import SupervisorStrategy.{ Stop, Resume }
+
+      override def supervisorStrategy: SupervisorStrategy = OneForOneStrategy(){
+        case _: ActorInitializationException => Stop
+        case _: ActorKilledException => Stop
+        case _: DeathPactException => Stop
+        case ex: Exception => {
+          log.error( ex, "Error during detection calculations. Resuming calculations under [{}]", self.path.name )
+          Resume
         }
       }
     }

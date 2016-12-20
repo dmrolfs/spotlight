@@ -4,10 +4,10 @@ import java.io.Serializable
 
 import scala.annotation.tailrec
 import scala.concurrent.ExecutionContext
-import scala.concurrent.duration.{Duration, FiniteDuration, MINUTES, NANOSECONDS}
+import scala.concurrent.duration._
 import scala.util.Random
 import scala.reflect._
-import akka.actor.{ActorPath, Props}
+import akka.actor.{ActorPath, ActorRef, Props, SupervisorStrategy}
 import akka.agent.Agent
 import akka.cluster.sharding.ShardRegion
 import akka.event.LoggingReceive
@@ -355,23 +355,24 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
   class RootType extends AggregateRootType {
     //todo: make configuration driven for algorithms
     override val snapshotPeriod: Option[FiniteDuration] = None // not used - snapshot timing explicitly defined below
-    override def snapshot: Option[SnapshotSpecification] = {
-      snapshotPeriod map { _ => super.snapshot } getOrElse {
-        import scala.concurrent.duration._
+    override def snapshot: Option[SnapshotSpecification] = None
+//    override def snapshot: Option[SnapshotSpecification] = {
+//      snapshotPeriod map { _ => super.snapshot } getOrElse {
+//        import scala.concurrent.duration._
+//
+//        Some(
+//          new SnapshotSpecification {
+//            override val snapshotInterval: FiniteDuration = 30.seconds
+//            override val snapshotInitialDelay: FiniteDuration = {
+//              val delay = snapshotInterval * AlgorithmModule.snapshotFactorizer.nextDouble()
+//              FiniteDuration( delay.toMillis, MILLISECONDS )
+//            }
+//          }
+//        )
+//      }
+//    }
 
-        Some(
-          new SnapshotSpecification {
-            override val snapshotInterval: FiniteDuration = 3.minutes
-            override val snapshotInitialDelay: FiniteDuration = {
-              val delay = snapshotInterval * AlgorithmModule.snapshotFactorizer.nextDouble()
-              FiniteDuration( delay.toMillis, MILLISECONDS )
-            }
-          }
-        )
-      }
-    }
-
-    override val passivateTimeout: Duration = Duration( 1, MINUTES ) // Duration.Inf //todo: resolve replaying events with data tsunami
+    override val passivateTimeout: Duration = Duration.Inf // Duration( 1, MINUTES ) // Duration.Inf //todo: resolve replaying events with data tsunami
 
     override lazy val name: String = module.shardName
     override lazy val identifying: Identifying[_] = AlgorithmModule.identifying
@@ -389,7 +390,30 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
     def clusteredProps( model: DomainModel ): Props = Props( new ClusteredRepository(model) )
   }
 
-  class LocalRepository( model: DomainModel ) extends Repository( model ) with LocalAggregateContext
+  import akka.pattern.{ Backoff, BackoffOptions, BackoffSupervisor }
+
+  class LocalRepository( model: DomainModel ) extends Repository( model ) with LocalAggregateContext {
+    def backoffOptionsFor( id: String ): BackoffOptions = {
+      Backoff.onStop(
+        childProps = aggregateProps,
+        childName = id,
+        minBackoff = 3.seconds,
+        maxBackoff = 5.minutes,
+        randomFactor = 0.2
+      )
+    }
+
+    override def aggregateFor( command: Any ): ActorRef = {
+      if ( !rootType.aggregateIdFor.isDefinedAt(command) ) {
+        log.warning( "AggregateRootType[{}] does not recognize command[{}]", rootType.name, command )
+      }
+      val (id, _) = rootType aggregateIdFor command
+      val options = backoffOptionsFor( id )
+      val name = "backoff-"+id
+      context.child( name ) getOrElse { context.actorOf( BackoffSupervisor.props(options), "backoff-"+id ) }
+    }
+  }
+
   class ClusteredRepository( model: DomainModel ) extends Repository( model ) with ClusteredAggregateContext
 
   class Repository( model: DomainModel )
@@ -416,6 +440,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
   with InstrumentedActor {
     publisher: EventPublisher =>
 
+log.error( "{} AlgorithmActor instantiated: [{}]", algorithm.label, aggregateId )
     override val journalPluginId: String = "akka.persistence.algorithm.journal.plugin"
     override val snapshotPluginId: String = "akka.persistence.algorithm.snapshot.plugin"
 
@@ -504,7 +529,8 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
         }
       }
 
-      case AdvancedType( adv ) => persist( adv ) { accept }
+//      case AdvancedType( adv ) => persist( adv ) { accept }
+      case AdvancedType( adv ) => accept( adv )
     }
 
     val toOutliers = kleisli[TryV, (Outliers, Context), Outliers] { case (o, _) => o.right }
@@ -770,7 +796,8 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
     private val recordAdvancements: KOp[Seq[Advanced], Seq[Advanced]] = {
       kleisli[TryV, Seq[Advanced], Seq[Advanced]] { advances =>
         log.debug( "TEST: recordAdvancements: [{}]", advances.mkString("\n", "\n", "\n") )
-        advances foreach { evt => persist( evt ){ accept } }
+//        advances foreach { evt => persist( evt ){ accept } }
+        advances foreach { accept }
         advances.right
       }
     }

@@ -154,13 +154,13 @@ object FileBatchExample extends Instrumented with StrictLogging {
       import spotlight.analysis.outlier.PlanCatalog.{ WatchPoints => C }
       StreamMonitor.set(
         Data,
-        Intake,
+//        Intake,
         Rate,
-        C.Intake,
+//        C.Intake,
         Scoring,
         OSM.Catalog,
         C.Outlet,
-        Publish,
+//        Publish,
         Results,
         OSM.ScoringUnrecognized
       )
@@ -187,6 +187,13 @@ object FileBatchExample extends Instrumented with StrictLogging {
 //    .delay( 1.seconds )
   }
 
+  def rateLimitFlow( parallelism: Int, refreshPeriod: FiniteDuration )( implicit system: ActorSystem ): Flow[TimeSeries, TimeSeries, NotUsed] = {
+//    val limiterRef = system.actorOf( Limiter.props( parallelism, refreshPeriod, parallelism ), "rate-limiter" )
+//    val limitDuration = 3.minutes // ( configuration.detectionBudget * 1.1 )
+//    val limitWait = FiniteDuration( limitDuration._1, limitDuration._2 )
+//    Limiter.limitGlobal[TimeSeries](limiterRef, limitWait)( system.dispatcher )
+    Flow[TimeSeries].map{ identity }
+  }
 
   def detectionWorkflow(
     context: BoundedContext,
@@ -197,11 +204,6 @@ object FileBatchExample extends Instrumented with StrictLogging {
     materializer: Materializer
   ): Flow[String, SimpleFlattenedOutlier, NotUsed] = {
     val conf = configuration
-
-    // parallelism * 2, 50ms, 1 => 20/s == slows at 8m
-    // parallelism , 50ms, 1 => ?/s == slows at 10000 files
-    val parallelism = Runtime.getRuntime.availableProcessors()
-    val limiterRef = system.actorOf( Limiter.props( parallelism, 50.milliseconds, parallelism ), "rate-limiter" )
 
     val graph = GraphDSL.create() { implicit b =>
       import GraphDSL.Implicits._
@@ -224,11 +226,7 @@ object FileBatchExample extends Instrumented with StrictLogging {
         .buffer( 1000, OverflowStrategy.backpressure ).watchFlow( WatchPoints.Scoring )
       )
 
-      val limitDuration = 10.minutes // ( configuration.detectionBudget * 1.1 )
-      val limitWait = FiniteDuration( limitDuration._1, limitDuration._2 )
-      val limiter = b.add( Limiter.limitGlobal[TimeSeries](limiterRef, limitWait)( system.dispatcher ) )
-      // val limiter = b.add( Flow[TimeSeries].map{ identity } )
-
+      val limiter = b.add( rateLimitFlow( configuration.parallelism, 25.milliseconds ).watchFlow( WatchPoints.Rate ) )
       val score = b.add( scoring )
 
       //todo remove after working
