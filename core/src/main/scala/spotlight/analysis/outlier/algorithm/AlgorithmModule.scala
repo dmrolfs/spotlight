@@ -440,9 +440,10 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
   with InstrumentedActor {
     publisher: EventPublisher =>
 
-log.error( "{} AlgorithmActor instantiated: [{}]", algorithm.label, aggregateId )
     override val journalPluginId: String = "akka.persistence.algorithm.journal.plugin"
     override val snapshotPluginId: String = "akka.persistence.algorithm.snapshot.plugin"
+
+    log.info( "{} AlgorithmActor instantiated: [{}]", algorithm.label, aggregateId )
 
     override def preStart(): Unit = {
       super.preStart()

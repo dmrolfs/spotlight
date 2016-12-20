@@ -13,7 +13,8 @@ echo "running ${1:-spotlight.app.GraphiteSpotlight}..."
 echo
 echo
 
-java -cp graphite/target/scala-2.11/com.github.dmrolfs-spotlight-graphite-*.jar \
+CPATH="./graphite/target/scala-2.11/com.github.dmrolfs-spotlight-graphite-*.jar"
+java -classpath $CPATH \
   -Dspotlight.config=$SPOTLIGHT_CONFIG \
   -Dconfig.resource=$SPOTLIGHT_CONFIG \
   -Djava.library.path=native \
