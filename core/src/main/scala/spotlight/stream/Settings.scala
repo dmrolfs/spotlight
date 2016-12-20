@@ -313,7 +313,7 @@ object Settings extends LazyLogging {
     override def detectionBudget: Duration = spotlight.analysis.outlier.durationFrom( config, Directory.DETECTION_BUDGET ).get
 
     override def parallelismFactor: Double = {
-      val path = "spotlight.workflow.detect.max-in-flight-cpu-factor"
+      val path = "spotlight.workflow.detect.parallelism-cpu-factor"
       if ( config hasPath path ) config.getDouble( path ) else 1.0
     }
 
