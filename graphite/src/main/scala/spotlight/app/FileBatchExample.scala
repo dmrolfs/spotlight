@@ -168,7 +168,7 @@ object FileBatchExample extends Instrumented with StrictLogging {
       val publish = Flow[SimpleFlattenedOutlier].map{ identity }.watchFlow( Publish )
 
       sourceData()
-      .via( Flow[String].map{ identity }.watchFlow( Data ) )
+      .via( Flow[String].buffer( 1000, OverflowStrategy.backpressure ).watchFlow( Data ) )
       .map { e => logger.info("after the sourceData step: [{}]", e); e }
       .via( detectionWorkflow(boundedContext, configuration, scoring) )
       .via( publish )
