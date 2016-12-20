@@ -11,7 +11,7 @@ import peds.commons.util._
 /**
   * Created by rolfsd on 1/26/16.
   */
-trait Moment {
+trait Moment extends Serializable {
   def alpha: Double
   def centerOfMass: Double
   //    def halfLife: Double

@@ -102,7 +102,7 @@
 //            override def detector: ActorRef = fixture.detector.ref
 //            override def detectionBudget: FiniteDuration = 500.millis
 //            override def bufferSize: Int = 100
-//            override def maxInDetectionCpuFactor: Double = 1.0
+//            override def parallelismFactor: Double = 1.0
 ////            override def plans: Set[OutlierPlan] = ps
 //          }
 //        ),
@@ -237,7 +237,7 @@
 ////        detectorRef = detector.ref,
 ////        detectionBudget = 2.seconds,
 ////        bufferSize = 100,
-////        maxInDetectionCpuFactor = 1.0,
+////        parallelismFactor = 1.0,
 ////        plans = Set( p1, p2)
 ////      )
 ////
@@ -264,7 +264,7 @@
 //          detectorRef = detector.ref,
 //          detectionBudget = 2.seconds,
 //          bufferSize = 100,
-//          maxInDetectionCpuFactor = 1.0
+//          parallelismFactor = 1.0
 //        ),
 //        "PlanRouter"
 //      )
@@ -448,7 +448,7 @@
 ////      val graphiteFlow = OutlierScoringModel.batchSeries( parallelism = 4, windowSize = 20.millis )
 ////      val detectFlow = OutlierDetection.detectionFlow(
 ////        detector = detector,
-////        maxInDetectionCpuFactor = 1,
+////        parallelismFactor = 1,
 ////        maxAllowedWait = 2.seconds,
 ////        plans = Seq( defaultPlan )
 ////      )

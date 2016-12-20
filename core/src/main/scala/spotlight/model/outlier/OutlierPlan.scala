@@ -25,7 +25,7 @@ sealed trait OutlierPlan extends Entity with Equals {
   def appliesTo: OutlierPlan.AppliesTo
   def algorithms: Set[Symbol]
   def grouping: Option[OutlierPlan.Grouping]
-  def timeout: FiniteDuration
+  def timeout: Duration
   def isQuorum: IsQuorum
   def reduce: ReduceOutliers
   def algorithmConfig: Config
@@ -203,7 +203,7 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
 
   def apply(
     name: String,
-    timeout: FiniteDuration,
+    timeout: Duration,
     isQuorum: IsQuorum,
     reduce: ReduceOutliers,
     algorithms: Set[Symbol],
@@ -229,7 +229,7 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
 
   def apply(
     name: String,
-    timeout: FiniteDuration,
+    timeout: Duration,
     isQuorum: IsQuorum,
     reduce: ReduceOutliers,
     algorithms: Set[Symbol],
@@ -255,7 +255,7 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
 
   def forTopics(
     name: String,
-    timeout: FiniteDuration,
+    timeout: Duration,
     isQuorum: IsQuorum,
     reduce: ReduceOutliers,
     algorithms: Set[Symbol],
@@ -281,7 +281,7 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
 
   def forTopics(
     name: String,
-    timeout: FiniteDuration,
+    timeout: Duration,
     isQuorum: IsQuorum,
     reduce: ReduceOutliers,
     algorithms: Set[Symbol],
@@ -307,7 +307,7 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
 
   def forRegex(
     name: String,
-    timeout: FiniteDuration,
+    timeout: Duration,
     isQuorum: IsQuorum,
     reduce: ReduceOutliers,
     algorithms: Set[Symbol],
@@ -333,7 +333,7 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
 
   def default(
     name: String,
-    timeout: FiniteDuration,
+    timeout: Duration,
     isQuorum: IsQuorum,
     reduce: ReduceOutliers,
     algorithms: Set[Symbol],
@@ -373,7 +373,7 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
     override val appliesTo: OutlierPlan.AppliesTo,
     override val algorithms: Set[Symbol],
     override val grouping: Option[OutlierPlan.Grouping],
-    override val timeout: FiniteDuration,
+    override val timeout: Duration,
     override val isQuorum: IsQuorum,
     override val reduce: ReduceOutliers,
     override val algorithmConfig: Config,

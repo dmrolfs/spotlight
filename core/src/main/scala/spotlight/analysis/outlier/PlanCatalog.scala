@@ -63,7 +63,7 @@ object PlanCatalog extends LazyLogging {
   def props(
     configuration: Config,
     maxInFlightCpuFactor: Double = 8.0,
-    applicationDetectionBudget: Option[FiniteDuration] = None,
+    applicationDetectionBudget: Option[Duration] = None,
     applicationPlans: Set[OutlierPlan] = Set.empty[OutlierPlan]
   )(
     implicit boundedContext: BoundedContext
@@ -116,29 +116,26 @@ object PlanCatalog extends LazyLogging {
   }
 
   trait ExecutionProvider {
-    def detectionBudget: FiniteDuration
+    def detectionBudget: Duration
     def maxInFlight: Int
     def correlationId: WorkId
   }
 
   trait DefaultExecutionProvider extends ExecutionProvider { outer: EnvelopingActor with ActorLogging =>
     def configuration: Config
-    def applicationDetectionBudget: Option[FiniteDuration]
+    def applicationDetectionBudget: Option[Duration]
     def maxInFlightCpuFactor: Double
 
     override val maxInFlight: Int = ( Runtime.getRuntime.availableProcessors() * maxInFlightCpuFactor ).toInt
 
-    override lazy val detectionBudget: FiniteDuration = {
-      applicationDetectionBudget getOrElse { loadDetectionBudget( configuration ) getOrElse 10.seconds }
+    override lazy val detectionBudget: Duration = {
+      applicationDetectionBudget getOrElse {
+        loadDetectionBudget( configuration ) getOrElse { 10.seconds.toCoarsest }
+      }
     }
 
-    private def loadDetectionBudget( specification: Config ): Option[FiniteDuration] = {
-      import Default.DetectionBudgetPath
-      if ( specification hasPath DetectionBudgetPath ) {
-        Some( FiniteDuration( specification.getDuration( DetectionBudgetPath, NANOSECONDS ), NANOSECONDS ) )
-      } else {
-        None
-      }
+    private def loadDetectionBudget( specification: Config ): Option[Duration] = {
+      durationFrom( specification, Default.DetectionBudgetPath )
     }
 
     def correlationId: WorkId = {
@@ -161,7 +158,7 @@ object PlanCatalog extends LazyLogging {
     boundedContext: BoundedContext,
     configuration: Config,
     maxInFlightCpuFactor: Double = 8.0,
-    applicationDetectionBudget: Option[FiniteDuration] = None,
+    applicationDetectionBudget: Option[Duration] = None,
     applicationPlans: Set[OutlierPlan] = Set.empty[OutlierPlan]
   ) extends PlanCatalog( boundedContext ) with DefaultExecutionProvider with PlanProvider {
     private val trace = Trace[Default]
@@ -189,13 +186,12 @@ object PlanCatalog extends LazyLogging {
       }
     }
 
-    private def makePlan( name: String, planSpecification: Config )( budget: FiniteDuration ): Option[OutlierPlan] = {
+    private def makePlan( name: String, planSpecification: Config )( budget: Duration ): Option[OutlierPlan] = {
       logger.info( "PlanCatalog making plan from specification: [{}]", planSpecification )
 
       //todo: bring initialization of plans into module init and base config on init config?
       val utilization = 0.9
-      val utilized = budget * utilization
-      val timeout = if ( utilized.isFinite ) utilized.asInstanceOf[FiniteDuration] else budget
+      val timeout = budget * utilization
 
       val grouping: Option[OutlierPlan.Grouping] = {
         val GROUP_LIMIT = "group.limit"
@@ -315,6 +311,9 @@ object PlanCatalog extends LazyLogging {
       }
     }
   }
+
+
+  case object NoRegisteredPlansError extends IllegalStateException("Cannot create detection model without registered plans")
 }
 
 class PlanCatalog( boundedContext: BoundedContext )
@@ -532,29 +531,37 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
       }
     }
 
-    def detectFrom( planFlows: Set[DetectFlow] ): DetectFlow = {
+    def detectFrom( planFlows: Set[DetectFlow] ): Future[DetectFlow] = {
       val nrFlows = planFlows.size
       log.debug( "making PlanCatalog graph with [{}] plans", nrFlows )
 
-      val g = GraphDSL.create() { implicit b =>
-        import GraphDSL.Implicits._
+      val graph = Future {
+        GraphDSL.create() { implicit b =>
+          import GraphDSL.Implicits._
 
-        val broadcast = b.add( Broadcast[TimeSeries]( nrFlows ) )
-        val merge = b.add( Merge[Outliers]( nrFlows ) )
-        val intake = b.add( Flow[TimeSeries].map{ identity }.watchFlow( WatchPoints.Intake ) )
-        val outlet = b.add( Flow[Outliers].map{ identity }.watchFlow( WatchPoints.Outlet ) )
+          val intake = b.add( Flow[TimeSeries].map{ identity }.watchFlow( WatchPoints.Intake ) )
+          val outlet = b.add( Flow[Outliers].map{ identity }.watchFlow( WatchPoints.Outlet ) )
 
-        intake ~> broadcast.in
-        planFlows.zipWithIndex foreach { case (pf, i) =>
-          log.debug( "adding to catalog flow, order undefined analysis flow [{}]", i )
-          val flow = b.add( pf )
-          broadcast.out( i ) ~> flow ~> merge.in( i )
+          if ( planFlows.nonEmpty ) {
+            val broadcast = b.add( Broadcast[TimeSeries]( nrFlows ) )
+            val merge = b.add( Merge[Outliers]( nrFlows ) )
+
+            intake ~> broadcast.in
+            planFlows.zipWithIndex foreach { case (pf, i) =>
+              log.debug( "adding to catalog flow, order undefined analysis flow [{}]", i )
+              val flow = b.add( pf )
+              broadcast.out( i ) ~> flow ~> merge.in( i )
+            }
+            merge.out ~> outlet
+          } else {
+            throw PlanCatalog.NoRegisteredPlansError
+          }
+
+          FlowShape( intake.in, outlet.out )
         }
-        merge.out ~> outlet
-        FlowShape( intake.in, outlet.out )
       }
 
-      Flow.fromGraph( g ).named( "PlanCatalogFlow" ).watchFlow( WatchPoints.Catalog )
+      graph map { g => Flow.fromGraph( g ).named( "PlanCatalogFlow" ).watchFlow( WatchPoints.Catalog ) }
     }
 
     for {
@@ -562,8 +569,8 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
       plans <- collectPlans()
       _ = log.debug( "PlanCatalog: collect plans: [{}]", plans )
       planFlows <- collectPlanFlows( model, plans )
+      f <- detectFrom( planFlows )
     } yield {
-      val f = detectFrom( planFlows )
       log.debug( "PlanCatalog detect flow graph created: [{}]", f.toString )
       f
     }
