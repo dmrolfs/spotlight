@@ -1,5 +1,7 @@
 package spotlight.analysis.outlier.algorithm.statistical
 
+import com.sun.xml.internal.org.jvnet.fastinfoset.sax.helpers.EncodingAlgorithmAttributesImpl
+
 import scala.reflect.ClassTag
 import scalaz._
 import Scalaz._
@@ -88,7 +90,8 @@ object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfig
   override val evShape: ClassTag[Shape] = ClassTag( classOf[GrubbsShape] )
   override val shapeCompanion: ShapeCompanion[Shape] = GrubbsShape
 
-  override def algorithm: Algorithm = new Algorithm {
+  override def algorithm: Algorithm = AlgorithmImpl
+  object AlgorithmImpl extends Algorithm {
     override val label: Symbol = 'grubbs
     val minimumDataPoints: Int = 7
 
@@ -121,7 +124,7 @@ object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfig
       }
     }
 
-    def grubbsScore( shape: Shape )( implicit s: State, c: Context ): TryV[Double] = {
+    def grubbsScore( shape: Shape )( implicit c: Context ): TryV[Double] = {
       for {
         size <- checkSize( shape.movingStatistics.getN )
         critical <- criticalValue( shape )
