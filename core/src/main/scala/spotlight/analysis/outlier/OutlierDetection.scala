@@ -27,7 +27,7 @@ object OutlierDetection extends Instrumented with StrictLogging {
   sealed trait DetectionProtocol
   case class DetectionResult( outliers: Outliers, correlationIds: Set[WorkId] ) extends DetectionProtocol
   case class UnrecognizedTopic( topic: Topic ) extends DetectionProtocol
-  case class DetectionTimedOut( topic: Topic, plan: OutlierPlan ) extends DetectionProtocol
+  case class DetectionTimedOut( source: TimeSeriesBase, plan: OutlierPlan ) extends DetectionProtocol
 
 
   def props( routerRef: ActorRef ): Props = Props( new Default(routerRef) )
@@ -148,7 +148,7 @@ class OutlierDetection extends Actor with EnvelopingActor with InstrumentedActor
       stopIfFullyComplete( isWaitingToComplete )
     }
 
-    case timedOut @ OutlierQuorumAggregator.AnalysisTimedOut( topic, plan ) => {
+    case timedOut: DetectionTimedOut => {
       log.error( "quorum was not reached in time: [{}]", timedOut )
       val aggregator = sender()
 

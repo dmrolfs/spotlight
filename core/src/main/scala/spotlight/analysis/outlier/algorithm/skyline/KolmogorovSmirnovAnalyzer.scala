@@ -88,10 +88,12 @@ class KolmogorovSmirnovAnalyzer( override val router: ActorRef ) extends CommonA
     import java.util.concurrent.TimeUnit.MILLISECONDS
     val ReferenceOffset = algorithm.name + ".reference-offset"
 
-    val result = if ( c.messageConfig.hasPath( ReferenceOffset ) ) {
-      new joda.Duration( c.messageConfig.getDuration(ReferenceOffset, MILLISECONDS) )
-    } else {
-      joda.Days.ONE.toStandardDuration
+    val result = {
+      if ( c.messageConfig.hasPath( ReferenceOffset ) ) {
+        new joda.Duration( c.messageConfig.getDuration(ReferenceOffset, MILLISECONDS) )
+      } else {
+        joda.Days.ONE.toStandardDuration
+      }
     }
 
     result.successNel

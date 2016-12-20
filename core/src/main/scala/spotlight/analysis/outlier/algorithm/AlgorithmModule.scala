@@ -1,10 +1,13 @@
 package spotlight.analysis.outlier.algorithm
 
+import java.io.Serializable
+
 import scala.annotation.tailrec
-import scala.concurrent.duration.{Duration, FiniteDuration, MINUTES, NANOSECONDS}
+import scala.concurrent.ExecutionContext
+import scala.concurrent.duration._
 import scala.util.Random
 import scala.reflect._
-import akka.actor.{ActorPath, Props}
+import akka.actor.{ActorPath, ActorRef, Props, SupervisorStrategy}
 import akka.agent.Agent
 import akka.cluster.sharding.ShardRegion
 import akka.event.LoggingReceive
@@ -13,29 +16,26 @@ import akka.persistence.{DeleteMessagesFailure, DeleteMessagesSuccess, SaveSnaps
 import scalaz._
 import Scalaz._
 import scalaz.Kleisli.{ask, kleisli}
-import shapeless.{Lens, TypeCase}
+import shapeless.TypeCase
 import com.typesafe.config.Config
 import com.typesafe.config.ConfigException.BadValue
-import com.typesafe.scalalogging.LazyLogging
+import com.typesafe.scalalogging.{LazyLogging, StrictLogging}
 import org.apache.commons.math3.ml.clustering.DoublePoint
 import nl.grons.metrics.scala.{Meter, MetricName, Timer}
 import peds.akka.envelope._
 import peds.akka.metrics.{Instrumented, InstrumentedActor}
 import peds.akka.publish.{EventPublisher, StackableStreamPublisher}
 import peds.archetype.domain.model.core.{Entity, EntityIdentifying}
-import peds.commons.{KOp, TryV, Valid}
-import peds.commons.identifier.{Identifying, TaggedID}
+import peds.commons.{KOp, TryV}
+import peds.commons.identifier.{Identifying, ShortUUID, TaggedID}
 import peds.commons.log.Trace
 import demesne._
 import demesne.repository.{AggregateRootRepository, EnvelopingAggregateRootRepository}
 import demesne.repository.AggregateRootRepository.{ClusteredAggregateContext, LocalAggregateContext}
 import peds.commons.collection.BloomFilter
 import spotlight.analysis.outlier._
-import spotlight.analysis.outlier.algorithm.AlgorithmModule.RedundantAlgorithmConfiguration
 import spotlight.model.outlier.{NoOutliers, OutlierPlan, Outliers}
 import spotlight.model.timeseries._
-
-import scala.concurrent.ExecutionContext
 
 
 object AlgorithmProtocol extends AggregateProtocol[AlgorithmModule.AnalysisState#ID] {
@@ -45,14 +45,20 @@ object AlgorithmProtocol extends AggregateProtocol[AlgorithmModule.AnalysisState
 
   import AlgorithmModule.AnalysisState
 
-  case class UseConfiguration( override val targetId: UseConfiguration#TID, configuration: Config ) extends AlgorithmCommand
-  case class ConfigurationChanged( override val sourceId: ConfigurationChanged#TID, configuration: Config ) extends AlgorithmEvent
+  case class GetTopicShapeSnapshot( override val targetId: GetTopicShapeSnapshot#TID, topic: Topic ) extends AlgorithmCommand
+  case class TopicShapeSnapshot(
+    override val sourceId: TopicShapeSnapshot#TID,
+    algorithm: Symbol,
+    topic: Topic,
+    snapshot: Option[AlgorithmModule#Shape]
+  ) extends AlgorithmEvent
 
   case class GetStateSnapshot( override val targetId: GetStateSnapshot#TID ) extends AlgorithmCommand
-  case class StateSnapshot( sourceId: StateSnapshot#TID, snapshot: Option[AnalysisState] ) extends AlgorithmEvent
+  case class StateSnapshot(override val sourceId: StateSnapshot#TID, snapshot: AnalysisState) extends AlgorithmEvent
 
   case class Advanced(
     override val sourceId: Advanced#TID,
+    topic: Topic,
     point: DataPoint,
     isOutlier: Boolean,
     threshold: ThresholdBoundary
@@ -71,24 +77,27 @@ object AlgorithmProtocol extends AggregateProtocol[AlgorithmModule.AnalysisState
 /**
   * Created by rolfsd on 6/5/16.
   */
-object AlgorithmModule extends Instrumented with LazyLogging {
+object AlgorithmModule extends Instrumented with StrictLogging {
   trait StrictSelf[T <: StrictSelf[T]] { self: T =>
     type Self >: self.type <: T
   }
 
-  type ID = OutlierPlan.Scope
+  type ID = ShortUUID
+  type TID = TaggedID[ID]
+
 
   trait AnalysisState extends Entity with Equals { self: StrictSelf[_] =>
+    type Shape <: Serializable
+    def evShape: ClassTag[Shape]
+
     override type ID = AlgorithmModule.ID
 
     override val evID: ClassTag[ID] = classTag[AlgorithmModule.ID]
     override val evTID: ClassTag[TID] = classTag[TaggedID[AlgorithmModule.ID]]
 
-    def scope: OutlierPlan.Scope = id
     def algorithm: Symbol
-    def topic: Topic = scope.topic
-
-    def withConfiguration( configuration: Config ): Valid[Self]
+    def shapes: Map[Topic, Shape] = Map.empty[Topic, Shape]
+    def withTopicShape( topic: Topic, shape: Shape ): Self
 
 //    def thresholds: Seq[ThresholdBoundary]
 //    def addThreshold( threshold: ThresholdBoundary ): Self
@@ -99,8 +108,8 @@ object AlgorithmModule extends Instrumented with LazyLogging {
           41 * (
             41 + id.id.##
           ) + name.##
-        ) + topic.##
-      ) + algorithm.##
+        ) + algorithm.##
+      ) + shapes.##
     }
 
     override def equals( rhs: Any ): Boolean = {
@@ -112,8 +121,8 @@ object AlgorithmModule extends Instrumented with LazyLogging {
             ( that canEqual this ) &&
             ( this.id.id == that.id.id ) &&
             ( this.name == that.name) &&
-            ( this.topic == that.topic) &&
-            ( this.algorithm == that.algorithm )
+            ( this.algorithm.name == that.algorithm.name) &&
+            ( this.shapes == that.shapes )
           }
         }
 
@@ -123,13 +132,27 @@ object AlgorithmModule extends Instrumented with LazyLogging {
   }
 
 
-  implicit val identifying: EntityIdentifying[AnalysisState] = {
-    new EntityIdentifying[AnalysisState] with OutlierPlan.Scope.ScopeIdentifying[AnalysisState] {
-      override lazy val idTag: Symbol = 'algorithm
-      override val evEntity: ClassTag[AnalysisState] = classTag[AnalysisState]
+  trait ShapeCompanion[S] {
+    def zero( configuration: Option[Config] ): S
+    def advance( original: S, advanced: AlgorithmProtocol.Advanced ): S
+
+    //todo: there's a functional way to achieve this :-)
+    def valueFrom[V]( configuration: Option[Config], path: String )( fn: Config => V ): Option[V] = {
+      for {
+        c <- configuration if c hasPath path
+        value <- \/.fromTryCatchNonFatal{ fn(c) }.toOption
+      } yield value
     }
   }
 
+
+  implicit val identifying: EntityIdentifying[AnalysisState] = {
+    new EntityIdentifying[AnalysisState] with ShortUUID.ShortUuidIdentifying[AnalysisState] {
+      override lazy val idTag: Symbol = 'algorithm
+      override val evEntity: ClassTag[AnalysisState] = classTag[AnalysisState]
+      override def nextId: TryV[TID] = new IllegalStateException( "analysis state is fixed to plan and not generated" ).left
+    }
+  }
 
 
   /**
@@ -139,6 +162,7 @@ object AlgorithmModule extends Instrumented with LazyLogging {
 
 
   trait ModuleConfiguration {
+    //todo: provide a link to global algorithm configuration
     def maximumNrClusterNodes: Int = 6
   }
 
@@ -166,6 +190,7 @@ object AlgorithmModule extends Instrumented with LazyLogging {
 
 
   val snapshotFactorizer: Random = new Random()
+
   override lazy val metricBaseName: MetricName = MetricName( classOf[AlgorithmModule] )
 
   val _uniqueCalculations: Agent[BloomFilter[AlgorithmModule.ID]] = {
@@ -196,23 +221,33 @@ object AlgorithmModule extends Instrumented with LazyLogging {
 }
 
 abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmModule.ModuleConfiguration =>
-  private val trace = Trace[AlgorithmModule]
+  import AlgorithmModule.{ AnalysisState, ShapeCompanion, StrictSelf }
+  import AlgorithmProtocol.Advanced
 
-  type State <: AlgorithmModule.AnalysisState
+  private val trace = Trace[AlgorithmModule]
 
   /**
     * Shape represents the culminated value of applying the algorithm over the time series data for this ID.
     */
-  type Shape
+  type Shape <: Serializable
+  def evShape: ClassTag[Shape]
 
-  implicit def evState: ClassTag[State]
+  val shapeCompanion: ShapeCompanion[Shape]
 
-  val analysisStateCompanion: AnalysisStateCompanion
-  trait AnalysisStateCompanion {
-    def zero( id: State#TID ): State
-    def shapeLens: Lens[State, Shape]
-    //todo: require algo to define?    def makeShape(): Shape
-    def advanceShape( shape: Shape, advanced: AlgorithmProtocol.Advanced ): Shape
+  case class State(
+    override val id: AlgorithmModule.TID,
+    override val shapes: Map[Topic, module.Shape] = Map.empty[Topic, module.Shape]
+  ) extends AnalysisState with StrictSelf[State] {
+    override type Self = State
+    override type Shape = module.Shape
+    override def evShape: ClassTag[Shape] = module.evShape
+
+    override def algorithm: Symbol = module.algorithm.label
+    override def name: String = algorithm.name
+
+    override def withTopicShape( topic: Topic, shape: Shape ): Self = copy( shapes = shapes + (topic -> shape) )
+
+    override def toString: String = s"""State( algorithm:${algorithm.name} id:[${id}] shapes:[${shapes.mkString(", ")}] )"""
   }
 
 
@@ -223,8 +258,8 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
 
   trait Algorithm {
     val label: Symbol
-    def prepareData( algorithmContext: Context ): Seq[DoublePoint]
-    def step( point: PointT )( implicit state: State, algorithmContext: Context ): Option[(Boolean, ThresholdBoundary)]
+    def prepareData( c: Context ): Seq[DoublePoint] = c.data
+    def step( point: PointT, shape: Shape )( implicit s: State, c: Context ): Option[(Boolean, ThresholdBoundary)]
   }
 
 
@@ -233,16 +268,14 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
 
   trait AlgorithmContext extends LazyLogging {
     def message: DetectUsing
-
-    def plan: OutlierPlan = message.payload.plan
-
+    def topic: Topic = message.topic
+    def data: Seq[DoublePoint]
     def tolerance: Double
-
     def recent: RecentHistory
 
+    def plan: OutlierPlan = message.payload.plan
     def source: TimeSeriesBase = message.source
-
-    def data: Seq[DoublePoint]
+    def configuration: Config = message.plan.algorithmConfig
 
     def fillData( minimalSize: Int = RecentHistory.LastN ): (Seq[DoublePoint]) => Seq[DoublePoint] = { original =>
       if ( minimalSize <= original.size ) original
@@ -308,7 +341,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
   override type ID = AlgorithmModule.ID
   val IdType = TypeCase[TID]
   override def nextId: TryV[TID] = AlgorithmModule.identifying.nextIdAs[TID]
-  val AdvancedType = TypeCase[AlgorithmProtocol.Advanced]
+  val AdvancedType = TypeCase[Advanced]
 
 
   override lazy val rootType: AggregateRootType = new RootType
@@ -320,25 +353,26 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
 //  }
 
   class RootType extends AggregateRootType {
-    //todo: make thse configuration driven for algorithms
-    override def snapshotPeriod: Option[FiniteDuration] = None
-    override def snapshot: Option[SnapshotSpecification] = {
-      snapshotPeriod map { _ => super.snapshot } getOrElse {
-        import scala.concurrent.duration._
+    //todo: make configuration driven for algorithms
+    override val snapshotPeriod: Option[FiniteDuration] = None // not used - snapshot timing explicitly defined below
+    override def snapshot: Option[SnapshotSpecification] = None
+//    override def snapshot: Option[SnapshotSpecification] = {
+//      snapshotPeriod map { _ => super.snapshot } getOrElse {
+//        import scala.concurrent.duration._
+//
+//        Some(
+//          new SnapshotSpecification {
+//            override val snapshotInterval: FiniteDuration = 30.seconds
+//            override val snapshotInitialDelay: FiniteDuration = {
+//              val delay = snapshotInterval * AlgorithmModule.snapshotFactorizer.nextDouble()
+//              FiniteDuration( delay.toMillis, MILLISECONDS )
+//            }
+//          }
+//        )
+//      }
+//    }
 
-        Some(
-          new SnapshotSpecification {
-            override val snapshotInterval: FiniteDuration = 10.minutes
-            override val snapshotInitialDelay: FiniteDuration = {
-              val delay = snapshotInterval * AlgorithmModule.snapshotFactorizer.nextDouble()
-              FiniteDuration( delay.toMillis, MILLISECONDS )
-            }
-          }
-        )
-      }
-    }
-
-    override val passivateTimeout: Duration = Duration( 1, MINUTES ) // Duration.Inf //todo: resolve replaying events with data tsunami
+    override val passivateTimeout: Duration = Duration.Inf // Duration( 1, MINUTES ) // Duration.Inf //todo: resolve replaying events with data tsunami
 
     override lazy val name: String = module.shardName
     override lazy val identifying: Identifying[_] = AlgorithmModule.identifying
@@ -356,7 +390,30 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
     def clusteredProps( model: DomainModel ): Props = Props( new ClusteredRepository(model) )
   }
 
-  class LocalRepository( model: DomainModel ) extends Repository( model ) with LocalAggregateContext
+  import akka.pattern.{ Backoff, BackoffOptions, BackoffSupervisor }
+
+  class LocalRepository( model: DomainModel ) extends Repository( model ) with LocalAggregateContext {
+    def backoffOptionsFor( id: String ): BackoffOptions = {
+      Backoff.onStop(
+        childProps = aggregateProps,
+        childName = id,
+        minBackoff = 3.seconds,
+        maxBackoff = 5.minutes,
+        randomFactor = 0.2
+      )
+    }
+
+    override def aggregateFor( command: Any ): ActorRef = {
+      if ( !rootType.aggregateIdFor.isDefinedAt(command) ) {
+        log.warning( "AggregateRootType[{}] does not recognize command[{}]", rootType.name, command )
+      }
+      val (id, _) = rootType aggregateIdFor command
+      val options = backoffOptionsFor( id )
+      val name = "backoff-"+id
+      context.child( name ) getOrElse { context.actorOf( BackoffSupervisor.props(options), "backoff-"+id ) }
+    }
+  }
+
   class ClusteredRepository( model: DomainModel ) extends Repository( model ) with ClusteredAggregateContext
 
   class Repository( model: DomainModel )
@@ -376,6 +433,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
     extends AlgorithmActor(model, rootType) with StackableStreamPublisher
   }
 
+
   class AlgorithmActor( override val model: DomainModel, override val rootType: AggregateRootType )
   extends AggregateRoot[State, ID]
   with AggregateRoot.Provider
@@ -384,6 +442,8 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
 
     override val journalPluginId: String = "akka.persistence.algorithm.journal.plugin"
     override val snapshotPluginId: String = "akka.persistence.algorithm.snapshot.plugin"
+
+    log.info( "{} AlgorithmActor instantiated: [{}]", algorithm.label, aggregateId )
 
     override def preStart(): Unit = {
       super.preStart()
@@ -398,48 +458,16 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
     override lazy val metricBaseName: MetricName = MetricName( "spotlight.analysis.outlier.algorithm" )
     lazy val algorithmTimer: Timer = metrics timer algorithm.label.name
 
-    override var state: State = _
-    override lazy val evState: ClassTag[State] = module.evState
+    override var state: State = State( aggregateId )
+    override lazy val evState: ClassTag[State] = ClassTag( classOf[State] )
 
     var algorithmContext: Context = _
 
-    import analysisStateCompanion.{ shapeLens, advanceShape }
-//    val advanceLens: Lens[State, (analysisStateCompanion.Shape, Seq[ThresholdBoundary])] = shapeLens ~ thresholdLens
-    val advanceLens: Lens[State, Shape] = shapeLens
-
-    import AlgorithmProtocol.ConfigurationChanged
-
     override val acceptance: Acceptance = {
-      case ( AdvancedType(event), s ) => {
-        val currentState = Option(s) getOrElse {
-          log.debug( "AlgorithmModule[{}]: processed first data. creating initial state", self.path )
-          analysisStateCompanion zero aggregateId
-        }
-//        val result = advanceLens.modify( currentState ){ case (h, ts) => (updateShape( h, event ), ts :+ event.threshold ) }
-        val newState = advanceLens.modify( currentState ){ case shape => advanceShape(shape, event) }
-        log.debug( "advancing [{}]: state=[{}]", aggregateId, newState )
-        newState
-      }
-
-      case ( event: ConfigurationChanged, s ) => {
-        val currentState = Option(s) getOrElse { analysisStateCompanion zero aggregateId }
-        currentState
-        .withConfiguration( event.configuration )
-        .map { _.asInstanceOf[State] }
-        .valueOr { exs =>
-          exs foreach {
-            case ex: RedundantAlgorithmConfiguration[_] => {
-              log.debug(
-                "ignoring redundant accepted configuration event: {}={} for current-state:[{}]",
-                ex.path, ex.value, currentState
-              )
-            }
-
-            case ex => log.error( ex, "ignoring accepted event: [{}] current-state:[{}]", event, currentState )
-          }
-
-          s
-        }
+      case ( AdvancedType(event), cs ) => {
+        log.debug( "TEST: ACCEPTANCE: event:[{}] current-state:[{}]", event, cs )
+        val s = cs.shapes.get( event.topic ) getOrElse shapeCompanion.zero( None )
+        cs.withTopicShape( event.topic, shapeCompanion.advance(s, event) )
       }
     }
 
@@ -448,7 +476,6 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
     val active: Receive = {
       case msg @ DetectUsing( algo, payload: DetectOutliersInSeries, history, algorithmConfig ) => {
         val aggregator = sender()
-        val toOutliers = kleisli[TryV, (Outliers, Context), Outliers] { case (o, _) => o.right }
 
         val start = System.nanoTime()
         @inline def stopTimer( start: Long ): Unit = {
@@ -503,25 +530,24 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
         }
       }
 
-      case AdvancedType( adv ) => persist( adv ) { accept }
+//      case AdvancedType( adv ) => persist( adv ) { accept }
+      case AdvancedType( adv ) => accept( adv )
     }
 
-    import AlgorithmProtocol.{ UseConfiguration, ConfigurationChanged, GetStateSnapshot, StateSnapshot }
+    val toOutliers = kleisli[TryV, (Outliers, Context), Outliers] { case (o, _) => o.right }
+
+    import AlgorithmProtocol.{ GetTopicShapeSnapshot, TopicShapeSnapshot, GetStateSnapshot, StateSnapshot }
 
     val stateReceiver: Receive = {
-      case UseConfiguration( _, config ) => {
-        if ( Option(state).isEmpty || state.withConfiguration(config).isDefined ) {
-          log.debug( "received and accepting UseConfiguration[{}] with state:[{}]", config, Option(state) )
-          persist( ConfigurationChanged(aggregateId, config) ) { accept }
-        } else {
-          log.debug( "ignoring UseConfiguration" )
-        }
+      case GetTopicShapeSnapshot( _, topic ) => {
+        sender() ! TopicShapeSnapshot( aggregateId, algorithm.label, topic, state.shapes.get(topic) )
       }
 
-      case _: GetStateSnapshot => sender() ! StateSnapshot( aggregateId, Option(state) )
+      case _: GetStateSnapshot => sender() ! StateSnapshot( aggregateId, state )
     }
 
-    var _snapshotStarted: Long = -1L
+
+    var _snapshotStarted: Long = 0L
     def startSnapshotTimer(): Unit = { _snapshotStarted = System.nanoTime() }
     def stopSnapshotTimer( event: Any ): Unit = {
       if ( 0 < _snapshotStarted ) {
@@ -536,7 +562,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
       }
     }
 
-    var _journalSweepStarted: Long = -1L
+    var _journalSweepStarted: Long = 0L
     def startSweepTimer(): Unit = { _journalSweepStarted = System.nanoTime() }
     def stopSweepTimer( event: Any ): Unit = {
       if ( 0 < _journalSweepStarted ) {
@@ -551,7 +577,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
       }
     }
 
-    var _passivationStarted: Long = -1L
+    var _passivationStarted: Long = 0L
     def startPassivationTimer(): Unit = { _passivationStarted = System.nanoTime() }
     def stopPassivationTimer( event: Any ): Unit = {
       if ( 0 < _passivationStarted ) {
@@ -561,7 +587,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
 
       event match {
         case e: demesne.PassivationSpecification.StopAggregateRoot[_] => {
-          log.warning( "[{}] received repeated passivation message: [{}]", self.path.name, e )
+          log.info( "[{}] received repeated passivation message: [{}]", self.path.name, e )
         }
 
         case _ => { }
@@ -595,7 +621,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
 
       case e @ SaveSnapshotFailure( meta, ex ) => {
         stopSnapshotTimer( e )
-        log.warning( "[{}] failed to save snapshot. meta:[{}] cause:[{}]", meta, ex )
+        log.warning( "[{}] failed to save snapshot. meta:[{}] cause:[{}]", self.path.name, meta, ex )
       }
 
       case e: DeleteMessagesSuccess => {
@@ -605,7 +631,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
 
       case e: DeleteMessagesFailure => {
         stopSweepTimer( e )
-        log.warning( "[{}] FAILED to clear journal will attempt to clear on subsequent snapshot: [{}]", self.path.name, e )
+        log.info( "[{}] FAILED to clear journal will attempt to clear on subsequent snapshot: [{}]", self.path.name, e )
       }
     }
 
@@ -655,7 +681,8 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
 
     override def unhandled( message: Any ): Unit = {
       message match {
-        case m: DetectUsing if Option(state).isDefined && m.algorithm.name == state.algorithm.name && m.scope == state.id => {
+//        case m: DetectUsing if Option(state).isDefined && m.algorithm.name == state.algorithm.name && m.scope == state.id => {
+        case m: DetectUsing if m.algorithm.name == state.algorithm.name => {
           val ex = AlgorithmProtocol.AlgorithmUsedBeforeRegistrationError( aggregateId, algorithm.label, self.path )
           log.error( ex, "algorithm actor [{}] not registered for scope:[{}]", algorithm.label, aggregateId )
         }
@@ -682,17 +709,21 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
       for {
         ctx <- ask[TryV, Context]
         data <- kleisli[TryV, Context, Seq[DoublePoint]] { c => \/ fromTryCatchNonFatal { algorithm prepareData c } }
-        events <- collectOutlierPoints( data )
+        events <- collectOutlierPoints( data ) >=> recordAdvancements
         o <- makeOutliers( events )
       } yield ( o, ctx )
     }
 
-    private def collectOutlierPoints( points: Seq[DoublePoint] ): KOp[Context, Seq[AlgorithmProtocol.Advanced]] = {
-      kleisli[TryV, Context, Seq[AlgorithmProtocol.Advanced]] { implicit analysisContext =>
-        def tryStep( pt: PointT )( implicit s: State ): TryV[(Boolean, ThresholdBoundary)] = {
+    case class Accumulation( topic: Topic, shape: Shape, advances: Seq[Advanced] = Seq.empty[Advanced] )
+
+    private def collectOutlierPoints( points: Seq[DoublePoint] ): KOp[Context, Seq[Advanced]] = {
+      kleisli[TryV, Context, Seq[Advanced]] { implicit analysisContext =>
+        def tryStep( pt: PointT, shape: Shape ): TryV[(Boolean, ThresholdBoundary)] = {
           \/ fromTryCatchNonFatal {
-            logger.debug( "algorithm {}.step( {} ): state=[{}]", algorithm.label.name, pt, s )
-            algorithm.step( pt )
+            logger.debug( "algorithm {}.step( {} ): before-shape=[{}]", algorithm.label.name, pt, shape.toString )
+
+            algorithm
+            .step( pt, shape )( state, analysisContext )
             .getOrElse {
               logger.debug(
                 "skipping point[{}] per insufficient history for algorithm {}",
@@ -704,29 +735,23 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
           }
         }
 
-
-        @tailrec def loop(
-          points: List[DoublePoint],
-          accumlated: TryV[Seq[AlgorithmProtocol.Advanced]]
-        )(
-          implicit loopState: TryV[State]
-        ): TryV[Seq[AlgorithmProtocol.Advanced]] = {
+        @tailrec def loop( points: List[DoublePoint], accumulation: TryV[Accumulation] ): TryV[Seq[Advanced]] = {
           points match {
-            case Nil => accumlated
+            case Nil => accumulation map { _.advances }
 
             case pt :: tail => {
-              val updatedAccAndState: TryV[(Seq[AlgorithmProtocol.Advanced], State)] = {
+              val newAcc = {
                 for {
-                  acc <- accumlated
-                  ls <- loopState
-                  ot <- tryStep( pt )( ls )
+                  acc <- accumulation
+                  ot <- tryStep( pt, acc.shape )
                   (isOutlier, threshold) = ot
                 } yield {
                   analysisContext.data
                   .find { _.timestamp == pt.timestamp }
                   .map { original =>
-                    val event = AlgorithmProtocol.Advanced(
+                    val event = Advanced(
                       sourceId = aggregateId,
+                      topic = acc.topic,
                       point = original.toDataPoint,
                       isOutlier = isOutlier,
                       threshold = threshold
@@ -740,30 +765,45 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
                       event
                     )
 
-                    ( acc :+ event, acceptance(event, ls) )
+                    acc.copy(
+//                      state = acceptance(event, acc.state),
+                      shape = shapeCompanion.advance(acc.shape, event),
+                      advances = acc.advances :+ event
+                    )
                   }
                   .getOrElse {
                     log.error( "NOT ORIGINAL PT:[{}]", (pt._1.toLong, pt._2) )
-                    ( acc, ls )
+                    acc
                   }
                 }
               }
 
-              val newAcc = updatedAccAndState map { _._1 }
-              val newState = updatedAccAndState map { _._2 }
-              loop( tail, newAcc )( newState )
+              loop( tail, newAcc )
             }
           }
         }
 
-        val effState = Option( state ) getOrElse { analysisStateCompanion zero aggregateId }
-        val events = loop( points.toList, Seq.empty[AlgorithmProtocol.Advanced].right )( effState.right )
-        events foreach { _ foreach { e => persist( e ){ accept } } }
-        events
+        loop(
+          points = points.toList,
+          accumulation = Accumulation(
+//            state = state,
+            topic = analysisContext.topic,
+            shape = state.shapes.get(analysisContext.topic) getOrElse shapeCompanion.zero( Option(analysisContext.configuration) )
+          ).right
+        )
       }
     }
 
-    private def makeOutliers( events: Seq[AlgorithmProtocol.Advanced] ): KOp[Context, Outliers] = {
+    private val recordAdvancements: KOp[Seq[Advanced], Seq[Advanced]] = {
+      kleisli[TryV, Seq[Advanced], Seq[Advanced]] { advances =>
+        log.debug( "TEST: recordAdvancements: [{}]", advances.mkString("\n", "\n", "\n") )
+//        advances foreach { evt => persist( evt ){ accept } }
+        advances foreach { accept }
+        advances.right
+      }
+    }
+
+    private def makeOutliers( events: Seq[Advanced] ): KOp[Context, Outliers] = {
       kleisli[TryV, Context, Outliers] { ctx =>
         val outliers = events collect { case e if e.isOutlier => e.point }
         val thresholds = events map { _.threshold }

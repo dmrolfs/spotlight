@@ -15,6 +15,8 @@ import peds.akka.metrics.InstrumentedActor
 import peds.commons.{TryV, Valid}
 import peds.commons.log.Trace
 import peds.commons.concurrent._
+import peds.commons.identifier.{ShortUUID, TaggedID}
+import shapeless.TypeCase
 import spotlight.analysis.outlier.algorithm.{AlgorithmModule, AlgorithmProtocol, InsufficientAlgorithmModuleError}
 import spotlight.analysis.outlier.algorithm.statistical._
 import spotlight.model.outlier.OutlierPlan
@@ -215,15 +217,24 @@ object DetectionAlgorithmRouter extends LazyLogging {
 
 
   sealed abstract class AlgorithmResolver {
-    def referenceFor( scope: OutlierPlan.Scope ): ActorRef
+    def referenceFor( message: Any ): ActorRef
   }
 
   case class DirectResolver( reference: ActorRef ) extends AlgorithmResolver {
-    override def referenceFor( scope: Scope ): ActorRef = reference
+    override def referenceFor( message: Any ): ActorRef = reference
   }
 
   case class RootTypeResolver( rootType: AggregateRootType, model: DomainModel ) extends AlgorithmResolver {
-    override def referenceFor( scope: Scope ): ActorRef = model( rootType, scope )
+    val TidType = TypeCase[TaggedID[ShortUUID]]
+
+    override def referenceFor( message: Any ): ActorRef = {
+      message match {
+        case m: OutlierDetectionMessage => model( rootType, m.plan.id )
+        case id: ShortUUID => model( rootType, id )
+        case TidType(tid) => model( rootType, tid )
+        case _ => model.system.deadLetters
+      }
+    }
   }
 }
 
@@ -255,7 +266,8 @@ class DetectionAlgorithmRouter extends Actor with EnvelopingActor with Instrumen
   }
 
   val routing: Receive = {
-    case m: DetectUsing if contains( m.algorithm ) => routingTable( m.algorithm ).referenceFor( m.scope ) forwardEnvelope m
+//    case m: DetectUsing if contains( m.algorithm ) => routingTable( m.algorithm ).referenceFor( m.scope ) forwardEnvelope m
+    case m: DetectUsing if contains( m.algorithm ) => routingTable( m.algorithm ).referenceFor( m ) forwardEnvelope m
   }
 
   override val receive: Receive = LoggingReceive{ around( registration orElse routing ) }

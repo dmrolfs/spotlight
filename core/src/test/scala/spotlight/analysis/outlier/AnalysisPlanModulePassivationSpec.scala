@@ -17,8 +17,8 @@ import peds.archetype.domain.model.core.EntityIdentifying
 import peds.commons.identifier.{ShortUUID, TaggedID}
 import peds.commons.log.Trace
 import shapeless.Lens
-import spotlight.analysis.outlier.AnalysisPlanModule.AggregateRoot.OutlierPlanActor
-import spotlight.analysis.outlier.AnalysisPlanModule.AggregateRoot.OutlierPlanActor.{FlowConfigurationProvider, WorkerProvider}
+import spotlight.analysis.outlier.AnalysisPlanModule.AggregateRoot.PlanActor
+import spotlight.analysis.outlier.AnalysisPlanModule.AggregateRoot.PlanActor.{FlowConfigurationProvider, WorkerProvider}
 import spotlight.analysis.outlier.algorithm.statistical.SimpleMovingAverageAlgorithm
 import spotlight.model.outlier.{IsQuorum, OutlierPlan, ReduceOutliers}
 import spotlight.testkit.EntityModuleSpec
@@ -64,7 +64,7 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[OutlierPlan] { 
     val proxyProbe = TestProbe()
 
     private class TestAnalysisPlanModule( model: DomainModel, rootType: AggregateRootType )
-    extends OutlierPlanActor( model, rootType )
+    extends PlanActor( model, rootType )
     with WorkerProvider
     with FlowConfigurationProvider
     with StackableStreamPublisher

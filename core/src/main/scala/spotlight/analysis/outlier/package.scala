@@ -1,7 +1,9 @@
 package spotlight.analysis
 
+import scala.concurrent.duration._
 import akka.NotUsed
 import akka.stream.scaladsl.Flow
+import com.typesafe.config.Config
 import org.apache.commons.math3.ml.distance.{DistanceMeasure, EuclideanDistance}
 import peds.commons.math.MahalanobisDistance
 import spotlight.model.outlier.{OutlierPlan, Outliers}
@@ -17,9 +19,18 @@ package object outlier {
   type TimeSeriesScope = (TimeSeries, OutlierPlan.Scope)
 
 
+  def durationFrom( config: Config, path: String ): Option[Duration] = {
+    if ( config hasPath path ) {
+      if ( config.getString(path).trim.compareToIgnoreCase( "Inf" ) == 0 ) Some( Duration.Inf )
+      else Some( FiniteDuration( config.getDuration(path, NANOSECONDS), NANOSECONDS ).toCoarsest )
+    } else {
+      None
+    }
+  }
+
   /**
     * Type class that determines circumstance when a distance measure is valid to use.
- *
+    *
     * @tparam D
     */
   trait DistanceMeasureValidity[D <: DistanceMeasure] {

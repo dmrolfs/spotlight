@@ -18,9 +18,8 @@ import peds.commons.V
 import peds.commons.identifier.{ShortUUID, TaggedID}
 import peds.commons.log.Trace
 import shapeless.Lens
-import spotlight.analysis.outlier.AnalysisPlanModule.AggregateRoot.OutlierPlanActor
-import spotlight.analysis.outlier.AnalysisPlanModule.AggregateRoot.OutlierPlanActor
-import spotlight.analysis.outlier.AnalysisPlanModule.AggregateRoot.OutlierPlanActor.{FlowConfigurationProvider, WorkerProvider}
+import spotlight.analysis.outlier.AnalysisPlanModule.AggregateRoot.PlanActor
+import spotlight.analysis.outlier.AnalysisPlanModule.AggregateRoot.PlanActor.{FlowConfigurationProvider, WorkerProvider}
 import spotlight.analysis.outlier.algorithm.statistical.SimpleMovingAverageAlgorithm
 import spotlight.model.outlier._
 import spotlight.testkit.EntityModuleSpec
@@ -118,7 +117,7 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] with OptionVa
     }
 
     class TestOutlierPlanActor( model: DomainModel, rootType: AggregateRootType )
-    extends OutlierPlanActor( model, rootType )
+    extends PlanActor( model, rootType )
     with WorkerProvider
     with FlowConfigurationProvider
     with StackableStreamPublisher
@@ -140,7 +139,7 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] with OptionVa
     val proxyProbe = TestProbe( "proxy" )
 
     class FixtureOutlierPlanActor( model: DomainModel, rootType: AggregateRootType)
-    extends AnalysisPlanModule.AggregateRoot.OutlierPlanActor( model, rootType )
+    extends AnalysisPlanModule.AggregateRoot.PlanActor( model, rootType )
     with WorkerProvider
     with FlowConfigurationProvider
     with StackableStreamPublisher {

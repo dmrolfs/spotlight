@@ -243,7 +243,7 @@ object PlanCatalogSpec extends StrictLogging {
         |    buffer: 1000
         |    detect {
         |      timeout: 10s
-        |      max-in-flight-cpu-factor: 1
+        |      parallelism-cpu-factor: 1
         |    }
         |  }
         |}
