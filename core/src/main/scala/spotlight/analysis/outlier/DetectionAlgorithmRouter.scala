@@ -17,7 +17,7 @@ import peds.commons.log.Trace
 import peds.commons.concurrent._
 import peds.commons.identifier.{ShortUUID, TaggedID}
 import shapeless.TypeCase
-import spotlight.analysis.outlier.algorithm.{AlgorithmModule, AlgorithmProtocol, InsufficientAlgorithmModuleError}
+import spotlight.analysis.outlier.algorithm._
 import spotlight.analysis.outlier.algorithm.statistical._
 import spotlight.model.outlier.OutlierPlan
 import spotlight.model.outlier.OutlierPlan.Scope
@@ -32,9 +32,18 @@ object DetectionAlgorithmRouter extends LazyLogging {
 
 
   sealed trait RouterProtocol
+
   case class RegisterAlgorithmReference( algorithm: Symbol, handler: ActorRef ) extends RouterProtocol
-  case class RegisterAlgorithmRootType( algorithm: Symbol, handler: AggregateRootType, model: DomainModel ) extends RouterProtocol
+
+  case class RegisterAlgorithmRootType(
+    algorithm: Symbol,
+    handler: AggregateRootType,
+    model: DomainModel,
+    sharded: Boolean = false
+  ) extends RouterProtocol
+
   case class AlgorithmRegistered( algorithm: Symbol ) extends RouterProtocol
+
 
   val ContextKey = 'DetectionAlgorithmRouter
 
@@ -58,7 +67,12 @@ object DetectionAlgorithmRouter extends LazyLogging {
   }
 
 
-  def props( routingTable: Map[Symbol, AlgorithmResolver] ): Props = Props( new Default( routingTable ) )
+  def props(
+    namespace: String,
+    routingTable: Map[Symbol, AlgorithmResolver],
+    shardControl: AlgorithmShardCatalog.Control
+  ): Props = Props( new Default( namespace, routingTable, shardControl ) )
+
   val DispatcherPath: String = OutlierDetection.DispatcherPath
 
   def name( suffix: String ): String = "DetectionRouter-" + suffix
@@ -66,10 +80,18 @@ object DetectionAlgorithmRouter extends LazyLogging {
 
   trait Provider {
     def initialRoutingTable: Map[Symbol, AlgorithmResolver]
+    def namespace: String
+    def algorithmShardControl: AlgorithmShardCatalog.Control
+    def algorithmShardCatalogFor( model: DomainModel, rootType: AggregateRootType )( implicit context: ActorContext ): ActorRef = {
+      model.aggregateOf( AlgorithmShardCatalog.module.rootType, AlgorithmShardCatalog.idFor(namespace, rootType) )
+    }
   }
 
-  private class Default( override val initialRoutingTable: Map[Symbol, AlgorithmResolver] )
-  extends DetectionAlgorithmRouter with Provider
+  private class Default(
+    override val namespace: String,
+    override val initialRoutingTable: Map[Symbol, AlgorithmResolver],
+    override val algorithmShardControl: AlgorithmShardCatalog.Control
+  ) extends DetectionAlgorithmRouter with Provider
 
   def rootTypeFor( algorithm: Symbol )( implicit ec: ExecutionContext ): Option[AggregateRootType] = {
     import scala.concurrent.duration._
@@ -217,17 +239,17 @@ object DetectionAlgorithmRouter extends LazyLogging {
 
 
   sealed abstract class AlgorithmResolver {
-    def referenceFor( message: Any ): ActorRef
+    def referenceFor( message: Any )( implicit context: ActorContext ): ActorRef
   }
 
   case class DirectResolver( reference: ActorRef ) extends AlgorithmResolver {
-    override def referenceFor( message: Any ): ActorRef = reference
+    override def referenceFor( message: Any )( implicit context: ActorContext ): ActorRef = reference
   }
 
   case class RootTypeResolver( rootType: AggregateRootType, model: DomainModel ) extends AlgorithmResolver {
     val TidType = TypeCase[TaggedID[ShortUUID]]
 
-    override def referenceFor( message: Any ): ActorRef = {
+    override def referenceFor( message: Any )( implicit context: ActorContext ): ActorRef = {
       message match {
         case m: OutlierDetectionMessage => model( rootType, m.plan.id )
         case id: ShortUUID => model( rootType, id )
@@ -235,6 +257,10 @@ object DetectionAlgorithmRouter extends LazyLogging {
         case _ => model.system.deadLetters
       }
     }
+  }
+
+  case class ShardedRootTypeResolver( shardCatalog: ActorRef ) extends AlgorithmResolver {
+    override def referenceFor( message: Any )( implicit context: ActorContext ): ActorRef = shardCatalog
   }
 }
 
@@ -259,7 +285,12 @@ class DetectionAlgorithmRouter extends Actor with EnvelopingActor with Instrumen
       sender() !+ AlgorithmRegistered( algorithm )
     }
 
-    case RegisterAlgorithmRootType( algorithm, handler, model ) => {
+    case RegisterAlgorithmRootType( algorithm, handler, model, true ) => {
+      addRoute( algorithm, ShardedRootTypeResolver( provider algorithmShardCatalogFor handler ) )
+      sender() !+ AlgorithmRegistered( algorithm )
+    }
+
+    case RegisterAlgorithmRootType( algorithm, handler, model, _ ) => {
       addRoute( algorithm, RootTypeResolver(handler, model) )
       sender() !+ AlgorithmRegistered( algorithm )
     }

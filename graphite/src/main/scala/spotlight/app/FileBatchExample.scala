@@ -192,7 +192,10 @@ object FileBatchExample extends Instrumented with StrictLogging {
 //    val limitDuration = 3.minutes // ( configuration.detectionBudget * 1.1 )
 //    val limitWait = FiniteDuration( limitDuration._1, limitDuration._2 )
 //    Limiter.limitGlobal[TimeSeries](limiterRef, limitWait)( system.dispatcher )
-    Flow[TimeSeries].map{ identity }
+
+//    Flow[TimeSeries].map{ identity }
+
+    Flow[TimeSeries].throttle( parallelism, refreshPeriod, akka.stream.ThrottleMode.shaping )
   }
 
   def detectionWorkflow(

@@ -40,7 +40,7 @@ object AnalysisPlanProtocol extends AggregateProtocol[OutlierPlan#ID]{
   sealed abstract class AnalysisPlanEvent extends AnalysisPlanMessage with EventMessage
 
   case class MakeFlow(
-    override val targetId: AnalysisPlanModule.module.TID,
+    override val targetId: MakeFlow#TID,
     parallelism: Int,
     system: ActorSystem,
     timeout: Timeout,
@@ -101,6 +101,7 @@ object AnalysisPlanProtocol extends AggregateProtocol[OutlierPlan#ID]{
   }
 }
 
+WORK HERE TO RESOLVE PASSIVATION UNHANDLING
 
 /**
   * Created by rolfsd on 5/26/16.

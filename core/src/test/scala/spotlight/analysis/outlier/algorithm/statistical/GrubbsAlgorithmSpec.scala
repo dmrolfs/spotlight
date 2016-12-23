@@ -1,21 +1,17 @@
 package spotlight.analysis.outlier.algorithm.statistical
 
-import akka.actor.ActorSystem
-
 import scala.annotation.tailrec
+import akka.actor.ActorSystem
 import scalaz.{-\/, \/-}
-import com.typesafe.config.{Config, ConfigFactory}
+import com.typesafe.config.Config
 import org.apache.commons.math3.stat.descriptive.{DescriptiveStatistics, StatisticalSummary}
 import org.joda.{time => joda}
 import org.mockito.Mockito._
 import org.scalatest.Assertion
 import org.typelevel.scalatest.{DisjunctionMatchers, DisjunctionValues}
-import peds.akka.envelope._
 import peds.commons.TryV
 import peds.commons.log.Trace
 import spotlight.analysis.outlier.RecentHistory
-import spotlight.analysis.outlier.algorithm.AlgorithmProtocol.Advanced
-import spotlight.analysis.outlier.algorithm.statistical.GrubbsAlgorithm.Context
 import spotlight.analysis.outlier.algorithm.{AlgorithmModule, AlgorithmModuleSpec, AlgorithmProtocol => P}
 import spotlight.model.timeseries._
 
