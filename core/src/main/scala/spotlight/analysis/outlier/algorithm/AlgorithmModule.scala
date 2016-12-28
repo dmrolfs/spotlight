@@ -200,13 +200,7 @@ object AlgorithmModule extends Instrumented with StrictLogging {
   metrics.gauge( "unique-calculations" ){ _uniqueCalculations.map{ _.size }.get() }
 
   def addUniqueCalculation( id: AlgorithmModule.ID ): Unit = {
-    _uniqueCalculations send { cs =>
-      if ( cs.has_?(id) ) cs
-      else {
-        logger.info( "TEST: adding UNIQUE CALCULATION: [{}]", id )
-        cs + id
-      }
-    }
+    _uniqueCalculations send { cs => if ( cs.has_?(id) ) cs else cs + id }
   }
 
   val snapshotTimer: Timer = metrics.timer( "snapshot" )
@@ -316,7 +310,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
       }
       .map { case (ts, pts) =>
         val average = pts.sum / pts.size
-        logger.debug( "points to tail average ({}, [{}]) = {}", ts.toLong.toString, pts.mkString(","), average.toString )
+//        logger.debug( "points to tail average ({}, [{}]) = {}", ts.toLong.toString, pts.mkString(","), average.toString )
         ( ts, average ).toDoublePoint
       }
     }
@@ -465,7 +459,6 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
 
     override val acceptance: Acceptance = {
       case ( AdvancedType(event), cs ) => {
-        log.debug( "TEST: ACCEPTANCE: event:[{}] current-state:[{}]", event, cs )
         val s = cs.shapes.get( event.topic ) getOrElse shapeCompanion.zero( None )
         cs.withTopicShape( event.topic, shapeCompanion.advance(s, event) )
       }
@@ -485,7 +478,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
         ( makeAlgorithmContext >=> findOutliers >=> toOutliers ).run( msg ) match {
           case \/-( r ) => {
             stopTimer( start )
-            log.debug( "[{}] sending detect result to aggregator[{}]: [{}]", workId, aggregator.path.name, r )
+//            log.debug( "[{}] sending detect result to aggregator[{}]: [{}]", workId, aggregator.path.name, r )
             aggregator !+ r
           }
 
@@ -610,10 +603,10 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
       case e @ SaveSnapshotSuccess( meta ) => {
         stopSnapshotTimer( e )
 
-        log.debug(
-          "[{} - {}]: successful snapshot, deleting journal messages up to sequenceNr: [{}]",
-          self.path.name, rootType.snapshotPeriod.map{ _.toCoarsest }, meta.sequenceNr
-        )
+//        log.debug(
+//          "[{} - {}]: successful snapshot, deleting journal messages up to sequenceNr: [{}]",
+//          self.path.name, rootType.snapshotPeriod.map{ _.toCoarsest }, meta.sequenceNr
+//        )
 
         startSweepTimer()
         deleteMessages( meta.sequenceNr )
@@ -626,12 +619,12 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
 
       case e: DeleteMessagesSuccess => {
         stopSweepTimer( e )
-        log.info( "[{}] successfully cleared journal: [{}]", self.path.name, e )
+//        log.info( "[{}] successfully cleared journal: [{}]", self.path.name, e )
       }
 
       case e: DeleteMessagesFailure => {
         stopSweepTimer( e )
-        log.info( "[{}] FAILED to clear journal will attempt to clear on subsequent snapshot: [{}]", self.path.name, e )
+//        log.info( "[{}] FAILED to clear journal will attempt to clear on subsequent snapshot: [{}]", self.path.name, e )
       }
     }
 
@@ -644,10 +637,10 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
       case e @ SaveSnapshotSuccess( meta ) => {
         stopSnapshotTimer( e )
 
-        log.debug(
-          "[{} - {}]: successful passivation snapshot, deleting journal messages up to sequenceNr: [{}]",
-          self.path.name, rootType.snapshotPeriod.map{ _.toCoarsest }, meta.sequenceNr
-        )
+//        log.debug(
+//          "[{} - {}]: successful passivation snapshot, deleting journal messages up to sequenceNr: [{}]",
+//          self.path.name, rootType.snapshotPeriod.map{ _.toCoarsest }, meta.sequenceNr
+//        )
 
         startSweepTimer()
         deleteMessages( meta.sequenceNr )
@@ -661,7 +654,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
 
       case e: DeleteMessagesSuccess => {
         stopSweepTimer( e )
-        log.debug( "[{}] on passivation successfully cleared journal: [{}]", self.path.name, e )
+//        log.debug( "[{}] on passivation successfully cleared journal: [{}]", self.path.name, e )
         stopPassivationTimer( e )
         context stop self
       }
@@ -720,15 +713,15 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
       kleisli[TryV, Context, Seq[Advanced]] { implicit analysisContext =>
         def tryStep( pt: PointT, shape: Shape ): TryV[(Boolean, ThresholdBoundary)] = {
           \/ fromTryCatchNonFatal {
-            logger.debug( "algorithm {}.step( {} ): before-shape=[{}]", algorithm.label.name, pt, shape.toString )
+//            logger.debug( "algorithm {}.step( {} ): before-shape=[{}]", algorithm.label.name, pt, shape.toString )
 
             algorithm
             .step( pt, shape )( state, analysisContext )
             .getOrElse {
-              logger.debug(
-                "skipping point[{}] per insufficient history for algorithm {}",
-                s"(${pt.dateTime}:${pt.timestamp.toLong}, ${pt.value})", algorithm.label
-              )
+//              logger.debug(
+//                "skipping point[{}] per insufficient history for algorithm {}",
+//                s"(${pt.dateTime}:${pt.timestamp.toLong}, ${pt.value})", algorithm.label
+//              )
 
               ( false, ThresholdBoundary empty pt.timestamp.toLong )
             }
@@ -757,13 +750,13 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
                       threshold = threshold
                     )
 
-                    log.debug(
-                      "{} STEP:{} [{}]: AnalysisState.Advanced:[{}]",
-                      algorithm.label.name,
-                      if ( isOutlier ) "ANOMALY" else "regular",
-                      s"ts:[${pt.dateTime}:${pt._1.toLong}] eff-value:[${pt.value}] orig-value:[${original.value}]",
-                      event
-                    )
+//                    log.debug(
+//                      "{} STEP:{} [{}]: AnalysisState.Advanced:[{}]",
+//                      algorithm.label.name,
+//                      if ( isOutlier ) "ANOMALY" else "regular",
+//                      s"ts:[${pt.dateTime}:${pt._1.toLong}] eff-value:[${pt.value}] orig-value:[${original.value}]",
+//                      event
+//                    )
 
                     acc.copy(
 //                      state = acceptance(event, acc.state),
@@ -796,7 +789,6 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
 
     private val recordAdvancements: KOp[Seq[Advanced], Seq[Advanced]] = {
       kleisli[TryV, Seq[Advanced], Seq[Advanced]] { advances =>
-        log.debug( "TEST: recordAdvancements: [{}]", advances.mkString("\n", "\n", "\n") )
 //        advances foreach { evt => persist( evt ){ accept } }
         advances foreach { accept }
         advances.right
