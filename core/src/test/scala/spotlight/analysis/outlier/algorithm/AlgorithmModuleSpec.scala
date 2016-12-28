@@ -248,7 +248,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
         val sas = as.value.asInstanceOf[TestShape]
         a.sourceId.id mustBe id.id
         a.algorithm.name mustBe module.algorithm.label.name
-        logger.info( "asserting state: {}", sas )
+        logger.info( "asserting shape: {}", sas )
         assertShapeFn( sas )
       }
     }
@@ -434,7 +434,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
 
   def bootstrapSuite(): Unit = {
     s"${defaultModule.algorithm.label.name} entity" should {
-      "have zero state before advance" in { f: Fixture =>
+      "have zero shape before advance" in { f: Fixture =>
         import f._
 
         logger.debug( "aggregate = [{}]", aggregate )
@@ -455,7 +455,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
         aggregate ! adv
 
         Thread.sleep(1000)
-        logger.debug( "TEST: getting current state of id:[{}]...", id )
+        logger.debug( "TEST: getting current shape of id:[{}]...", id )
         whenReady(
           ( aggregate ? P.GetTopicShapeSnapshot( id, adv.topic ) ).mapTo[P.TopicShapeSnapshot],
           timeout( 15.seconds.dilated
@@ -493,7 +493,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
         val t = ThresholdBoundary( nowTimestamp, Some(1.1), Some(2.2), Some(3.3) )
         val adv = P.Advanced( id, scope.topic, pt, false, t )
         val expected = expectedUpdatedShape( zero, adv )
-        logger.debug( "TEST: expectedState=[{}]", expected )
+        logger.debug( "TEST: expectedShape=[{}]", expected )
 
         val actual = module.shapeCompanion.advance( zero, adv )
         actualVsExpectedShape( actual, expected )

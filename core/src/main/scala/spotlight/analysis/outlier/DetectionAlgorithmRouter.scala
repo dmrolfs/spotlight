@@ -96,7 +96,6 @@ object DetectionAlgorithmRouter extends LazyLogging {
 //        SeriesDensityAnalyzer.Algorithm -> ???, // SeriesDensityAnalyzer.props( router ),
 //        SeriesCentroidDensityAnalyzer.Algorithm -> ???, // SeriesCentroidDensityAnalyzer.props( router ),
 //        CohortDensityAnalyzer.Algorithm -> ???, // CohortDensityAnalyzer.props( router ),
-//        ExponentialMovingAverageAnalyzer.Algorithm -> ???, // ExponentialMovingAverageAnalyzer.props( router ),
 //        FirstHourAverageAnalyzer.Algorithm -> ???, // FirstHourAverageAnalyzer.props( router ),
 //        HistogramBinsAnalyzer.Algorithm -> ???, // HistogramBinsAnalyzer.props( router ),
 //        KolmogorovSmirnovAnalyzer.Algorithm -> ???, // KolmogorovSmirnovAnalyzer.props( router ),
@@ -104,8 +103,9 @@ object DetectionAlgorithmRouter extends LazyLogging {
 //        MeanSubtractionCumulationAnalyzer.Algorithm -> ???, // MeanSubtractionCumulationAnalyzer.props( router ),
 //        MedianAbsoluteDeviationAnalyzer.Algorithm -> ???, // MedianAbsoluteDeviationAnalyzer.props( router ),
 //        SeasonalExponentialMovingAverageAnalyzer.Algorithm -> ??? // SeasonalExponentialMovingAverageAnalyzer.props( router )
-           GrubbsAlgorithm.algorithm.label -> GrubbsAlgorithm.rootType,
-           SimpleMovingAverageAlgorithm.algorithm.label -> SimpleMovingAverageAlgorithm.rootType
+        ExponentialMovingAverageAlgorithm.algorithm.label -> ExponentialMovingAverageAlgorithm.rootType,
+        GrubbsAlgorithm.algorithm.label -> GrubbsAlgorithm.rootType,
+        SimpleMovingAverageAlgorithm.algorithm.label -> SimpleMovingAverageAlgorithm.rootType
       )
     )
   }
