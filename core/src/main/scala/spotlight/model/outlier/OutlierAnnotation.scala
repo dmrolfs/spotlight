@@ -4,7 +4,6 @@ import scalaz._, Scalaz._
 import org.joda.{ time => joda }
 import com.github.nscala_time.time.Imports._
 import peds.commons.Valid
-import peds.commons.log.Trace
 
 
 trait OutlierAnnotation {
@@ -13,15 +12,13 @@ trait OutlierAnnotation {
 }
 
 object OutlierAnnotation {
-  val trace = Trace[OutlierAnnotation.type]
+  def outlierAnnotation( obm: OutlierBoundsMagnet ): Valid[OutlierAnnotation] = { obm() }
 
-  def outlierAnnotation( obm: OutlierBoundsMagnet ): Valid[OutlierAnnotation] = trace.block( s"outlierAnnotation($obm)" ) { obm() }
-
-  def cleanAnnotation( start: Option[joda.DateTime], end: Option[joda.DateTime] ): Valid[OutlierAnnotation] = trace.block( s"cleanAnnotation($start, $end" ) {
+  def cleanAnnotation( start: Option[joda.DateTime], end: Option[joda.DateTime] ): Valid[OutlierAnnotation] = {
     check( start, end ) map { i => NoOutlierIntervalAnnotation( i ) }
   }
 
-  def annotationsFromSeries( series: Outliers ): Valid[Seq[OutlierAnnotation]] = trace.block( s"annotationsFromSeries(...)" ) {
+  def annotationsFromSeries( series: Outliers ): Valid[Seq[OutlierAnnotation]] = {
     val result = series match {
       case no: NoOutliers => List( cleanAnnotation(no.source.start, no.source.end) )
 
@@ -57,7 +54,7 @@ object OutlierAnnotation {
 
   type FlexInterval = ( Option[joda.DateTime], Option[joda.DateTime] )
 
-  implicit def fromUncertainInterval( start: Option[joda.DateTime], end: Option[joda.DateTime] ) = trace.block( s"fromUncertainInterval($start, $end)" ) {
+  implicit def fromUncertainInterval( start: Option[joda.DateTime], end: Option[joda.DateTime] ) = {
     new OutlierBoundsMagnet {
       override def apply(): Result = {
         import scalaz.Validation.FlatMap._
@@ -74,7 +71,7 @@ object OutlierAnnotation {
         }
       }
 
-      val check: Valid[FlexInterval] = trace.briefBlock( s"uncertain-check($start, $end)" ) {
+      val check: Valid[FlexInterval] = {
         (start, end) match {
           case (None, None) => Validation.failureNel( OutlierTimeBoundsError(None, None) )
           case interval @ (Some(_), None) => interval.successNel[Throwable]
@@ -88,7 +85,7 @@ object OutlierAnnotation {
     }
   }
 
-  private def check( start: Option[joda.DateTime], end: Option[joda.DateTime] ): Valid[joda.Interval] = trace.briefBlock( s"check($start, $end)" ) {
+  private def check( start: Option[joda.DateTime], end: Option[joda.DateTime] ): Valid[joda.Interval] = {
     val result = for {
       s <- start
       e <- end

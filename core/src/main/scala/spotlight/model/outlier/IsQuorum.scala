@@ -1,7 +1,5 @@
 package spotlight.model.outlier
 
-import org.joda.{time => joda}
-import peds.commons.log.Trace
 import peds.commons.util._
 
 

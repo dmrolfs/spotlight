@@ -13,7 +13,6 @@ import demesne.{AggregateRootType, BoundedContext, DomainModel, StartTask}
 import peds.akka.envelope._
 import peds.akka.metrics.InstrumentedActor
 import peds.commons.{TryV, Valid}
-import peds.commons.log.Trace
 import peds.commons.concurrent._
 import peds.commons.identifier.{ShortUUID, TaggedID}
 import shapeless.TypeCase
@@ -28,9 +27,6 @@ import spotlight.model.outlier.OutlierPlan.Scope
  * Created by rolfsd on 9/29/15.
  */
 object DetectionAlgorithmRouter extends LazyLogging {
-  private val trace = Trace[DetectionAlgorithmRouter.type]
-
-
   sealed trait RouterProtocol
 
   case class RegisterAlgorithmReference( algorithm: Symbol, handler: ActorRef ) extends RouterProtocol
@@ -133,7 +129,7 @@ object DetectionAlgorithmRouter extends LazyLogging {
   }
 
 
-  def userAlgorithms( configuration: Config ): Valid[Map[Symbol, Class[_ <: AlgorithmModule]]] = trace.block( "userAlgorithms" ) {
+  def userAlgorithms( configuration: Config ): Valid[Map[Symbol, Class[_ <: AlgorithmModule]]] = {
     def loadClass( algorithm: Symbol, fqcn: String ): TryV[Class[_ <: AlgorithmModule]] = {
       \/ fromTryCatchNonFatal { Class.forName( fqcn, true, getClass.getClassLoader ).asInstanceOf[Class[_ <: AlgorithmModule]] }
     }

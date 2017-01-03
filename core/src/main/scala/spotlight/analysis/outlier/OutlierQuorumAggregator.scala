@@ -10,15 +10,12 @@ import org.slf4j.LoggerFactory
 import nl.grons.metrics.scala.{Meter, MetricName, Timer}
 import peds.akka.envelope._
 import peds.akka.metrics.InstrumentedActor
-import peds.commons.log.Trace
 import spotlight.analysis.outlier.OutlierQuorumAggregator.ConfigurationProvider
 import spotlight.model.outlier._
 import spotlight.model.timeseries.{TimeSeriesBase, Topic}
 
 
 object OutlierQuorumAggregator {
-  val trace = Trace[OutlierQuorumAggregator.type]
-
   def props( plan: OutlierPlan, source: TimeSeriesBase ): Props = Props( new DefaultOutlierQuorumAggregator(plan, source) )
 
   private class DefaultOutlierQuorumAggregator( plan: OutlierPlan, source: TimeSeriesBase )

@@ -16,7 +16,6 @@ import peds.akka.envelope.pattern.ask
 import peds.akka.publish.{EventPublisher, StackableStreamPublisher}
 import peds.archetype.domain.model.core.{EntityIdentifying, EntityLensProvider}
 import peds.commons.identifier.ShortUUID
-import peds.commons.log.Trace
 import demesne.module.entity.EntityAggregateModule
 import demesne.module.entity.EntityAggregateModule.MakeIndexSpec
 import demesne.module.entity.{messages => EntityMessages}
@@ -223,8 +222,6 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
 
       import akka.stream.Supervision
       import spotlight.analysis.outlier.{AnalysisPlanProtocol => P}
-
-      private val trace = Trace[PlanActor]
 
       override lazy val metricBaseName: MetricName = MetricName( classOf[PlanActor] )
       val failuresMeter: Meter = metrics.meter( "failures" )

@@ -25,7 +25,6 @@ import peds.akka.stream.StreamMonitor
 import demesne.BoundedContext
 import peds.akka.stream.Limiter
 import peds.commons.TryV
-import peds.commons.log.Trace
 import spotlight.analysis.outlier.DetectFlow
 import spotlight.model.outlier.{Outliers, SeriesOutliers}
 import spotlight.model.timeseries.{DataPoint, ThresholdBoundary, TimeSeries}
@@ -37,9 +36,6 @@ import spotlight.stream.{Bootstrap, BootstrapContext, Settings}
   * Created by rolfsd on 11/17/16.
   */
 object FileBatchExample extends Instrumented with StrictLogging {
-  private val trace = Trace[FileBatchExample.type]
-
-
   def main( args: Array[String] ): Unit = {
     import scala.concurrent.ExecutionContext.Implicits.global
 
@@ -298,7 +294,7 @@ object FileBatchExample extends Instrumented with StrictLogging {
     }
   }
 
-  def flattenObject( outlier: SeriesOutliers ): TryV[List[SimpleFlattenedOutlier]] = trace.briefBlock("flattenObject"){
+  def flattenObject( outlier: SeriesOutliers ): TryV[List[SimpleFlattenedOutlier]] = {
     \/ fromTryCatchNonFatal {
       outlier.algorithms.toList.map{ a =>
         val o = parseOutlierObject( outlier.outliers )
@@ -315,7 +311,7 @@ object FileBatchExample extends Instrumented with StrictLogging {
 //    thresholdBoundaries map { a => Threshold(a.timestamp, a.ceiling, a.expected, a.floor ) }
 //  }
 
-  def parseOutlierObject(dataPoints: Seq[DataPoint]) : Seq[OutlierTimeSeriesObject] = trace.briefBlock( s"parseOutlierObject(${dataPoints})"){
+  def parseOutlierObject(dataPoints: Seq[DataPoint]) : Seq[OutlierTimeSeriesObject] = {
     dataPoints map { a => OutlierTimeSeriesObject( a.timestamp, a.value ) }
   }
 
@@ -348,7 +344,7 @@ object FileBatchExample extends Instrumented with StrictLogging {
     .withAttributes( ActorAttributes.supervisionStrategy(GraphiteSerializationProtocol.decider) )
   }
 
-  def toTimeSeries( bytes: String ): TryV[List[TimeSeries]] = trace.briefBlock( "toTimeSeries" ) {
+  def toTimeSeries( bytes: String ): TryV[List[TimeSeries]] = {
     import spotlight.model.timeseries._
 
     \/ fromTryCatchNonFatal {

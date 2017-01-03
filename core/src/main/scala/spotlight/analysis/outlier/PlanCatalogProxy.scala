@@ -17,7 +17,6 @@ import com.typesafe.scalalogging.LazyLogging
 import nl.grons.metrics.scala.{MetricName, Timer}
 import peds.akka.envelope._
 import peds.akka.metrics.{Instrumented, InstrumentedActor}
-import peds.commons.log.Trace
 import spotlight.analysis.outlier.OutlierDetection.DetectionResult
 import spotlight.analysis.outlier.PlanCatalogProtocol.{Started, WaitForStart}
 import spotlight.model.timeseries._
@@ -78,8 +77,6 @@ extends ActorSubscriber with EnvelopingActor with InstrumentedActor with ActorLo
 
   import PlanCatalog.{ PlanRequest }
 
-  private val trace = Trace[PlanCatalogProxy]
-
   override lazy val metricBaseName: MetricName = MetricName( classOf[PlanCatalogProxy] )
   val catalogTimer: Timer = metrics timer "catalog"
 
@@ -133,7 +130,7 @@ extends ActorSubscriber with EnvelopingActor with InstrumentedActor with ActorLo
     correlationIds.collect{ case cid => _workRequests.get( cid ) map { req => ( cid, req ) } }.flatten
   }
 
-  def findOutstandingCorrelationIds( workIds: Set[WorkId] ): Set[WorkId] = trace.briefBlock( "findOutstandingCorrelationIds" ) {
+  def findOutstandingCorrelationIds( workIds: Set[WorkId] ): Set[WorkId] = {
     log.debug( "outstanding work: [{}]", knownWork )
     log.debug( "returning work: [{}]", workIds )
     log.debug( "known intersect: [{}]", knownWork intersect workIds )
