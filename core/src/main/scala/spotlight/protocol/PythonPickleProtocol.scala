@@ -11,7 +11,6 @@ import akka.util.ByteString
 import com.typesafe.scalalogging.LazyLogging
 import net.razorvine.pickle.Pickler
 import org.joda.{time => joda}
-import peds.commons.log.Trace
 import spotlight.model.timeseries._
 
 
@@ -54,8 +53,6 @@ object PythonPickleProtocol {
 
 class PythonPickleProtocol extends GraphiteSerializationProtocol with LazyLogging {
   import PythonPickleProtocol._
-
-  val trace = Trace[PythonPickleProtocol]
 
   // Pickler is not thread safe so protocols need to be instantiated per thread.
   // If perf is an issue, may consider hand-coding pickler based on dropwizard graphite reporter.

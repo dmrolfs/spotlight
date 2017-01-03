@@ -1,7 +1,6 @@
 package spotlight.analysis.outlier
 
 import java.net.URI
-
 import scala.concurrent.ExecutionContext
 import akka.actor.{Actor, ActorLogging, ActorPath, ActorRef, Props}
 import akka.agent.Agent
@@ -9,7 +8,6 @@ import akka.event.LoggingReceive
 import akka.pattern.AskTimeoutException
 import akka.stream.Supervision
 import akka.stream.actor.ActorSubscriberMessage
-
 import scalaz.{-\/, \/, \/-}
 import org.slf4j.LoggerFactory
 import com.typesafe.scalalogging.{Logger, StrictLogging}
@@ -18,7 +16,6 @@ import peds.akka.envelope._
 import peds.akka.metrics.{Instrumented, InstrumentedActor}
 import peds.commons.TryV
 import peds.commons.identifier.ShortUUID
-import peds.commons.log.Trace
 import spotlight.model.timeseries._
 import spotlight.model.outlier.{CorrelatedData, OutlierPlan, Outliers}
 
@@ -72,7 +69,6 @@ object OutlierDetection extends Instrumented with StrictLogging {
   )
 
   private[OutlierDetection] object DetectionRequest {
-    private val trace = Trace[DetectionResult.type]
     def from( m: OutlierDetectionMessage, subscriber: ActorRef )( implicit wid: WorkId ): DetectionRequest = {
       logger.debug( "req = [{}]", m )
       logger.debug( "req.correlationIds = [{}]", m.correlationIds )
@@ -104,8 +100,6 @@ class OutlierDetection extends Actor with EnvelopingActor with InstrumentedActor
   outer: OutlierDetection.ConfigurationProvider =>
 
   import OutlierDetection._
-
-  val trace = Trace[OutlierDetection]
 
   override lazy val metricBaseName: MetricName = MetricName( classOf[OutlierDetection] )
   val detectionTimer: Timer = metrics timer "detect"

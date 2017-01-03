@@ -14,7 +14,6 @@ import com.typesafe.scalalogging.{Logger, StrictLogging}
 import demesne.BoundedContext
 import kamon.Kamon
 import nl.grons.metrics.scala.MetricName
-import peds.commons.log.Trace
 import peds.akka.metrics.Instrumented
 import peds.akka.stream.StreamMonitor
 import spotlight.model.outlier._
@@ -33,7 +32,6 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
   }
 
   override protected val logger: Logger = Logger( LoggerFactory.getLogger("GraphiteSpotlight") )
-  val trace = Trace[GraphiteSpotlight.type]
   val ActorSystemName = "Spotlight"
 
   def main( args: Array[String] ): Unit = {

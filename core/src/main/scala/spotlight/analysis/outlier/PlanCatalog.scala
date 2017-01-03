@@ -20,7 +20,6 @@ import nl.grons.metrics.scala.MetricName
 import peds.akka.envelope._
 import peds.akka.envelope.pattern.{ask => envAsk}
 import peds.akka.metrics.InstrumentedActor
-import peds.commons.log.Trace
 import peds.akka.stream.CommonActorPublisher
 import demesne.{BoundedContext, DomainModel}
 import spotlight.analysis.outlier.OutlierDetection.DetectionResult
@@ -161,8 +160,6 @@ object PlanCatalog extends LazyLogging {
     applicationDetectionBudget: Option[Duration] = None,
     applicationPlans: Set[OutlierPlan] = Set.empty[OutlierPlan]
   ) extends PlanCatalog( boundedContext ) with DefaultExecutionProvider with PlanProvider {
-    private val trace = Trace[Default]
-
     //todo also load from plan index?
     override lazy val specifiedPlans: Set[OutlierPlan] = applicationPlans ++ loadPlans( configuration )
 
@@ -322,8 +319,6 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
 
   import spotlight.analysis.outlier.{ PlanCatalogProtocol => P, AnalysisPlanProtocol => AP }
 
-  private val trace = Trace[PlanCatalog]
-
   override lazy val metricBaseName: MetricName = MetricName( classOf[PlanCatalog] )
 
   val fallbackIndex: Agent[Map[String, OutlierPlan.Summary]] = {
@@ -359,7 +354,7 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
     } yield fromIndex ++ fromFallback
   }
 
-  def applicablePlanExists( ts: TimeSeries )( implicit ec: ExecutionContext ): Boolean = trace.briefBlock( s"applicablePlanExists( ${ts.topic} )" ) {
+  def applicablePlanExists( ts: TimeSeries )( implicit ec: ExecutionContext ): Boolean = {
     val current = unsafeApplicablePlanExists( ts )
     if ( current ) current
     else {
@@ -393,7 +388,7 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
     }
   }
 
-  def unsafeApplicablePlanExists( ts: TimeSeries ): Boolean = trace.briefBlock( s"unsafeApplicablePlanExists( ${ts.topic} )" ) {
+  def unsafeApplicablePlanExists( ts: TimeSeries ): Boolean = {
     log.debug(
       "PlanCatalog: unsafe look at {} plans for one that applies to topic:[{}] -- [{}]",
       planIndex.entries.size, ts.topic, planIndex.entries.values.mkString(", ")
@@ -402,7 +397,7 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
     planIndex.entries.values exists { _ appliesTo ts }
   }
 
-  def futureApplicablePlanExists( ts: TimeSeries )( implicit ec: ExecutionContext ): Future[Boolean] = trace.briefBlock( s"futureApplicablePlanExists( ${ts.topic} )" ) {
+  def futureApplicablePlanExists( ts: TimeSeries )( implicit ec: ExecutionContext ): Future[Boolean] = {
     planIndex.futureEntries map { entries =>
       log.debug(
         "PlanCatalog: safe look at {} plans for one that applies to topic:[{}] -- [{}]",

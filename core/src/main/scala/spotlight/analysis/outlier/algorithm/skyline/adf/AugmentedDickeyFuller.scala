@@ -1,7 +1,6 @@
 package spotlight.analysis.outlier.algorithm.skyline.adf
 
 import org.apache.commons.math3.linear.{MatrixUtils, RealMatrix, RealVector}
-import peds.commons.log.Trace
 
 /**
   * Created by rolfsd on 3/6/16.
@@ -13,8 +12,6 @@ abstract class AugmentedDickeyFuller {
 }
 
 object AugmentedDickeyFuller {
-  private val trace = Trace[AugmentedDickeyFuller.type]
-
   def apply( ts: Array[Double], lag: Int ): AugmentedDickeyFuller = computeADFStatistics( ts, lag )
   def apply( ts: Array[Double] ): AugmentedDickeyFuller = apply( ts = ts, lag = math.floor( math.cbrt(ts.size - 1) ).toInt )
 

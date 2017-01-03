@@ -28,7 +28,6 @@ import peds.akka.publish.{EventPublisher, StackableStreamPublisher}
 import peds.archetype.domain.model.core.{Entity, EntityIdentifying}
 import peds.commons.{KOp, TryV}
 import peds.commons.identifier.{Identifying, ShortUUID, TaggedID}
-import peds.commons.log.Trace
 import demesne._
 import demesne.repository.{AggregateRootRepository, EnvelopingAggregateRootRepository}
 import demesne.repository.AggregateRootRepository.{ClusteredAggregateContext, LocalAggregateContext}
@@ -217,8 +216,6 @@ object AlgorithmModule extends Instrumented with StrictLogging {
 abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmModule.ModuleConfiguration =>
   import AlgorithmModule.{ AnalysisState, ShapeCompanion, StrictSelf }
   import AlgorithmProtocol.Advanced
-
-  private val trace = Trace[AlgorithmModule]
 
   /**
     * Shape represents the culminated value of applying the algorithm over the time series data for this ID.

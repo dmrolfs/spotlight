@@ -9,7 +9,6 @@ import peds.commons.{KOp, Valid}
 import spotlight.analysis.outlier.algorithm.AlgorithmActor.AlgorithmContext
 import spotlight.analysis.outlier.algorithm.CommonAnalyzer
 import CommonAnalyzer.WrappingContext
-import peds.commons.log.Trace
 import spotlight.model.outlier.Outliers
 import spotlight.model.timeseries._
 
@@ -17,6 +16,7 @@ import spotlight.model.timeseries._
 /**
   * Created by rolfsd on 2/25/16.
   */
+//todo use HdrHistogram!!!
 object HistogramBinsAnalyzer {
   val Algorithm = Symbol( "histogram-bins" )
 
