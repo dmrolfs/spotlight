@@ -1,7 +1,7 @@
 package spotlight.analysis.outlier
 
 import scala.concurrent.duration.{Duration, FiniteDuration}
-import akka.actor.{Actor, ActorLogging, Cancellable, Props}
+import akka.actor.{ActorLogging, Cancellable, Props}
 import akka.event.LoggingReceive
 
 import scalaz.{-\/, \/-}

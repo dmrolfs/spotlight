@@ -3,8 +3,8 @@ package spotlight.analysis.outlier
 import scala.reflect._
 import akka.NotUsed
 import akka.actor._
-import akka.stream.Supervision.{Decider, Directive}
-import akka.stream.{ActorAttributes, Materializer, OverflowStrategy}
+import akka.stream.Supervision.Decider
+import akka.stream.{ActorAttributes, Materializer}
 import akka.stream.scaladsl.Flow
 import akka.util.Timeout
 import shapeless.Lens
@@ -101,7 +101,6 @@ object AnalysisPlanProtocol extends AggregateProtocol[OutlierPlan#ID]{
   }
 }
 
-WORK HERE TO RESOLVE PASSIVATION UNHANDLING
 
 /**
   * Created by rolfsd on 5/26/16.
