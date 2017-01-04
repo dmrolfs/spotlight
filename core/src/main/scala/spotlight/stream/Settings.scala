@@ -14,7 +14,7 @@ import spotlight.protocol.{GraphiteSerializationProtocol, MessagePackProtocol, P
 import peds.commons.{V, Valid}
 
 
-//todo refactor in form of ActorSystem.Settings; i.e., class name and Settings.config rt extending Config
+//todo refactor into base required settings and allow for app-specific extension
 /**
   * Created by rolfsd on 1/12/16.
   */
@@ -32,6 +32,7 @@ trait Settings extends LazyLogging {
   def tcpInboundBufferSize: Int
   def workflowBufferSize: Int
   def parallelism: Int = ( parallelismFactor * Runtime.getRuntime.availableProcessors() ).toInt
+  def args: Seq[String]
 
   def config: Config
 
@@ -160,7 +161,7 @@ object Settings extends LazyLogging {
       for {
         u <- usage.disjunction
         c <- checkConfiguration( config, u ).disjunction
-      } yield makeSettings( u, c)
+      } yield makeSettings( u, c )
     }
   }
 
@@ -279,7 +280,8 @@ object Settings extends LazyLogging {
           p <- graphitePort
         } yield new InetSocketAddress( h, p )
       },
-      config = ConfigFactory.parseString( SimpleSettings.AkkaRemotePortPath + "=" + usage.clusterPort ).withFallback( config )
+      config = ConfigFactory.parseString( SimpleSettings.AkkaRemotePortPath + "=" + usage.clusterPort ).withFallback( config ),
+      args = usage.args
     )
   }
 
@@ -306,7 +308,8 @@ object Settings extends LazyLogging {
     override val protocol: GraphiteSerializationProtocol,
     override val windowDuration: FiniteDuration,
     override val graphiteAddress: Option[InetSocketAddress],
-    override val config: Config
+    override val config: Config,
+    override val args: Seq[String]
   ) extends Settings with LazyLogging {
     override def clusterPort: Int = config.getInt( SimpleSettings.AkkaRemotePortPath )
 
@@ -441,7 +444,8 @@ object Settings extends LazyLogging {
     clusterPort: Int = 2552,
     sourceHost: Option[InetAddress] = None,
     sourcePort: Option[Int] = None,
-    windowSize: Option[FiniteDuration] = None
+    windowSize: Option[FiniteDuration] = None,
+    args: Seq[String] = Seq.empty[String]
   )
 
   private object UsageSettings {
@@ -468,6 +472,8 @@ object Settings extends LazyLogging {
       opt[Long]( 'w', "window" ) action { (e, c) =>
         c.copy( windowSize = Some(FiniteDuration(e, SECONDS)) )
       } text( "batch window size (in seconds) for collecting time series data. Default = 60s." )
+
+      arg[String]( "<arg>..." ).unbounded().optional().action { (a, c) => c.copy( args = c.args :+ a )}
 
       help( "help" )
 
