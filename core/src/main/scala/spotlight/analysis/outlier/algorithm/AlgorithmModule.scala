@@ -1,18 +1,16 @@
 package spotlight.analysis.outlier.algorithm
 
 import java.io.Serializable
-
 import scala.annotation.tailrec
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
 import scala.util.Random
 import scala.reflect._
-import akka.actor.{ActorPath, ActorRef, Props, SupervisorStrategy}
+import akka.actor.{ActorPath, ActorRef, Props}
 import akka.agent.Agent
 import akka.cluster.sharding.ShardRegion
 import akka.event.LoggingReceive
 import akka.persistence.{DeleteMessagesFailure, DeleteMessagesSuccess, SaveSnapshotFailure, SaveSnapshotSuccess}
-
 import scalaz._
 import Scalaz._
 import scalaz.Kleisli.{ask, kleisli}
@@ -21,6 +19,7 @@ import com.typesafe.config.Config
 import com.typesafe.config.ConfigException.BadValue
 import com.typesafe.scalalogging.{LazyLogging, StrictLogging}
 import org.apache.commons.math3.ml.clustering.DoublePoint
+import com.codahale.metrics.{Metric, MetricFilter}
 import nl.grons.metrics.scala.{Meter, MetricName, Timer}
 import peds.akka.envelope._
 import peds.akka.metrics.{Instrumented, InstrumentedActor}
@@ -77,6 +76,8 @@ object AlgorithmProtocol extends AggregateProtocol[AlgorithmModule.AnalysisState
   * Created by rolfsd on 6/5/16.
   */
 object AlgorithmModule extends Instrumented with StrictLogging {
+  // useful for with* methods to maintain concrete typing
+  // idea pick up from: http://stackoverflow.com/questions/14729996/scala-implementing-method-with-return-type-of-concrete-instance
   trait StrictSelf[T <: StrictSelf[T]] { self: T =>
     type Self >: self.type <: T
   }
@@ -192,16 +193,6 @@ object AlgorithmModule extends Instrumented with StrictLogging {
 
   override lazy val metricBaseName: MetricName = MetricName( classOf[AlgorithmModule] )
 
-  val _uniqueCalculations: Agent[BloomFilter[AlgorithmModule.ID]] = {
-    Agent( BloomFilter[AlgorithmModule.ID](maxFalsePosProbability = 0.01, size = 10000000) )( ExecutionContext.global )
-  }
-
-  metrics.gauge( "unique-calculations" ){ _uniqueCalculations.map{ _.size }.get() }
-
-  def addUniqueCalculation( id: AlgorithmModule.ID ): Unit = {
-    _uniqueCalculations send { cs => if ( cs.has_?(id) ) cs else cs + id }
-  }
-
   val snapshotTimer: Timer = metrics.timer( "snapshot" )
   val snapshotSuccesses: Meter = metrics.meter( "snapshot", "successes" )
   val snapshotFailures: Meter = metrics.meter( "snapshot", "failures" )
@@ -213,9 +204,46 @@ object AlgorithmModule extends Instrumented with StrictLogging {
   val passivationTimer: Timer = metrics.timer( "passivation" )
 }
 
-abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmModule.ModuleConfiguration =>
+abstract class AlgorithmModule extends AggregateRootModule with Instrumented { module: AlgorithmModule.ModuleConfiguration =>
   import AlgorithmModule.{ AnalysisState, ShapeCompanion, StrictSelf }
   import AlgorithmProtocol.Advanced
+
+
+  initializeMetrics()  // defer to concrete modules to initiate?
+
+  override lazy val metricBaseName: MetricName = MetricName( "spotlight.analysis.outlier.algorithm." + rootType.name )
+
+  object ShardMonitor {
+    val ShardsMetricName = "shards"
+    val shards: Agent[BloomFilter[AlgorithmModule.ID]] = {
+      Agent( BloomFilter[AlgorithmModule.ID](maxFalsePosProbability = 0.01, size = 10000000) )( ExecutionContext.global )
+    }
+
+    def :+( id: AlgorithmModule.ID ): Unit = {
+      shards send { ss =>
+        if ( ss.has_?(id) ) ss
+        else {
+          logger.info( "created new {} algorithm shard: {}", rootType.name, id )
+          ss + id
+        }
+      }
+    }
+  }
+
+  def initializeMetrics(): Unit = {
+    stripLingeringMetrics()
+    metrics.gauge( ShardMonitor.ShardsMetricName ) { ShardMonitor.shards.get().size }
+  }
+
+  def stripLingeringMetrics(): Unit = {
+    metrics.registry.removeMatching(
+      new MetricFilter {
+        override def matches( name: String, metric: Metric ): Boolean = {
+          name.contains( classOf[PlanCatalog].getName ) && name.contains( ShardMonitor.ShardsMetricName )
+        }
+      }
+    )
+  }
 
   /**
     * Shape represents the culminated value of applying the algorithm over the time series data for this ID.
@@ -438,7 +466,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
 
     override def preStart(): Unit = {
       super.preStart()
-      AlgorithmModule addUniqueCalculation aggregateId
+      module.ShardMonitor :+ aggregateId
     }
 
     override def parseId( idstr: String ): TID = {
@@ -446,8 +474,8 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
       identifying.safeParseId( idstr )( identifying.evID )
     }
 
-    override lazy val metricBaseName: MetricName = MetricName( "spotlight.analysis.outlier.algorithm" )
-    lazy val algorithmTimer: Timer = metrics timer algorithm.label.name
+    override lazy val metricBaseName: MetricName = module.metricBaseName
+    lazy val executionTimer: Timer = metrics.timer( "execution" )
 
     override var state: State = State( aggregateId )
     override lazy val evState: ClassTag[State] = ClassTag( classOf[State] )
@@ -469,7 +497,7 @@ abstract class AlgorithmModule extends AggregateRootModule { module: AlgorithmMo
 
         val start = System.nanoTime()
         @inline def stopTimer( start: Long ): Unit = {
-          algorithmTimer.update( System.nanoTime() - start, scala.concurrent.duration.NANOSECONDS )
+          executionTimer.update( System.nanoTime() - start, scala.concurrent.duration.NANOSECONDS )
         }
 
         ( makeAlgorithmContext >=> findOutliers >=> toOutliers ).run( msg ) match {
