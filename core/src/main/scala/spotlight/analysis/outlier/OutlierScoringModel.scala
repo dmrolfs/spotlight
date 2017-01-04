@@ -1,19 +1,19 @@
-package spotlight.stream
+package spotlight.analysis.outlier
 
 import java.util.concurrent.atomic.AtomicInteger
 import scala.concurrent.duration._
 import akka.NotUsed
-import akka.stream.FanOutShape.{Init, Name}
 import akka.actor._
-import akka.stream.scaladsl._
+import akka.stream.FanOutShape.{Init, Name}
 import akka.stream._
+import akka.stream.scaladsl._
 import akka.stream.stage._
 import com.typesafe.scalalogging.{Logger, StrictLogging}
 import org.slf4j.LoggerFactory
 import peds.akka.metrics.Instrumented
 import peds.akka.stream.StreamMonitor
 import peds.commons.collection.BloomFilter
-import spotlight.analysis.outlier.DetectFlow
+import spotlight.Settings
 import spotlight.model.outlier._
 import spotlight.model.timeseries.TimeSeriesBase.Merging
 import spotlight.model.timeseries._
@@ -142,7 +142,8 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
     materializer: Materializer,
     tsMerging: Merging[TimeSeries]
   ): Flow[TimeSeries, TimeSeries, NotUsed] = {
-    import scalaz.{ \/-, -\/, Scalaz }, Scalaz._
+    import scalaz.{-\/, Scalaz, \/-}
+    import Scalaz._
 
     type TopicAccumulator = Map[Topic, TimeSeries]
     val seedFn: (TimeSeries) => (TopicAccumulator, Long) = (ts: TimeSeries) => ( Map( ts.topic -> ts ), 0 )

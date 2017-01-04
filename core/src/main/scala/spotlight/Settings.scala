@@ -1,17 +1,19 @@
-package spotlight.stream
+package spotlight
 
 import java.net.{InetAddress, InetSocketAddress}
-import scala.concurrent.duration._
-import scala.util.matching.Regex
-import scalaz.Scalaz._
-import scalaz._
+
 import com.typesafe.config._
 import com.typesafe.scalalogging.LazyLogging
+import peds.commons.{V, Valid}
 import spotlight.analysis.outlier.OutlierDetection
 import spotlight.model.outlier._
 import spotlight.model.timeseries.Topic
 import spotlight.protocol.{GraphiteSerializationProtocol, MessagePackProtocol, PythonPickleProtocol}
-import peds.commons.{V, Valid}
+
+import scala.concurrent.duration._
+import scala.util.matching.Regex
+import scalaz.Scalaz._
+import scalaz._
 
 
 //todo refactor into base required settings and allow for app-specific extension
@@ -302,7 +304,7 @@ object Settings extends LazyLogging {
     val AkkaRemotePortPath = "akka.remote.netty.tcp.port"
   }
 
-  final case class SimpleSettings private[stream](
+  final case class SimpleSettings private[Settings](
     override val sourceAddress: InetSocketAddress,
     override val maxFrameLength: Int,
     override val protocol: GraphiteSerializationProtocol,
@@ -438,9 +440,9 @@ object Settings extends LazyLogging {
     }
   }
 
-  case class UsageConfigurationError private[stream]( usage: String ) extends IllegalArgumentException( usage )
+  case class UsageConfigurationError private[Settings]( usage: String ) extends IllegalArgumentException( usage )
 
-  final case class UsageSettings private[stream](
+  final case class UsageSettings private[Settings](
     clusterPort: Int = 2552,
     sourceHost: Option[InetAddress] = None,
     sourcePort: Option[Int] = None,

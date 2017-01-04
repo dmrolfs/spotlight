@@ -1,33 +1,34 @@
-package spotlight.stream
+package spotlight.analysis.outlier
 
 import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicInteger
 
-import scala.concurrent.{Await, Future}
-import scala.concurrent.duration._
-import scala.util.Failure
-import akka.{NotUsed, pattern}
 import akka.actor.ActorSystem
 import akka.pattern.ask
-import akka.stream.{ActorMaterializer, Materializer, OverflowStrategy}
-import akka.stream.testkit.scaladsl.{TestSink, TestSource}
 import akka.stream.scaladsl._
-import akka.util.ByteString
+import akka.stream.testkit.scaladsl.{TestSink, TestSource}
+import akka.stream.{ActorMaterializer, Materializer, OverflowStrategy}
 import akka.testkit._
+import akka.util.ByteString
+import akka.{NotUsed, pattern}
+import com.github.nscala_time.time.Imports.{richDateTime, richSDuration}
 import com.typesafe.config.{Config, ConfigFactory}
-import org.scalatest.Tag
+import demesne.{AggregateRootType, BoundedContext, DomainModel}
 import org.apache.commons.math3.random.RandomDataGenerator
 import org.joda.{time => joda}
-import com.github.nscala_time.time.Imports.{richDateTime, richSDuration}
-import demesne.{AggregateRootType, BoundedContext, DomainModel}
+import org.scalatest.Tag
 import peds.commons.log.Trace
 import spotlight.analysis.outlier.algorithm.statistical.SimpleMovingAverageAlgorithm
-import spotlight.protocol.PythonPickleProtocol
-import spotlight.testkit.ParallelAkkaSpec
-import spotlight.analysis.outlier.{AnalysisPlanModule, AnalysisPlanProtocol, PlanCatalog, PlanCatalogProtocol, PlanCatalogProxy}
 import spotlight.model.outlier._
 import spotlight.model.timeseries.TimeSeriesBase.Merging
 import spotlight.model.timeseries.{DataPoint, TimeSeries}
+import spotlight.protocol.PythonPickleProtocol
+import spotlight.testkit.ParallelAkkaSpec
+import spotlight.{Settings, Spotlight}
+
+import scala.concurrent.duration._
+import scala.concurrent.{Await, Future}
+import scala.util.Failure
 
 
 /**
@@ -224,7 +225,6 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
 
     "read sliding window" in { f: Fixture =>
       import f._
-      import system.dispatcher
 
       val now = joda.DateTime.now
       val dp1 = makeDataPoints( points, start = now ).take( 3 )
@@ -256,8 +256,8 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
 
 
     "batch series by plan passthru without merging with demand" in { f: Fixture =>
-      import f._
       import OutlierScoringModelSpec._
+      import f._
 
       val p1 = makePlan( "p1", None )
       val p2 = makePlan( "p2", None )
@@ -308,8 +308,8 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
     }
 
     "batch series by plan with merging if backpressured" in { f: Fixture =>
-      import f._
       import OutlierScoringModelSpec._
+      import f._
 
       val p1 = makePlan( "p1", None )
       val p2 = makePlan( "p2", None )
@@ -359,9 +359,9 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
     }
 
     "detect Outliers" taggedAs WIP in { f: Fixture =>
+      import com.github.nscala_time.time.OrderingImplicits._
       import f._
       import system.dispatcher
-      import com.github.nscala_time.time.OrderingImplicits._
 
       val algos = Set( algo )
       val grouping: Option[OutlierPlan.Grouping] = {
@@ -392,7 +392,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
         )
       )
 
-      import demesne.module.entity.{ messages => EntityMessages }
+      import demesne.module.entity.{messages => EntityMessages}
       model.aggregateOf( AnalysisPlanModule.module.rootType, defaultPlan.id ) ! EntityMessages.Add( defaultPlan.id, Some(defaultPlan))
 
       Thread.sleep( 1000 ) // ugh let plan added
@@ -401,10 +401,10 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
       logger.info( "BOOTSTRAP:BEFORE BoundedContext roottypes = [{}]", boundedContext.unsafeModel.rootTypes )
 //      Thread.sleep( 10000 )
 //      logger.info( "BOOTSTRAP:AFTER BoundedContext roottypes = [{}]", boundedContext.unsafeModel.rootTypes )
-      val catalogRef = Await.result( Bootstrap.makeCatalog( settings )( boundedContext ), 3.seconds )
+      val catalogRef = Await.result( Spotlight.makeCatalog( settings )( boundedContext ), 3.seconds )
       logger.info( "Catalog ref = [{}]", catalogRef )
 
-      import PlanCatalogProtocol.{ MakeFlow, CatalogFlow, WaitForStart, Started }
+      import PlanCatalogProtocol.{CatalogFlow, MakeFlow, WaitForStart}
       val catalogFlow = {
         for {
           _ <- catalogRef ? WaitForStart
@@ -539,9 +539,9 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
     }
 
     "ex4" in { f: Fixture =>
+      import akka.pattern.pipe
       import f._
       import f.system.dispatcher
-      import akka.pattern.pipe
 
       val sourceUnderTest = Source( 1 to 4 ).grouped(2)
       val probe = TestProbe()
@@ -648,7 +648,6 @@ object OutlierScoringModelSpec {
 
   def pickled(metrics: Seq[(String, Seq[DataPoint])] ): ByteString = trace.block( s"pickled($metrics)" ) {
     import net.razorvine.pickle.Pickler
-    import scala.collection.convert.wrapAll._
 
     val data = new java.util.LinkedList[AnyRef]
     for {

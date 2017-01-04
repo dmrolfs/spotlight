@@ -25,11 +25,11 @@ import peds.akka.stream.StreamMonitor
 import demesne.BoundedContext
 import peds.akka.stream.Limiter
 import peds.commons.TryV
+import spotlight.{Spotlight, SpotlightContext$, Settings}
 import spotlight.analysis.outlier.DetectFlow
 import spotlight.model.outlier.{Outliers, SeriesOutliers}
 import spotlight.model.timeseries.{DataPoint, ThresholdBoundary, TimeSeries}
 import spotlight.protocol.GraphiteSerializationProtocol
-import spotlight.stream.{Bootstrap, BootstrapContext, Settings}
 
 
 /**
@@ -132,15 +132,15 @@ object FileBatchExample extends Instrumented with StrictLogging {
     import scala.concurrent.ExecutionContext.Implicits.global
 
     val context = {
-      BootstrapContext
+      SpotlightContext
       .builder
-      .set( BootstrapContext.Name, "DetectionFlow" )
-//      .set( BootstrapContext.StartTasks, Set( /*SharedLeveldbStore.start(true), Bootstrap.kamonStartTask*/ ) )
-      .set( BootstrapContext.System, Some(system) )
+      .set( SpotlightContext.Name, "DetectionFlow" )
+      //      .set( SpotlightContext.StartTasks, Set( /*SharedLeveldbStore.start(true), Spotlight.kamonStartTask*/ ) )
+      .set( SpotlightContext.System, Some( system ) )
       .build()
     }
 
-    Bootstrap( context )
+    Spotlight( context )
     .run( args )
     .map { e => logger.debug( "bootstrapping process..." ); e }
     .flatMap { case ( boundedContext, settings, scoring ) =>
@@ -148,7 +148,7 @@ object FileBatchExample extends Instrumented with StrictLogging {
 
       import StreamMonitor._
       import WatchPoints._
-      import spotlight.stream.OutlierScoringModel.{ WatchPoints => OSM }
+      import spotlight.analysis.outlier.OutlierScoringModel.{ WatchPoints => OSM }
       import spotlight.analysis.outlier.PlanCatalog.{ WatchPoints => C }
       StreamMonitor.set(
         Data,
