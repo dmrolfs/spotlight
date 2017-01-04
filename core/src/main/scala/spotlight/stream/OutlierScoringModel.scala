@@ -8,7 +8,6 @@ import akka.actor._
 import akka.stream.scaladsl._
 import akka.stream._
 import akka.stream.stage._
-import akka.util.Timeout
 import com.typesafe.scalalogging.{Logger, StrictLogging}
 import org.slf4j.LoggerFactory
 import peds.akka.metrics.Instrumented
@@ -88,7 +87,7 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
   ): GraphStage[FlowShape[TimeSeries, TimeSeries]] = {
     new GraphStage[FlowShape[TimeSeries, TimeSeries]] {
       val count = new AtomicInteger( 0 )
-      var bloom = BloomFilter[Topic]( maxFalsePosProbability = 0.001, 500000 )
+      var bloom = BloomFilter[Topic]( maxFalsePosProbability = 0.001, 10000000 )
 
       val in = Inlet[TimeSeries]( "logMetric.in" )
       val out = Outlet[TimeSeries]( "logMetric.out" )
