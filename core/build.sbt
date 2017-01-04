@@ -6,6 +6,12 @@ name := "spotlight-core"
 
 description := "lorem ipsum."
 
+enablePlugins( BuildInfoPlugin )
+
+buildInfoKeys := Seq[BuildInfoKey]( name, version, scalaVersion, sbtVersion )
+
+buildInfoPackage := "spotlight"
+
 libraryDependencies ++=
   commonDependencies ++
   metrics.all ++

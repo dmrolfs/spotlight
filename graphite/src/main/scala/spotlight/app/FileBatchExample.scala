@@ -25,11 +25,11 @@ import peds.akka.stream.StreamMonitor
 import demesne.BoundedContext
 import peds.akka.stream.Limiter
 import peds.commons.TryV
+import spotlight.{Spotlight, SpotlightContext$, Settings}
 import spotlight.analysis.outlier.DetectFlow
 import spotlight.model.outlier.{Outliers, SeriesOutliers}
 import spotlight.model.timeseries.{DataPoint, ThresholdBoundary, TimeSeries}
 import spotlight.protocol.GraphiteSerializationProtocol
-import spotlight.stream.{Bootstrap, BootstrapContext, Settings}
 
 
 /**
@@ -41,6 +41,8 @@ object FileBatchExample extends Instrumented with StrictLogging {
 
     val logger = Logger( LoggerFactory.getLogger("Application") )
     logger.info( "Starting Application Up" )
+    logger.info( "spotlight build info: {}", spotlight.BuildInfo )
+    logger.info( "demesne build info: {}", demesne.BuildInfo )
 
     implicit val actorSystem = ActorSystem( "Spotlight" )
     val deadListener = actorSystem.actorOf( DeadListenerActor.props, "dead-listener" )
@@ -130,23 +132,23 @@ object FileBatchExample extends Instrumented with StrictLogging {
     import scala.concurrent.ExecutionContext.Implicits.global
 
     val context = {
-      BootstrapContext
+      SpotlightContext
       .builder
-      .set( BootstrapContext.Name, "DetectionFlow" )
-//      .set( BootstrapContext.StartTasks, Set( /*SharedLeveldbStore.start(true), Bootstrap.kamonStartTask*/ ) )
-      .set( BootstrapContext.System, Some(system) )
+      .set( SpotlightContext.Name, "DetectionFlow" )
+      //      .set( SpotlightContext.StartTasks, Set( /*SharedLeveldbStore.start(true), Spotlight.kamonStartTask*/ ) )
+      .set( SpotlightContext.System, Some( system ) )
       .build()
     }
 
-    Bootstrap( context )
+    Spotlight( context )
     .run( args )
     .map { e => logger.debug( "bootstrapping process..." ); e }
-    .flatMap { case ( boundedContext, configuration, scoring ) =>
+    .flatMap { case ( boundedContext, settings, scoring ) =>
       logger.debug("process bootstrapped. processing data...")
 
       import StreamMonitor._
       import WatchPoints._
-      import spotlight.stream.OutlierScoringModel.{ WatchPoints => OSM }
+      import spotlight.analysis.outlier.OutlierScoringModel.{ WatchPoints => OSM }
       import spotlight.analysis.outlier.PlanCatalog.{ WatchPoints => C }
       StreamMonitor.set(
         Data,
@@ -163,19 +165,22 @@ object FileBatchExample extends Instrumented with StrictLogging {
 
       val publish = Flow[SimpleFlattenedOutlier].map{ identity }.watchFlow( Publish )
 
-      sourceData()
+      sourceData( settings )
       .via( Flow[String].buffer( 1000, OverflowStrategy.backpressure ).watchFlow( Data ) )
       .map { e => logger.info("after the sourceData step: [{}]", e); e }
-      .via( detectionWorkflow(boundedContext, configuration, scoring) )
+      .via( detectionWorkflow(boundedContext, settings, scoring) )
       .via( publish )
       .map { e => logger.info("AFTER DETECTION: [{}]", e); e }
       .runWith( Sink.seq )
     }
   }
 
-  def sourceData(): Source[String, Future[IOResult]] = {
+  def sourceData( settings: Settings ): Source[String, Future[IOResult]] = {
+    val data = settings.args.lastOption getOrElse "source.txt"
+    logger.info( "using data file: {}", Paths.get(data) )
+
     FileIO
-    .fromPath( Paths.get( "source.txt" ) )
+    .fromPath( Paths.get( data ) )
     .via( Framing.delimiter(ByteString("\n"), maximumFrameLength = 1024) )
     .map { b => logger.info( "sourceData: bytes = [{}]", b); b }
     .map { _.utf8String }

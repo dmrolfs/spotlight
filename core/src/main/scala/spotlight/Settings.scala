@@ -1,20 +1,22 @@
-package spotlight.stream
+package spotlight
 
 import java.net.{InetAddress, InetSocketAddress}
-import scala.concurrent.duration._
-import scala.util.matching.Regex
-import scalaz.Scalaz._
-import scalaz._
+
 import com.typesafe.config._
 import com.typesafe.scalalogging.LazyLogging
+import peds.commons.{V, Valid}
 import spotlight.analysis.outlier.OutlierDetection
 import spotlight.model.outlier._
 import spotlight.model.timeseries.Topic
 import spotlight.protocol.{GraphiteSerializationProtocol, MessagePackProtocol, PythonPickleProtocol}
-import peds.commons.{V, Valid}
+
+import scala.concurrent.duration._
+import scala.util.matching.Regex
+import scalaz.Scalaz._
+import scalaz._
 
 
-//todo refactor in form of ActorSystem.Settings; i.e., class name and Settings.config rt extending Config
+//todo refactor into base required settings and allow for app-specific extension
 /**
   * Created by rolfsd on 1/12/16.
   */
@@ -32,6 +34,7 @@ trait Settings extends LazyLogging {
   def tcpInboundBufferSize: Int
   def workflowBufferSize: Int
   def parallelism: Int = ( parallelismFactor * Runtime.getRuntime.availableProcessors() ).toInt
+  def args: Seq[String]
 
   def config: Config
 
@@ -160,7 +163,7 @@ object Settings extends LazyLogging {
       for {
         u <- usage.disjunction
         c <- checkConfiguration( config, u ).disjunction
-      } yield makeSettings( u, c)
+      } yield makeSettings( u, c )
     }
   }
 
@@ -279,7 +282,8 @@ object Settings extends LazyLogging {
           p <- graphitePort
         } yield new InetSocketAddress( h, p )
       },
-      config = ConfigFactory.parseString( SimpleSettings.AkkaRemotePortPath + "=" + usage.clusterPort ).withFallback( config )
+      config = ConfigFactory.parseString( SimpleSettings.AkkaRemotePortPath + "=" + usage.clusterPort ).withFallback( config ),
+      args = usage.args
     )
   }
 
@@ -300,13 +304,14 @@ object Settings extends LazyLogging {
     val AkkaRemotePortPath = "akka.remote.netty.tcp.port"
   }
 
-  final case class SimpleSettings private[stream](
+  final case class SimpleSettings private[Settings](
     override val sourceAddress: InetSocketAddress,
     override val maxFrameLength: Int,
     override val protocol: GraphiteSerializationProtocol,
     override val windowDuration: FiniteDuration,
     override val graphiteAddress: Option[InetSocketAddress],
-    override val config: Config
+    override val config: Config,
+    override val args: Seq[String]
   ) extends Settings with LazyLogging {
     override def clusterPort: Int = config.getInt( SimpleSettings.AkkaRemotePortPath )
 
@@ -435,13 +440,14 @@ object Settings extends LazyLogging {
     }
   }
 
-  case class UsageConfigurationError private[stream]( usage: String ) extends IllegalArgumentException( usage )
+  case class UsageConfigurationError private[Settings]( usage: String ) extends IllegalArgumentException( usage )
 
-  final case class UsageSettings private[stream](
+  final case class UsageSettings private[Settings](
     clusterPort: Int = 2552,
     sourceHost: Option[InetAddress] = None,
     sourcePort: Option[Int] = None,
-    windowSize: Option[FiniteDuration] = None
+    windowSize: Option[FiniteDuration] = None,
+    args: Seq[String] = Seq.empty[String]
   )
 
   private object UsageSettings {
@@ -468,6 +474,8 @@ object Settings extends LazyLogging {
       opt[Long]( 'w', "window" ) action { (e, c) =>
         c.copy( windowSize = Some(FiniteDuration(e, SECONDS)) )
       } text( "batch window size (in seconds) for collecting time series data. Default = 60s." )
+
+      arg[String]( "<arg>..." ).unbounded().optional().action { (a, c) => c.copy( args = c.args :+ a )}
 
       help( "help" )
 

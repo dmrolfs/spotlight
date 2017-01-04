@@ -1,35 +1,35 @@
-package spotlight.stream
+package spotlight
 
-import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
+import scala.concurrent.{ExecutionContext, Future}
 import akka.Done
 import akka.actor.{ActorRef, ActorSystem, Props, SupervisorStrategy}
 import akka.stream._
 import akka.stream.scaladsl.{Flow, GraphDSL, Sink}
 import akka.util.Timeout
-
-import scalaz._
-import Scalaz._
 import scalaz.Kleisli.kleisli
-import shapeless.{Generic, HNil}
-import com.typesafe.config.Config
+import scalaz.Scalaz._
+import scalaz._
+import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.{Logger, StrictLogging}
+import demesne.{AggregateRootType, BoundedContext, DomainModel, StartTask}
 import nl.grons.metrics.scala.{Meter, MetricName}
+import org.slf4j.LoggerFactory
 import peds.akka.metrics.{Instrumented, Reporter}
+import peds.akka.supervision.IsolatedLifeCycleSupervisor.{ChildStarted, StartChild}
+import peds.akka.supervision.{IsolatedLifeCycleSupervisor, OneForOneStrategyFactory}
 import peds.commons.builder.HasBuilder
 import peds.commons.util._
-import demesne.{AggregateRootType, BoundedContext, DomainModel, StartTask}
-import org.slf4j.LoggerFactory
-import peds.akka.supervision.{IsolatedLifeCycleSupervisor, OneForOneStrategyFactory}
-import peds.akka.supervision.IsolatedLifeCycleSupervisor.{ChildStarted, StartChild}
-import spotlight.analysis.outlier.{AnalysisPlanModule, DetectFlow, DetectionAlgorithmRouter, PlanCatalog, PlanCatalogProtocol => CP}
+import shapeless.{Generic, HNil}
+import spotlight.analysis.outlier._
+import spotlight.analysis.outlier.{PlanCatalogProtocol => CP}
 import spotlight.analysis.outlier.algorithm.statistical.SimpleMovingAverageAlgorithm
 
 
 /**
   * Created by rolfsd on 11/7/16.
   */
-case class BootstrapContext(
+final case class SpotlightContext(
   name: String,
   rootTypes: Set[AggregateRootType],
   system: Option[ActorSystem],
@@ -38,7 +38,7 @@ case class BootstrapContext(
   timeout: Timeout
 )
 
-object BootstrapContext extends HasBuilder[BootstrapContext] {
+object SpotlightContext extends HasBuilder[SpotlightContext] {
   object Name extends Param[String]
   object RootTypes extends OptParam[Set[AggregateRootType]]( Set.empty[AggregateRootType] )
   object System extends OptParam[Option[ActorSystem]]( None )
@@ -46,8 +46,8 @@ object BootstrapContext extends HasBuilder[BootstrapContext] {
   object StartTasks extends OptParam[Set[StartTask]]( Set.empty[StartTask] )
   object Timeout extends OptParam[Timeout]( 30.seconds )
 
-  // Establish HList <=> BootstrapContext isomorphism
-  val gen = Generic[BootstrapContext]
+  // Establish HList <=> SpotlightContext isomorphism
+  val gen = Generic[SpotlightContext]
   // Establish Param[_] <=> constructor parameter correspondence
   override val fieldsContainer = createFieldsContainer(
     Name ::
@@ -61,21 +61,21 @@ object BootstrapContext extends HasBuilder[BootstrapContext] {
 }
 
 
-object Bootstrap extends Instrumented with StrictLogging {
+object Spotlight extends Instrumented with StrictLogging {
   override lazy val metricBaseName: MetricName = MetricName( getClass.getPackage.getName, getClass.safeSimpleName )
   lazy val workflowFailuresMeter: Meter = metrics meter "workflow.failures"
 
   type SystemSettings = ( ActorSystem, Settings )
   type BoundedSettings = ( BoundedContext, Settings )
-  type SpotlightContext = ( BoundedContext, Settings, DetectFlow )
+  type SpotlightModel = ( BoundedContext, Settings, DetectFlow )
 
 
   def apply(
-    context: BootstrapContext,
+    context: SpotlightContext,
     finishSubscriberOnComplete: Boolean = true
   )(
     implicit ec: ExecutionContext
-  ): Kleisli[Future, Array[String], SpotlightContext] = {
+  ): Kleisli[Future, Array[String], SpotlightModel] = {
     systemConfiguration( context ) >=> startBoundedContext( context ) >=> makeFlow( finishSubscriberOnComplete )
   }
 
@@ -111,7 +111,7 @@ object Bootstrap extends Instrumented with StrictLogging {
   val kamonStartTask: StartTask = StartTask.withFunction( "start Kamon monitoring" ){ bc => kamon.Kamon.start(); Done }
 
 
-  def systemConfiguration( context: BootstrapContext ): Kleisli[Future, Array[String], SystemSettings] = {
+  def systemConfiguration( context: SpotlightContext ): Kleisli[Future, Array[String], SystemSettings] = {
     kleisli[Future, Array[String], SystemSettings] { args =>
       def spotlightConfig: String = Option( System getProperty "spotlight.config" ) getOrElse { "application.conf" }
 
@@ -121,7 +121,7 @@ object Bootstrap extends Instrumented with StrictLogging {
         scala.util.Try { Thread.currentThread.getContextClassLoader.getResource(spotlightConfig) }
       )
 
-      Settings( args, config = com.typesafe.config.ConfigFactory.load() ).disjunction map { settings =>
+      Settings( args, config = ConfigFactory.load() ).disjunction map { settings =>
         logger info settings.usage
         val system = context.system getOrElse ActorSystem( context.name, settings.config )
         ( system, settings )
@@ -135,7 +135,7 @@ object Bootstrap extends Instrumented with StrictLogging {
     }
   }
 
-  def startBoundedContext( context: BootstrapContext ): Kleisli[Future, SystemSettings, BoundedSettings] = {
+  def startBoundedContext( context: SpotlightContext ): Kleisli[Future, SystemSettings, BoundedSettings] = {
     kleisli[Future, SystemSettings, BoundedSettings] { case (system, settings) =>
       implicit val sys = system
       implicit val ec = system.dispatcher
@@ -159,8 +159,8 @@ object Bootstrap extends Instrumented with StrictLogging {
   }
 
 
-  def makeFlow( finishSubscriberOnComplete: Boolean ): Kleisli[Future, BoundedSettings, SpotlightContext] = {
-    kleisli[Future, BoundedSettings, SpotlightContext] { case (boundedContext, settings) =>
+  def makeFlow( finishSubscriberOnComplete: Boolean ): Kleisli[Future, BoundedSettings, SpotlightModel] = {
+    kleisli[Future, BoundedSettings, SpotlightModel] { case (boundedContext, settings) =>
       implicit val bc = boundedContext
       implicit val system = boundedContext.system
       implicit val dispatcher = system.dispatcher
@@ -197,7 +197,7 @@ object Bootstrap extends Instrumented with StrictLogging {
 
     val catalogProps = PlanCatalog.props(
       configuration = settings.toConfig,
-      maxInFlightCpuFactor = settings.parallelismFactor, //todo different yet same
+      maxInFlightCpuFactor = settings.parallelismFactor, //todo different yet same - refactor to be parallelsimFactor
       applicationDetectionBudget = Some( settings.detectionBudget ),
       applicationPlans = settings.plans
     )
@@ -208,10 +208,10 @@ object Bootstrap extends Instrumented with StrictLogging {
 
     for {
       ChildStarted( catalog ) <- ( catalogSupervisor ? StartChild(catalogProps, PlanCatalog.name) ).mapTo[ChildStarted]
-    _ = logger.info( "CATALOG STARTED: [{}]", catalog )
+      _ = logger.info( "catalog initialization started: [{}]", catalog )
       _ <- ( catalog ? CP.WaitForStart ).mapTo[CP.Started.type]
     } yield {
-      logger.info( "CATALOG INITIALIZATION FINISHED" )
+      logger.debug( "catalog initialization completed" )
       catalog
     }
   }

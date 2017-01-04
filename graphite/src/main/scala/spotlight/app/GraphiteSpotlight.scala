@@ -1,6 +1,7 @@
 package spotlight.app
 
 import java.net.{InetSocketAddress, Socket}
+
 import scala.concurrent.Future
 import scala.concurrent.duration._
 import scala.util.{Failure, Success}
@@ -16,10 +17,12 @@ import kamon.Kamon
 import nl.grons.metrics.scala.MetricName
 import peds.akka.metrics.Instrumented
 import peds.akka.stream.StreamMonitor
+import spotlight.analysis.outlier.OutlierScoringModel
+import spotlight.{Settings, Spotlight, SpotlightContext$}
 import spotlight.model.outlier._
 import spotlight.model.timeseries.{TimeSeries, Topic}
 import spotlight.publish.{GraphitePublisher, LogPublisher}
-import spotlight.stream.{Bootstrap, BootstrapContext, OutlierScoringModel, Settings}
+import spotlight.stream.Bootstrap
 
 
 /**
@@ -38,16 +41,15 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
     import scala.concurrent.ExecutionContext.Implicits.global
 
     val context = {
-      import spotlight.stream.{ BootstrapContext => BC }
-      BootstrapContext
+      SpotlightContext
       .builder
       .set( BC.Name, ActorSystemName )
-//      .set( BC.StartTasks, Set( SharedLeveldbStore.start( true ), Bootstrap.kamonStartTask ) )
+      //      .set( BC.StartTasks, Set( SharedLeveldbStore.start( true ), Spotlight.kamonStartTask ) )
       .set( BC.Timeout, Timeout(30.seconds) )
       .build()
     }
 
-    Bootstrap( context, finishSubscriberOnComplete = false )
+    Spotlight( context, finishSubscriberOnComplete = false )
     .run( args )
     .foreach { case (boundedContext, configuration, flow) =>
       execute( flow )( boundedContext, configuration ) onComplete {
@@ -86,7 +88,7 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
 
     implicit val system = boundedContext.system
     implicit val materializer = ActorMaterializer(
-      ActorMaterializerSettings( system ) withSupervisionStrategy Bootstrap.supervisionDecider
+      ActorMaterializerSettings( system ) withSupervisionStrategy Spotlight.supervisionDecider
     )
     val address = settings.sourceAddress
 
@@ -97,7 +99,7 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
     }
 
     import spotlight.app.GraphiteSpotlight.{ WatchPoints => GS }
-    import spotlight.stream.OutlierScoringModel.{ WatchPoints => OSM }
+    import spotlight.analysis.outlier.OutlierScoringModel.{ WatchPoints => OSM }
     StreamMonitor.set( GS.Framing, GS.Intake, OSM.ScoringPlanned, OSM.PlanBuffer, GS.PublishBuffer, OSM.ScoringUnrecognized )
 
     val connections = Tcp().bind( address.getHostName, address.getPort )
@@ -134,7 +136,7 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
       FlowShape( egressBroadcast.in, tcpOut.out )
     }
 
-    Flow.fromGraph( graph ).withAttributes( ActorAttributes supervisionStrategy Bootstrap.supervisionDecider )
+    Flow.fromGraph( graph ).withAttributes( ActorAttributes supervisionStrategy Spotlight.supervisionDecider )
   }
 
   def publishOutliers( graphiteAddress: Option[InetSocketAddress] ): Sink[Outliers, ActorRef] = {
