@@ -1,6 +1,7 @@
 package spotlight.app
 
 import scala.concurrent.Future
+import scala.util.{Failure, Success}
 import akka.NotUsed
 import akka.actor.{Actor, ActorSystem, DeadLetter, Props}
 import akka.event.LoggingReceive
@@ -16,14 +17,11 @@ import org.json4s.jackson.JsonMethods
 import peds.akka.metrics.Instrumented
 import demesne.BoundedContext
 import peds.akka.stream.StreamMonitor
-import spotlight.{Spotlight, SpotlightContext$, Settings}
+import spotlight.{Spotlight, SpotlightContext, Settings}
 import spotlight.analysis.outlier.DetectFlow
 import spotlight.model.outlier.{Outliers, SeriesOutliers}
 import spotlight.model.timeseries.{DataPoint, ThresholdBoundary, TimeSeries}
 import spotlight.protocol.GraphiteSerializationProtocol
-import spotlight.stream.Bootstrap
-
-import scala.util.{Failure, Success}
 
 
 /**

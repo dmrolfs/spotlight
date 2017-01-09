@@ -55,12 +55,16 @@ sealed trait OutlierPlan extends Entity with Equals {
 }
 
 object OutlierPlan extends EntityLensProvider[OutlierPlan] {
-  implicit def summarize( p: OutlierPlan ): Summary = Summary( p.id, p.name, p.appliesTo )
+  implicit def summarize( p: OutlierPlan ): Summary = Summary( p )
 
-  case class Summary( id: OutlierPlan#TID, name: String, appliesTo: OutlierPlan.AppliesTo )
+  case class Summary( id: OutlierPlan#TID, name: String, slug: String, appliesTo: OutlierPlan.AppliesTo )
+
   object Summary {
-    def apply( info: OutlierPlan ): Summary = Summary( id = info.id, name = info.name, appliesTo = info.appliesTo )
+    def apply( info: OutlierPlan ): Summary = {
+      Summary( id = info.id, name = info.name, slug = info.slug, appliesTo = info.appliesTo )
+    }
   }
+
 
   case class Scope( plan: String, topic: Topic ) {
     def name: String = toString

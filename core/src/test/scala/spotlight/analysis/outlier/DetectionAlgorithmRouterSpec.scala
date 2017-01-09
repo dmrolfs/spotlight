@@ -3,12 +3,15 @@ package spotlight.analysis.outlier
 import scala.concurrent.duration._
 import akka.actor.ActorSystem
 import akka.testkit._
-import com.typesafe.config.Config
+import com.typesafe.config.{Config, ConfigFactory}
+import demesne.{AggregateRootType, DomainModel}
 import org.joda.{time => joda}
 import org.scalatest.mockito.MockitoSugar
+import org.mockito.Mockito._
 import peds.akka.envelope.{Envelope, WorkId}
-import spotlight.analysis.outlier.AnalysisPlanProtocol.AcceptTimeSeries
-import spotlight.model.outlier.OutlierPlan
+import spotlight.analysis.outlier.DetectionAlgorithmRouter.ShardedRootTypeProxy
+import spotlight.analysis.outlier.algorithm.{AlgorithmShardCatalogModule, AlgorithmShardProtocol}
+import spotlight.model.outlier.{IsQuorum, OutlierPlan, ReduceOutliers}
 import spotlight.model.timeseries.{DataPoint, TimeSeries}
 import spotlight.testkit.ParallelAkkaSpec
 
@@ -17,7 +20,6 @@ import spotlight.testkit.ParallelAkkaSpec
  * Created by rolfsd on 10/20/15.
  */
 class DetectionAlgorithmRouterSpec extends ParallelAkkaSpec with MockitoSugar {
-
   override def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture = {
     new Fixture( config, system, slug )
   }
@@ -25,8 +27,37 @@ class DetectionAlgorithmRouterSpec extends ParallelAkkaSpec with MockitoSugar {
   class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends AkkaFixture( _config, _system, _slug ) {
     val algo = 'foo
     val algorithm = TestProbe()
-    val resolver = DetectionAlgorithmRouter.DirectResolver( algorithm.ref )
-    val router = TestActorRef[DetectionAlgorithmRouter]( DetectionAlgorithmRouter.props( Map(algo -> resolver) ) )
+    val algorithmRootType = mock[AggregateRootType]
+    when( algorithmRootType.name ).thenReturn { algo.name }
+    val catalogId = AlgorithmShardCatalogModule.idFor( plan, algo.name )
+    val catalog = TestProbe()
+    val catalogRootType = AlgorithmShardCatalogModule.module.rootType
+    val model = mock[DomainModel]
+    logger.debug( "FIXTURE: SHARD ROOT-TYPE:[{}]", catalogRootType )
+    when( model(catalogRootType, catalogId) ).thenReturn( catalog.ref )
+
+    lazy val plan = makePlan( "TestPlan", None )
+    def makePlan( name: String, g: Option[OutlierPlan.Grouping] ): OutlierPlan = {
+      OutlierPlan.default(
+        name = name,
+        algorithms = Set( algo ),
+        grouping = g,
+        timeout = 500.millis,
+        isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = 1, triggerPoint = 1 ),
+        reduce = ReduceOutliers.byCorroborationPercentage(50),
+        planSpecification = ConfigFactory.parseString(
+          s"""
+             |algorithm-config.${algo.name}.seedEps: 5.0
+             |algorithm-config.${algo.name}.minDensityConnectedPoints: 3
+          """.stripMargin
+        )
+      )
+    }
+
+//    val resolver = DetectionAlgorithmRouter.DirectProxy( algorithm.ref )
+//    val resolver = DetectionAlgorithmRouter.ShardedRootTypeProxy( plan, algorithmRootType, model )
+//    val router = TestActorRef[DetectionAlgorithmRouter]( DetectionAlgorithmRouter.props( plan, Map(algo -> resolver) ) )
+    val router = TestActorRef[DetectionAlgorithmRouter]( DetectionAlgorithmRouter.props( plan, Map() ) )
     val subscriber = TestProbe()
   }
 
@@ -42,9 +73,36 @@ class DetectionAlgorithmRouterSpec extends ParallelAkkaSpec with MockitoSugar {
       }
     }
 
-    "route detection messages" in { f: Fixture =>
+    "route detection messages" taggedAs WIP in { f: Fixture =>
       import f._
-      router.receive( RegisterAlgorithmReference(algo, algorithm.ref) )
+      model must not be (null)
+      algorithmRootType must not be (null)
+      catalogId must not be (null)
+      AlgorithmShardCatalogModule.module.rootType must not be (null)
+      logger.debug( "TEST: SHARD ROOT-TYPE:[{}]", AlgorithmShardCatalogModule.module.rootType )
+      catalogRootType mustBe catalogRootType
+      AlgorithmShardCatalogModule.module.rootType mustBe AlgorithmShardCatalogModule.module.rootType
+      AlgorithmShardCatalogModule.module.rootType mustBe catalogRootType
+      model( AlgorithmShardCatalogModule.module.rootType, catalogId ) must be (catalog.ref)
+
+      router.receive( RegisterAlgorithmRootType(algo, algorithmRootType, model, true) )
+      logger.debug( "#TEST looking for catalog add..." )
+      catalog.expectMsgPF( hint = "catalog-add" ) {
+        case Envelope( m: AlgorithmShardProtocol.Add, _ ) => {
+          m.plan mustBe plan.toSummary
+          m.algorithmRootType mustBe algorithmRootType
+        }
+      }
+      logger.debug( "#TEST ...catalog add passed" )
+
+//      logger.debug( "#TEST looking for catalog add AGAIN..." )
+//      catalog.expectMsgPF( hint = "catalog-add" ) {
+//        case Envelope( m: AlgorithmShardProtocol.Add, _ ) => {
+//          m.plan mustBe plan.toSummary
+//          m.algorithmRootType mustBe algorithmRootType
+//        }
+//      }
+//      logger.debug( "#TEST ...catalog add passed AGAIN" )
 
       val myPoints = Seq(
         DataPoint( new joda.DateTime(448), 8.46 ),
@@ -70,7 +128,6 @@ class DetectionAlgorithmRouterSpec extends ParallelAkkaSpec with MockitoSugar {
 
       val series = TimeSeries( "series", myPoints )
       val aggregator = TestProbe()
-      val plan = mock[OutlierPlan]
       val msg = DetectUsing(
         'foo,
         DetectOutliersInSeries(series, plan, Option(subscriber.ref), Set.empty[WorkId]),
@@ -79,9 +136,22 @@ class DetectionAlgorithmRouterSpec extends ParallelAkkaSpec with MockitoSugar {
 
       implicit val sender = aggregator.ref
       router.receive( msg )
-      algorithm.expectMsgPF( 2.seconds.dilated, "route" ) {
-        case Envelope( actual, _ ) => actual mustBe msg
+
+      logger.debug( "#TEST looking for routing to catalog..." )
+      catalog.expectMsgPF( hint = "catalog" ) {
+//        case Envelope( payload, _ ) => payload mustBe msg
+        case Envelope( AlgorithmShardProtocol.RouteMessage(_, payload), _ ) => { payload mustBe msg }
+        case m => {
+          logger.debug( "#TEST NOT FOUND")
+          fail( s"not found: ${m}" )
+        }
       }
+      logger.debug( "#TEST ...catalog routing passed" )
+//      catalog.forward( algo)
+//
+//      algorithm.expectMsgPF( 2.seconds.dilated, "route" ) {
+//        case Envelope( actual, _ ) => actual mustBe msg
+//      }
     }
   }
 }

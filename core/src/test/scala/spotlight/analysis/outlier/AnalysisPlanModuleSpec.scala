@@ -6,12 +6,12 @@ import akka.testkit._
 import com.typesafe.config.{Config, ConfigFactory}
 import peds.akka.envelope._
 import peds.akka.envelope.pattern.ask
-import akka.actor.{ActorContext, ActorRef, ActorSystem, PoisonPill, Props}
+import akka.actor.{ActorRef, ActorSystem, Props}
 import demesne.index.StackableIndexBusPublisher
 import demesne.module.{AggregateEnvironment, LocalAggregate}
 import demesne.{AggregateRootType, DomainModel}
 import demesne.repository.AggregateRootProps
-import demesne.module.entity.{EntityAggregateModule, messages => EntityMessages}
+import demesne.module.entity.{EntityAggregateModule, EntityProtocol}
 import org.scalatest.{OptionValues, Tag}
 import peds.akka.publish.StackableStreamPublisher
 import peds.commons.V
@@ -127,6 +127,8 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] with OptionVa
 
     class Module extends FixtureModule {
       override def aggregateRootPropsOp: AggregateRootProps = testProps( _, _ )
+      override type Protocol = outer.Protocol
+      override val protocol: Protocol = outer.protocol
     }
 
     override val module: Module = new Module
@@ -165,6 +167,9 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] with OptionVa
       override def aggregateRootPropsOp: AggregateRootProps = {
         ( m: DomainModel,rt: AggregateRootType ) => Props( new FixtureOutlierPlanActor( m, rt ) )
       }
+
+      override type Protocol = outer.Protocol
+      override val protocol: Protocol = outer.protocol
     }
 
     override val module: Module = new Module
@@ -284,9 +289,9 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] with OptionVa
     "add OutlierPlan" in { f: Fixture =>
       import f._
 
-      entity ! EntityMessages.Add( tid, Some(plan) )
+      entity ! protocol.Add( tid, Some(plan) )
       bus.expectMsgPF( max = 5.seconds.dilated, hint = "add plan" ) {
-        case p: EntityMessages.Added => {
+        case p: protocol.Added => {
           logger.info( "ADD PLAN: p.sourceId[{}]=[{}]   id[{}]=[{}]", p.sourceId.getClass.getCanonicalName, p.sourceId, tid.getClass.getCanonicalName, tid)
           p.sourceId mustBe plan.id
           assert( p.info.isDefined )
@@ -307,8 +312,8 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] with OptionVa
     "change appliesTo" in { f: Fixture =>
       import f._
 
-      entity !+ EntityMessages.Add( tid, Some(plan) )
-      bus.expectMsgType[EntityMessages.Added]
+      entity !+ protocol.Add( tid, Some(plan) )
+      bus.expectMsgType[protocol.Added]
 
       //anonymous partial functions extend Serialiazble
       val extract: OutlierPlan.ExtractTopic = {
@@ -333,8 +338,8 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] with OptionVa
     "change algorithms" in { f: Fixture =>
       import f._
 
-      entity !+ EntityMessages.Add( tid, Some(plan) )
-      bus.expectMsgType[EntityMessages.Added]
+      entity !+ protocol.Add( tid, Some(plan) )
+      bus.expectMsgType[protocol.Added]
 
       val testConfig = ConfigFactory.parseString(
         """
@@ -361,8 +366,8 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] with OptionVa
     "change resolveVia" in { f: Fixture =>
       import f._
 
-      entity !+ EntityMessages.Add( tid, Some(plan) )
-      bus.expectMsgType[EntityMessages.Added]
+      entity !+ protocol.Add( tid, Some(plan) )
+      bus.expectMsgType[protocol.Added]
 
       //anonymous partial functions extend Serialiazble
       val reduce: ReduceOutliers = new ReduceOutliers {

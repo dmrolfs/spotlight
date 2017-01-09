@@ -25,7 +25,7 @@ import peds.akka.stream.StreamMonitor
 import demesne.BoundedContext
 import peds.akka.stream.Limiter
 import peds.commons.TryV
-import spotlight.{Spotlight, SpotlightContext$, Settings}
+import spotlight.{Spotlight, SpotlightContext, Settings}
 import spotlight.analysis.outlier.DetectFlow
 import spotlight.model.outlier.{Outliers, SeriesOutliers}
 import spotlight.model.timeseries.{DataPoint, ThresholdBoundary, TimeSeries}
@@ -196,7 +196,7 @@ object FileBatchExample extends Instrumented with StrictLogging {
 
 //    Flow[TimeSeries].map{ identity }
 
-    Flow[TimeSeries].throttle( parallelism, refreshPeriod, akka.stream.ThrottleMode.shaping )
+    Flow[TimeSeries].throttle( parallelism, refreshPeriod, parallelism, akka.stream.ThrottleMode.shaping )
   }
 
   def detectionWorkflow(

@@ -6,11 +6,11 @@ import akka.testkit._
 import com.typesafe.config.{Config, ConfigFactory}
 import peds.akka.envelope._
 import peds.akka.envelope.pattern.ask
-import akka.actor.{ActorContext, ActorRef, ActorSystem, Props}
+import akka.actor.{ActorRef, ActorSystem, Props}
 import demesne.index.StackableIndexBusPublisher
 import demesne.{AggregateRootType, DomainModel}
 import demesne.module.{AggregateEnvironment, LocalAggregate}
-import demesne.module.entity.{EntityAggregateModule, messages => EntityMessages}
+import demesne.module.entity.{EntityAggregateModule, EntityProtocol}
 import demesne.repository.AggregateRootProps
 import peds.akka.publish.StackableStreamPublisher
 import peds.archetype.domain.model.core.EntityIdentifying
@@ -23,7 +23,6 @@ import spotlight.analysis.outlier.algorithm.statistical.SimpleMovingAverageAlgor
 import spotlight.model.outlier.{IsQuorum, OutlierPlan, ReduceOutliers}
 import spotlight.testkit.EntityModuleSpec
 import spotlight.analysis.outlier.{AnalysisPlanProtocol => P}
-import spotlight.model.timeseries.Topic
 
 
 /**
@@ -52,6 +51,8 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[OutlierPlan] { 
       override val idLens: Lens[OutlierPlan, TaggedID[ShortUUID]] = OutlierPlan.idLens
       override val nameLens: Lens[OutlierPlan, String] = OutlierPlan.nameLens
       override def aggregateRootPropsOp: AggregateRootProps = testProps( _, _ )
+      override type Protocol = outer.Protocol
+      override val protocol: Protocol = outer.protocol
       override def environment: AggregateEnvironment = LocalAggregate
     }
 
@@ -111,9 +112,9 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[OutlierPlan] { 
       import f._
 
       val planInfo = makePlan("TestPlan", None)
-      entity ! EntityMessages.Add( planInfo.id, Some(planInfo) )
+      entity ! protocol.Add( planInfo.id, Some(planInfo) )
       bus.expectMsgPF( max = 5.seconds.dilated, hint = "add plan" ) {
-        case p: EntityMessages.Added => {
+        case p: protocol.Added => {
           logger.info( "ADD PLAN: p.sourceId[{}]=[{}]   id[{}]=[{}]", p.sourceId.getClass.getCanonicalName, p.sourceId, tid.getClass.getCanonicalName, tid)
           p.sourceId mustBe planInfo.id
           assert( p.info.isDefined )
@@ -133,11 +134,10 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[OutlierPlan] { 
 
     "recover and continue after passivation" in { f: Fixture =>
       import f._
-      import demesne.module.entity.{ messages => EntityMessages }
 
       val p1 = makePlan( "TestPlan", None )
       val planTid = p1.id
-      entity ! EntityMessages.Add( p1.id, Some(p1) )
+      entity ! protocol.Add( p1.id, Some(p1) )
 
       stateFrom( entity, planTid ) mustBe p1
 
@@ -145,7 +145,7 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[OutlierPlan] { 
       Thread.sleep( 10000 )
       logger.info( "TEST:AWAKE...")
 
-      bus.expectMsgClass( classOf[EntityMessages.Added] )
+      bus.expectMsgClass( classOf[protocol.Added] )
 
       stateFrom( entity, planTid ) mustBe p1
 
@@ -163,8 +163,8 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[OutlierPlan] { 
       import f._
 
       val p1 = makePlan( "TestPlan", None )
-      entity ! EntityMessages.Add( p1.id, Some(p1) )
-      bus.expectMsgClass( classOf[EntityMessages.Added] )
+      entity ! protocol.Add( p1.id, Some(p1) )
+      bus.expectMsgClass( classOf[protocol.Added] )
       stateFrom( entity, p1.id ) mustBe p1
 
       logger.info( "TEST:taking Snapshot..." )

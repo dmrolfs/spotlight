@@ -55,7 +55,7 @@
 //      val algorithmRefs = for {
 //        name <- plan.algorithms.toSeq
 //        rt <- DetectionAlgorithmRouter.rootTypeFor( name )( context.dispatcher ).toSeq
-//      } yield ( name, DetectionAlgorithmRouter.RootTypeResolver(rt, model) )
+//      } yield ( name, DetectionAlgorithmRouter.RootTypeProxy(rt, model) )
 //
 //      context.actorOf(
 //        DetectionAlgorithmRouter.props( Map(algorithmRefs:_*) ).withDispatcher( DetectionAlgorithmRouter.DispatcherPath ),

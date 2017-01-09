@@ -4,7 +4,7 @@ import sbt._
 object Dependencies {
   object peds {
     val version = "0.4.4-SNAPSHOT"
-    def module( id: String ) = "com.github.dmrolfs" %% s"peds-$id" % version
+    def module( id: String ) = "com.github.dmrolfs" %% s"peds-$id" % version withSources() withJavadoc()
     def all = Seq( commons, akka, archetype )
 
     val commons = module( "commons" )
@@ -14,15 +14,15 @@ object Dependencies {
   }
 
   object demesne {
-    val version = "2.0.10-SNAPSHOT"
-    def module( id: String ) = "com.github.dmrolfs" %% s"demesne-$id" % version
+    val version = "2.1.0-SNAPSHOT"
+    def module( id: String ) = "com.github.dmrolfs" %% s"demesne-$id" % version withSources() withJavadoc()
     val core = module( "core" )
     val testkit = module( "testkit" )
   }
 
   object akka {
     val version = "2.4.14"
-    def module( id: String ) = "com.typesafe.akka" %% s"akka-$id" % version
+    def module( id: String ) = "com.typesafe.akka" %% s"akka-$id" % version withSources() withJavadoc()
     val all: Seq[ModuleID] = Seq( actor, stream, agent, cluster, clusterSharding, contrib, persistence, remote, slf4j )
 
     val actor = module( "actor" )
@@ -51,7 +51,7 @@ object Dependencies {
 
   object scalaz {
     val version = "7.2.8"
-    def module( id: String ) = "org.scalaz" %% s"scalaz-$id" % version
+    def module( id: String ) = "org.scalaz" %% s"scalaz-$id" % version withSources() withJavadoc()
 
     val core = module( "core" )
     val concurrent = module( "concurrent" )
@@ -113,13 +113,13 @@ object Dependencies {
     val uuid = "com.eaio.uuid" % "uuid" % "3.4"
     val config = "com.typesafe" % "config" % "1.3.1"
 //    val pureConfig = "com.github.melrief" %% "pureconfig" % "0.1.5"
-    val shapeless = "com.chuusai" %% "shapeless" % "2.3.2"
+    val shapeless = "com.chuusai" %% "shapeless" % "2.3.2" withSources() withJavadoc()
     val parboiled = "org.parboiled" %% "parboiled" % "2.1.3"
     val inflector = "org.atteo" % "evo-inflector" % "1.2.1"
-    val squants = "com.squants"  %% "squants"  % "0.6.2"
+    val squants = "org.typelevel"  %% "squants"  % "1.0.0"
     val accord = "com.wix" %% "accord-core" % "0.6"
     val lang = "org.apache.commons" % "commons-lang3" % "3.5"
-    val math3 = "org.apache.commons" % "commons-math3" % "3.6.1"
+    val math3 = "org.apache.commons" % "commons-math3" % "3.6.1" withSources() withJavadoc()
 //    val suanshu = "com.numericalmethod" % "suanshu" % "3.4.0" intransitive()  // don't want to use due to $$$
     val scopt = "com.github.scopt" %% "scopt" % "3.5.0"
     val pyrolite = "net.razorvine" % "pyrolite" % "4.10"
@@ -145,12 +145,12 @@ object Dependencies {
   }
 
   object quality {
-    val scalatest = "org.scalatest" %% "scalatest" % "3.0.0"
-    val scalazMatchers = "org.typelevel" %% "scalaz-scalatest" % "1.1.0"
+    val scalatest = "org.scalatest" %% "scalatest" % "3.0.0" withSources() withJavadoc()
+    val scalazMatchers = "org.typelevel" %% "scalaz-scalatest" % "1.1.0" withSources() withJavadoc()
 
     object mockito {
       val version = "1.10.19"
-      def module( id: String ) = "org.mockito" % s"mockito-$id" % version
+      def module( id: String ) = "org.mockito" % s"mockito-$id" % version withSources() withJavadoc()
       val core = module( "core" )
     }
 

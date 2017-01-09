@@ -19,8 +19,6 @@ import shapeless.TypeCase
 import spotlight.analysis.outlier.algorithm._
 import spotlight.analysis.outlier.algorithm.statistical._
 import spotlight.model.outlier.OutlierPlan
-import spotlight.model.outlier.OutlierPlan.Scope
-
 
 
 /**
@@ -33,9 +31,9 @@ object DetectionAlgorithmRouter extends LazyLogging {
 
   case class RegisterAlgorithmRootType(
     algorithm: Symbol,
-    handler: AggregateRootType,
+    algorithmRootType: AggregateRootType,
     model: DomainModel,
-    sharded: Boolean = false
+    sharded: Boolean = true
   ) extends RouterProtocol
 
   case class AlgorithmRegistered( algorithm: Symbol ) extends RouterProtocol
@@ -63,11 +61,9 @@ object DetectionAlgorithmRouter extends LazyLogging {
   }
 
 
-  def props(
-    namespace: String,
-    routingTable: Map[Symbol, AlgorithmResolver],
-    shardControl: AlgorithmShardCatalog.Control
-  ): Props = Props( new Default( namespace, routingTable, shardControl ) )
+  def props( plan: OutlierPlan.Summary, routingTable: Map[Symbol, AlgorithmProxy] ): Props = {
+    Props( new Default( plan, routingTable ) )
+  }
 
   val DispatcherPath: String = OutlierDetection.DispatcherPath
 
@@ -75,18 +71,13 @@ object DetectionAlgorithmRouter extends LazyLogging {
 
 
   trait Provider {
-    def initialRoutingTable: Map[Symbol, AlgorithmResolver]
-    def namespace: String
-    def algorithmShardControl: AlgorithmShardCatalog.Control
-    def algorithmShardCatalogFor( model: DomainModel, rootType: AggregateRootType )( implicit context: ActorContext ): ActorRef = {
-      model.aggregateOf( AlgorithmShardCatalog.module.rootType, AlgorithmShardCatalog.idFor(namespace, rootType) )
-    }
+    def initialRoutingTable: Map[Symbol, AlgorithmProxy]
+    def plan: OutlierPlan.Summary
   }
 
   private class Default(
-    override val namespace: String,
-    override val initialRoutingTable: Map[Symbol, AlgorithmResolver],
-    override val algorithmShardControl: AlgorithmShardCatalog.Control
+    override val plan: OutlierPlan.Summary,
+    override val initialRoutingTable: Map[Symbol, AlgorithmProxy]
   ) extends DetectionAlgorithmRouter with Provider
 
   def rootTypeFor( algorithm: Symbol )( implicit ec: ExecutionContext ): Option[AggregateRootType] = {
@@ -234,29 +225,56 @@ object DetectionAlgorithmRouter extends LazyLogging {
   }
 
 
-  sealed abstract class AlgorithmResolver {
+  sealed abstract class AlgorithmProxy {
+    def forward( message: Any )( implicit sender: ActorRef, context: ActorContext ): Unit = {
+      referenceFor( message ) forwardEnvelope message
+    }
+
     def referenceFor( message: Any )( implicit context: ActorContext ): ActorRef
   }
 
-  case class DirectResolver( reference: ActorRef ) extends AlgorithmResolver {
+  case class DirectProxy(reference: ActorRef ) extends AlgorithmProxy {
     override def referenceFor( message: Any )( implicit context: ActorContext ): ActorRef = reference
   }
 
-  case class RootTypeResolver( rootType: AggregateRootType, model: DomainModel ) extends AlgorithmResolver {
+  case class RootTypeProxy(algorithmRootType: AggregateRootType, model: DomainModel ) extends AlgorithmProxy {
     val TidType = TypeCase[TaggedID[ShortUUID]]
 
     override def referenceFor( message: Any )( implicit context: ActorContext ): ActorRef = {
       message match {
-        case m: OutlierDetectionMessage => model( rootType, m.plan.id )
-        case id: ShortUUID => model( rootType, id )
-        case TidType(tid) => model( rootType, tid )
+        case m: OutlierDetectionMessage => model( algorithmRootType, m.plan.id )
+        case id: ShortUUID => model( algorithmRootType, id )
+        case TidType(tid) => model( algorithmRootType, tid )
         case _ => model.system.deadLetters
       }
     }
   }
 
-  case class ShardedRootTypeResolver( shardCatalog: ActorRef ) extends AlgorithmResolver {
-    override def referenceFor( message: Any )( implicit context: ActorContext ): ActorRef = shardCatalog
+  case class ShardedRootTypeProxy(
+    plan: OutlierPlan.Summary,
+    algorithmRootType: AggregateRootType,
+    model: DomainModel
+  ) extends AlgorithmProxy {
+    val catalogId: AlgorithmShardCatalogModule.TID = AlgorithmShardCatalogModule.idFor( plan, algorithmRootType.name )
+    val catalogRef: ActorRef = {
+      val ref = model( AlgorithmShardCatalogModule.module.rootType, catalogId )
+      logger.debug( "#TEST: model:[{}] algorithmRootType:[{}] catalogId:[{}] ref = [{}]", model, algorithmRootType, catalogId, ref )
+      ref !+ AlgorithmShardProtocol.Add( catalogId, plan, algorithmRootType )
+      ref
+    }
+
+
+    import peds.commons.util._
+    override def forward( message: Any )( implicit sender: ActorRef, context: ActorContext ): Unit = {
+      val routeMessage = AlgorithmShardProtocol.RouteMessage( catalogId, message )
+      logger.debug( "#TEST: forward to catalog:[{}] route-message:[{}]", catalogRef, routeMessage )
+      referenceFor(message) forwardEnvelope AlgorithmShardProtocol.RouteMessage( catalogId, message )
+    }
+
+    override def referenceFor( message: Any )( implicit context: ActorContext ): ActorRef = {
+      logger.debug( "#TEST: referenceFor: catalog:[{}]", catalogRef )
+      catalogRef
+    }
   }
 }
 
@@ -265,9 +283,9 @@ class DetectionAlgorithmRouter extends Actor with EnvelopingActor with Instrumen
 
   import DetectionAlgorithmRouter._
 
-  var routingTable: Map[Symbol, AlgorithmResolver] = provider.initialRoutingTable
-  def addRoute( algorithm: Symbol, resolver: AlgorithmResolver ): Unit = { routingTable += ( algorithm -> resolver ) }
-  log.debug( "DetectionAlgorithmRouter[{}] created with routing keys:[{}]", self.path.name, routingTable.keys.mkString(",") )
+  var routingTable: Map[Symbol, AlgorithmProxy] = provider.initialRoutingTable
+  def addRoute( algorithm: Symbol, resolver: AlgorithmProxy ): Unit = {routingTable += ( algorithm -> resolver ) }
+  log.debug( "DetectionAlgorithmRouter[{}] created with routing-table:[{}]", self.path.name, routingTable.mkString("\n", ",", "\n") )
 
   def contains( algorithm: Symbol ): Boolean = {
     log.debug( "DetectionAlgorithmRouter[{}] looking for {} in algorithms:[{}]", self.path.name, algorithm, routingTable.keys.mkString(",") )
@@ -277,24 +295,25 @@ class DetectionAlgorithmRouter extends Actor with EnvelopingActor with Instrumen
   val registration: Receive = {
 //    case class RegisterAlgorithmRootType( algorithm: Symbol, handler: AggregateRootType ) extends RouterProtocol
     case RegisterAlgorithmReference( algorithm, handler ) => {
-      addRoute( algorithm, DirectResolver(handler) )
+      addRoute( algorithm, DirectProxy( handler ) )
       sender() !+ AlgorithmRegistered( algorithm )
     }
 
-    case RegisterAlgorithmRootType( algorithm, handler, model, true ) => {
-      addRoute( algorithm, ShardedRootTypeResolver( provider algorithmShardCatalogFor handler ) )
+    case RegisterAlgorithmRootType( algorithm, algorithmRootType, model, true ) => {
+      addRoute( algorithm, ShardedRootTypeProxy( plan, algorithmRootType, model ) )
       sender() !+ AlgorithmRegistered( algorithm )
     }
 
-    case RegisterAlgorithmRootType( algorithm, handler, model, _ ) => {
-      addRoute( algorithm, RootTypeResolver(handler, model) )
+    case RegisterAlgorithmRootType( algorithm, algorithmRootType, model, _ ) => {
+      addRoute( algorithm, RootTypeProxy( algorithmRootType, model ) )
       sender() !+ AlgorithmRegistered( algorithm )
     }
   }
 
   val routing: Receive = {
 //    case m: DetectUsing if contains( m.algorithm ) => routingTable( m.algorithm ).referenceFor( m.scope ) forwardEnvelope m
-    case m: DetectUsing if contains( m.algorithm ) => routingTable( m.algorithm ).referenceFor( m ) forwardEnvelope m
+//    case m: DetectUsing if contains( m.algorithm ) => routingTable( m.algorithm ).referenceFor( m ) forwardEnvelope m
+    case m: DetectUsing if contains( m.algorithm ) => routingTable( m.algorithm ) forward m
   }
 
   override val receive: Receive = LoggingReceive{ around( registration orElse routing ) }

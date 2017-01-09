@@ -14,6 +14,7 @@ import demesne.{AggregateRootType, BoundedContext, DomainModel}
 import demesne.testkit.concurrent.CountDownFunction
 import peds.akka.envelope._
 import spotlight.analysis.outlier.PlanCatalogProtocol.CatalogedPlans
+import spotlight.analysis.outlier.{AnalysisPlanProtocol => AP}
 import spotlight.testkit.ParallelAkkaSpec
 import spotlight.analysis.outlier.{PlanCatalogProtocol => P}
 import spotlight.model.outlier.OutlierPlan
@@ -57,7 +58,7 @@ class PlanCatalogSpec extends ParallelAkkaSpec with ScalaFutures with StrictLogg
     implicit val actorTimeout = Timeout( 5.seconds.dilated )
 
     val bus = TestProbe()
-    system.eventStream.subscribe( bus.ref, classOf[AnalysisPlanProtocol.Event] )
+    system.eventStream.subscribe( bus.ref, classOf[AP.Event] )
 
     lazy val index = trace.block( "index" ) {
       model.aggregateIndexFor[String, AnalysisPlanModule.module.TID, OutlierPlan.Summary](
@@ -152,8 +153,6 @@ class PlanCatalogSpec extends ParallelAkkaSpec with ScalaFutures with StrictLogg
     "start Catalog" in { f: Fixture =>
       import f._
       import akka.pattern.ask
-      import spotlight.analysis.outlier.{ AnalysisPlanProtocol => AP }
-      import demesne.module.entity.{ messages => EntityMessages }
 
       logger.info( "TEST: ==============  STARTING TEST  ==============")
       whenReady( index.futureEntries, timeout(3.seconds.dilated) ) { _ mustBe empty }
@@ -169,7 +168,7 @@ class PlanCatalogSpec extends ParallelAkkaSpec with ScalaFutures with StrictLogg
 
       logger.info( "TEST: ==============  CHECKING BUS  ==============")
       bus.expectMsgPF( hint = "added" ) {
-        case payload: EntityMessages.Added => {
+        case payload: AP.Added => {
           logger.info( "TEST: Bus received Added message:[{}]", payload )
           payload.info mustBe defined
         }

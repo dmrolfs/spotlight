@@ -18,11 +18,10 @@ import nl.grons.metrics.scala.MetricName
 import peds.akka.metrics.Instrumented
 import peds.akka.stream.StreamMonitor
 import spotlight.analysis.outlier.OutlierScoringModel
-import spotlight.{Settings, Spotlight, SpotlightContext$}
+import spotlight.{Settings, Spotlight, SpotlightContext}
 import spotlight.model.outlier._
 import spotlight.model.timeseries.{TimeSeries, Topic}
 import spotlight.publish.{GraphitePublisher, LogPublisher}
-import spotlight.stream.Bootstrap
 
 
 /**
@@ -43,9 +42,9 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
     val context = {
       SpotlightContext
       .builder
-      .set( BC.Name, ActorSystemName )
-      //      .set( BC.StartTasks, Set( SharedLeveldbStore.start( true ), Spotlight.kamonStartTask ) )
-      .set( BC.Timeout, Timeout(30.seconds) )
+      .set( SpotlightContext.Name, ActorSystemName )
+      //      .set( SpotlightContext.StartTasks, Set( SharedLeveldbStore.start( true ), Spotlight.kamonStartTask ) )
+      .set( SpotlightContext.Timeout, Timeout(30.seconds) )
       .build()
     }
 

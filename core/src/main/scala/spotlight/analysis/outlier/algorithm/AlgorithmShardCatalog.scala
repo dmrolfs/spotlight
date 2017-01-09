@@ -1,102 +1,179 @@
 package spotlight.analysis.outlier.algorithm
 
 import scala.reflect._
-import akka.actor.Props
+import akka.actor.{ActorRef, Cancellable, Props}
+import akka.event.LoggingReceive
+import akka.persistence.RecoveryCompleted
+
+import scalaz.{-\/, Validation, \/-}
 import com.typesafe.scalalogging.LazyLogging
-import nl.grons.metrics.scala.MetricName
+import nl.grons.metrics.scala.{Meter, MetricName}
+import squants.information.{Bytes, Information, Megabytes}
+import peds.akka.envelope._
+import peds.akka.publish.{EventPublisher, StackableStreamPublisher}
 import peds.akka.metrics.{Instrumented, InstrumentedActor}
 import peds.archetype.domain.model.core.Entity
+import peds.commons.{TryV, Valid}
 import peds.commons.identifier._
+import peds.commons.util._
+import demesne._
 import demesne.module.{LocalAggregate, SimpleAggregateModule}
-import demesne.{AggregateMessage, AggregateProtocol, AggregateRootType, DomainModel}
-import peds.akka.publish.EventPublisher
+import spotlight.analysis.outlier.DetectUsing
+import spotlight.analysis.outlier.algorithm.{AlgorithmProtocol => AP}
 import spotlight.model.outlier.OutlierPlan
-
+import spotlight.model.timeseries._
 
 
 /**
   * Created by rolfsd on 12/21/16.
   */
-object AlgorithmShardProtocol extends AggregateProtocol[AlgorithmShardCatalog.ID] {
-  sealed trait AlgorithmShardMessage
-  sealed abstract class AlgorithmShardCommand extends AlgorithmShardMessage with CommandMessage
-  sealed abstract class AlgorithmShardEvent extends AlgorithmShardMessage with EventMessage
+object AlgorithmShardProtocol extends AggregateProtocol[AlgorithmShardCatalog#ID] {
+//  import AlgorithmShardCatalog.Control
 
-  case class RouteMessage( override val targetId: RouteMessage#TID, payload: Any )
-  extends AggregateMessage with AlgorithmShardMessage
+  case class Add(
+    override val targetId: Add#TID,
+    plan: OutlierPlan.Summary,
+    algorithmRootType: AggregateRootType
+//    control: Option[Control] = None
+  ) extends Command
 
+  case class Added(
+    override val sourceId: Added#TID,
+    plan: OutlierPlan.Summary,
+    algorithmRootType: AggregateRootType
+//    control: AlgorithmShardCatalog.Control
+  ) extends Event
 
-  case class UseControl(
-    override val targetId: UseControl#TID,
-    control: AlgorithmShardCatalog.Control
-  ) extends AlgorithmShardCommand
+  case class RouteMessage( override val targetId: RouteMessage#TID, payload: Any ) extends Message
 
-  case class ControlSet(
-    override val sourceId: ControlSet#TID,
-    control: AlgorithmShardCatalog.Control
-  ) extends AlgorithmShardEvent
+//  case class UseControl( override val targetId: UseControl#TID, control: Control ) extends AlgorithmShardCommand
+//  case class ControlSet( override val sourceId: ControlSet#TID, control: Control ) extends AlgorithmShardEvent
+
+  case class ShardAssigned(
+    override val sourceId: ShardAssigned#TID,
+    topic: Topic,
+    algorithmId: AlgorithmModule.TID
+  ) extends Event
 }
 
 
-object AlgorithmShardCatalog extends Instrumented with LazyLogging {
-  type ID = ShardCatalog#ID
-  type TID = ShardCatalog#TID
+case class AlgorithmShardCatalog(
+  plan: OutlierPlan.Summary,
+  algorithmRootType: AggregateRootType,
+  //  control: AlgorithmShardCatalog.Control,
+  shards: Map[Topic, AlgorithmModule.TID] = Map.empty[Topic, AlgorithmModule.TID]
+) extends Entity with Equals {
+  import AlgorithmShardCatalog.identifying
 
-  def idFor( plan: OutlierPlan.Summary ): TID = {
-    val Tid = identifying.evTID
-    val Tid( pid ) = plan.id
-    identifying.tidAs[TID]( identifying.tag( pid ) ).toOption.get
+  override type ID = identifying.ID
+  override val evID: ClassTag[ID] = ClassTag( classOf[AlgorithmShardCatalog.ID] )
+  override val evTID: ClassTag[TID] = classTag[TID]
+
+  override def id: TID = identifying.tag( AlgorithmShardCatalog.ID(plan.id, algorithmRootType.name).asInstanceOf[identifying.ID] )
+  override def name: String = plan.name
+  override def slug: String = plan.slug
+
+  def apply( t: Topic ): AlgorithmModule.TID = shards( t )
+  def contains( t: Topic ): Boolean = shards contains t
+
+  def assignShard( t: Topic, shard: AlgorithmModule.TID ): AlgorithmShardCatalog = {
+    val newShards = shards + ( t -> shard )
+    copy( shards = newShards )
+  }
+
+  override def canEqual( rhs: Any ): Boolean = rhs.isInstanceOf[AlgorithmShardCatalog]
+
+  override def hashCode: Int = 41 + id.##
+
+  override def equals( rhs: Any ): Boolean = {
+    rhs match {
+      case that: AlgorithmShardCatalog => {
+        if ( this eq that ) true
+        else {
+          ( that.## == this.## ) &&
+            ( that canEqual this ) &&
+            ( this.id == that.id )
+        }
+      }
+
+      case _ => false
+    }
+  }
+
+  override def toString(): String = getClass.safeSimpleName + s"( plan:${plan} )"
+}
+
+object AlgorithmShardCatalog {
+  final case class ID( planId: OutlierPlan#ID, algorithmLabel: String ) {
+    override def toString: String = planId + ":" + algorithmLabel
+  }
+
+  object ID {
+    def fromString( rep: String ): Valid[ID] = {
+      Validation
+      .fromTryCatchNonFatal {
+        val Array( pid, algo ) = rep.split( ':' )
+        ID( planId = ShortUUID(pid), algorithmLabel = algo )
+      }
+      .toValidationNel
+    }
+  }
+
+  implicit val identifying: Identifying[AlgorithmShardCatalog] = {
+    new Identifying[AlgorithmShardCatalog] {
+      override type ID = AlgorithmShardCatalog.ID
+      override val evID: ClassTag[ID] = classTag[ID]
+      override val evTID: ClassTag[TID] = classTag[TID]
+
+      override def fromString( idrep: String ): ID = {
+        AlgorithmShardCatalog.ID.fromString( idrep ).disjunction match {
+          case \/-( id ) => id
+          case -\/( exs ) => {
+            exs foreach { ex => logger.error( s"failed to parse id string [${idrep}] into ${evID}", ex ) }
+            throw exs.head
+          }
+        }
+      }
+
+      override def nextId: TryV[TID] = -\/( new IllegalStateException("AlgorithmShardCatalog does not support nextId") )
+
+      override val idTag: Symbol = Symbol( "shard-catalog" )
+      override def idOf( c: AlgorithmShardCatalog ): TID = c.id.asInstanceOf[TID]
+    }
+  }
+
+
+  sealed trait Control {
+    def withinThreshold( estimate: AP.EstimatedSize ): Boolean
+  }
+
+  object Control {
+    final case class BySize( threshold: Information = Megabytes(10) ) extends Control {
+      override def withinThreshold( estimate: AP.EstimatedSize ): Boolean = estimate.size <= threshold
+    }
+  }
+}
+
+
+object AlgorithmShardCatalogModule extends Instrumented with LazyLogging {
+  type ID = AlgorithmShardCatalog#ID
+  type TID = AlgorithmShardCatalog#TID
+  type AlgoTID = AlgorithmModule.TID
+
+
+  def idFor( plan: OutlierPlan.Summary, algorithmLabel: String ): TID = {
+    //todo: this casting bit wrt path dependent types is driving me nuts
+    identifying.tag( AlgorithmShardCatalog.ID(plan.id, algorithmLabel).asInstanceOf[identifying.ID] ).asInstanceOf[TID]
   }
 
   override lazy val metricBaseName: MetricName = MetricName( getClass )
 
-  sealed trait Control { }
-
-  object Control {
-    final case class ControlBySize private[Control]( thresholdMB: Int ) extends Control
-  }
+  implicit val identifying: Identifying[AlgorithmShardCatalog] = AlgorithmShardCatalog.identifying
 
 
-  case class ShardCatalog(
-    override val id: ShardCatalog#TID,
-    override val name: String
-  ) extends Entity with Equals {
-    override type ID = OutlierPlan#ID
-    override val evID: ClassTag[ID] = classTag[ID]
-    override val evTID: ClassTag[TID] = classTag[TID]
-
-    override def canEqual( rhs: Any ): Boolean = rhs.isInstanceOf[ShardCatalog]
-
-    override def hashCode: Int = 41 + id.##
-
-    override def equals( rhs: Any ): Boolean = {
-      rhs match {
-        case that: ShardCatalog => {
-          if ( this eq that ) true
-          else {
-            ( that.## == this.## ) &&
-            ( that canEqual this ) &&
-            ( this.id == that.id )
-          }
-        }
-
-        case _ => false
-      }
-    }
-
-    override def toString(): String = WORK HERE
-  }
-
-  implicit val identifying: Identifying[ShardCatalog] = {
-    new Identifying[ShardCatalog] with ShortUUID.ShortUuidIdentifying[ShardCatalog] {
-      override val idTag: Symbol = Symbol( "shard-catalog" )
-      override def idOf( o: ShardCatalog ): TID = tag( o.id )
-    }
-  }
-
-
-  val module: SimpleAggregateModule[ShardCatalog] = {
-    val b = SimpleAggregateModule.builderFor[ShardCatalog].make
+  val module: SimpleAggregateModule[AlgorithmShardCatalog] = {
+    logger.debug( "#TEST MAKE SHARD CATALOG MODULE" )
+    val b = SimpleAggregateModule.builderFor[AlgorithmShardCatalog].make
     import b.P.{ Tag => BTag, Props => BProps, _ }
 
     b
@@ -109,36 +186,208 @@ object AlgorithmShardCatalog extends Instrumented with LazyLogging {
 
 
   object AggregateRoot {
-
     object ShardCatalogActor {
-      def props( model: DomainModel, rootType: AggregateRootType ): Props = ???
+      def props( model: DomainModel, rootType: AggregateRootType ): Props = Props( new Default(model, rootType) )
 
       def name( rootType: AggregateRootType ): String = rootType.name + "ShardCatalog"
+
+      private class Default( model: DomainModel, rootType: AggregateRootType )
+      extends ShardCatalogActor( model, rootType )
+      with StackableStreamPublisher
+
+
+      case class Availability private[AlgorithmShardCatalogModule](
+        shardSizes: Map[AlgoTID, AP.EstimatedSize] = Map.empty[AlgoTID, AP.EstimatedSize],
+        control: AlgorithmShardCatalog.Control
+      ) {
+        def withNewShardId( shard: AlgoTID ): Availability = {
+          val newShardSizes = shardSizes + ( shard -> AP.EstimatedSize(shard, Bytes(0)) )
+          copy( shardSizes = newShardSizes )
+        }
+
+        def withEstimate( estimate: AP.EstimatedSize ): Availability = {
+          val newShardSizes = shardSizes + ( estimate.sourceId -> estimate )
+          copy( shardSizes = newShardSizes )
+        }
+
+        val available: Set[AlgoTID] = shardSizes.collect{ case (aid, size) if control withinThreshold size => aid }.toSet
+
+        val mostAvailable: Option[AlgoTID] = {
+          available.toSeq.map{ aid => ( aid, shardSizes(aid) ) }.sortBy{ _._2 }.headOption.map{ _._1 }
+        }
+
+        @inline def isEmpty: Boolean = mostAvailable.isDefined
+        @inline def nonEmpty: Boolean = !isEmpty
+
+        val isCandidate: AlgoTID => Boolean = { aid: AlgoTID => available.contains( aid ) || !shardSizes.contains( aid ) }
+      }
+
     }
 
     class ShardCatalogActor( override val model: DomainModel, override val rootType: AggregateRootType )
-    extends demesne.AggregateRoot[ShardCatalog, ShardCatalog#ID]
+    extends demesne.AggregateRoot[AlgorithmShardCatalog, AlgorithmShardCatalog#ID]
     with InstrumentedActor
     with demesne.AggregateRoot.Provider {
       outer: EventPublisher =>
 
+      import ShardCatalogActor.Availability
       import spotlight.analysis.outlier.algorithm.{ AlgorithmShardProtocol => P }
 
       override lazy val metricBaseName: MetricName = MetricName( classOf[ShardCatalogActor] )
+      val assignmentsMeter: Meter = metrics.meter( "shard", "assignments")
+      val routingMeter: Meter = metrics.meter( "shard", "routings" )
+
+      val shardsGaugeName: String = "count"
+      val activeShardSizeGaugeName: String = "active-size-mb"
+      val totalShardSizeGaugeName: String = "total-size-mb"
+
+      def initializeMetrics(): Unit = {
+        stripLingeringMetrics()
+
+        metrics.gauge( "shard", shardsGaugeName ) { availability.shardSizes.size }
+
+        metrics.gauge( "shard", activeShardSizeGaugeName ) {
+          availability.mostAvailable.map{ availability.shardSizes }.map{ _.size }.getOrElse{ Bytes( 0 ) }.toMegabytes
+        }
+
+        metrics.gauge( "shard", totalShardSizeGaugeName ) {
+          availability.shardSizes.values.foldLeft( Bytes(0) ){ _ + _.size }.toMegabytes
+        }
+      }
+
+      def stripLingeringMetrics(): Unit = {
+        import com.codahale.metrics.{ Metric, MetricFilter }
+
+        metrics.registry.removeMatching(
+          new MetricFilter {
+            override def matches( name: String, metric: Metric ): Boolean = {
+              name.contains( classOf[ShardCatalogActor].getName ) &&
+              (
+                name.contains( shardsGaugeName ) ||
+                name.contains( activeShardSizeGaugeName ) ||
+                name.contains( totalShardSizeGaugeName )
+              )
+            }
+          }
+        )
+      }
+
+      var updateAvailability: Option[Cancellable] = None
+      override def postStop(): Unit = updateAvailability foreach { _.cancel() }
 
       override def parseId( idrep: String ): TID = identifying.safeParseTid[TID]( idrep )( classTag[TID] )
 
-      override var state: ShardCatalog = ShardCatalog( id = aggregateId, name = self.path.name )
+      override var state: AlgorithmShardCatalog = _
+      override val evState: ClassTag[AlgorithmShardCatalog] = classTag[AlgorithmShardCatalog]
+      var availability: Availability = _
 
+      override def acceptance: Acceptance = {
+        case ( P.Added(_, p, rt), s ) if Option(s).isEmpty => AlgorithmShardCatalog( plan = p, algorithmRootType = rt )
+        case ( P.ShardAssigned(_, t, aid), s ) => s.assignShard( t, aid )
+//        case (P.ControlSet(_, c), s ) if c != s.control => s.copy( control = c )
+      }
+
+      def referenceFor( aid: AlgoTID ): ActorRef = model( state.algorithmRootType, aid )
+
+
+      def dispatch( forCandidates: AlgoTID => Boolean ): Unit = {
+        for {
+          s <- Option( state ).toSet[AlgorithmShardCatalog]
+          allShards = s.shards.values.toSet
+          candidates = allShards filter forCandidates
+          cid <- candidates
+          ref = model( s.algorithmRootType, cid )
+        } {
+          ref !+ AP.EstimateSize( cid.asInstanceOf[AP.EstimateSize#TID] )
+        }
+      }
+
+
+      case object UpdateAvailability extends P.ProtocolMessage
+
+      override def receiveRecover: Receive = {
+        case RecoveryCompleted => {
+          import scala.concurrent.duration._
+          dispatch( aid => true )
+          updateAvailability = Option(
+            context.system.scheduler.schedule(
+              initialDelay = 1.minute,
+              interval = 1.minute,
+              receiver = self,
+              message = UpdateAvailability
+            )(
+              context.system.dispatcher
+            )
+          )
+        }
+      }
+
+      override def receiveCommand: Receive = active( Availability(control = AlgorithmShardCatalog.Control.BySize()) )
+
+      def active( newAvailability: Availability ): Receive = {
+        availability = newAvailability
+        LoggingReceive { around( knownRouting orElse unknownRouting( availability ) orElse admin ) }
+      }
+
+      def isAlgorithmKnown( algorithmRootType: AggregateRootType ): Boolean = {
+        Option( state )
+        .map { _.shards.values.toSet contains algorithmRootType }
+        .getOrElse { false }
+      }
+
+      val admin: Receive = {
+        case P.Add( id, _, algorithmRootType ) if id == aggregateId && isAlgorithmKnown(algorithmRootType) => { }
+        case P.Add( id, plan, algorithmRootType) if id == aggregateId => {
+          persist( P.Added(id, plan, algorithmRootType) ) { acceptAndPublish }
+        }
+      }
+
+      val knownRouting: Receive = {
+        case m: DetectUsing if state contains m.topic => {
+          val sid = state( m.topic )
+          routingMeter.mark()
+          log.debug( "ShardCatalog[{}]: topic [{}] routed to algorithm shard:[{}]", self.path.name, m.topic, sid )
+          model( state.algorithmRootType, sid ) forwardEnvelope m
+        }
+
+        case P.RouteMessage( _, payload ) if knownRouting isDefinedAt payload => {
+          log.debug( "ShardCatalog[{}]: known RouteMessage received. extracting payload:[{}]", self.path.name, payload )
+          knownRouting( payload )
+        }
+      }
+
+      def unknownRouting( availability: Availability ): Receive = {
+        case P.RouteMessage( _, payload ) if unknownRouting( availability ) isDefinedAt payload => {
+          log.debug( "ShardCatalog[{}]: unknown RouteMessage received. extracting payload:[{}]", self.path.name, payload )
+          unknownRouting( availability )( payload )
+        }
+
+        case m: DetectUsing => {
+          import scalaz.Scalaz.{ state => _, _ }
+
+          availability
+          .mostAvailable
+          .map { _.right[Throwable] }
+          .getOrElse {
+            val nid = state.algorithmRootType.identifying.nextIdAs[AlgoTID]
+            nid foreach { n => context become active( availability withNewShardId n ) }
+            nid
+          }
+          .foreach { aid =>
+            log.debug( "ShardCatalog[{}]: unknown topic:[{}] routed to algorithm shard:[{}]", self.path.name, m.topic, aid )
+            persist( P.ShardAssigned(aggregateId, m.topic, aid) ) { e =>
+              accept( e )
+              assignmentsMeter.mark()
+              routingMeter.mark()
+              log.info( "ShardCatalog[{}]: topic [{}] assigned and routed to algorithm shard:[{}]", self.path.name, m.topic, e.algorithmId )
+              //todo should message be reworked for shard's aid? since that's different than router and shard-catalog or should router use routeMessage and forward
+              referenceFor( e.algorithmId ) forwardEnvelope m //okay to close over sender in persist handler
+            }
+          }
+        }
+
+        case estimate: AP.EstimatedSize => context become active( availability withEstimate estimate )
+      }
     }
   }
-
-
-
-
-
-  def props(model: DomainModel, rootType: AggregateRootType, control: Control): Props = {
-    ???
-  }
-
 }

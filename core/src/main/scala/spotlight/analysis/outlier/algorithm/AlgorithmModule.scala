@@ -1,6 +1,7 @@
 package spotlight.analysis.outlier.algorithm
 
 import java.io.Serializable
+
 import scala.annotation.tailrec
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
@@ -11,6 +12,7 @@ import akka.agent.Agent
 import akka.cluster.sharding.ShardRegion
 import akka.event.LoggingReceive
 import akka.persistence.{DeleteMessagesFailure, DeleteMessagesSuccess, SaveSnapshotFailure, SaveSnapshotSuccess}
+
 import scalaz._
 import Scalaz._
 import scalaz.Kleisli.{ask, kleisli}
@@ -21,6 +23,7 @@ import com.typesafe.scalalogging.{LazyLogging, StrictLogging}
 import org.apache.commons.math3.ml.clustering.DoublePoint
 import com.codahale.metrics.{Metric, MetricFilter}
 import nl.grons.metrics.scala.{Meter, MetricName, Timer}
+import squants.information.{Bytes, Information}
 import peds.akka.envelope._
 import peds.akka.metrics.{Instrumented, InstrumentedActor}
 import peds.akka.publish.{EventPublisher, StackableStreamPublisher}
@@ -36,23 +39,27 @@ import spotlight.model.outlier.{NoOutliers, OutlierPlan, Outliers}
 import spotlight.model.timeseries._
 
 
-object AlgorithmProtocol extends AggregateProtocol[AlgorithmModule.AnalysisState#ID] {
-  sealed trait AlgorithmMessage
-  abstract class AlgorithmCommand extends Command with AlgorithmMessage
-  abstract class AlgorithmEvent extends Event with AlgorithmMessage
-
+object AlgorithmProtocol extends AggregateProtocol[AlgorithmModule.ID] {
   import AlgorithmModule.AnalysisState
 
-  case class GetTopicShapeSnapshot( override val targetId: GetTopicShapeSnapshot#TID, topic: Topic ) extends AlgorithmCommand
+  case class EstimateSize( override val targetId: EstimateSize#TID ) extends Message
+  case class EstimatedSize( val sourceId: AlgorithmModule.TID, size: Information ) extends ProtocolMessage
+  object EstimatedSize {
+    implicit val ordering = new scala.math.Ordering[EstimatedSize] {
+      override def compare( lhs: EstimatedSize, rhs: EstimatedSize ): Int = lhs.size compare rhs.size
+    }
+  }
+
+  case class GetTopicShapeSnapshot( override val targetId: GetTopicShapeSnapshot#TID, topic: Topic ) extends Command
   case class TopicShapeSnapshot(
     override val sourceId: TopicShapeSnapshot#TID,
     algorithm: Symbol,
     topic: Topic,
     snapshot: Option[AlgorithmModule#Shape]
-  ) extends AlgorithmEvent
+  ) extends Event
 
-  case class GetStateSnapshot( override val targetId: GetStateSnapshot#TID ) extends AlgorithmCommand
-  case class StateSnapshot(override val sourceId: StateSnapshot#TID, snapshot: AnalysisState) extends AlgorithmEvent
+  case class GetStateSnapshot( override val targetId: AlgorithmModule.TID ) extends Command
+  case class StateSnapshot(override val sourceId: StateSnapshot#TID, snapshot: AnalysisState) extends Event
 
   case class Advanced(
     override val sourceId: Advanced#TID,
@@ -60,7 +67,7 @@ object AlgorithmProtocol extends AggregateProtocol[AlgorithmModule.AnalysisState
     point: DataPoint,
     isOutlier: Boolean,
     threshold: ThresholdBoundary
-  ) extends AlgorithmEvent
+  ) extends Event
 
   case class AlgorithmUsedBeforeRegistrationError(
     sourceId: AnalysisState#TID,
@@ -150,7 +157,6 @@ object AlgorithmModule extends Instrumented with StrictLogging {
     new EntityIdentifying[AnalysisState] with ShortUUID.ShortUuidIdentifying[AnalysisState] {
       override lazy val idTag: Symbol = 'algorithm
       override val evEntity: ClassTag[AnalysisState] = classTag[AnalysisState]
-      override def nextId: TryV[TID] = new IllegalStateException( "analysis state is fixed to plan and not generated" ).left
     }
   }
 
@@ -209,10 +215,6 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
   import AlgorithmProtocol.Advanced
 
 
-  initializeMetrics()  // defer to concrete modules to initiate?
-
-  override lazy val metricBaseName: MetricName = MetricName( "spotlight.analysis.outlier.algorithm." + rootType.name )
-
   object ShardMonitor {
     val ShardsMetricName = "shards"
     val shards: Agent[BloomFilter[AlgorithmModule.ID]] = {
@@ -230,6 +232,11 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
     }
   }
 
+
+  initializeMetrics()  // defer to concrete modules to initiate?
+
+  override lazy val metricBaseName: MetricName = MetricName( "spotlight.analysis.outlier.algorithm." + rootType.name )
+
   def initializeMetrics(): Unit = {
     stripLingeringMetrics()
     metrics.gauge( ShardMonitor.ShardsMetricName ) { ShardMonitor.shards.get().size }
@@ -244,6 +251,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
       }
     )
   }
+
 
   /**
     * Shape represents the culminated value of applying the algorithm over the time series data for this ID.
@@ -480,6 +488,19 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
     override var state: State = State( aggregateId )
     override lazy val evState: ClassTag[State] = ClassTag( classOf[State] )
 
+    /**
+      * Used to answer EstimateSize requests. The default implementation relies on serializing current
+      * state, which is an expensive means to answer. Algorithms are free to override to provide more efficient calculations,
+      * such as multiplying the number of represented topics by the average shape size.
+      * @return Information byte size
+      */
+    def estimateStateSize(): Information = {
+      import akka.serialization.{ SerializationExtension, Serializer }
+      lazy val serializer: Serializer = SerializationExtension( context.system ) findSerializerFor state
+      val bytes = serializer toBinary state
+      Bytes( bytes.size )
+    }
+
     var algorithmContext: Context = _
 
     override val acceptance: Acceptance = {
@@ -554,14 +575,14 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
 
     val toOutliers = kleisli[TryV, (Outliers, Context), Outliers] { case (o, _) => o.right }
 
-    import AlgorithmProtocol.{ GetTopicShapeSnapshot, TopicShapeSnapshot, GetStateSnapshot, StateSnapshot }
+    import spotlight.analysis.outlier.algorithm.{ AlgorithmProtocol => AP }
 
     val stateReceiver: Receive = {
-      case GetTopicShapeSnapshot( _, topic ) => {
-        sender() ! TopicShapeSnapshot( aggregateId, algorithm.label, topic, state.shapes.get(topic) )
+      case AP.GetTopicShapeSnapshot( _, topic ) => {
+        sender() ! AP.TopicShapeSnapshot( aggregateId, algorithm.label, topic, state.shapes.get(topic) )
       }
 
-      case _: GetStateSnapshot => sender() ! StateSnapshot( aggregateId, state )
+      case _: AP.GetStateSnapshot => sender() ! AP.StateSnapshot( aggregateId, state )
     }
 
 
@@ -619,6 +640,8 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
     }
 
     val nonfunctional: Receive = {
+      case m: AP.EstimateSize => sender() !+ AP.EstimatedSize( aggregateId, estimateStateSize() )
+
       case e: demesne.PassivationSpecification.StopAggregateRoot[_] => {
         startPassivationTimer()
         saveSnapshot( state )
