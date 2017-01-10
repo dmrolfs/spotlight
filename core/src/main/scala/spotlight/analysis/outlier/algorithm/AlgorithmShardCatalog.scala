@@ -19,6 +19,7 @@ import peds.commons.util._
 import demesne._
 import demesne.module.{LocalAggregate, SimpleAggregateModule}
 import spotlight.analysis.outlier.DetectUsing
+import spotlight.analysis.outlier.algorithm.AlgorithmShardCatalogModule.AlgoTID
 import spotlight.analysis.outlier.algorithm.{AlgorithmProtocol => AP}
 import spotlight.model.outlier.OutlierPlan
 import spotlight.model.timeseries._
@@ -61,7 +62,7 @@ case class AlgorithmShardCatalog(
   plan: OutlierPlan.Summary,
   algorithmRootType: AggregateRootType,
   //  control: AlgorithmShardCatalog.Control,
-  shards: Map[Topic, AlgorithmModule.TID] = Map.empty[Topic, AlgorithmModule.TID]
+  shards: Map[Topic, AlgoTID] = Map.empty[Topic, AlgoTID]
 ) extends Entity with Equals {
   import AlgorithmShardCatalog.identifying
 
@@ -73,12 +74,20 @@ case class AlgorithmShardCatalog(
   override def name: String = plan.name
   override def slug: String = plan.slug
 
-  def apply( t: Topic ): AlgorithmModule.TID = shards( t )
+  def apply( t: Topic ): AlgoTID = shards( t )
   def contains( t: Topic ): Boolean = shards contains t
 
-  def assignShard( t: Topic, shard: AlgorithmModule.TID ): AlgorithmShardCatalog = {
+  def assignShard( t: Topic, shard: AlgoTID ): AlgorithmShardCatalog = {
     val newShards = shards + ( t -> shard )
     copy( shards = newShards )
+  }
+
+  def tally: Map[AlgoTID, Int] = {
+    val zero = Map( shards.values.toSet[AlgoTID].map{ s => ( s, 0 ) }.toSeq:_* )
+    shards.foldLeft( zero ){ case (acc, (_, aid)) =>
+      val newTally = acc( aid ) + 1
+      acc + ( aid -> newTally )
+    }
   }
 
   override def canEqual( rhs: Any ): Boolean = rhs.isInstanceOf[AlgorithmShardCatalog]
@@ -201,7 +210,7 @@ object AlgorithmShardCatalogModule extends Instrumented with LazyLogging {
         control: AlgorithmShardCatalog.Control
       ) {
         def withNewShardId( shard: AlgoTID ): Availability = {
-          val newShardSizes = shardSizes + ( shard -> AP.EstimatedSize(shard, Bytes(0)) )
+          val newShardSizes = shardSizes + ( shard -> AP.EstimatedSize(shard, 0, Bytes(0)) )
           copy( shardSizes = newShardSizes )
         }
 
@@ -233,44 +242,61 @@ object AlgorithmShardCatalogModule extends Instrumented with LazyLogging {
       import ShardCatalogActor.Availability
       import spotlight.analysis.outlier.algorithm.{ AlgorithmShardProtocol => P }
 
+
       override lazy val metricBaseName: MetricName = MetricName( classOf[ShardCatalogActor] )
-      val assignmentsMeter: Meter = metrics.meter( "shard", "assignments")
-      val routingMeter: Meter = metrics.meter( "shard", "routings" )
 
-      val shardsGaugeName: String = "count"
-      val activeShardSizeGaugeName: String = "active-size-mb"
-      val totalShardSizeGaugeName: String = "total-size-mb"
+      var shardMetrics: Option[ShardMetrics] = None
 
-      def initializeMetrics(): Unit = {
-        stripLingeringMetrics()
+      class ShardMetrics( plan: OutlierPlan.Summary, id: AlgorithmShardCatalog.ID ) extends Instrumented {
+        val ShardBaseName = "shard"
 
-        metrics.gauge( "shard", shardsGaugeName ) { availability.shardSizes.size }
-
-        metrics.gauge( "shard", activeShardSizeGaugeName ) {
-          availability.mostAvailable.map{ availability.shardSizes }.map{ _.size }.getOrElse{ Bytes( 0 ) }.toMegabytes
+        override lazy val metricBaseName: MetricName = {
+          AlgorithmShardCatalogModule.metricBaseName.append( ShardBaseName, plan.name, id.algorithmLabel )
         }
 
-        metrics.gauge( "shard", totalShardSizeGaugeName ) {
-          availability.shardSizes.values.foldLeft( Bytes(0) ){ _ + _.size }.toMegabytes
-        }
-      }
+        val CountName = "count"
+        val ActiveShardSizeGaugeName = "active-size-mb"
+        val TotalShardSizeGaugeName = "total-size-mb"
+        val AssignmentsName = "assignments"
+        val RoutingsName = "routings"
 
-      def stripLingeringMetrics(): Unit = {
-        import com.codahale.metrics.{ Metric, MetricFilter }
+        val assignmentsMeter: Meter = metrics.meter( AssignmentsName )
+        val routingMeter: Meter = metrics.meter( RoutingsName )
 
-        metrics.registry.removeMatching(
-          new MetricFilter {
-            override def matches( name: String, metric: Metric ): Boolean = {
-              name.contains( classOf[ShardCatalogActor].getName ) &&
-              (
-                name.contains( shardsGaugeName ) ||
-                name.contains( activeShardSizeGaugeName ) ||
-                name.contains( totalShardSizeGaugeName )
-              )
-            }
+        initializeMetrics()
+
+        def initializeMetrics(): Unit = {
+          stripLingeringMetrics()
+
+          metrics.gauge( CountName ) { availability.shardSizes.size }
+
+          metrics.gauge( ActiveShardSizeGaugeName ) {
+            availability.mostAvailable.map{ availability.shardSizes }.map{ _.size }.getOrElse{ Bytes( 0 ) }.toMegabytes
           }
-        )
+
+          metrics.gauge( TotalShardSizeGaugeName ) {
+            availability.shardSizes.values.foldLeft( Bytes(0) ){ _ + _.size }.toMegabytes
+          }
+        }
+
+        def stripLingeringMetrics(): Unit = {
+          import com.codahale.metrics.{ Metric, MetricFilter }
+
+          metrics.registry.removeMatching(
+            new MetricFilter {
+              override def matches( name: String, metric: Metric ): Boolean = {
+                name.contains( ShardBaseName ) &&
+                (
+                  name.contains( CountName ) ||
+                  name.contains( ActiveShardSizeGaugeName ) ||
+                  name.contains( TotalShardSizeGaugeName )
+                )
+              }
+            }
+          )
+        }
       }
+
 
       var updateAvailability: Option[Cancellable] = None
       override def postStop(): Unit = updateAvailability foreach { _.cancel() }
@@ -282,7 +308,10 @@ object AlgorithmShardCatalogModule extends Instrumented with LazyLogging {
       var availability: Availability = _
 
       override def acceptance: Acceptance = {
-        case ( P.Added(_, p, rt), s ) if Option(s).isEmpty => AlgorithmShardCatalog( plan = p, algorithmRootType = rt )
+        case ( P.Added(tid, p, rt), s ) if Option(s).isEmpty => {
+          shardMetrics = Some( new ShardMetrics(plan = p, id = tid.id.asInstanceOf[AlgorithmShardCatalog.ID] ) )
+          AlgorithmShardCatalog( plan = p, algorithmRootType = rt )
+        }
         case ( P.ShardAssigned(_, t, aid), s ) => s.assignShard( t, aid )
 //        case (P.ControlSet(_, c), s ) if c != s.control => s.copy( control = c )
       }
@@ -290,11 +319,15 @@ object AlgorithmShardCatalogModule extends Instrumented with LazyLogging {
       def referenceFor( aid: AlgoTID ): ActorRef = model( state.algorithmRootType, aid )
 
 
-      def dispatch( forCandidates: AlgoTID => Boolean ): Unit = {
+      def dispatchEstimateRequests( forCandidates: AlgoTID => Boolean ): Unit = {
+        log.warning( "dispatching availability:[{}]", availability )
         for {
           s <- Option( state ).toSet[AlgorithmShardCatalog]
           allShards = s.shards.values.toSet
+          tally = s.tally
+          _ = log.warning( "dispatching considering all-shards:[{}]", allShards.map{ s => (s, tally(s), forCandidates(s)) }.mkString(", ") )
           candidates = allShards filter forCandidates
+          _ = log.warning( "dispatching availability estimate requests to [{}:{}] shards: [{}]", s.plan.name, s.algorithmRootType.name, candidates.mkString(", ") )
           cid <- candidates
           ref = model( s.algorithmRootType, cid )
         } {
@@ -308,7 +341,11 @@ object AlgorithmShardCatalogModule extends Instrumented with LazyLogging {
       override def receiveRecover: Receive = {
         case RecoveryCompleted => {
           import scala.concurrent.duration._
-          dispatch( aid => true )
+
+          shardMetrics = Option( state ) map { s => new ShardMetrics( s.plan, s.id.id.asInstanceOf[AlgorithmShardCatalog.ID] ) }
+
+          dispatchEstimateRequests( _ => true )
+
           updateAvailability = Option(
             context.system.scheduler.schedule(
               initialDelay = 1.minute,
@@ -326,6 +363,7 @@ object AlgorithmShardCatalogModule extends Instrumented with LazyLogging {
 
       def active( newAvailability: Availability ): Receive = {
         availability = newAvailability
+        log.warning( "[{}] updating availability to:[{}]", self.path.name, newAvailability )
         LoggingReceive { around( knownRouting orElse unknownRouting( availability ) orElse admin ) }
       }
 
@@ -340,14 +378,16 @@ object AlgorithmShardCatalogModule extends Instrumented with LazyLogging {
         case P.Add( id, plan, algorithmRootType) if id == aggregateId => {
           persist( P.Added(id, plan, algorithmRootType) ) { acceptAndPublish }
         }
+
+        case UpdateAvailability => dispatchEstimateRequests( availability.isCandidate )
       }
 
       val knownRouting: Receive = {
-        case m: DetectUsing if state contains m.topic => {
+        case m: DetectUsing if Option(state).isDefined && state.contains( m.topic ) => {
           val sid = state( m.topic )
-          routingMeter.mark()
+          shardMetrics foreach { _.routingMeter.mark() }
           log.debug( "ShardCatalog[{}]: topic [{}] routed to algorithm shard:[{}]", self.path.name, m.topic, sid )
-          model( state.algorithmRootType, sid ) forwardEnvelope m
+          model( state.algorithmRootType, sid ) forwardEnvelope m.copy( )
         }
 
         case P.RouteMessage( _, payload ) if knownRouting isDefinedAt payload => {
@@ -357,12 +397,30 @@ object AlgorithmShardCatalogModule extends Instrumented with LazyLogging {
       }
 
       def unknownRouting( availability: Availability ): Receive = {
-        case P.RouteMessage( _, payload ) if unknownRouting( availability ) isDefinedAt payload => {
+        case P.RouteMessage( _, payload ) if assignRouting isDefinedAt payload => {
           log.debug( "ShardCatalog[{}]: unknown RouteMessage received. extracting payload:[{}]", self.path.name, payload )
-          unknownRouting( availability )( payload )
+          assignRouting( payload )
         }
 
-        case m: DetectUsing => {
+        case m: DetectUsing if assignRouting isDefinedAt m => assignRouting( m )
+
+        case estimate: AP.EstimatedSize => {
+          if ( estimate.nrShapes != state.shards.size ) {
+            log.warning(
+              "ShardCatalog[{}] mistmatching number of topics between catalog:[{}] and algorithm-shard[{}]:[{}]",
+              self.path.name,
+              state.shards.size,
+              estimate.sourceId,
+              estimate.nrShapes
+            )
+          }
+          log.warning( "ShardCatalog[{}] updating availability from:[{}]: [{}]", self.path.name, sender().path.name, estimate )
+          context become active( availability withEstimate estimate )
+        }
+      }
+
+      val assignRouting: Receive = {
+        case m: DetectUsing if Option(state).isDefined => {
           import scalaz.Scalaz.{ state => _, _ }
 
           availability
@@ -377,16 +435,18 @@ object AlgorithmShardCatalogModule extends Instrumented with LazyLogging {
             log.debug( "ShardCatalog[{}]: unknown topic:[{}] routed to algorithm shard:[{}]", self.path.name, m.topic, aid )
             persist( P.ShardAssigned(aggregateId, m.topic, aid) ) { e =>
               accept( e )
-              assignmentsMeter.mark()
-              routingMeter.mark()
+
+              shardMetrics foreach { sm =>
+                sm.assignmentsMeter.mark()
+                sm.routingMeter.mark()
+              }
+
               log.info( "ShardCatalog[{}]: topic [{}] assigned and routed to algorithm shard:[{}]", self.path.name, m.topic, e.algorithmId )
               //todo should message be reworked for shard's aid? since that's different than router and shard-catalog or should router use routeMessage and forward
               referenceFor( e.algorithmId ) forwardEnvelope m //okay to close over sender in persist handler
             }
           }
         }
-
-        case estimate: AP.EstimatedSize => context become active( availability withEstimate estimate )
       }
     }
   }
