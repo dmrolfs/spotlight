@@ -15,7 +15,7 @@ import org.mockito.Mockito._
 import org.scalatest.Tag
 import org.scalatest.mock.MockitoSugar
 import peds.akka.envelope.WorkId
-import spotlight.testkit.TestCorrelatedSeries
+import peds.commons.identifier.{ShortUUID, TaggedID}
 
 
 /**
@@ -28,6 +28,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
 
   class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends SkylineFixture( _config, _system, _slug ) {
     val plan = mock[OutlierPlan]
+    when( plan.id ).thenReturn( TaggedID( 'plan, ShortUUID() ) )
     when( plan.name ).thenReturn( "mock-plan" )
     when( plan.appliesTo ).thenReturn( SkylineFixture.appliesToAll )
     when( plan.algorithms ).thenReturn(
@@ -66,6 +67,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
       val history1 = historyWith( None, series )
       implicit val sender = aggregator.ref
       analyzer ! DetectUsing(
+        plan.id,
         algoS,
         DetectOutliersInSeries(series, plan, Option(subscriber.ref), Set.empty[WorkId]),
         history1,
@@ -91,6 +93,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
       val history2 = historyWith( Option(history1 recordLastPoints series.points), series2 )
 
       analyzer ! DetectUsing(
+        plan.id,
         algoS,
         DetectOutliersInSeries(series2, plan, Option(subscriber.ref), Set.empty[WorkId]),
         history2,
@@ -126,6 +129,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
       val history1 = historyWith( None, series )
       implicit val sender = aggregator.ref
       analyzer ! DetectUsing(
+        plan.id,
         algoS,
         DetectOutliersInSeries(series, plan, Option(subscriber.ref), Set.empty[WorkId]),
         history1,
@@ -153,6 +157,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
       val history2 = historyWith( Option(history1 recordLastPoints series.points), series2 )
 
       analyzer ! DetectUsing(
+        plan.id,
         algoS,
         DetectOutliersInSeries(series2, plan, Option(subscriber.ref), Set.empty[WorkId]),
         history2,
@@ -188,6 +193,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
       val history1 = historyWith( None, series )
       implicit val sender = aggregator.ref
       analyzer ! DetectUsing(
+        plan.id,
         algoS,
         DetectOutliersInSeries(series, plan, Option(subscriber.ref), Set.empty[WorkId]),
         history1,
@@ -220,6 +226,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
       val history2 = historyWith( Option(history1 recordLastPoints series.points), series2 )
 
       analyzer ! DetectUsing(
+        plan.id,
         algoS,
         DetectOutliersInSeries(series2, plan, Option(subscriber.ref), Set.empty[WorkId]),
         history2,
@@ -263,6 +270,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
       val history1 = historyWith( None, series )
       implicit val sender = aggregator.ref
       analyzer ! DetectUsing(
+        plan.id,
         algoS,
         DetectOutliersInSeries(series, plan, Option(subscriber.ref), Set.empty[WorkId]),
         history1,
@@ -291,6 +299,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
       val history2 = historyWith( Option(history1 recordLastPoints series.points), series2 )
 
       analyzer ! DetectUsing(
+        plan.id,
         algoS,
         DetectOutliersInSeries(series2, plan, Option(subscriber.ref), Set.empty[WorkId]),
         history2,
@@ -331,6 +340,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
       val history1 = historyWith( None, series )
       implicit val sender = aggregator.ref
       analyzer ! DetectUsing(
+        plan.id,
         algoS,
         DetectOutliersInSeries(series, plan, Option(subscriber.ref), Set.empty[WorkId]),
         history1,
@@ -357,6 +367,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
       val history2 = historyWith( Option(history1 recordLastPoints series.points), series2 )
 
       analyzer ! DetectUsing(
+        plan.id,
         algoS,
         DetectOutliersInSeries(series2, plan, Option(subscriber.ref), Set.empty[WorkId]),
         history2,
@@ -384,6 +395,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
       val history3 = historyWith( Option(history1 recordLastPoints series.points), series3 )
 
       analyzer ! DetectUsing(
+        plan.id,
         algoS,
         DetectOutliersInSeries(series3, plan, Option(subscriber.ref), Set.empty[WorkId]),
         history3,

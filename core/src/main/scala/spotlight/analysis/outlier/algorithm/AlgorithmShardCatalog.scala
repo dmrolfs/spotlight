@@ -8,7 +8,7 @@ import akka.persistence.RecoveryCompleted
 import scalaz.{-\/, Validation, \/-}
 import com.typesafe.scalalogging.LazyLogging
 import nl.grons.metrics.scala.{Meter, MetricName}
-import squants.information.{Bytes, Information, Megabytes}
+import squants.information.{Bytes, Information, Kilobytes, Megabytes}
 import peds.akka.envelope._
 import peds.akka.publish.{EventPublisher, StackableStreamPublisher}
 import peds.akka.metrics.{Instrumented, InstrumentedActor}
@@ -181,7 +181,6 @@ object AlgorithmShardCatalogModule extends Instrumented with LazyLogging {
 
 
   val module: SimpleAggregateModule[AlgorithmShardCatalog] = {
-    logger.debug( "#TEST MAKE SHARD CATALOG MODULE" )
     val b = SimpleAggregateModule.builderFor[AlgorithmShardCatalog].make
     import b.P.{ Tag => BTag, Props => BProps, _ }
 
@@ -210,11 +209,13 @@ object AlgorithmShardCatalogModule extends Instrumented with LazyLogging {
         control: AlgorithmShardCatalog.Control
       ) {
         def withNewShardId( shard: AlgoTID ): Availability = {
+          logger.warn( "#TEST #ShardCatalog #Availability: withNewShardId:[{}]", shard )
           val newShardSizes = shardSizes + ( shard -> AP.EstimatedSize(shard, 0, Bytes(0)) )
           copy( shardSizes = newShardSizes )
         }
 
         def withEstimate( estimate: AP.EstimatedSize ): Availability = {
+          logger.warn( "#TEST #ShardCatalog #Availability: withEstimate:[{}]", estimate )
           val newShardSizes = shardSizes + ( estimate.sourceId -> estimate )
           copy( shardSizes = newShardSizes )
         }
@@ -271,11 +272,11 @@ object AlgorithmShardCatalogModule extends Instrumented with LazyLogging {
           metrics.gauge( CountName ) { availability.shardSizes.size }
 
           metrics.gauge( ActiveShardSizeGaugeName ) {
-            availability.mostAvailable.map{ availability.shardSizes }.map{ _.size }.getOrElse{ Bytes( 0 ) }.toMegabytes
+            availability.mostAvailable.map{ availability.shardSizes }.map{ _.size }.getOrElse{ Bytes( 0 ) }.toKilobytes
           }
 
           metrics.gauge( TotalShardSizeGaugeName ) {
-            availability.shardSizes.values.foldLeft( Bytes(0) ){ _ + _.size }.toMegabytes
+            availability.shardSizes.values.foldLeft( Bytes(0) ){ _ + _.size }.toKilobytes
           }
         }
 
@@ -285,12 +286,17 @@ object AlgorithmShardCatalogModule extends Instrumented with LazyLogging {
           metrics.registry.removeMatching(
             new MetricFilter {
               override def matches( name: String, metric: Metric ): Boolean = {
-                name.contains( ShardBaseName ) &&
-                (
-                  name.contains( CountName ) ||
-                  name.contains( ActiveShardSizeGaugeName ) ||
-                  name.contains( TotalShardSizeGaugeName )
-                )
+                val isMatch = {
+                  name.contains( ShardBaseName ) &&
+                    (
+                      name.contains( CountName ) ||
+                      name.contains( ActiveShardSizeGaugeName ) ||
+                      name.contains( TotalShardSizeGaugeName )
+                    )
+                }
+
+                log.warning( s"#TEST #ShardCatalog[{}]: stripLingeringMetrics removeMatching: name:[{}] TO-REMOVE:[{}] has-${ShardBaseName}:${name contains ShardBaseName} has-${CountName}:${name contains CountName} has-${ActiveShardSizeGaugeName}:${name contains ActiveShardSizeGaugeName} has-${TotalShardSizeGaugeName}:${name contains TotalShardSizeGaugeName}", self.path.name, name, isMatch )
+                isMatch
               }
             }
           )
@@ -309,9 +315,13 @@ object AlgorithmShardCatalogModule extends Instrumented with LazyLogging {
 
       override def acceptance: Acceptance = {
         case ( P.Added(tid, p, rt), s ) if Option(s).isEmpty => {
-          shardMetrics = Some( new ShardMetrics(plan = p, id = tid.id.asInstanceOf[AlgorithmShardCatalog.ID] ) )
+          if ( shardMetrics.isEmpty ) {
+            shardMetrics = Some( new ShardMetrics(plan = p, id = tid.id.asInstanceOf[AlgorithmShardCatalog.ID] ) )
+          }
+
           AlgorithmShardCatalog( plan = p, algorithmRootType = rt )
         }
+
         case ( P.ShardAssigned(_, t, aid), s ) => s.assignShard( t, aid )
 //        case (P.ControlSet(_, c), s ) if c != s.control => s.copy( control = c )
       }
@@ -320,14 +330,14 @@ object AlgorithmShardCatalogModule extends Instrumented with LazyLogging {
 
 
       def dispatchEstimateRequests( forCandidates: AlgoTID => Boolean ): Unit = {
-        log.warning( "dispatching availability:[{}]", availability )
+        log.warning( "#TEST ShardCatalog: dispatching availability:[{}]", availability )
         for {
           s <- Option( state ).toSet[AlgorithmShardCatalog]
           allShards = s.shards.values.toSet
           tally = s.tally
-          _ = log.warning( "dispatching considering all-shards:[{}]", allShards.map{ s => (s, tally(s), forCandidates(s)) }.mkString(", ") )
+          _ = log.warning( "#TEST ShardCatalog: dispatching considering all-shards:[{}]", allShards.map{ s => (s, tally(s), forCandidates(s)) }.mkString(", ") )
           candidates = allShards filter forCandidates
-          _ = log.warning( "dispatching availability estimate requests to [{}:{}] shards: [{}]", s.plan.name, s.algorithmRootType.name, candidates.mkString(", ") )
+          _ = log.warning( "#TEST ShardCatalog: dispatching availability estimate requests to [{}:{}] shards: [{}]", s.plan.name, s.algorithmRootType.name, candidates.mkString(", ") )
           cid <- candidates
           ref = model( s.algorithmRootType, cid )
         } {
@@ -359,12 +369,12 @@ object AlgorithmShardCatalogModule extends Instrumented with LazyLogging {
         }
       }
 
-      override def receiveCommand: Receive = active( Availability(control = AlgorithmShardCatalog.Control.BySize()) )
+      override def receiveCommand: Receive = active( Availability(control = AlgorithmShardCatalog.Control.BySize( Kilobytes(250) ) ) )
 
       def active( newAvailability: Availability ): Receive = {
         availability = newAvailability
-        log.warning( "[{}] updating availability to:[{}]", self.path.name, newAvailability )
-        LoggingReceive { around( knownRouting orElse unknownRouting( availability ) orElse admin ) }
+        log.warning( "#TEST ShardCatalog[{}] updating availability to:[{}]", self.path.name, newAvailability )
+        LoggingReceive { around( knownRouting orElse unknownRouting( newAvailability ) orElse admin ) }
       }
 
       def isAlgorithmKnown( algorithmRootType: AggregateRootType ): Boolean = {
@@ -387,7 +397,7 @@ object AlgorithmShardCatalogModule extends Instrumented with LazyLogging {
           val sid = state( m.topic )
           shardMetrics foreach { _.routingMeter.mark() }
           log.debug( "ShardCatalog[{}]: topic [{}] routed to algorithm shard:[{}]", self.path.name, m.topic, sid )
-          model( state.algorithmRootType, sid ) forwardEnvelope m.copy( )
+          referenceFor( sid ) forwardEnvelope m.copy( targetId = sid )
         }
 
         case P.RouteMessage( _, payload ) if knownRouting isDefinedAt payload => {
@@ -414,7 +424,6 @@ object AlgorithmShardCatalogModule extends Instrumented with LazyLogging {
               estimate.nrShapes
             )
           }
-          log.warning( "ShardCatalog[{}] updating availability from:[{}]: [{}]", self.path.name, sender().path.name, estimate )
           context become active( availability withEstimate estimate )
         }
       }
@@ -429,6 +438,7 @@ object AlgorithmShardCatalogModule extends Instrumented with LazyLogging {
           .getOrElse {
             val nid = state.algorithmRootType.identifying.nextIdAs[AlgoTID]
             nid foreach { n => context become active( availability withNewShardId n ) }
+            log.warning( "ShardCatalog[{}]: creating new shard id: NID[{}]  root-type:[{}] tag:[{}]", self.path.name, nid, state.algorithmRootType, state.algorithmRootType.identifying.idTag.name )
             nid
           }
           .foreach { aid =>
@@ -443,7 +453,7 @@ object AlgorithmShardCatalogModule extends Instrumented with LazyLogging {
 
               log.info( "ShardCatalog[{}]: topic [{}] assigned and routed to algorithm shard:[{}]", self.path.name, m.topic, e.algorithmId )
               //todo should message be reworked for shard's aid? since that's different than router and shard-catalog or should router use routeMessage and forward
-              referenceFor( e.algorithmId ) forwardEnvelope m //okay to close over sender in persist handler
+              referenceFor( e.algorithmId ) forwardEnvelope m.copy( targetId = aid ) //okay to close over sender in persist handler
             }
           }
         }

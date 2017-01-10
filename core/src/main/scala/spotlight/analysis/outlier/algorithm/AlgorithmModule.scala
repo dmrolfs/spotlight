@@ -157,14 +157,6 @@ object AlgorithmModule extends Instrumented with StrictLogging {
   }
 
 
-  implicit val identifying: EntityIdentifying[AnalysisState] = {
-    new EntityIdentifying[AnalysisState] with ShortUUID.ShortUuidIdentifying[AnalysisState] {
-      override lazy val idTag: Symbol = 'algorithm
-      override val evEntity: ClassTag[AnalysisState] = classTag[AnalysisState]
-    }
-  }
-
-
   /**
     *  approximate number of points in a one day window size @ 1 pt per 10s
     */
@@ -369,9 +361,16 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
   }
 
 
+  implicit val identifying: EntityIdentifying[AnalysisState] = {
+    new EntityIdentifying[AnalysisState] with ShortUUID.ShortUuidIdentifying[AnalysisState] {
+      override lazy val idTag: Symbol = algorithm.label
+      override val evEntity: ClassTag[AnalysisState] = classTag[AnalysisState]
+    }
+  }
+
   override type ID = AlgorithmModule.ID
   val IdType = TypeCase[TID]
-  override def nextId: TryV[TID] = AlgorithmModule.identifying.nextIdAs[TID]
+  override def nextId: TryV[TID] = module.identifying.nextIdAs[TID]
   val AdvancedType = TypeCase[Advanced]
 
 
@@ -406,7 +405,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
     override val passivateTimeout: Duration = Duration.Inf // Duration( 1, MINUTES ) // Duration.Inf //todo: resolve replaying events with data tsunami
 
     override lazy val name: String = module.shardName
-    override lazy val identifying: Identifying[_] = AlgorithmModule.identifying
+    override lazy val identifying: Identifying[_] = module.identifying
     override def repositoryProps( implicit model: DomainModel ): Props = Repository localProps model //todo change to clustered with multi-jvm testing of cluster
     override def maximumNrClusterNodes: Int = module.maximumNrClusterNodes
     override def aggregateIdFor: ShardRegion.ExtractEntityId = super.aggregateIdFor orElse {
@@ -474,7 +473,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
     override val journalPluginId: String = "akka.persistence.algorithm.journal.plugin"
     override val snapshotPluginId: String = "akka.persistence.algorithm.snapshot.plugin"
 
-    log.info( "{} AlgorithmActor instantiated: [{}]", algorithm.label, aggregateId )
+    log.warning( "#TEST #info {} AlgorithmActor instantiated: [{}]", algorithm.label, aggregateId )
 
     override def preStart(): Unit = {
       super.preStart()
@@ -482,7 +481,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
     }
 
     override def parseId( idstr: String ): TID = {
-      val identifying = AlgorithmModule.identifying
+      val identifying = module.identifying
       identifying.safeParseId( idstr )( identifying.evID )
     }
 
@@ -500,10 +499,8 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
       */
     def estimateStateSize(): Information = {
       import akka.serialization.{ SerializationExtension, Serializer }
-      log.warning( "#TEST: #Estimate: [{}] nr-shapes:[{}] state:[{}]", self.path.name, state.shapes.size, state )
       val serializer: Serializer = SerializationExtension( context.system ) findSerializerFor state
       val bytes = akka.util.ByteString( serializer toBinary state )
-      log.warning( "#TEST: #Estimate: [{}] state serialization: nr-shapes:[{}] bytes:[{}]", self.path.name, state.shapes.size, bytes.size )
       val size = Bytes( bytes.size )
       log.warning( "#TEST: #Estimate: [{}] estimated size: [{}]", self.path.name, size )
       size
@@ -522,7 +519,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
     override def receiveCommand: Receive = LoggingReceive { around( active orElse stateReceiver orElse nonfunctional ) }
 
     val active: Receive = {
-      case msg @ DetectUsing( algo, payload: DetectOutliersInSeries, history, algorithmConfig ) => {
+      case msg @ DetectUsing( _, algo, payload: DetectOutliersInSeries, _, _ ) => {
         val aggregator = sender()
 
         val start = System.nanoTime()
@@ -850,12 +847,8 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
 
     private val recordAdvancements: KOp[Seq[Advanced], Seq[Advanced]] = {
       kleisli[TryV, Seq[Advanced], Seq[Advanced]] { advances =>
-        log.warning( "#TEST #Algorithm[{}] Recording Advances:[{}]", self.path.name, advances.size )
 //        advances foreach { evt => persist( evt ){ accept } }
-        val before = state
         advances foreach { accept }
-        val after = state
-        log.warning( "Algorithm[{}] recorded Advancements: BEFORE:[{}] AFTER:[{}]", self.path.name, before.shapes.size, after.shapes.size )
         advances.right
       }
     }

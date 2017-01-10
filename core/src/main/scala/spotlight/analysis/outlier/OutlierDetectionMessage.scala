@@ -21,7 +21,7 @@ sealed trait OutlierDetectionMessage extends CommandLike {
   override type ID = AnalysisPlanModule.module.ID
   //todo: detect message is routed to many algorithms, each with own tag. This targetId is set to a dummy tag knowing that
   // aggregate routing uses id portion only and ignores tag.
-  override def targetId: TID = plan.id
+//  override def targetId: TID = plan.id
   def topic: Topic
   type Source <: TimeSeriesBase
   def evSource: ClassTag[Source]
@@ -57,6 +57,7 @@ final case class DetectOutliersInSeries private[outlier](
   override val subscriber: Option[ActorRef],
   override val correlationIds: Set[WorkId]
 ) extends OutlierDetectionMessage {
+  override def targetId: TID = plan.id
   override def topic: Topic = source.topic
   override type Source = TimeSeries
   override def evSource: ClassTag[TimeSeries] = ClassTag( classOf[TimeSeries] )
@@ -64,6 +65,7 @@ final case class DetectOutliersInSeries private[outlier](
 
 
 final case class DetectUsing private[outlier](
+  override val targetId: DetectUsing#TID,
   algorithm: Symbol,
   payload: OutlierDetectionMessage,
   @deprecated("???replace with RecentHistory or remove or ???", "20161004") history: HistoricalStatistics,
@@ -87,6 +89,7 @@ final case class UnrecognizedPayload private[outlier](
   algorithm: Symbol,
   request: DetectUsing
 ) extends OutlierDetectionMessage {
+  override def targetId: TID = plan.id
   override def topic: Topic = request.topic
   override type Source = request.Source
   override def evSource: ClassTag[Source] = request.evSource

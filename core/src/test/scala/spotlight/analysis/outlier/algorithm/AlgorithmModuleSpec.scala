@@ -42,7 +42,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
 
   type Module <: AlgorithmModule
   val defaultModule: Module
-  lazy val identifying: EntityIdentifying[AlgorithmModule.AnalysisState] = AlgorithmModule.identifying
+  lazy val identifying: EntityIdentifying[AlgorithmModule.AnalysisState] = defaultModule.identifying
 
 
   override def testSlug( test: OneArgTest ): String = {
@@ -109,7 +109,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
       r
     }
 
-    override def nextId(): module.TID = AlgorithmModule.identifying.tag( ShortUUID() )
+    override def nextId(): module.TID = identifying.tag( ShortUUID() )
 
     override def before(test: OneArgTest): Unit = {
       super.before( test )
@@ -179,6 +179,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
       logger.info( "TEST: ShortUUID id:[{}] aggregate.path:[{}]", id, aggregate.path )
       aggregate.sendEnvelope(
         DetectUsing(
+          targetId = plan.id,
           algorithm = module.algorithm.label,
           payload = DetectOutliersInSeries( series, plan, Option(subscriber.ref), Set.empty[WorkId] ),
           history = history

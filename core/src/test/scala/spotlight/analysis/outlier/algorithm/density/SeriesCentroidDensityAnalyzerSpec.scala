@@ -1,6 +1,7 @@
 package spotlight.analysis.outlier.algorithm.density
 
 import java.util.concurrent.atomic.AtomicInteger
+
 import scala.concurrent.duration._
 import akka.actor.ActorSystem
 import akka.event.EventStream
@@ -10,13 +11,15 @@ import com.typesafe.config.{Config, ConfigFactory}
 import org.apache.commons.math3.random.RandomDataGenerator
 import org.joda.{time => joda}
 import org.scalatest.mockito.MockitoSugar
+import org.mockito.Mockito._
 import peds.akka.envelope.WorkId
+import peds.commons.identifier.{ShortUUID, TaggedID}
 import shapeless._
 import spotlight.analysis.outlier._
 import spotlight.analysis.outlier.algorithm.AlgorithmActor
-import spotlight.model.outlier.{CorrelatedData, _}
+import spotlight.model.outlier._
 import spotlight.model.timeseries._
-import spotlight.testkit.{ParallelAkkaSpec, TestCorrelatedSeries}
+import spotlight.testkit.ParallelAkkaSpec
 
 
 /**
@@ -33,6 +36,7 @@ class SeriesCentroidDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSug
     val algoS = SeriesCentroidDensityAnalyzer.Algorithm
 //    val algoC = CohortDensityAnalyzer.Algorithm
     val plan = mock[OutlierPlan]
+    when( plan.id ).thenReturn( TaggedID( 'plan, ShortUUID() ) )
     val router = TestProbe()
     val subscriber = TestProbe()
     val aggregator = TestProbe()
@@ -63,6 +67,7 @@ class SeriesCentroidDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSug
       an [AlgorithmActor.AlgorithmUsedBeforeRegistrationError] must be thrownBy
       analyzer.receive(
         DetectUsing(
+          plan.id,
           algoS,
           DetectOutliersInSeries( TimeSeries("series", points), plan, Option(subscriber.ref), Set.empty[WorkId] ),
           HistoricalStatistics(2, false ),
@@ -95,6 +100,7 @@ class SeriesCentroidDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSug
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
       implicit val sender = aggregator.ref
       analyzer ! DetectUsing(
+        plan.id,
         algoS,
         DetectOutliersInSeries( series, plan, Option(subscriber.ref), Set.empty[WorkId] ),
         HistoricalStatistics(2, false ),
@@ -133,6 +139,7 @@ class SeriesCentroidDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSug
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
       implicit val sender = aggregator.ref
       analyzer ! DetectUsing(
+        plan.id,
         algoS,
         DetectOutliersInSeries( series, plan, Option(subscriber.ref), Set.empty[WorkId] ),
         history,
@@ -188,6 +195,7 @@ class SeriesCentroidDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSug
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
       implicit val sender = aggregator.ref
       analyzer ! DetectUsing(
+        plan.id,
         algoS,
         DetectOutliersInSeries( series, plan, Option(subscriber.ref), Set.empty[WorkId] ),
         HistoricalStatistics(2, false),

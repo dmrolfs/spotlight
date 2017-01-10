@@ -89,7 +89,7 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
   }
 
   override def detect: Receive = {
-    case msg @ DetectUsing( algo, payload: DetectOutliersInSeries, history, algorithmConfig ) => {
+    case msg @ DetectUsing( _, algo, payload: DetectOutliersInSeries, history, algorithmConfig ) => {
       val aggregator = sender()
       log.info( "TEST: AGGREGATOR=[{}]", aggregator )
       val toOutliers = kleisli[TryV, (Outliers, AlgorithmContext), Outliers] { case (o, _) =>

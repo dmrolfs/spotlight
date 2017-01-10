@@ -65,8 +65,8 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
         Flow[TimeSeries].filter{ !isPlanned( _, settings.plans ) }.via( watchUnrecognized )
       )
 
-      val regulator = b.add( Flow[TimeSeries].via( regulateByTopic(100000) ) )
-      val buffer = b.add( Flow[TimeSeries].buffer( 1000, OverflowStrategy.backpressure ).watchFlow( WatchPoints.PlanBuffer ) )
+      val regulator = b.add( Flow[TimeSeries].via( regulateByTopic(1) ) )
+      val buffer = b.add( Flow[TimeSeries].buffer( 100, OverflowStrategy.backpressure ).watchFlow( WatchPoints.PlanBuffer ) )
       val detect = b.add( catalogFlow.watchFlow(WatchPoints.Catalog) )
 
       logMetrics ~> blockPriors ~> broadcast ~> passPlanned ~> regulator ~> buffer ~> detect

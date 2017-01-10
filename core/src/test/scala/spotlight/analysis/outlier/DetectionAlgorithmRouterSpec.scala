@@ -129,6 +129,7 @@ class DetectionAlgorithmRouterSpec extends ParallelAkkaSpec with MockitoSugar {
       val series = TimeSeries( "series", myPoints )
       val aggregator = TestProbe()
       val msg = DetectUsing(
+        plan.id,
         'foo,
         DetectOutliersInSeries(series, plan, Option(subscriber.ref), Set.empty[WorkId]),
         HistoricalStatistics(2, false)
