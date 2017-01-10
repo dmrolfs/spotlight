@@ -236,7 +236,7 @@ class OutlierDetection extends Actor with EnvelopingActor with InstrumentedActor
     else {
       val blunted = new URI( "akka.tcp", name, null ).getSchemeSpecificPart.replaceAll( """[\.\[\];/?:@&=+$,]""", "_" )
       log.debug(
-        "OutlierDetection attempting to dispatch to invalid aggregator\n" +
+        "OutlierDetection attempting to dispatchEstimateRequests to invalid aggregator\n" +
         " + (plan-name, extractedTopic, uuid):[{}]\n" +
         " + attempted name:{}\n" +
         " + blunted name:{}", 

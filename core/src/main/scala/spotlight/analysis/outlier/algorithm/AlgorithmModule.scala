@@ -43,10 +43,14 @@ object AlgorithmProtocol extends AggregateProtocol[AlgorithmModule.ID] {
   import AlgorithmModule.AnalysisState
 
   case class EstimateSize( override val targetId: EstimateSize#TID ) extends Message
-  case class EstimatedSize( val sourceId: AlgorithmModule.TID, size: Information ) extends ProtocolMessage
+  case class EstimatedSize( val sourceId: AlgorithmModule.TID, nrShapes: Int, size: Information ) extends ProtocolMessage
   object EstimatedSize {
     implicit val ordering = new scala.math.Ordering[EstimatedSize] {
-      override def compare( lhs: EstimatedSize, rhs: EstimatedSize ): Int = lhs.size compare rhs.size
+      override def compare( lhs: EstimatedSize, rhs: EstimatedSize ): Int = {
+        val sizeComparison = lhs.size compare rhs.size
+        if ( sizeComparison != 0 ) sizeComparison
+        else lhs.nrShapes compare rhs.nrShapes
+      }
     }
   }
 
@@ -496,15 +500,20 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
       */
     def estimateStateSize(): Information = {
       import akka.serialization.{ SerializationExtension, Serializer }
-      lazy val serializer: Serializer = SerializationExtension( context.system ) findSerializerFor state
-      val bytes = serializer toBinary state
-      Bytes( bytes.size )
+      log.warning( "#TEST: #Estimate: [{}] nr-shapes:[{}] state:[{}]", self.path.name, state.shapes.size, state )
+      val serializer: Serializer = SerializationExtension( context.system ) findSerializerFor state
+      val bytes = akka.util.ByteString( serializer toBinary state )
+      log.warning( "#TEST: #Estimate: [{}] state serialization: nr-shapes:[{}] bytes:[{}]", self.path.name, state.shapes.size, bytes.size )
+      val size = Bytes( bytes.size )
+      log.warning( "#TEST: #Estimate: [{}] estimated size: [{}]", self.path.name, size )
+      size
     }
 
     var algorithmContext: Context = _
 
     override val acceptance: Acceptance = {
       case ( AdvancedType(event), cs ) => {
+//        log.warning( "#TEST Algorithm[{}]: advancing with event - topic:[{}] point:[{}]", self.path.name, event.topic, event.point )
         val s = cs.shapes.get( event.topic ) getOrElse shapeCompanion.zero( None )
         cs.withTopicShape( event.topic, shapeCompanion.advance(s, event) )
       }
@@ -578,6 +587,12 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
     import spotlight.analysis.outlier.algorithm.{ AlgorithmProtocol => AP }
 
     val stateReceiver: Receive = {
+      case m: AP.EstimateSize => {
+        val resp = AP.EstimatedSize( sourceId = aggregateId, nrShapes = state.shapes.size, size = estimateStateSize() )
+        log.warning( "#TEST: #Estimate: [{}] responding to [{}] estimate request with: [{}]", self.path, sender().path.name, resp )
+        sender() !+ resp
+      }
+
       case AP.GetTopicShapeSnapshot( _, topic ) => {
         sender() ! AP.TopicShapeSnapshot( aggregateId, algorithm.label, topic, state.shapes.get(topic) )
       }
@@ -640,8 +655,6 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
     }
 
     val nonfunctional: Receive = {
-      case m: AP.EstimateSize => sender() !+ AP.EstimatedSize( aggregateId, estimateStateSize() )
-
       case e: demesne.PassivationSpecification.StopAggregateRoot[_] => {
         startPassivationTimer()
         saveSnapshot( state )
@@ -837,8 +850,12 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
 
     private val recordAdvancements: KOp[Seq[Advanced], Seq[Advanced]] = {
       kleisli[TryV, Seq[Advanced], Seq[Advanced]] { advances =>
+        log.warning( "#TEST #Algorithm[{}] Recording Advances:[{}]", self.path.name, advances.size )
 //        advances foreach { evt => persist( evt ){ accept } }
+        val before = state
         advances foreach { accept }
+        val after = state
+        log.warning( "Algorithm[{}] recorded Advancements: BEFORE:[{}] AFTER:[{}]", self.path.name, before.shapes.size, after.shapes.size )
         advances.right
       }
     }

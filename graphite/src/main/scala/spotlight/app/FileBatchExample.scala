@@ -166,11 +166,11 @@ object FileBatchExample extends Instrumented with StrictLogging {
       val publish = Flow[SimpleFlattenedOutlier].map{ identity }.watchFlow( Publish )
 
       sourceData( settings )
-      .via( Flow[String].buffer( 1000, OverflowStrategy.backpressure ).watchFlow( Data ) )
-      .map { e => logger.info("after the sourceData step: [{}]", e); e }
+      .via( Flow[String].buffer( 1000, OverflowStrategy.backpressure ).watchSourced( Data ) )
+//      .map { e => logger.info("after the sourceData step: [{}]", e); e }
       .via( detectionWorkflow(boundedContext, settings, scoring) )
       .via( publish )
-      .map { e => logger.info("AFTER DETECTION: [{}]", e); e }
+//      .map { e => logger.info("AFTER DETECTION: [{}]", e); e }
       .runWith( Sink.seq )
     }
   }
@@ -181,10 +181,10 @@ object FileBatchExample extends Instrumented with StrictLogging {
 
     FileIO
     .fromPath( Paths.get( data ) )
-    .via( Framing.delimiter(ByteString("\n"), maximumFrameLength = 1024) )
-    .map { b => logger.info( "sourceData: bytes = [{}]", b); b }
+    .via( Framing.delimiter(ByteString("\n"), maximumFrameLength = 10240) )
+//    .map { b => logger.info( "sourceData: bytes = [{}]", b); b }
     .map { _.utf8String }
-    .map { s => logger.info( "sourceData: utf8String = [{}]", s); s }
+//    .map { s => logger.info( "sourceData: utf8String = [{}]", s); s }
 //    .delay( 1.seconds )
   }
 
@@ -223,10 +223,10 @@ object FileBatchExample extends Instrumented with StrictLogging {
 
       val timeSeries = b.add(
         Flow[String]
-        .via( watch("unpacking") )
+//        .via( watch("unpacking") )
         .via( unmarshalTimeSeriesData )
-        .map { ( _, count.incrementAndGet() ) }
-        .map { case (ts, i) => logger.info( "UNPACKED[ {} ]: [{}]", (i + 1 ).toString, ts ); ts }
+//        .map { ( _, count.incrementAndGet() ) }
+//        .map { case (ts, i) => logger.info( "UNPACKED[ {} ]: [{}]", (i + 1 ).toString, ts ); ts }
         .buffer( 1000, OverflowStrategy.backpressure ).watchFlow( WatchPoints.Scoring )
       )
 
@@ -242,11 +242,11 @@ object FileBatchExample extends Instrumented with StrictLogging {
 
       val filterOutliers = b.add(
         Flow[Outliers]
-        .map { m => logger.info( "FILTER:BEFORE class:[{}] message:[{}]", m.getClass.getCanonicalName, m ); m }
+//        .map { m => logger.info( "FILTER:BEFORE class:[{}] message:[{}]", m.getClass.getCanonicalName, m ); m }
         .collect {
           case s: SeriesOutliers => s
         }
-        .map { m => logger.info( "FILTER:AFTER class:[{}] message:[{}]", m.getClass.getCanonicalName, m ); m }
+//        .map { m => logger.info( "FILTER:AFTER class:[{}] message:[{}]", m.getClass.getCanonicalName, m ); m }
         .watchFlow( WatchPoints.Results )
       )
 
@@ -254,7 +254,7 @@ object FileBatchExample extends Instrumented with StrictLogging {
         Flow[SeriesOutliers]
         .map { s =>
           flattenObject( s ) match {
-            case \/-( f ) => logger.info( "Success: flatter.flattenObject = [{}]", f ); f
+            case \/-( f ) => f
             case -\/( ex ) => {
               logger.error( s"Failure: flatter.flattenObject[${s}]:", ex )
               throw ex
@@ -286,18 +286,18 @@ object FileBatchExample extends Instrumented with StrictLogging {
     }
   }
 
-  def flatten: Flow[SeriesOutliers , List[SimpleFlattenedOutlier],NotUsed] = {
-    Flow[SeriesOutliers ]
-    .map[List[SimpleFlattenedOutlier]] { so =>
-      flattenObject( so ) match {
-        case \/-( f ) => logger.info( "Success: flatten.flattenObject = [{}]", f ); f
-        case -\/( ex ) => {
-          logger.error( s"Failure: flatten.flattenObject[${so}]:", ex )
-          throw ex
-        }
-      }
-    }
-  }
+//  def flatten: Flow[SeriesOutliers , List[SimpleFlattenedOutlier],NotUsed] = {
+//    Flow[SeriesOutliers ]
+//    .map[List[SimpleFlattenedOutlier]] { so =>
+//      flattenObject( so ) match {
+//        case \/-( f ) => f
+//        case -\/( ex ) => {
+//          logger.error( s"Failure: flatten.flattenObject[${so}]:", ex )
+//          throw ex
+//        }
+//      }
+//    }
+//  }
 
   def flattenObject( outlier: SeriesOutliers ): TryV[List[SimpleFlattenedOutlier]] = {
     \/ fromTryCatchNonFatal {
@@ -338,14 +338,14 @@ object FileBatchExample extends Instrumented with StrictLogging {
     Flow[String]
     .mapConcat { s =>
       toTimeSeries( s ) match {
-        case \/-( tss ) => logger.info( "Success: unmarshalTimeSeries.toTimeSeries = [{}]", tss ); tss
+        case \/-( tss ) => tss
         case -\/( ex ) => {
           logger.error( s"Failure: unmarshalTimeSeries.toTimeSeries[${s}]:", ex )
           throw ex
         }
       }
     }
-    .map { ts => logger.info( "unmarshalled time series: [{}]", ts ); ts }
+//    .map { ts => logger.info( "unmarshalled time series: [{}]", ts ); ts }
     .withAttributes( ActorAttributes.supervisionStrategy(GraphiteSerializationProtocol.decider) )
   }
 

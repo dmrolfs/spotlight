@@ -258,23 +258,16 @@ object DetectionAlgorithmRouter extends LazyLogging {
     val catalogId: AlgorithmShardCatalogModule.TID = AlgorithmShardCatalogModule.idFor( plan, algorithmRootType.name )
     val catalogRef: ActorRef = {
       val ref = model( AlgorithmShardCatalogModule.module.rootType, catalogId )
-      logger.debug( "#TEST: model:[{}] algorithmRootType:[{}] catalogId:[{}] ref = [{}]", model, algorithmRootType, catalogId, ref )
       ref !+ AlgorithmShardProtocol.Add( catalogId, plan, algorithmRootType )
       ref
     }
 
 
-    import peds.commons.util._
     override def forward( message: Any )( implicit sender: ActorRef, context: ActorContext ): Unit = {
-      val routeMessage = AlgorithmShardProtocol.RouteMessage( catalogId, message )
-      logger.debug( "#TEST: forward to catalog:[{}] route-message:[{}]", catalogRef, routeMessage )
       referenceFor(message) forwardEnvelope AlgorithmShardProtocol.RouteMessage( catalogId, message )
     }
 
-    override def referenceFor( message: Any )( implicit context: ActorContext ): ActorRef = {
-      logger.debug( "#TEST: referenceFor: catalog:[{}]", catalogRef )
-      catalogRef
-    }
+    override def referenceFor( message: Any )( implicit context: ActorContext ): ActorRef = catalogRef
   }
 }
 
@@ -311,8 +304,6 @@ class DetectionAlgorithmRouter extends Actor with EnvelopingActor with Instrumen
   }
 
   val routing: Receive = {
-//    case m: DetectUsing if contains( m.algorithm ) => routingTable( m.algorithm ).referenceFor( m.scope ) forwardEnvelope m
-//    case m: DetectUsing if contains( m.algorithm ) => routingTable( m.algorithm ).referenceFor( m ) forwardEnvelope m
     case m: DetectUsing if contains( m.algorithm ) => routingTable( m.algorithm ) forward m
   }
 
