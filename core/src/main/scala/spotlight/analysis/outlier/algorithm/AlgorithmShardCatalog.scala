@@ -209,13 +209,11 @@ object AlgorithmShardCatalogModule extends Instrumented with LazyLogging {
         control: AlgorithmShardCatalog.Control
       ) {
         def withNewShardId( shard: AlgoTID ): Availability = {
-          logger.warn( "#TEST #ShardCatalog #Availability: withNewShardId:[{}]", shard )
           val newShardSizes = shardSizes + ( shard -> AP.EstimatedSize(shard, 0, Bytes(0)) )
           copy( shardSizes = newShardSizes )
         }
 
         def withEstimate( estimate: AP.EstimatedSize ): Availability = {
-          logger.warn( "#TEST #ShardCatalog #Availability: withEstimate:[{}]", estimate )
           val newShardSizes = shardSizes + ( estimate.sourceId -> estimate )
           copy( shardSizes = newShardSizes )
         }
@@ -252,7 +250,7 @@ object AlgorithmShardCatalogModule extends Instrumented with LazyLogging {
         val ShardBaseName = "shard"
 
         override lazy val metricBaseName: MetricName = {
-          AlgorithmShardCatalogModule.metricBaseName.append( ShardBaseName, plan.name, id.algorithmLabel )
+          AlgorithmShardCatalogModule.metricBaseName.append( plan.name, id.algorithmLabel, ShardBaseName )
         }
 
         val CountName = "count"
@@ -268,6 +266,7 @@ object AlgorithmShardCatalogModule extends Instrumented with LazyLogging {
 
         def initializeMetrics(): Unit = {
           stripLingeringMetrics()
+          metrics.unregisterGauges()
 
           metrics.gauge( CountName ) { availability.shardSizes.size }
 
@@ -330,14 +329,11 @@ object AlgorithmShardCatalogModule extends Instrumented with LazyLogging {
 
 
       def dispatchEstimateRequests( forCandidates: AlgoTID => Boolean ): Unit = {
-        log.warning( "#TEST ShardCatalog: dispatching availability:[{}]", availability )
         for {
           s <- Option( state ).toSet[AlgorithmShardCatalog]
           allShards = s.shards.values.toSet
           tally = s.tally
-          _ = log.warning( "#TEST ShardCatalog: dispatching considering all-shards:[{}]", allShards.map{ s => (s, tally(s), forCandidates(s)) }.mkString(", ") )
           candidates = allShards filter forCandidates
-          _ = log.warning( "#TEST ShardCatalog: dispatching availability estimate requests to [{}:{}] shards: [{}]", s.plan.name, s.algorithmRootType.name, candidates.mkString(", ") )
           cid <- candidates
           ref = model( s.algorithmRootType, cid )
         } {
@@ -373,7 +369,7 @@ object AlgorithmShardCatalogModule extends Instrumented with LazyLogging {
 
       def active( newAvailability: Availability ): Receive = {
         availability = newAvailability
-        log.warning( "#TEST ShardCatalog[{}] updating availability to:[{}]", self.path.name, newAvailability )
+        log.info( "ShardCatalog[{}] updating availability to:[{}]", self.path.name, newAvailability )
         LoggingReceive { around( knownRouting orElse unknownRouting( newAvailability ) orElse admin ) }
       }
 

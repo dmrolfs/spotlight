@@ -356,11 +356,9 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
 
       def detectionFlow(p: OutlierPlan, parallelism: Int)(implicit system: ActorSystem, timeout: Timeout): DetectFlow = {
         Flow[TimeSeries]
-        .map { ts => log.debug( "AnalysisPlanModule:FLOW-DETECT: before-filter: [{}]", ts.toString ); ts }
         .map { ts => OutlierDetectionMessage( ts, p ).disjunction }
         .collect { case scalaz.\/-( m ) => m }
-        .map { m => log.debug( "AnalysisPlanModule:FLOW-DETECT: on-to-detection-grid: [{}]", m.toString ); m }
-        .mapAsync( parallelism ) { m =>( detector ?+ m ) }.withAttributes( ActorAttributes supervisionStrategy detectorDecider )
+        .mapAsync( parallelism ) { m => ( detector ?+ m ) }.withAttributes( ActorAttributes supervisionStrategy detectorDecider )
         .filter {
           case Envelope( DetectionResult( outliers, _ ), _ ) => true
           case DetectionResult( outliers, _ ) => true

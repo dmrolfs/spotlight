@@ -55,22 +55,28 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
     GraphDSL.create() { implicit b =>
       val logMetrics = b.add( logMetric( Logger(LoggerFactory getLogger "Metrics"), settings.plans ) )
       val blockPriors = b.add( Flow[TimeSeries] filter { notReportedBySpotlight } )
-      val broadcast = b.add( Broadcast[TimeSeries](outputPorts = 2, eagerCancel = false) )
-
-      val watchPlanned = Flow[TimeSeries].map{ identity }.watchSourced( WatchPoints.ScoringPlanned )
-      val passPlanned = b.add( Flow[TimeSeries].filter{ isPlanned( _, settings.plans ) }.via( watchPlanned ) )
-
-      val watchUnrecognized = Flow[TimeSeries].map{ identity }.watchSourced( WatchPoints.ScoringUnrecognized )
-      val passUnrecognized = b.add(
-        Flow[TimeSeries].filter{ !isPlanned( _, settings.plans ) }.via( watchUnrecognized )
+      val zipWithInPlan = b.add(
+        Flow[TimeSeries]
+        .map { ts => ( ts, isPlanned(ts, settings.plans) ) }
+        .buffer( 10, OverflowStrategy.backpressure )//.watchFlow( 'preBroadcast )
       )
 
-      val regulator = b.add( Flow[TimeSeries].via( regulateByTopic(10000) ) )
-      val buffer = b.add( Flow[TimeSeries].buffer( 100, OverflowStrategy.backpressure ).watchFlow( WatchPoints.PlanBuffer ) )
+      val broadcast = b.add( Broadcast[(TimeSeries, Boolean)](outputPorts = 2, eagerCancel = false) )
+
+      val passPlanned = b.add( Flow[(TimeSeries, Boolean)].collect { case (ts, inPlan) if inPlan => ts } )
+      val passUnrecognized = b.add( Flow[(TimeSeries, Boolean)].collect { case (ts, inPlan) if !inPlan => ts } )
+
+      val regulator = b.add(
+        Flow[TimeSeries]
+        .buffer( 10, OverflowStrategy.backpressure ).watchSourced( 'regulator )
+        .via( regulateByTopic(10000) )
+      )
+
+//      val buffer = b.add( Flow[TimeSeries].buffer( 10, OverflowStrategy.backpressure ).watchFlow( WatchPoints.PlanBuffer ) )
       val detect = b.add( catalogFlow.watchFlow(WatchPoints.Catalog) )
 
-      logMetrics ~> blockPriors ~> broadcast ~> passPlanned ~> regulator ~> buffer ~> detect
-                                   broadcast ~> passUnrecognized
+      logMetrics ~> blockPriors ~> zipWithInPlan ~> broadcast ~> passPlanned ~> regulator /*~> buffer */~> detect
+                                                    broadcast ~> passUnrecognized
 
       ScoringShape(
         FanOutShape.Ports(

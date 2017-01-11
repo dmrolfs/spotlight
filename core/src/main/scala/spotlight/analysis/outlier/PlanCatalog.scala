@@ -534,8 +534,8 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
         GraphDSL.create() { implicit b =>
           import GraphDSL.Implicits._
 
-          val intake = b.add( Flow[TimeSeries].map{ identity }.watchFlow( WatchPoints.Intake ) )
-          val outlet = b.add( Flow[Outliers].map{ identity }.watchFlow( WatchPoints.Outlet ) )
+          val intake = b.add( Flow[TimeSeries].map{ identity }/*.watchFlow( WatchPoints.Intake )*/ )
+          val outlet = b.add( Flow[Outliers].map{ identity }/*.watchFlow( WatchPoints.Outlet )*/ )
 
           if ( planFlows.nonEmpty ) {
             val broadcast = b.add( Broadcast[TimeSeries]( nrFlows ) )
