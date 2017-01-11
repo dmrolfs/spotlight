@@ -369,7 +369,7 @@ object AlgorithmShardCatalogModule extends Instrumented with LazyLogging {
         }
       }
 
-      override def receiveCommand: Receive = active( Availability(control = AlgorithmShardCatalog.Control.BySize( Kilobytes(250) ) ) )
+      override def receiveCommand: Receive = active( Availability(control = AlgorithmShardCatalog.Control.BySize( Megabytes(2) ) ) )
 
       def active( newAvailability: Availability ): Receive = {
         availability = newAvailability
