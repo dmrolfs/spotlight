@@ -385,22 +385,22 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
   class RootType extends AggregateRootType {
     //todo: make configuration driven for algorithms
     override val snapshotPeriod: Option[FiniteDuration] = None // not used - snapshot timing explicitly defined below
-    override def snapshot: Option[SnapshotSpecification] = None
-//    override def snapshot: Option[SnapshotSpecification] = {
-//      snapshotPeriod map { _ => super.snapshot } getOrElse {
-//        import scala.concurrent.duration._
-//
-//        Some(
-//          new SnapshotSpecification {
-//            override val snapshotInterval: FiniteDuration = 30.seconds
-//            override val snapshotInitialDelay: FiniteDuration = {
-//              val delay = snapshotInterval * AlgorithmModule.snapshotFactorizer.nextDouble()
-//              FiniteDuration( delay.toMillis, MILLISECONDS )
-//            }
-//          }
-//        )
-//      }
-//    }
+//    override def snapshot: Option[SnapshotSpecification] = None
+    override def snapshot: Option[SnapshotSpecification] = {
+      snapshotPeriod map { _ => super.snapshot } getOrElse {
+        import scala.concurrent.duration._
+
+        Some(
+          new SnapshotSpecification {
+            override val snapshotInterval: FiniteDuration = 1.minute
+            override val snapshotInitialDelay: FiniteDuration = {
+              val delay = snapshotInterval * AlgorithmModule.snapshotFactorizer.nextDouble()
+              FiniteDuration( delay.toMillis, MILLISECONDS )
+            }
+          }
+        )
+      }
+    }
 
     override val passivateTimeout: Duration = Duration.Inf // Duration( 1, MINUTES ) // Duration.Inf //todo: resolve replaying events with data tsunami
 
@@ -473,7 +473,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
     override val journalPluginId: String = "akka.persistence.algorithm.journal.plugin"
     override val snapshotPluginId: String = "akka.persistence.algorithm.snapshot.plugin"
 
-    log.warning( "#TEST #info {} AlgorithmActor instantiated: [{}]", algorithm.label, aggregateId )
+    log.info( "{} AlgorithmActor instantiated: [{}]", algorithm.label, aggregateId )
 
     override def preStart(): Unit = {
       super.preStart()
@@ -502,7 +502,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
       val serializer: Serializer = SerializationExtension( context.system ) findSerializerFor state
       val bytes = akka.util.ByteString( serializer toBinary state )
       val size = Bytes( bytes.size )
-      log.warning( "#TEST: #Estimate: [{}] estimated size: [{}]", self.path.name, size )
+//      log.warning( "#TEST: #Estimate: [{}] estimated size: [{}]", self.path.name, size )
       size
     }
 
@@ -575,8 +575,8 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
         }
       }
 
-//      case AdvancedType( adv ) => persist( adv ) { accept }
-      case AdvancedType( adv ) => accept( adv )
+      case AdvancedType( adv ) => persist( adv ) { accept }
+//      case AdvancedType( adv ) => accept( adv )
     }
 
     val toOutliers = kleisli[TryV, (Outliers, Context), Outliers] { case (o, _) => o.right }
@@ -586,7 +586,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
     val stateReceiver: Receive = {
       case m: AP.EstimateSize => {
         val resp = AP.EstimatedSize( sourceId = aggregateId, nrShapes = state.shapes.size, size = estimateStateSize() )
-        log.warning( "#TEST: #Estimate: [{}] responding to [{}] estimate request with: [{}]", self.path, sender().path.name, resp )
+//        log.warning( "#TEST: #Estimate: [{}] responding to [{}] estimate request with: [{}]", self.path, sender().path.name, resp )
         sender() !+ resp
       }
 
@@ -847,8 +847,8 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
 
     private val recordAdvancements: KOp[Seq[Advanced], Seq[Advanced]] = {
       kleisli[TryV, Seq[Advanced], Seq[Advanced]] { advances =>
-//        advances foreach { evt => persist( evt ){ accept } }
-        advances foreach { accept }
+        advances foreach { evt => persist( evt ){ accept } }
+//        advances foreach { accept }
         advances.right
       }
     }
