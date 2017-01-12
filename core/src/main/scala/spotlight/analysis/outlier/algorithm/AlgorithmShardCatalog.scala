@@ -411,16 +411,20 @@ object AlgorithmShardCatalogModule extends Instrumented with LazyLogging {
         case m: DetectUsing if assignRouting isDefinedAt m => assignRouting( m )
 
         case estimate: AP.EstimatedSize => {
-          if ( estimate.nrShapes != state.shards.size ) {
-            log.warning(
-              "ShardCatalog[{}] mistmatching number of topics between catalog:[{}] and algorithm-shard[{}]:[{}]",
-              self.path.name,
-              state.shards.size,
-              estimate.sourceId,
-              estimate.nrShapes
-            )
-          }
           context become active( availability withEstimate estimate )
+
+          { // unecessary check?
+            val topicsForShard = state.shards.count{ case (t, aid) => aid == estimate.sourceId }
+            if ( estimate.nrShapes != topicsForShard ) {
+              log.warning(
+                           "ShardCatalog[{}] mismatching number of topics between catalog:[{}] and algorithm-shard[{}]:[{}]",
+                           self.path.name,
+                           state.shards.size,
+                           estimate.sourceId,
+                           estimate.nrShapes
+                         )
+            }
+          }
         }
       }
 
