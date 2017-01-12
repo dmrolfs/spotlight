@@ -402,7 +402,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
       }
     }
 
-    override val passivateTimeout: Duration = Duration.Inf // Duration( 1, MINUTES ) // Duration.Inf //todo: resolve replaying events with data tsunami
+    override val passivateTimeout: Duration = Duration( 5, MINUTES ) // Duration( 1, MINUTES ) // Duration.Inf //todo: resolve replaying events with data tsunami
 
     override lazy val name: String = module.shardName
     override lazy val identifying: Identifying[_] = module.identifying
