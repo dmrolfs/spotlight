@@ -84,7 +84,7 @@ object Spotlight extends Instrumented with StrictLogging {
   val systemRootTypes: Set[AggregateRootType] = {
     Set(
       AnalysisPlanModule.module.rootType,
-      AlgorithmShardCatalogModule.module.rootType,
+      AlgorithmShardCatalogModule.rootType,
       SimpleMovingAverageAlgorithm.rootType,
       GrubbsAlgorithm.rootType,
       ExponentialMovingAverageAlgorithm.rootType

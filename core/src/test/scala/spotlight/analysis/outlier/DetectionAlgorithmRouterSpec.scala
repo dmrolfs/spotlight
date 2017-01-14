@@ -31,7 +31,7 @@ class DetectionAlgorithmRouterSpec extends ParallelAkkaSpec with MockitoSugar {
     when( algorithmRootType.name ).thenReturn { algo.name }
     val catalogId = AlgorithmShardCatalogModule.idFor( plan, algo.name )
     val catalog = TestProbe()
-    val catalogRootType = AlgorithmShardCatalogModule.module.rootType
+    val catalogRootType = AlgorithmShardCatalogModule.rootType
     val model = mock[DomainModel]
     logger.debug( "FIXTURE: SHARD ROOT-TYPE:[{}]", catalogRootType )
     when( model(catalogRootType, catalogId) ).thenReturn( catalog.ref )
@@ -57,7 +57,6 @@ class DetectionAlgorithmRouterSpec extends ParallelAkkaSpec with MockitoSugar {
 //    val resolver = DetectionAlgorithmRouter.DirectProxy( algorithm.ref )
 //    val resolver = DetectionAlgorithmRouter.ShardedRootTypeProxy( plan, algorithmRootType, model )
 //    val router = TestActorRef[DetectionAlgorithmRouter]( DetectionAlgorithmRouter.props( plan, Map(algo -> resolver) ) )
-    val router = TestActorRef[DetectionAlgorithmRouter]( DetectionAlgorithmRouter.props( plan, Map() ) )
     val subscriber = TestProbe()
   }
 
@@ -67,6 +66,7 @@ class DetectionAlgorithmRouterSpec extends ParallelAkkaSpec with MockitoSugar {
     "register algorithms" in { f: Fixture =>
       import f._
       val probe = TestProbe()
+      val router = TestActorRef[DetectionAlgorithmRouter]( DetectionAlgorithmRouter.props( plan, Map() ) )
       router.receive( RegisterAlgorithmReference('foo, probe.ref), probe.ref )
       probe.expectMsgPF( hint = "register", max = 200.millis.dilated ) {
         case Envelope( AlgorithmRegistered(actual), _ ) => actual.name mustBe Symbol("foo").name
@@ -78,13 +78,14 @@ class DetectionAlgorithmRouterSpec extends ParallelAkkaSpec with MockitoSugar {
       model must not be (null)
       algorithmRootType must not be (null)
       catalogId must not be (null)
-      AlgorithmShardCatalogModule.module.rootType must not be (null)
-      logger.debug( "TEST: SHARD ROOT-TYPE:[{}]", AlgorithmShardCatalogModule.module.rootType )
+      AlgorithmShardCatalogModule.rootType must not be (null)
+      logger.debug( "TEST: SHARD ROOT-TYPE:[{}]", AlgorithmShardCatalogModule.rootType )
       catalogRootType mustBe catalogRootType
-      AlgorithmShardCatalogModule.module.rootType mustBe AlgorithmShardCatalogModule.module.rootType
-      AlgorithmShardCatalogModule.module.rootType mustBe catalogRootType
-      model( AlgorithmShardCatalogModule.module.rootType, catalogId ) must be (catalog.ref)
+      AlgorithmShardCatalogModule.rootType mustBe AlgorithmShardCatalogModule.rootType
+      AlgorithmShardCatalogModule.rootType mustBe catalogRootType
+      model( AlgorithmShardCatalogModule.rootType, catalogId ) must be (catalog.ref)
 
+      val router = TestActorRef[DetectionAlgorithmRouter]( DetectionAlgorithmRouter.props( plan, Map() ) )
       router.receive( RegisterAlgorithmRootType(algo, algorithmRootType, model, true) )
       logger.debug( "#TEST looking for catalog add..." )
       catalog.expectMsgPF( hint = "catalog-add" ) {

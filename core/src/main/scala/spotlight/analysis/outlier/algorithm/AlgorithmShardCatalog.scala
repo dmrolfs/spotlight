@@ -19,6 +19,7 @@ import peds.commons.identifier._
 import peds.commons.util._
 import demesne._
 import demesne.module.{LocalAggregate, SimpleAggregateModule}
+import demesne.repository.CommonLocalRepository
 import spotlight.analysis.outlier.DetectUsing
 import spotlight.analysis.outlier.algorithm.AlgorithmShardCatalogModule.AlgoTID
 import spotlight.analysis.outlier.algorithm.{AlgorithmProtocol => AP}
@@ -165,9 +166,8 @@ object AlgorithmShardCatalog {
 }
 
 
-object AlgorithmShardCatalogModule extends Instrumented with LazyLogging {
-  type ID = AlgorithmShardCatalog#ID
-  type TID = AlgorithmShardCatalog#TID
+object AlgorithmShardCatalogModule extends AggregateRootModule with Instrumented { module =>
+  override type ID = AlgorithmShardCatalog#ID
   type AlgoTID = AlgorithmModule.TID
 
 
@@ -179,20 +179,31 @@ object AlgorithmShardCatalogModule extends Instrumented with LazyLogging {
   override lazy val metricBaseName: MetricName = MetricName( getClass )
 
   implicit val identifying: Identifying[AlgorithmShardCatalog] = AlgorithmShardCatalog.identifying
+  override def nextId: TryV[TID] = identifying.nextIdAs[TID]
 
 
-  val module: SimpleAggregateModule[AlgorithmShardCatalog] = {
-    val b = SimpleAggregateModule.builderFor[AlgorithmShardCatalog].make
-    import b.P.{ Tag => BTag, Props => BProps, _ }
+//  val module: SimpleAggregateModule[AlgorithmShardCatalog] = {
+//    val b = SimpleAggregateModule.builderFor[AlgorithmShardCatalog].make
+//    import b.P.{ Tag => BTag, Props => BProps, _ }
+//
+//    b
+//    .builder
+//    .set( BTag, identifying.idTag )
+//    .set( Environment, LocalAggregate )
+//    .set( BProps, AggregateRoot.ShardCatalogActor.props(_, _) )
+//    .build()
+//  }
 
-    b
-    .builder
-    .set( BTag, identifying.idTag )
-    .set( Environment, LocalAggregate )
-    .set( BProps, AggregateRoot.ShardCatalogActor.props(_, _) )
-    .build()
+
+  override val rootType: AggregateRootType = AlgorithmShardCatalogRootType
+  object AlgorithmShardCatalogRootType extends AggregateRootType {
+    override val name: String = module.identifying.idTag.name
+    override val identifying: Identifying[_] = module.identifying
+    override val snapshotPeriod: Option[FiniteDuration] = None
+    override def repositoryProps( implicit model: DomainModel ): Props = {
+      CommonLocalRepository.props( model, this, AggregateRoot.ShardCatalogActor.props( _: DomainModel, _: AggregateRootType ) )
+    }
   }
-
 
   object AggregateRoot {
     object ShardCatalogActor {

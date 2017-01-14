@@ -233,7 +233,7 @@ object DetectionAlgorithmRouter extends LazyLogging {
     def referenceFor( message: Any )( implicit context: ActorContext ): ActorRef
   }
 
-  case class DirectProxy(reference: ActorRef ) extends AlgorithmProxy {
+  case class DirectProxy( reference: ActorRef ) extends AlgorithmProxy {
     override def referenceFor( message: Any )( implicit context: ActorContext ): ActorRef = reference
   }
 
@@ -257,7 +257,7 @@ object DetectionAlgorithmRouter extends LazyLogging {
   ) extends AlgorithmProxy {
     val catalogId: AlgorithmShardCatalogModule.TID = AlgorithmShardCatalogModule.idFor( plan, algorithmRootType.name )
     val catalogRef: ActorRef = {
-      val ref = model( AlgorithmShardCatalogModule.module.rootType, catalogId )
+      val ref = model( AlgorithmShardCatalogModule.rootType, catalogId )
       ref !+ AlgorithmShardProtocol.Add( catalogId, plan, algorithmRootType )
       ref
     }

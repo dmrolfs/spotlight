@@ -120,7 +120,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
 
     def rootTypes: Set[AggregateRootType] = Set(
       AnalysisPlanModule.module.rootType,
-      AlgorithmShardCatalogModule.module.rootType,
+      AlgorithmShardCatalogModule.rootType,
       SimpleMovingAverageAlgorithm.rootType
     )
 
