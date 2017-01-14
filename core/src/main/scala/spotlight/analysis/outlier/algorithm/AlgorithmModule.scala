@@ -7,11 +7,15 @@ import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
 import scala.util.Random
 import scala.reflect._
-import akka.actor.{ActorPath, ActorRef, Props}
+import akka.actor._
+import akka.actor.Actor.Receive
 import akka.agent.Agent
 import akka.cluster.sharding.ShardRegion
 import akka.event.LoggingReceive
-import akka.persistence.{DeleteMessagesFailure, DeleteMessagesSuccess, SaveSnapshotFailure, SaveSnapshotSuccess}
+import akka.persistence._
+import bloomfilter.mutable.BloomFilter
+import bloomfilter.CanGenerateHashFrom
+import bloomfilter.CanGenerateHashFrom.CanGenerateHashFromString
 
 import scalaz._
 import Scalaz._
@@ -24,16 +28,18 @@ import org.apache.commons.math3.ml.clustering.DoublePoint
 import com.codahale.metrics.{Metric, MetricFilter}
 import nl.grons.metrics.scala.{Meter, MetricName, Timer}
 import squants.information.{Bytes, Information}
+import peds.akka.ActorStack
 import peds.akka.envelope._
 import peds.akka.metrics.{Instrumented, InstrumentedActor}
 import peds.akka.publish.{EventPublisher, StackableStreamPublisher}
 import peds.archetype.domain.model.core.{Entity, EntityIdentifying}
 import peds.commons.{KOp, TryV}
 import peds.commons.identifier.{Identifying, ShortUUID, TaggedID}
+import peds.commons.util._
 import demesne._
-import demesne.repository.{AggregateRootRepository, EnvelopingAggregateRootRepository}
+import demesne.PassivationSpecification.StopAggregateRoot
+import demesne.repository.{AggregateRootRepository, CommonLocalRepository, EnvelopingAggregateRootRepository}
 import demesne.repository.AggregateRootRepository.{ClusteredAggregateContext, LocalAggregateContext}
-import peds.commons.collection.BloomFilter
 import spotlight.analysis.outlier._
 import spotlight.model.outlier.{NoOutliers, OutlierPlan, Outliers}
 import spotlight.model.timeseries._
@@ -42,8 +48,11 @@ import spotlight.model.timeseries._
 object AlgorithmProtocol extends AggregateProtocol[AlgorithmModule.ID] {
   import AlgorithmModule.AnalysisState
 
-  case class EstimateSize( override val targetId: EstimateSize#TID ) extends Message
-  case class EstimatedSize( val sourceId: AlgorithmModule.TID, nrShapes: Int, size: Information ) extends ProtocolMessage
+  case class EstimateSize( override val targetId: EstimateSize#TID ) extends Message with NotInfluenceReceiveTimeout
+  case class EstimatedSize( val sourceId: AlgorithmModule.TID, nrShapes: Int, size: Information ) extends ProtocolMessage {
+    def averageSizePerShape: Information = size / nrShapes
+  }
+
   object EstimatedSize {
     implicit val ordering = new scala.math.Ordering[EstimatedSize] {
       override def compare( lhs: EstimatedSize, rhs: EstimatedSize ): Int = {
@@ -54,7 +63,11 @@ object AlgorithmProtocol extends AggregateProtocol[AlgorithmModule.ID] {
     }
   }
 
-  case class GetTopicShapeSnapshot( override val targetId: GetTopicShapeSnapshot#TID, topic: Topic ) extends Command
+  case class GetTopicShapeSnapshot(
+    override val targetId: GetTopicShapeSnapshot#TID,
+    topic: Topic
+  ) extends Command with NotInfluenceReceiveTimeout
+
   case class TopicShapeSnapshot(
     override val sourceId: TopicShapeSnapshot#TID,
     algorithm: Symbol,
@@ -62,7 +75,7 @@ object AlgorithmProtocol extends AggregateProtocol[AlgorithmModule.ID] {
     snapshot: Option[AlgorithmModule#Shape]
   ) extends Event
 
-  case class GetStateSnapshot( override val targetId: AlgorithmModule.TID ) extends Command
+  case class GetStateSnapshot( override val targetId: AlgorithmModule.TID ) extends Command with NotInfluenceReceiveTimeout
   case class StateSnapshot(override val sourceId: StateSnapshot#TID, snapshot: AnalysisState) extends Event
 
   case class Advanced(
@@ -212,18 +225,38 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
 
 
   object ShardMonitor {
+    implicit val canGenerateShortUUIDHash = new CanGenerateHashFrom[ShortUUID] {
+      override def generateHash( from: ShortUUID ): Long = CanGenerateHashFromString generateHash from.toString
+    }
+
     val ShardsMetricName = "shards"
-    val shards: Agent[BloomFilter[AlgorithmModule.ID]] = {
-      Agent( BloomFilter[AlgorithmModule.ID](maxFalsePosProbability = 0.01, size = 10000000) )( ExecutionContext.global )
+    val shards: Agent[(Long, BloomFilter[AlgorithmModule.ID])] = {
+//      Agent( BloomFilter[AlgorithmModule.ID](maxFalsePosProbability = 0.01, size = 10000000) )( ExecutionContext.global )
+      Agent(
+        (
+          0L,
+          BloomFilter[AlgorithmModule.ID]( numberOfItems = 10000000, falsePositiveRate = 0.1 )
+        )
+      )(
+        ExecutionContext.global
+      )
     }
 
     def :+( id: AlgorithmModule.ID ): Unit = {
-      shards send { ss =>
-        if ( ss.has_?(id) ) ss
+      shards send { css =>
+        val ( c, ss ) = css
+        if ( ss mightContain id ) (c, ss)
         else {
           logger.info( "created new {} algorithm shard: {}", rootType.name, id )
-          ss + id
+          ss add id
+          ( c + 1L, ss )
         }
+
+//        if ( ss.has_?(id) ) ss
+//        else {
+//          logger.info( "created new {} algorithm shard: {}", rootType.name, id )
+//          ss + id
+//        }
       }
     }
   }
@@ -235,7 +268,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
 
   def initializeMetrics(): Unit = {
     stripLingeringMetrics()
-    metrics.gauge( ShardMonitor.ShardsMetricName ) { ShardMonitor.shards.get().size }
+    metrics.gauge( ShardMonitor.ShardsMetricName ) { ShardMonitor.shards.get()._1 }
   }
 
   def stripLingeringMetrics(): Unit = {
@@ -248,6 +281,33 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
     )
   }
 
+
+  /**
+    * Used to answer EstimateSize requests. If the algorithm module overrides estimatedAverageShapeSize to provide a reasonable
+    * shape size factor, this function will quickly multiply the factor by the number of shapes managed by the actor.
+    * Otherwise, this function relies on serializing current state, which is becomes very expensive and possibly untenable as
+    * topics increase.
+    *
+    * It is recommended that algorithms override the estimatedAverageShapeSize to support the more efficient calculations, and
+    * the EstimatedSize message reports on the average shape size to help determine this factor.
+    * @return Information byte size
+    */
+  def estimateSize( state: State )( implicit system: ActorSystem ): Information = {
+    estimatedAverageShapeSize
+    .map { _ * state.shapes.size }
+    .getOrElse {
+      import akka.serialization.{ SerializationExtension, Serializer }
+      val serializer: Serializer = SerializationExtension( system ) findSerializerFor state
+      val bytes = akka.util.ByteString( serializer toBinary state )
+      Bytes( bytes.size )
+    }
+  }
+
+  /**
+    * Optimization available for algorithms to more efficiently respond to size estimate requests for algorithm sharding.
+    * @return blended average size for the algorithm shape
+    */
+  def estimatedAverageShapeSize: Option[Information] = None
 
   /**
     * Shape represents the culminated value of applying the algorithm over the time series data for this ID.
@@ -392,7 +452,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
 
         Some(
           new SnapshotSpecification {
-            override val snapshotInterval: FiniteDuration = 1.minute
+            override val snapshotInterval: FiniteDuration = 30.seconds
             override val snapshotInitialDelay: FiniteDuration = {
               val delay = snapshotInterval * AlgorithmModule.snapshotFactorizer.nextDouble()
               FiniteDuration( delay.toMillis, MILLISECONDS )
@@ -402,11 +462,12 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
       }
     }
 
-    override val passivateTimeout: Duration = Duration( 5, MINUTES ) // Duration( 1, MINUTES ) // Duration.Inf //todo: resolve replaying events with data tsunami
+    override val passivateTimeout: Duration = Duration( 1, MINUTES )
 
     override lazy val name: String = module.shardName
     override lazy val identifying: Identifying[_] = module.identifying
-    override def repositoryProps( implicit model: DomainModel ): Props = Repository localProps model //todo change to clustered with multi-jvm testing of cluster
+//    override def repositoryProps( implicit model: DomainModel ): Props = Repository localProps model //todo change to clustered with multi-jvm testing of cluster
+    override def repositoryProps( implicit model: DomainModel ): Props = CommonLocalRepository.props( model, this, AlgorithmActor.props( _: DomainModel, _: AggregateRootType ) )
     override def maximumNrClusterNodes: Int = module.maximumNrClusterNodes
     override def aggregateIdFor: ShardRegion.ExtractEntityId = super.aggregateIdFor orElse {
       case AdvancedType( a ) => ( a.sourceId.id.toString, a )
@@ -466,18 +527,31 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
 
   class AlgorithmActor( override val model: DomainModel, override val rootType: AggregateRootType )
   extends AggregateRoot[State, ID]
+  with Passivating[ID]
+  with EnvelopingActor
   with AggregateRoot.Provider
   with InstrumentedActor {
     publisher: EventPublisher =>
 
+    setInactivityTimeout( inactivity = rootType.passivation.inactivityTimeout, message = StopAggregateRoot(aggregateId) )
+
     override val journalPluginId: String = "akka.persistence.algorithm.journal.plugin"
     override val snapshotPluginId: String = "akka.persistence.algorithm.snapshot.plugin"
 
-    log.info( "{} AlgorithmActor instantiated: [{}]", algorithm.label, aggregateId )
+    log.warning(
+      "#TEST #INFO: {} AlgorithmActor instantiated: [{}] with inactivity timeout:[{}]",
+      algorithm.label, aggregateId, rootType.passivation.inactivityTimeout
+    )
 
     override def preStart(): Unit = {
       super.preStart()
       module.ShardMonitor :+ aggregateId
+    }
+
+    override def postStop(): Unit = {
+      clearInactivityTimeout()
+      log.warning( "#TEST AlgorithmModule[{}]: actor stopped with {} shapes", self.path.name, state.shapes.size )
+      super.postStop()
     }
 
     override def parseId( idstr: String ): TID = {
@@ -488,23 +562,21 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
     override lazy val metricBaseName: MetricName = module.metricBaseName
     lazy val executionTimer: Timer = metrics.timer( "execution" )
 
+    var _lastMeaningfulContact: Long = System.nanoTime()
+    def meaningfulTouch(): Long = { _lastMeaningfulContact = System.nanoTime(); _lastMeaningfulContact }
+    def checkNoisyAffect( message: Any ): Boolean = {
+      message match {
+        case m: NotInfluenceReceiveTimeout => false
+        case m => {
+          val check = rootType.passivation.inactivityTimeout.toNanos < ( System.nanoTime() - _lastMeaningfulContact )
+          if ( check ) log.error( "#TEST AlgorithmModule[{}] after-timeout:[{}] received noisy message:[{}]", self.path.name, check, m )
+          check
+        }
+      }
+    }
+
     override var state: State = State( aggregateId )
     override lazy val evState: ClassTag[State] = ClassTag( classOf[State] )
-
-    /**
-      * Used to answer EstimateSize requests. The default implementation relies on serializing current
-      * state, which is an expensive means to answer. Algorithms are free to override to provide more efficient calculations,
-      * such as multiplying the number of represented topics by the average shape size.
-      * @return Information byte size
-      */
-    def estimateStateSize(): Information = {
-      import akka.serialization.{ SerializationExtension, Serializer }
-      val serializer: Serializer = SerializationExtension( context.system ) findSerializerFor state
-      val bytes = akka.util.ByteString( serializer toBinary state )
-      val size = Bytes( bytes.size )
-//      log.warning( "#TEST: #Estimate: [{}] estimated size: [{}]", self.path.name, size )
-      size
-    }
 
     var algorithmContext: Context = _
 
@@ -520,11 +592,13 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
 
     val active: Receive = {
       case msg @ DetectUsing( _, algo, payload: DetectOutliersInSeries, _, _ ) => {
+        reportFirstMessage( msg )
+        checkNoisyAffect( msg )
         val aggregator = sender()
 
         val start = System.nanoTime()
         @inline def stopTimer( start: Long ): Unit = {
-          executionTimer.update( System.nanoTime() - start, scala.concurrent.duration.NANOSECONDS )
+          executionTimer.update( /*System.nanoTime()*/ meaningfulTouch() - start, scala.concurrent.duration.NANOSECONDS )
         }
 
         ( makeAlgorithmContext >=> findOutliers >=> toOutliers ).run( msg ) match {
@@ -575,90 +649,44 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
         }
       }
 
-      case AdvancedType( adv ) => persist( adv ) { accept }
+      case AdvancedType( adv ) => reportFirstMessage( adv ); checkNoisyAffect(adv); touch(); persist( adv ) { accept }
 //      case AdvancedType( adv ) => accept( adv )
     }
-
-    val toOutliers = kleisli[TryV, (Outliers, Context), Outliers] { case (o, _) => o.right }
 
     import spotlight.analysis.outlier.algorithm.{ AlgorithmProtocol => AP }
 
     val stateReceiver: Receive = {
       case m: AP.EstimateSize => {
-        val resp = AP.EstimatedSize( sourceId = aggregateId, nrShapes = state.shapes.size, size = estimateStateSize() )
-//        log.warning( "#TEST: #Estimate: [{}] responding to [{}] estimate request with: [{}]", self.path, sender().path.name, resp )
-        sender() !+ resp
+        reportFirstMessage( m )
+        checkNoisyAffect(m)
+        sender() !+ AP.EstimatedSize(
+          sourceId = aggregateId,
+          nrShapes = state.shapes.size,
+          size = estimateSize( state )( context.system )
+        )
       }
 
-      case AP.GetTopicShapeSnapshot( _, topic ) => {
+      case m @ AP.GetTopicShapeSnapshot( _, topic ) => {
+        reportFirstMessage( m )
+        checkNoisyAffect(m)
         sender() ! AP.TopicShapeSnapshot( aggregateId, algorithm.label, topic, state.shapes.get(topic) )
       }
 
-      case _: AP.GetStateSnapshot => sender() ! AP.StateSnapshot( aggregateId, state )
-    }
-
-
-    var _snapshotStarted: Long = 0L
-    def startSnapshotTimer(): Unit = { _snapshotStarted = System.nanoTime() }
-    def stopSnapshotTimer( event: Any ): Unit = {
-      if ( 0 < _snapshotStarted ) {
-        AlgorithmModule.snapshotTimer.update( System.nanoTime() - _snapshotStarted, NANOSECONDS )
-        _snapshotStarted = 0L
-      }
-
-      event match {
-        case _: SaveSnapshotSuccess => AlgorithmModule.snapshotSuccesses.mark()
-        case _: SaveSnapshotFailure => AlgorithmModule.snapshotFailures.mark()
-        case _ => { }
-      }
-    }
-
-    var _journalSweepStarted: Long = 0L
-    def startSweepTimer(): Unit = { _journalSweepStarted = System.nanoTime() }
-    def stopSweepTimer( event: Any ): Unit = {
-      if ( 0 < _journalSweepStarted ) {
-        AlgorithmModule.journalSweepTimer.update( System.nanoTime() - _journalSweepStarted, NANOSECONDS )
-        _journalSweepStarted = 0L
-      }
-
-      event match {
-        case _: DeleteMessagesSuccess => AlgorithmModule.journalSweepSuccesses.mark()
-        case _: DeleteMessagesFailure => AlgorithmModule.journalSweepFailures.mark()
-        case _ => { }
-      }
-    }
-
-    var _passivationStarted: Long = 0L
-    def startPassivationTimer(): Unit = { _passivationStarted = System.nanoTime() }
-    def stopPassivationTimer( event: Any ): Unit = {
-      if ( 0 < _passivationStarted ) {
-        AlgorithmModule.passivationTimer.update( System.nanoTime() - _passivationStarted, NANOSECONDS )
-        _passivationStarted = 0L
-      }
-
-      event match {
-        case e: demesne.PassivationSpecification.StopAggregateRoot[_] => {
-          log.info( "[{}] received repeated passivation message: [{}]", self.path.name, e )
-        }
-
-        case _ => { }
-      }
-    }
-
-
-    override def saveSnapshot( snapshot: Any ): Unit = {
-      startSnapshotTimer()
-      super.saveSnapshot( snapshot )
+      case m: AP.GetStateSnapshot => checkNoisyAffect(m); sender() ! AP.StateSnapshot( aggregateId, state )
     }
 
     val nonfunctional: Receive = {
-      case e: demesne.PassivationSpecification.StopAggregateRoot[_] => {
+      case StopAggregateRootType( m ) => {
+        reportFirstMessage( m )
+        log.warning( "#TEST #AlgorithmModule[{}] started passivating...", self.path.name )
         startPassivationTimer()
         saveSnapshot( state )
         context become LoggingReceive { around( passivating ) }
       }
 
       case e @ SaveSnapshotSuccess( meta ) => {
+        reportFirstMessage( e )
+        checkNoisyAffect(e)
         stopSnapshotTimer( e )
 
 //        log.debug(
@@ -671,16 +699,22 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
       }
 
       case e @ SaveSnapshotFailure( meta, ex ) => {
+        reportFirstMessage( e )
+        checkNoisyAffect(e)
         stopSnapshotTimer( e )
         log.warning( "[{}] failed to save snapshot. meta:[{}] cause:[{}]", self.path.name, meta, ex )
       }
 
       case e: DeleteMessagesSuccess => {
+        reportFirstMessage( e )
+        checkNoisyAffect(e)
         stopSweepTimer( e )
 //        log.info( "[{}] successfully cleared journal: [{}]", self.path.name, e )
       }
 
       case e: DeleteMessagesFailure => {
+        reportFirstMessage( e )
+        checkNoisyAffect(e)
         stopSweepTimer( e )
 //        log.info( "[{}] FAILED to clear journal will attempt to clear on subsequent snapshot: [{}]", self.path.name, e )
       }
@@ -689,16 +723,17 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
     val passivating: Receive = {
       case e: demesne.PassivationSpecification.StopAggregateRoot[_] => {
         stopPassivationTimer( e )
+        log.warning( "AlgorithmModule[{}] immediate passivation upon repeat stop command", self.path.name )
         context stop self
       }
 
       case e @ SaveSnapshotSuccess( meta ) => {
         stopSnapshotTimer( e )
 
-//        log.debug(
-//          "[{} - {}]: successful passivation snapshot, deleting journal messages up to sequenceNr: [{}]",
-//          self.path.name, rootType.snapshotPeriod.map{ _.toCoarsest }, meta.sequenceNr
-//        )
+        log.debug(
+          "AlgorithmModule[{} - {}]: successful passivation snapshot, deleting journal messages up to sequenceNr: [{}]",
+          self.path.name, rootType.snapshotPeriod.map{ _.toCoarsest }, meta.sequenceNr
+        )
 
         startSweepTimer()
         deleteMessages( meta.sequenceNr )
@@ -706,20 +741,20 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
 
       case e @ SaveSnapshotFailure( meta, ex ) => {
         stopSnapshotTimer( e )
-        log.warning( "[{}] failed to save passivation snapshot. meta:[{}] cause:[{}]", meta, ex )
+        log.warning( "[{}] failed to save passivation snapshot. meta:[{}] cause:[{}]", self.path.name, meta, ex )
       }
 
 
       case e: DeleteMessagesSuccess => {
         stopSweepTimer( e )
-//        log.debug( "[{}] on passivation successfully cleared journal: [{}]", self.path.name, e )
+        log.warning( "#TEST #DEBUG[{}] on passivation successfully cleared journal: [{}]", self.path.name, e )
         stopPassivationTimer( e )
         context stop self
       }
 
       case e: DeleteMessagesFailure => {
         stopSweepTimer( e )
-        log.info(
+        log.warning(
           "[{}] on passivation FAILED to clear journal will attempt to clear on subsequent snapshot: [{}]",
           self.path.name,
           e
@@ -747,6 +782,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
       }
     }
 
+
     // -- algorithm functional elements --
     val makeAlgorithmContext: KOp[DetectUsing, Context] = kleisli[TryV, DetectUsing, Context] { message =>
       //todo: with algorithm global config support. merge with state config (probably persist and accept ConfigChanged evt)
@@ -764,6 +800,9 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
         o <- makeOutliers( events )
       } yield ( o, ctx )
     }
+
+    val toOutliers = kleisli[TryV, (Outliers, Context), Outliers] { case (o, _) => o.right }
+
 
     case class Accumulation( topic: Topic, shape: Shape, advances: Seq[Advanced] = Seq.empty[Advanced] )
 
@@ -868,6 +907,147 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
         .disjunction
         .leftMap { _.head }
       }
+    }
+
+
+    // -- nonfunctional operations --
+    var _snapshotStarted: Long = 0L
+    def startSnapshotTimer(): Unit = { _snapshotStarted = System.nanoTime() }
+    def stopSnapshotTimer( event: Any ): Unit = {
+      if ( 0 < _snapshotStarted ) {
+        AlgorithmModule.snapshotTimer.update( System.nanoTime() - _snapshotStarted, NANOSECONDS )
+        _snapshotStarted = 0L
+      }
+
+      event match {
+        case _: SaveSnapshotSuccess => AlgorithmModule.snapshotSuccesses.mark()
+        case _: SaveSnapshotFailure => AlgorithmModule.snapshotFailures.mark()
+        case _ => { }
+      }
+    }
+
+    var _journalSweepStarted: Long = 0L
+    def startSweepTimer(): Unit = { _journalSweepStarted = System.nanoTime() }
+    def stopSweepTimer( event: Any ): Unit = {
+      if ( 0 < _journalSweepStarted ) {
+        AlgorithmModule.journalSweepTimer.update( System.nanoTime() - _journalSweepStarted, NANOSECONDS )
+        _journalSweepStarted = 0L
+      }
+
+      event match {
+        case _: DeleteMessagesSuccess => AlgorithmModule.journalSweepSuccesses.mark()
+        case _: DeleteMessagesFailure => AlgorithmModule.journalSweepFailures.mark()
+        case _ => { }
+      }
+    }
+
+    var _passivationStarted: Long = 0L
+    def startPassivationTimer(): Unit = { _passivationStarted = System.nanoTime() }
+    def stopPassivationTimer( event: Any ): Unit = {
+      if ( 0 < _passivationStarted ) {
+        AlgorithmModule.passivationTimer.update( System.nanoTime() - _passivationStarted, NANOSECONDS )
+        _passivationStarted = 0L
+      }
+
+      event match {
+        case e: demesne.PassivationSpecification.StopAggregateRoot[_] => {
+          log.info( "[{}] received repeated passivation message: [{}]", self.path.name, e )
+        }
+
+        case _ => { }
+      }
+    }
+
+
+    override def saveSnapshot( snapshot: Any ): Unit = {
+      startSnapshotTimer()
+      super.saveSnapshot( snapshot )
+    }
+
+
+    override protected def onPersistFailure( cause: Throwable, event: Any, seqNr: Long ): Unit = {
+      log.error( "AlgorithmModule[{}] onPersistFailure cause:[{}] event:[{}] seqNr:[{}]", self.path.name, cause, event, seqNr )
+      super.onPersistFailure( cause, event, seqNr )
+    }
+
+    var _reportOnFirstMessage: Boolean = true
+    def reportFirstMessage( m: Any ): Unit = {
+      if ( _reportOnFirstMessage && state.shapes.nonEmpty ) {
+        log.warning( "#TEST AlgorithmModule[{}]: shapes:[{}] first message: [{}]", self.path.name, state.shapes.size, m.getClass.safeSimpleName )
+      }
+      _reportOnFirstMessage = false
+    }
+
+    override def receiveRecover: Receive = {
+      case RecoveryCompleted => {
+        _reportOnFirstMessage = true
+        log.debug( "#TEST AlgorithmModule[{}]: recovery completed", self.path.name )
+      }
+    }
+
+    override protected def onRecoveryFailure( cause: Throwable, event: Option[Any] ): Unit = {
+      log.error( "AlgorithmModule[{}] onRecoveryFailure cause:[{}] event:[{}]", self.path.name, cause, event )
+      super.onRecoveryFailure( cause, event )
+    }
+  }
+}
+
+
+trait Passivating[I] extends ActorStack { outer: Actor with ActorLogging =>
+  val StopAggregateRootType: ClassTag[StopAggregateRoot[I]] = classTag[StopAggregateRoot[I]]
+  private var _inactivity: Option[(Cancellable, FiniteDuration, Any)] = None
+
+  def clearInactivityTimeout(): Option[(FiniteDuration, Any)] = {
+    val remainder = _inactivity map { case (c, d, m) => c.cancel(); (d, m) }
+    _inactivity = None
+    remainder
+  }
+
+  def setInactivityTimeout( inactivity: Duration, message: Any = ReceiveTimeout ): Option[Cancellable] = {
+    clearInactivityTimeout()
+    if ( !inactivity.isFinite() ) None
+    else {
+      val f = FiniteDuration( inactivity.toNanos, NANOSECONDS )
+      val c = context.system.scheduler.scheduleOnce( f, self, message )( context.dispatcher, self )
+      _inactivity = Some( (c, f, message) )
+      Some( c )
+    }
+  }
+
+  def touch(): Option[Cancellable] = clearInactivityTimeout() flatMap { case (d, m) => setInactivityTimeout( d, m ) }
+
+  override def around( r: Receive ): Receive = {
+    case m: NotInfluenceReceiveTimeout => {
+//      log.warning( "#TEST #PASSIVATING: [{}] not influencing passivation timer: [{}]", self.path.name, m )
+      super.around( r )( m )
+    }
+    case StopAggregateRootType( m ) => {
+//      log.warning( "#TEST #PASSIVATING: [{}] not influencing passivation timer: [{}]", self.path.name, m )
+      super.around( r )( m )
+    }
+    case m: SaveSnapshot => {
+//      log.warning( "#TEST #PASSIVATING: [{}] not influencing passivation timer: [{}]", self.path.name, m )
+      super.around( r )( m )
+    }
+    case m: SaveSnapshotSuccess => {
+//      log.warning( "#TEST #PASSIVATING: [{}] not influencing passivation timer: [{}]", self.path.name, m )
+      super.around( r )( m )
+    }
+    case m: SaveSnapshotFailure => {
+//      log.warning( "#TEST #PASSIVATING: [{}] not influencing passivation timer: [{}]", self.path.name, m )
+      super.around( r )( m )
+    }
+    case m: DeleteMessagesSuccess => {
+//      log.warning( "#TEST #PASSIVATING: [{}] not influencing passivation timer: [{}]", self.path.name, m )
+      super.around( r )( m )
+    }
+    case m: DeleteMessagesFailure => {
+//      log.warning( "#TEST #PASSIVATING: [{}] not influencing passivation timer: [{}]", self.path.name, m )
+      super.around( r )( m )
+    }
+    case m => {
+      touch()
+      super.around( r )( m )
     }
   }
 }

@@ -22,7 +22,7 @@ data:
 
 leveldb:
   extends:
-    file: docker-compose.yml
+    file: docker-compose-graphite.yml
     service: data
   volumes:
     - /Users/rolfsd/spotlight/data/journal:/var/lib/spotlight/data/leveldb/journal

@@ -1,5 +1,7 @@
 package spotlight.analysis.outlier.algorithm.statistical
 
+import akka.actor.ActorSystem
+
 import scala.reflect.ClassTag
 import com.typesafe.config.Config
 import org.apache.commons.math3.ml.clustering.DoublePoint
@@ -9,6 +11,7 @@ import spotlight.analysis.outlier.algorithm.AlgorithmProtocol.Advanced
 import spotlight.analysis.outlier.algorithm.AlgorithmModule
 import spotlight.analysis.outlier.algorithm.AlgorithmModule.ShapeCompanion
 import spotlight.model.timeseries._
+import squants.information.{Bytes, Information}
 
 
 /**
@@ -52,4 +55,10 @@ object SimpleMovingAverageAlgorithm extends AlgorithmModule with AlgorithmModule
   override type Context = CommonContext
 
   override def makeContext( message: DetectUsing, state: Option[State] ): Context = new CommonContext( message )
+
+  /**
+    * Optimization available for algorithms to more efficiently respond to size estimate requests for algorithm sharding.
+    * @return blended average size for the algorithm shape
+    */
+  override def estimatedAverageShapeSize: Option[Information] = Some( Bytes(100) )
 }

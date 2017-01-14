@@ -1,6 +1,7 @@
 package spotlight.analysis.outlier.algorithm
 
 import scala.reflect._
+import scala.concurrent.duration._
 import akka.actor.{ActorRef, Cancellable, Props}
 import akka.event.LoggingReceive
 import akka.persistence.RecoveryCompleted
@@ -258,9 +259,11 @@ object AlgorithmShardCatalogModule extends Instrumented with LazyLogging {
         val TotalShardSizeGaugeName = "total-size-mb"
         val AssignmentsName = "assignments"
         val RoutingsName = "routings"
+        val HitRateGaugeName = "hit-percentage"
 
         val assignmentsMeter: Meter = metrics.meter( AssignmentsName )
         val routingMeter: Meter = metrics.meter( RoutingsName )
+
 
         initializeMetrics()
 
@@ -277,6 +280,8 @@ object AlgorithmShardCatalogModule extends Instrumented with LazyLogging {
           metrics.gauge( TotalShardSizeGaugeName ) {
             availability.shardSizes.values.foldLeft( Bytes(0) ){ _ + _.size }.toKilobytes
           }
+
+          metrics.gauge( HitRateGaugeName ) { 100.0 * ( 1.0 - (routingMeter.count.toDouble / assignmentsMeter.count.toDouble) ) }
         }
 
         def stripLingeringMetrics(): Unit = {
@@ -290,7 +295,8 @@ object AlgorithmShardCatalogModule extends Instrumented with LazyLogging {
                     (
                       name.contains( CountName ) ||
                       name.contains( ActiveShardSizeGaugeName ) ||
-                      name.contains( TotalShardSizeGaugeName )
+                      name.contains( TotalShardSizeGaugeName ) ||
+                      name.contains( HitRateGaugeName )
                     )
                 }
 
@@ -343,6 +349,7 @@ object AlgorithmShardCatalogModule extends Instrumented with LazyLogging {
 
 
       case object UpdateAvailability extends P.ProtocolMessage
+      val AvailabilityCheckPeriod: FiniteDuration = 10.seconds
 
       override def receiveRecover: Receive = {
         case RecoveryCompleted => {
@@ -354,8 +361,8 @@ object AlgorithmShardCatalogModule extends Instrumented with LazyLogging {
 
           updateAvailability = Option(
             context.system.scheduler.schedule(
-              initialDelay = 1.minute,
-              interval = 1.minute,
+              initialDelay = AvailabilityCheckPeriod,
+              interval = AvailabilityCheckPeriod,
               receiver = self,
               message = UpdateAvailability
             )(
@@ -365,7 +372,7 @@ object AlgorithmShardCatalogModule extends Instrumented with LazyLogging {
         }
       }
 
-      override def receiveCommand: Receive = active( Availability(control = AlgorithmShardCatalog.Control.BySize( Megabytes(2) ) ) )
+      override def receiveCommand: Receive = active( Availability(control = AlgorithmShardCatalog.Control.BySize( Kilobytes(500) ) ) )
 
       def active( newAvailability: Availability ): Receive = {
         availability = newAvailability
@@ -411,20 +418,12 @@ object AlgorithmShardCatalogModule extends Instrumented with LazyLogging {
         case m: DetectUsing if assignRouting isDefinedAt m => assignRouting( m )
 
         case estimate: AP.EstimatedSize => {
-          context become active( availability withEstimate estimate )
+          log.info(
+            "AlgorithmShardCatalog[{}] shard:[{}] shapes:[{}] estimated average shape size:[{}]",
+            self.path.name, estimate.sourceId, estimate.nrShapes, estimate.averageSizePerShape
+          )
 
-          { // unecessary check?
-            val topicsForShard = state.shards.count{ case (t, aid) => aid == estimate.sourceId }
-            if ( estimate.nrShapes != topicsForShard ) {
-              log.warning(
-                           "ShardCatalog[{}] mismatching number of topics between catalog:[{}] and algorithm-shard[{}]:[{}]",
-                           self.path.name,
-                           state.shards.size,
-                           estimate.sourceId,
-                           estimate.nrShapes
-                         )
-            }
-          }
+          context become active( availability withEstimate estimate )
         }
       }
 

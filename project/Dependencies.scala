@@ -109,6 +109,7 @@ object Dependencies {
   }
 
   object facility {
+    val bloomFilter = "com.github.alexandrnikitin" %% "bloom-filter" % "0.7.0" withSources() withJavadoc()
     val json4sJackson = "org.json4s" %% "json4s-jackson" % "3.5.0"
     val uuid = "com.eaio.uuid" % "uuid" % "3.4"
     val config = "com.typesafe" % "config" % "1.3.1"
@@ -171,6 +172,7 @@ object Dependencies {
       akka.kryo,
       akka.kryoSerializers,
       log.logback.classic,
+      facility.bloomFilter,
       facility.uuid,
       facility.config,
       facility.shapeless,

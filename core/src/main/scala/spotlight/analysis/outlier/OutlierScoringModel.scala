@@ -10,9 +10,9 @@ import akka.stream.scaladsl._
 import akka.stream.stage._
 import com.typesafe.scalalogging.{Logger, StrictLogging}
 import org.slf4j.LoggerFactory
+import bloomfilter.mutable.BloomFilter
 import peds.akka.metrics.Instrumented
 import peds.akka.stream.StreamMonitor
-import peds.commons.collection.BloomFilter
 import spotlight.Settings
 import spotlight.model.outlier._
 import spotlight.model.timeseries.TimeSeriesBase.Merging
@@ -68,7 +68,7 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
 
       val regulator = b.add(
         Flow[TimeSeries]
-        .buffer( 10, OverflowStrategy.backpressure ).watchSourced( 'regulator )
+        .buffer( 10, OverflowStrategy.backpressure ).watchFlow( 'regulator )
         .via( regulateByTopic(10000) )
       )
 
@@ -93,7 +93,8 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
   ): GraphStage[FlowShape[TimeSeries, TimeSeries]] = {
     new GraphStage[FlowShape[TimeSeries, TimeSeries]] {
       val count = new AtomicInteger( 0 )
-      var bloom = BloomFilter[Topic]( maxFalsePosProbability = 0.001, 10000000 )
+//      var bloom = BloomFilter[Topic]( maxFalsePosProbability = 0.1, 10000000 )
+      val bloom = BloomFilter[Topic]( numberOfItems = 10000000, falsePositiveRate = 0.1 )
 
       val in = Inlet[TimeSeries]( "logMetric.in" )
       val out = Outlet[TimeSeries]( "logMetric.out" )
@@ -108,8 +109,10 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
               override def onPush(): Unit = {
                 val e = grab( in )
 
-                if ( !bloom.has_?( e.topic ) ) {
-                  bloom += e.topic
+//                if ( !bloom.has_?( e.topic ) ) {
+                if ( !bloom.mightContain( e.topic ) ) {
+                  bloom add e.topic
+//                  bloom += e.topic
                   if ( !e.topic.name.startsWith( OutlierMetricPrefix ) ) {
                     destination.debug(
                       "[{}] Plan for {}: {}",
