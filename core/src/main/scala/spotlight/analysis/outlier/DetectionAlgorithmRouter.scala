@@ -255,16 +255,18 @@ object DetectionAlgorithmRouter extends LazyLogging {
     algorithmRootType: AggregateRootType,
     model: DomainModel
   ) extends AlgorithmProxy {
-    val catalogId: AlgorithmShardCatalogModule.TID = AlgorithmShardCatalogModule.idFor( plan, algorithmRootType.name )
+    val catalogId: AlgorithmCellShardModule.TID = AlgorithmCellShardModule.idFor( plan, algorithmRootType.name )
     val catalogRef: ActorRef = {
-      val ref = model( AlgorithmShardCatalogModule.rootType, catalogId )
-      ref !+ AlgorithmShardProtocol.Add( catalogId, plan, algorithmRootType )
+//      val ref = model( AlgorithmLookupShardCatalogModule.rootType, catalogId )
+//      ref !+ AlgorithmLookupShardProtocol.Add( catalogId, plan, algorithmRootType )
+      val ref = model( AlgorithmCellShardModule.module.rootType, catalogId )
+      ref !+ AlgorithmCellShardProtocol.Add( catalogId, plan, algorithmRootType, 10000 ) // 5000 good // 2000 good // 1000 good w 10% drops
       ref
     }
 
 
     override def forward( message: Any )( implicit sender: ActorRef, context: ActorContext ): Unit = {
-      referenceFor(message) forwardEnvelope AlgorithmShardProtocol.RouteMessage( catalogId, message )
+      referenceFor(message) forwardEnvelope AlgorithmCellShardProtocol.RouteMessage( catalogId, message )
     }
 
     override def referenceFor( message: Any )( implicit context: ActorContext ): ActorRef = catalogRef

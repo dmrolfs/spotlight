@@ -7,7 +7,6 @@ import akka.event.LoggingReceive
 import akka.persistence.RecoveryCompleted
 
 import scalaz.{-\/, Validation, \/-}
-import com.typesafe.scalalogging.LazyLogging
 import nl.grons.metrics.scala.{Meter, MetricName}
 import squants.information.{Bytes, Information, Kilobytes, Megabytes}
 import peds.akka.envelope._
@@ -18,10 +17,9 @@ import peds.commons.{TryV, Valid}
 import peds.commons.identifier._
 import peds.commons.util._
 import demesne._
-import demesne.module.{LocalAggregate, SimpleAggregateModule}
 import demesne.repository.CommonLocalRepository
 import spotlight.analysis.outlier.DetectUsing
-import spotlight.analysis.outlier.algorithm.AlgorithmShardCatalogModule.AlgoTID
+import spotlight.analysis.outlier.algorithm.AlgorithmLookupShardCatalogModule.AlgoTID
 import spotlight.analysis.outlier.algorithm.{AlgorithmProtocol => AP}
 import spotlight.model.outlier.OutlierPlan
 import spotlight.model.timeseries._
@@ -30,8 +28,8 @@ import spotlight.model.timeseries._
 /**
   * Created by rolfsd on 12/21/16.
   */
-object AlgorithmShardProtocol extends AggregateProtocol[AlgorithmShardCatalog#ID] {
-//  import AlgorithmShardCatalog.Control
+object AlgorithmLookupShardProtocol extends AggregateProtocol[AlgorithmLookupShardCatalog#ID] {
+//  import AlgorithmLookupShardCatalog.Control
 
   case class Add(
     override val targetId: Add#TID,
@@ -44,7 +42,7 @@ object AlgorithmShardProtocol extends AggregateProtocol[AlgorithmShardCatalog#ID
     override val sourceId: Added#TID,
     plan: OutlierPlan.Summary,
     algorithmRootType: AggregateRootType
-//    control: AlgorithmShardCatalog.Control
+//    control: AlgorithmLookupShardCatalog.Control
   ) extends Event
 
   case class RouteMessage( override val targetId: RouteMessage#TID, payload: Any ) extends Message
@@ -60,26 +58,26 @@ object AlgorithmShardProtocol extends AggregateProtocol[AlgorithmShardCatalog#ID
 }
 
 
-case class AlgorithmShardCatalog(
+case class AlgorithmLookupShardCatalog(
   plan: OutlierPlan.Summary,
   algorithmRootType: AggregateRootType,
-  //  control: AlgorithmShardCatalog.Control,
+  //  control: AlgorithmLookupShardCatalog.Control,
   shards: Map[Topic, AlgoTID] = Map.empty[Topic, AlgoTID]
 ) extends Entity with Equals {
-  import AlgorithmShardCatalog.identifying
+  import AlgorithmLookupShardCatalog.identifying
 
   override type ID = identifying.ID
-  override val evID: ClassTag[ID] = ClassTag( classOf[AlgorithmShardCatalog.ID] )
+  override val evID: ClassTag[ID] = ClassTag( classOf[AlgorithmLookupShardCatalog.ID] )
   override val evTID: ClassTag[TID] = classTag[TID]
 
-  override def id: TID = identifying.tag( AlgorithmShardCatalog.ID(plan.id, algorithmRootType.name).asInstanceOf[identifying.ID] )
+  override def id: TID = identifying.tag( AlgorithmLookupShardCatalog.ID( plan.id, algorithmRootType.name ).asInstanceOf[identifying.ID] )
   override def name: String = plan.name
   override def slug: String = plan.slug
 
   def apply( t: Topic ): AlgoTID = shards( t )
   def contains( t: Topic ): Boolean = shards contains t
 
-  def assignShard( t: Topic, shard: AlgoTID ): AlgorithmShardCatalog = {
+  def assignShard( t: Topic, shard: AlgoTID ): AlgorithmLookupShardCatalog = {
     val newShards = shards + ( t -> shard )
     copy( shards = newShards )
   }
@@ -92,13 +90,13 @@ case class AlgorithmShardCatalog(
     }
   }
 
-  override def canEqual( rhs: Any ): Boolean = rhs.isInstanceOf[AlgorithmShardCatalog]
+  override def canEqual( rhs: Any ): Boolean = rhs.isInstanceOf[AlgorithmLookupShardCatalog]
 
   override def hashCode: Int = 41 + id.##
 
   override def equals( rhs: Any ): Boolean = {
     rhs match {
-      case that: AlgorithmShardCatalog => {
+      case that: AlgorithmLookupShardCatalog => {
         if ( this eq that ) true
         else {
           ( that.## == this.## ) &&
@@ -111,10 +109,10 @@ case class AlgorithmShardCatalog(
     }
   }
 
-  override def toString(): String = getClass.safeSimpleName + s"( plan:${plan} )"
+  override def toString(): String = getClass.safeSimpleName + s"( plan:${plan} algorithm:${algorithmRootType.name} )"
 }
 
-object AlgorithmShardCatalog {
+object AlgorithmLookupShardCatalog {
   final case class ID( planId: OutlierPlan#ID, algorithmLabel: String ) {
     override def toString: String = planId + ":" + algorithmLabel
   }
@@ -130,14 +128,14 @@ object AlgorithmShardCatalog {
     }
   }
 
-  implicit val identifying: Identifying[AlgorithmShardCatalog] = {
-    new Identifying[AlgorithmShardCatalog] {
-      override type ID = AlgorithmShardCatalog.ID
+  implicit val identifying: Identifying[AlgorithmLookupShardCatalog] = {
+    new Identifying[AlgorithmLookupShardCatalog] {
+      override type ID = AlgorithmLookupShardCatalog.ID
       override val evID: ClassTag[ID] = classTag[ID]
       override val evTID: ClassTag[TID] = classTag[TID]
 
       override def fromString( idrep: String ): ID = {
-        AlgorithmShardCatalog.ID.fromString( idrep ).disjunction match {
+        AlgorithmLookupShardCatalog.ID.fromString( idrep ).disjunction match {
           case \/-( id ) => id
           case -\/( exs ) => {
             exs foreach { ex => logger.error( s"failed to parse id string [${idrep}] into ${evID}", ex ) }
@@ -146,10 +144,10 @@ object AlgorithmShardCatalog {
         }
       }
 
-      override def nextId: TryV[TID] = -\/( new IllegalStateException("AlgorithmShardCatalog does not support nextId") )
+      override def nextId: TryV[TID] = -\/( new IllegalStateException("AlgorithmLookupShardCatalog does not support nextId") )
 
       override val idTag: Symbol = Symbol( "shard-catalog" )
-      override def idOf( c: AlgorithmShardCatalog ): TID = c.id.asInstanceOf[TID]
+      override def idOf( c: AlgorithmLookupShardCatalog ): TID = c.id.asInstanceOf[TID]
     }
   }
 
@@ -166,33 +164,20 @@ object AlgorithmShardCatalog {
 }
 
 
-object AlgorithmShardCatalogModule extends AggregateRootModule with Instrumented { module =>
-  override type ID = AlgorithmShardCatalog#ID
+object AlgorithmLookupShardCatalogModule extends AggregateRootModule with Instrumented { module =>
+  override type ID = AlgorithmLookupShardCatalog#ID
   type AlgoTID = AlgorithmModule.TID
 
 
   def idFor( plan: OutlierPlan.Summary, algorithmLabel: String ): TID = {
     //todo: this casting bit wrt path dependent types is driving me nuts
-    identifying.tag( AlgorithmShardCatalog.ID(plan.id, algorithmLabel).asInstanceOf[identifying.ID] ).asInstanceOf[TID]
+    identifying.tag( AlgorithmLookupShardCatalog.ID( plan.id, algorithmLabel ).asInstanceOf[identifying.ID] ).asInstanceOf[TID]
   }
 
   override lazy val metricBaseName: MetricName = MetricName( getClass )
 
-  implicit val identifying: Identifying[AlgorithmShardCatalog] = AlgorithmShardCatalog.identifying
+  implicit val identifying: Identifying[AlgorithmLookupShardCatalog] = AlgorithmLookupShardCatalog.identifying
   override def nextId: TryV[TID] = identifying.nextIdAs[TID]
-
-
-//  val module: SimpleAggregateModule[AlgorithmShardCatalog] = {
-//    val b = SimpleAggregateModule.builderFor[AlgorithmShardCatalog].make
-//    import b.P.{ Tag => BTag, Props => BProps, _ }
-//
-//    b
-//    .builder
-//    .set( BTag, identifying.idTag )
-//    .set( Environment, LocalAggregate )
-//    .set( BProps, AggregateRoot.ShardCatalogActor.props(_, _) )
-//    .build()
-//  }
 
 
   override val rootType: AggregateRootType = AlgorithmShardCatalogRootType
@@ -201,24 +186,24 @@ object AlgorithmShardCatalogModule extends AggregateRootModule with Instrumented
     override val identifying: Identifying[_] = module.identifying
     override val snapshotPeriod: Option[FiniteDuration] = None
     override def repositoryProps( implicit model: DomainModel ): Props = {
-      CommonLocalRepository.props( model, this, AggregateRoot.ShardCatalogActor.props( _: DomainModel, _: AggregateRootType ) )
+      CommonLocalRepository.props( model, this, AggregateRoot.AlgorithmShardingActor.props( _: DomainModel, _: AggregateRootType ) )
     }
   }
 
   object AggregateRoot {
-    object ShardCatalogActor {
+    object AlgorithmShardingActor {
       def props( model: DomainModel, rootType: AggregateRootType ): Props = Props( new Default(model, rootType) )
 
       def name( rootType: AggregateRootType ): String = rootType.name + "ShardCatalog"
 
       private class Default( model: DomainModel, rootType: AggregateRootType )
-      extends ShardCatalogActor( model, rootType )
-      with StackableStreamPublisher
+      extends AlgorithmShardingActor( model, rootType )
+              with StackableStreamPublisher
 
 
-      case class Availability private[AlgorithmShardCatalogModule](
+      case class Availability private[AlgorithmLookupShardCatalogModule](
         shardSizes: Map[AlgoTID, AP.EstimatedSize] = Map.empty[AlgoTID, AP.EstimatedSize],
-        control: AlgorithmShardCatalog.Control
+        control: AlgorithmLookupShardCatalog.Control
       ) {
         def withNewShardId( shard: AlgoTID ): Availability = {
           val newShardSizes = shardSizes + ( shard -> AP.EstimatedSize(shard, 0, Bytes(0)) )
@@ -241,28 +226,27 @@ object AlgorithmShardCatalogModule extends AggregateRootModule with Instrumented
 
         val isCandidate: AlgoTID => Boolean = { aid: AlgoTID => available.contains( aid ) || !shardSizes.contains( aid ) }
       }
-
     }
 
-    class ShardCatalogActor( override val model: DomainModel, override val rootType: AggregateRootType )
-    extends demesne.AggregateRoot[AlgorithmShardCatalog, AlgorithmShardCatalog#ID]
+    class AlgorithmShardingActor(override val model: DomainModel, override val rootType: AggregateRootType )
+    extends demesne.AggregateRoot[AlgorithmLookupShardCatalog, AlgorithmLookupShardCatalog#ID]
     with InstrumentedActor
     with demesne.AggregateRoot.Provider {
       outer: EventPublisher =>
 
-      import ShardCatalogActor.Availability
-      import spotlight.analysis.outlier.algorithm.{ AlgorithmShardProtocol => P }
+      import AlgorithmShardingActor.Availability
+      import spotlight.analysis.outlier.algorithm.{ AlgorithmLookupShardProtocol => P }
 
 
-      override lazy val metricBaseName: MetricName = MetricName( classOf[ShardCatalogActor] )
+      override lazy val metricBaseName: MetricName = MetricName( classOf[AlgorithmShardingActor] )
 
       var shardMetrics: Option[ShardMetrics] = None
 
-      class ShardMetrics( plan: OutlierPlan.Summary, id: AlgorithmShardCatalog.ID ) extends Instrumented {
+      class ShardMetrics( plan: OutlierPlan.Summary, id: AlgorithmLookupShardCatalog.ID ) extends Instrumented {
         val ShardBaseName = "shard"
 
         override lazy val metricBaseName: MetricName = {
-          AlgorithmShardCatalogModule.metricBaseName.append( plan.name, id.algorithmLabel, ShardBaseName )
+          AlgorithmLookupShardCatalogModule.metricBaseName.append( plan.name, id.algorithmLabel, ShardBaseName )
         }
 
         val CountName = "count"
@@ -303,12 +287,12 @@ object AlgorithmShardCatalogModule extends AggregateRootModule with Instrumented
               override def matches( name: String, metric: Metric ): Boolean = {
                 val isMatch = {
                   name.contains( ShardBaseName ) &&
-                    (
-                      name.contains( CountName ) ||
-                      name.contains( ActiveShardSizeGaugeName ) ||
-                      name.contains( TotalShardSizeGaugeName ) ||
-                      name.contains( HitRateGaugeName )
-                    )
+                  (
+                    name.contains( CountName ) ||
+                    name.contains( ActiveShardSizeGaugeName ) ||
+                    name.contains( TotalShardSizeGaugeName ) ||
+                    name.contains( HitRateGaugeName )
+                  )
                 }
 
                 log.warning( s"#TEST #ShardCatalog[{}]: stripLingeringMetrics removeMatching: name:[{}] TO-REMOVE:[{}] has-${ShardBaseName}:${name contains ShardBaseName} has-${CountName}:${name contains CountName} has-${ActiveShardSizeGaugeName}:${name contains ActiveShardSizeGaugeName} has-${TotalShardSizeGaugeName}:${name contains TotalShardSizeGaugeName}", self.path.name, name, isMatch )
@@ -325,17 +309,17 @@ object AlgorithmShardCatalogModule extends AggregateRootModule with Instrumented
 
       override def parseId( idrep: String ): TID = identifying.safeParseTid[TID]( idrep )( classTag[TID] )
 
-      override var state: AlgorithmShardCatalog = _
-      override val evState: ClassTag[AlgorithmShardCatalog] = classTag[AlgorithmShardCatalog]
+      override var state: AlgorithmLookupShardCatalog = _
+      override val evState: ClassTag[AlgorithmLookupShardCatalog] = classTag[AlgorithmLookupShardCatalog]
       var availability: Availability = _
 
       override def acceptance: Acceptance = {
         case ( P.Added(tid, p, rt), s ) if Option(s).isEmpty => {
           if ( shardMetrics.isEmpty ) {
-            shardMetrics = Some( new ShardMetrics(plan = p, id = tid.id.asInstanceOf[AlgorithmShardCatalog.ID] ) )
+            shardMetrics = Some( new ShardMetrics(plan = p, id = tid.id.asInstanceOf[AlgorithmLookupShardCatalog.ID] ) )
           }
 
-          AlgorithmShardCatalog( plan = p, algorithmRootType = rt )
+          AlgorithmLookupShardCatalog( plan = p, algorithmRootType = rt )
         }
 
         case ( P.ShardAssigned(_, t, aid), s ) => s.assignShard( t, aid )
@@ -347,12 +331,12 @@ object AlgorithmShardCatalogModule extends AggregateRootModule with Instrumented
 
       def dispatchEstimateRequests( forCandidates: AlgoTID => Boolean ): Unit = {
         for {
-          s <- Option( state ).toSet[AlgorithmShardCatalog]
+          s <- Option( state ).toSet[AlgorithmLookupShardCatalog]
           allShards = s.shards.values.toSet
           tally = s.tally
           candidates = allShards filter forCandidates
           cid <- candidates
-          ref = model( s.algorithmRootType, cid )
+          ref = referenceFor( cid )
         } {
           ref !+ AP.EstimateSize( cid.asInstanceOf[AP.EstimateSize#TID] )
         }
@@ -366,7 +350,7 @@ object AlgorithmShardCatalogModule extends AggregateRootModule with Instrumented
         case RecoveryCompleted => {
           import scala.concurrent.duration._
 
-          shardMetrics = Option( state ) map { s => new ShardMetrics( s.plan, s.id.id.asInstanceOf[AlgorithmShardCatalog.ID] ) }
+          shardMetrics = Option( state ) map { s => new ShardMetrics( s.plan, s.id.id.asInstanceOf[AlgorithmLookupShardCatalog.ID] ) }
 
           dispatchEstimateRequests( _ => true )
 
@@ -383,7 +367,7 @@ object AlgorithmShardCatalogModule extends AggregateRootModule with Instrumented
         }
       }
 
-      override def receiveCommand: Receive = active( Availability(control = AlgorithmShardCatalog.Control.BySize( Kilobytes(500) ) ) )
+      override def receiveCommand: Receive = active( Availability(control = AlgorithmLookupShardCatalog.Control.BySize( Kilobytes(500 ) ) ) )
 
       def active( newAvailability: Availability ): Receive = {
         availability = newAvailability
@@ -391,17 +375,12 @@ object AlgorithmShardCatalogModule extends AggregateRootModule with Instrumented
         LoggingReceive { around( knownRouting orElse unknownRouting( newAvailability ) orElse admin ) }
       }
 
-      def isAlgorithmKnown( algorithmRootType: AggregateRootType ): Boolean = {
-        Option( state )
-        .map { _.shards.values.toSet contains algorithmRootType }
-        .getOrElse { false }
-      }
-
       val admin: Receive = {
-        case P.Add( id, _, algorithmRootType ) if id == aggregateId && isAlgorithmKnown(algorithmRootType) => { }
-        case P.Add( id, plan, algorithmRootType) if id == aggregateId => {
+        case P.Add( id, plan, algorithmRootType) if id == aggregateId && Option(state).isEmpty => {
           persist( P.Added(id, plan, algorithmRootType) ) { acceptAndPublish }
         }
+
+        case P.Add( id, _, algorithmRootType ) if id == aggregateId && Option(state).nonEmpty => { }
 
         case UpdateAvailability => dispatchEstimateRequests( availability.isCandidate )
       }
@@ -430,7 +409,7 @@ object AlgorithmShardCatalogModule extends AggregateRootModule with Instrumented
 
         case estimate: AP.EstimatedSize => {
           log.info(
-            "AlgorithmShardCatalog[{}] shard:[{}] shapes:[{}] estimated average shape size:[{}]",
+            "AlgorithmLookupShardCatalog[{}] shard:[{}] shapes:[{}] estimated average shape size:[{}]",
             self.path.name, estimate.sourceId, estimate.nrShapes, estimate.averageSizePerShape
           )
 

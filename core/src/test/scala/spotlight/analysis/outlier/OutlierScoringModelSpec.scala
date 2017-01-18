@@ -21,7 +21,7 @@ import org.apache.commons.math3.random.RandomDataGenerator
 import org.joda.{time => joda}
 import org.scalatest.Tag
 import peds.commons.log.Trace
-import spotlight.analysis.outlier.algorithm.AlgorithmShardCatalogModule
+import spotlight.analysis.outlier.algorithm.{AlgorithmCellShardModule, AlgorithmLookupShardCatalogModule}
 import spotlight.analysis.outlier.{AnalysisPlanProtocol => AP}
 import spotlight.analysis.outlier.algorithm.statistical.SimpleMovingAverageAlgorithm
 import spotlight.model.outlier._
@@ -120,7 +120,8 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
 
     def rootTypes: Set[AggregateRootType] = Set(
       AnalysisPlanModule.module.rootType,
-      AlgorithmShardCatalogModule.rootType,
+      AlgorithmLookupShardCatalogModule.rootType,
+      AlgorithmCellShardModule.module.rootType,
       SimpleMovingAverageAlgorithm.rootType
     )
 
