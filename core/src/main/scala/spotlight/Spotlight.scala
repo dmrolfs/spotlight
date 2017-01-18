@@ -7,6 +7,7 @@ import akka.actor.{ActorRef, ActorSystem, Props, SupervisorStrategy}
 import akka.stream._
 import akka.stream.scaladsl.{Flow, GraphDSL, Sink}
 import akka.util.Timeout
+
 import scalaz.Kleisli.kleisli
 import scalaz.Scalaz._
 import scalaz._
@@ -22,8 +23,9 @@ import peds.commons.builder.HasBuilder
 import peds.commons.util._
 import shapeless.{Generic, HNil}
 import spotlight.analysis.outlier._
+import spotlight.analysis.outlier.algorithm.{AlgorithmCellShardModule, AlgorithmLookupShardCatalogModule}
 import spotlight.analysis.outlier.{PlanCatalogProtocol => CP}
-import spotlight.analysis.outlier.algorithm.statistical.SimpleMovingAverageAlgorithm
+import spotlight.analysis.outlier.algorithm.statistical.{ExponentialMovingAverageAlgorithm, GrubbsAlgorithm, SimpleMovingAverageAlgorithm}
 
 
 /**
@@ -82,7 +84,11 @@ object Spotlight extends Instrumented with StrictLogging {
   val systemRootTypes: Set[AggregateRootType] = {
     Set(
       AnalysisPlanModule.module.rootType,
-      SimpleMovingAverageAlgorithm.rootType
+      AlgorithmLookupShardCatalogModule.rootType,
+      AlgorithmCellShardModule.module.rootType,
+      SimpleMovingAverageAlgorithm.rootType,
+      GrubbsAlgorithm.rootType,
+      ExponentialMovingAverageAlgorithm.rootType
     )
   }
 

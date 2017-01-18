@@ -5,14 +5,14 @@ import scala.reflect.ClassTag
 import akka.actor.{ActorRef, ActorSystem}
 import com.typesafe.config.Config
 import org.joda.{time => joda}
-import demesne.AggregateRootType
-import demesne.module.entity.EntityAggregateModule
-import demesne.testkit.AggregateRootSpec
 import org.apache.commons.math3.random.RandomDataGenerator
 import org.scalatest.concurrent.ScalaFutures
 import peds.archetype.domain.model.core.{Entity, EntityIdentifying}
 import peds.commons.V
 import peds.commons.log.Trace
+import demesne.AggregateRootType
+import demesne.module.entity.{EntityAggregateModule, EntityProtocol}
+import demesne.testkit.AggregateRootSpec
 import spotlight.analysis.outlier.HistoricalStatistics
 import spotlight.model.outlier._
 import spotlight.model.timeseries._

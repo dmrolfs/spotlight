@@ -43,7 +43,7 @@ object OutlierQuorumAggregator {
  * Created by rolfsd on 9/28/15.
  */
 class OutlierQuorumAggregator( plan: OutlierPlan, source: TimeSeriesBase )
-extends EnvelopingActor with InstrumentedActor with ActorLogging { outer: ConfigurationProvider =>
+extends Actor with EnvelopingActor with InstrumentedActor with ActorLogging { outer: ConfigurationProvider =>
   import OutlierQuorumAggregator._
 
   override lazy val metricBaseName: MetricName = MetricName( classOf[OutlierQuorumAggregator] )

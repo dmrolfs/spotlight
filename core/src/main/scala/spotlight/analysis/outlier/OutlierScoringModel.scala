@@ -10,9 +10,9 @@ import akka.stream.scaladsl._
 import akka.stream.stage._
 import com.typesafe.scalalogging.{Logger, StrictLogging}
 import org.slf4j.LoggerFactory
+import bloomfilter.mutable.BloomFilter
 import peds.akka.metrics.Instrumented
 import peds.akka.stream.StreamMonitor
-import peds.commons.collection.BloomFilter
 import spotlight.Settings
 import spotlight.model.outlier._
 import spotlight.model.timeseries.TimeSeriesBase.Merging
@@ -55,22 +55,28 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
     GraphDSL.create() { implicit b =>
       val logMetrics = b.add( logMetric( Logger(LoggerFactory getLogger "Metrics"), settings.plans ) )
       val blockPriors = b.add( Flow[TimeSeries] filter { notReportedBySpotlight } )
-      val broadcast = b.add( Broadcast[TimeSeries](outputPorts = 2, eagerCancel = false) )
-
-      val watchPlanned = Flow[TimeSeries].map{ identity }.watchSourced( WatchPoints.ScoringPlanned )
-      val passPlanned = b.add( Flow[TimeSeries].filter{ isPlanned( _, settings.plans ) }.via( watchPlanned ) )
-
-      val watchUnrecognized = Flow[TimeSeries].map{ identity }.watchSourced( WatchPoints.ScoringUnrecognized )
-      val passUnrecognized = b.add(
-        Flow[TimeSeries].filter{ !isPlanned( _, settings.plans ) }.via( watchUnrecognized )
+      val zipWithInPlan = b.add(
+        Flow[TimeSeries]
+        .map { ts => ( ts, isPlanned(ts, settings.plans) ) }
+        .buffer( 10, OverflowStrategy.backpressure )//.watchFlow( 'preBroadcast )
       )
 
-      val regulator = b.add( Flow[TimeSeries].via( regulateByTopic(100000) ) )
-      val buffer = b.add( Flow[TimeSeries].buffer( 1000, OverflowStrategy.backpressure ).watchFlow( WatchPoints.PlanBuffer ) )
+      val broadcast = b.add( Broadcast[(TimeSeries, Boolean)](outputPorts = 2, eagerCancel = false) )
+
+      val passPlanned = b.add( Flow[(TimeSeries, Boolean)].collect { case (ts, inPlan) if inPlan => ts } )
+      val passUnrecognized = b.add( Flow[(TimeSeries, Boolean)].collect { case (ts, inPlan) if !inPlan => ts } )
+
+      val regulator = b.add(
+        Flow[TimeSeries]
+        .buffer( 10, OverflowStrategy.backpressure ).watchFlow( 'regulator )
+        .via( regulateByTopic(10000) )
+      )
+
+//      val buffer = b.add( Flow[TimeSeries].buffer( 10, OverflowStrategy.backpressure ).watchFlow( WatchPoints.PlanBuffer ) )
       val detect = b.add( catalogFlow.watchFlow(WatchPoints.Catalog) )
 
-      logMetrics ~> blockPriors ~> broadcast ~> passPlanned ~> regulator ~> buffer ~> detect
-                                   broadcast ~> passUnrecognized
+      logMetrics ~> blockPriors ~> zipWithInPlan ~> broadcast ~> passPlanned ~> regulator /*~> buffer */~> detect
+                                                    broadcast ~> passUnrecognized
 
       ScoringShape(
         FanOutShape.Ports(
@@ -87,7 +93,8 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
   ): GraphStage[FlowShape[TimeSeries, TimeSeries]] = {
     new GraphStage[FlowShape[TimeSeries, TimeSeries]] {
       val count = new AtomicInteger( 0 )
-      var bloom = BloomFilter[Topic]( maxFalsePosProbability = 0.001, 10000000 )
+//      var bloom = BloomFilter[Topic]( maxFalsePosProbability = 0.1, 10000000 )
+      val bloom = BloomFilter[Topic]( numberOfItems = 10000000, falsePositiveRate = 0.1 )
 
       val in = Inlet[TimeSeries]( "logMetric.in" )
       val out = Outlet[TimeSeries]( "logMetric.out" )
@@ -102,8 +109,10 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
               override def onPush(): Unit = {
                 val e = grab( in )
 
-                if ( !bloom.has_?( e.topic ) ) {
-                  bloom += e.topic
+//                if ( !bloom.has_?( e.topic ) ) {
+                if ( !bloom.mightContain( e.topic ) ) {
+                  bloom add e.topic
+//                  bloom += e.topic
                   if ( !e.topic.name.startsWith( OutlierMetricPrefix ) ) {
                     destination.debug(
                       "[{}] Plan for {}: {}",

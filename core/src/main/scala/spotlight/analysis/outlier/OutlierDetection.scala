@@ -173,7 +173,9 @@ class OutlierDetection extends Actor with EnvelopingActor with InstrumentedActor
     } yield {
       val history = updateHistory( m.source, p )
 //      p.algorithms foreach { algo => router !+ DetectUsing(algo, aggregator, m, history, p.algorithmConfig) }
-      p.algorithms foreach { algo => router.sendEnvelope( DetectUsing(algo, m, history, p.algorithmConfig) )( aggregator )}
+      p.algorithms foreach { algo =>
+        router.sendEnvelope( DetectUsing(m.plan.id, algo, m, history, p.algorithmConfig) )( aggregator )
+      }
       aggregator
     }
   }
@@ -236,7 +238,7 @@ class OutlierDetection extends Actor with EnvelopingActor with InstrumentedActor
     else {
       val blunted = new URI( "akka.tcp", name, null ).getSchemeSpecificPart.replaceAll( """[\.\[\];/?:@&=+$,]""", "_" )
       log.debug(
-        "OutlierDetection attempting to dispatch to invalid aggregator\n" +
+        "OutlierDetection attempting to dispatchEstimateRequests to invalid aggregator\n" +
         " + (plan-name, extractedTopic, uuid):[{}]\n" +
         " + attempted name:{}\n" +
         " + blunted name:{}", 

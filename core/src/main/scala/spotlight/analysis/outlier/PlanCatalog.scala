@@ -534,8 +534,8 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
         GraphDSL.create() { implicit b =>
           import GraphDSL.Implicits._
 
-          val intake = b.add( Flow[TimeSeries].map{ identity }.watchFlow( WatchPoints.Intake ) )
-          val outlet = b.add( Flow[Outliers].map{ identity }.watchFlow( WatchPoints.Outlet ) )
+          val intake = b.add( Flow[TimeSeries].map{ identity }/*.watchFlow( WatchPoints.Intake )*/ )
+          val outlet = b.add( Flow[Outliers].map{ identity }/*.watchFlow( WatchPoints.Outlet )*/ )
 
           if ( planFlows.nonEmpty ) {
             val broadcast = b.add( Broadcast[TimeSeries]( nrFlows ) )
@@ -642,7 +642,7 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
     implicit ec: ExecutionContext,
     to: Timeout
   ): Future[Map[String, OutlierPlan.Summary]] = {
-    import demesne.module.entity.{ messages => EntityMessages }
+    import spotlight.analysis.outlier.{ AnalysisPlanProtocol => AP }
 
     def loadSpecifiedPlans( model: DomainModel ): Seq[Future[(String, OutlierPlan.Summary)]] = {
       missing.toSeq.map { p =>
@@ -650,7 +650,7 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
         val planRef =  model( AnalysisPlanModule.module.rootType, p.id )
 
         for {
-          added <- ( planRef ?+ EntityMessages.Add( p.id, Some(p) ) )
+          added <- ( planRef ?+ AP.Add( p.id, Some(p) ) )
           _ = log.debug( "PlanCatalog: notified that plan is added:[{}]", added )
           loaded <- loadPlan( p.id )
           _ = log.debug( "PlanCatalog: loaded plan:[{}]", loaded )

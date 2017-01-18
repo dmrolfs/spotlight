@@ -25,9 +25,9 @@ import peds.akka.stream.StreamMonitor
 import demesne.BoundedContext
 import peds.akka.stream.Limiter
 import peds.commons.TryV
-import spotlight.{Spotlight, SpotlightContext$, Settings}
+import spotlight.{Settings, Spotlight, SpotlightContext}
 import spotlight.analysis.outlier.DetectFlow
-import spotlight.model.outlier.{Outliers, SeriesOutliers}
+import spotlight.model.outlier._
 import spotlight.model.timeseries.{DataPoint, ThresholdBoundary, TimeSeries}
 import spotlight.protocol.GraphiteSerializationProtocol
 
@@ -114,7 +114,7 @@ object FileBatchExample extends Instrumented with StrictLogging {
 
 
   object WatchPoints {
-    val Data = 'data
+    val DataSource = 'source
     val Intake = 'intake
     val Rate = 'rate
     val Scoring = 'scoring
@@ -151,26 +151,33 @@ object FileBatchExample extends Instrumented with StrictLogging {
       import spotlight.analysis.outlier.OutlierScoringModel.{ WatchPoints => OSM }
       import spotlight.analysis.outlier.PlanCatalog.{ WatchPoints => C }
       StreamMonitor.set(
-        Data,
-//        Intake,
+        DataSource,
+        Intake,
         Rate,
-//        C.Intake,
-        Scoring,
+//       'timeseries,
+//        'blockPriors,
+//        'preBroadcast,
+//        OSM.ScoringPlanned, // keep later?
+//        'passPlanned,
+//        'passUnrecognizedPreFilter,
+//        OSM.ScoringUnrecognized,
+        'regulator,
+//        OSM.PlanBuffer,
         OSM.Catalog,
-        C.Outlet,
+//        C.Outlet,
 //        Publish,
-        Results,
-        OSM.ScoringUnrecognized
+//       'filterOutliers,
+        Results//,
+//        OSM.ScoringUnrecognized
       )
 
-      val publish = Flow[SimpleFlattenedOutlier].map{ identity }.watchFlow( Publish )
+      val publish = Flow[SimpleFlattenedOutlier].buffer( 10, OverflowStrategy.backpressure ).watchFlow( Publish )
 
       sourceData( settings )
-      .via( Flow[String].buffer( 1000, OverflowStrategy.backpressure ).watchFlow( Data ) )
-      .map { e => logger.info("after the sourceData step: [{}]", e); e }
+      .via( Flow[String].watchSourced( DataSource ) )
+//      .via( Flow[String].buffer( 10, OverflowStrategy.backpressure ).watchSourced( Data ) )
       .via( detectionWorkflow(boundedContext, settings, scoring) )
       .via( publish )
-      .map { e => logger.info("AFTER DETECTION: [{}]", e); e }
       .runWith( Sink.seq )
     }
   }
@@ -182,18 +189,23 @@ object FileBatchExample extends Instrumented with StrictLogging {
     FileIO
     .fromPath( Paths.get( data ) )
     .via( Framing.delimiter(ByteString("\n"), maximumFrameLength = 1024) )
-    .map { b => logger.info( "sourceData: bytes = [{}]", b); b }
     .map { _.utf8String }
-    .map { s => logger.info( "sourceData: utf8String = [{}]", s); s }
-//    .delay( 1.seconds )
+
+//    import better.files._
+//
+//    val file = File( data )
+//    Source.fromIterator( () => file.lines.to[Iterator] )
   }
 
   def rateLimitFlow( parallelism: Int, refreshPeriod: FiniteDuration )( implicit system: ActorSystem ): Flow[TimeSeries, TimeSeries, NotUsed] = {
 //    val limiterRef = system.actorOf( Limiter.props( parallelism, refreshPeriod, parallelism ), "rate-limiter" )
-//    val limitDuration = 3.minutes // ( configuration.detectionBudget * 1.1 )
+//    val limitDuration = 9.minutes // ( configuration.detectionBudget * 1.1 )
 //    val limitWait = FiniteDuration( limitDuration._1, limitDuration._2 )
 //    Limiter.limitGlobal[TimeSeries](limiterRef, limitWait)( system.dispatcher )
+
     Flow[TimeSeries].map{ identity }
+
+//    Flow[TimeSeries].throttle( parallelism, refreshPeriod, parallelism, akka.stream.ThrottleMode.shaping )
   }
 
   def detectionWorkflow(
@@ -220,55 +232,45 @@ object FileBatchExample extends Instrumented with StrictLogging {
 
       val timeSeries = b.add(
         Flow[String]
-        .via( watch("unpacking") )
         .via( unmarshalTimeSeriesData )
-        .map { ( _, count.incrementAndGet() ) }
-        .map { case (ts, i) => logger.info( "UNPACKED[ {} ]: [{}]", (i + 1 ).toString, ts ); ts }
-        .buffer( 1000, OverflowStrategy.backpressure ).watchFlow( WatchPoints.Scoring )
       )
 
       val limiter = b.add( rateLimitFlow( configuration.parallelism, 25.milliseconds ).watchFlow( WatchPoints.Rate ) )
       val score = b.add( scoring )
 
       //todo remove after working
-      val publishBuffer = b.add(
-        Flow[Outliers]
-        .buffer( 1000, OverflowStrategy.backpressure )
-        .watchFlow( WatchPoints.Publish )
-      )
+//      val publishBuffer = b.add(
+//        Flow[Outliers]
+//        .buffer( 10, OverflowStrategy.backpressure )
+//        .watchFlow( WatchPoints.Publish )
+//      )
 
       val filterOutliers = b.add(
         Flow[Outliers]
-        .map { m => logger.info( "FILTER:BEFORE class:[{}] message:[{}]", m.getClass.getCanonicalName, m ); m }
-        .collect {
-          case s: SeriesOutliers => s
-        }
-        .map { m => logger.info( "FILTER:AFTER class:[{}] message:[{}]", m.getClass.getCanonicalName, m ); m }
-        .watchFlow( WatchPoints.Results )
+//        .buffer( 10, OverflowStrategy.backpressure ).watchFlow( 'filterOutliers )
+        .collect { case s: SeriesOutliers => s }.watchFlow( WatchPoints.Results )
       )
 
       val flatter = b.add(
         Flow[SeriesOutliers]
         .map { s =>
           flattenObject( s ) match {
-            case \/-( f ) => logger.info( "Success: flatter.flattenObject = [{}]", f ); f
+            case \/-( f ) => f
             case -\/( ex ) => {
               logger.error( s"Failure: flatter.flattenObject[${s}]:", ex )
               throw ex
             }
           }
         }
-        .watchFlow( 'flatter )
       )
 
       val unwrap = b.add(
         Flow[List[SimpleFlattenedOutlier]]
         .mapConcat(identity)
         .map { o => logger.info( "RESULT: {}", o ); o }
-        .watchFlow('unwrap)
       )
 
-      intakeBuffer ~> timeSeries ~> limiter ~> score ~> publishBuffer ~> filterOutliers ~> flatter ~> unwrap
+      intakeBuffer ~> timeSeries ~> limiter ~> score ~> /*publishBuffer ~>*/ filterOutliers ~> flatter ~> unwrap
 
       FlowShape( intakeBuffer.in, unwrap.out )
     }
@@ -283,18 +285,18 @@ object FileBatchExample extends Instrumented with StrictLogging {
     }
   }
 
-  def flatten: Flow[SeriesOutliers , List[SimpleFlattenedOutlier],NotUsed] = {
-    Flow[SeriesOutliers ]
-    .map[List[SimpleFlattenedOutlier]] { so =>
-      flattenObject( so ) match {
-        case \/-( f ) => logger.info( "Success: flatten.flattenObject = [{}]", f ); f
-        case -\/( ex ) => {
-          logger.error( s"Failure: flatten.flattenObject[${so}]:", ex )
-          throw ex
-        }
-      }
-    }
-  }
+//  def flatten: Flow[SeriesOutliers , List[SimpleFlattenedOutlier],NotUsed] = {
+//    Flow[SeriesOutliers ]
+//    .map[List[SimpleFlattenedOutlier]] { so =>
+//      flattenObject( so ) match {
+//        case \/-( f ) => f
+//        case -\/( ex ) => {
+//          logger.error( s"Failure: flatten.flattenObject[${so}]:", ex )
+//          throw ex
+//        }
+//      }
+//    }
+//  }
 
   def flattenObject( outlier: SeriesOutliers ): TryV[List[SimpleFlattenedOutlier]] = {
     \/ fromTryCatchNonFatal {
@@ -335,14 +337,14 @@ object FileBatchExample extends Instrumented with StrictLogging {
     Flow[String]
     .mapConcat { s =>
       toTimeSeries( s ) match {
-        case \/-( tss ) => logger.info( "Success: unmarshalTimeSeries.toTimeSeries = [{}]", tss ); tss
+        case \/-( tss ) => tss
         case -\/( ex ) => {
           logger.error( s"Failure: unmarshalTimeSeries.toTimeSeries[${s}]:", ex )
           throw ex
         }
       }
     }
-    .map { ts => logger.info( "unmarshalled time series: [{}]", ts ); ts }
+//    .map { ts => logger.info( "unmarshalled time series: [{}]", ts ); ts }
     .withAttributes( ActorAttributes.supervisionStrategy(GraphiteSerializationProtocol.decider) )
   }
 

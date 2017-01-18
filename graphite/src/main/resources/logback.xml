@@ -170,7 +170,7 @@
     </triggeringPolicy>
   </appender>
 
-  <logger name="Metrics" level="DEBUG" additivity="false">
+  <logger name="Metrics" level="OFF" additivity="false">
     <appender-ref ref="METRIC_FILE" />
   </logger>
 
@@ -182,19 +182,19 @@
     <appender-ref ref="CONFIG_FILE" />
   </logger>
 
-  <logger name="StreamMonitor" level="DEBUG" additivity="false">
+  <logger name="StreamMonitor" level="OFF" additivity="false">
     <appender-ref ref="STREAM_MONITOR_FILE" />
   </logger>
 
-  <logger name="Outliers" level="DEBUG" additivity="false">
+  <logger name="Outliers" level="OFF" additivity="false">
     <appender-ref ref="OUTLIERS_FILE" />
   </logger>
 
-  <logger name="Publish" level="DEBUG" additivity="false">
+  <logger name="Publish" level="OFF" additivity="false">
     <appender-ref ref="PUBLISH_FILE" />
   </logger>
 
-  <logger name="Debug" level="DEBUG" additivity="false">
+  <logger name="Debug" level="OFF" additivity="false">
     <appender-ref ref="DEBUG_FILE" />
   </logger>
 

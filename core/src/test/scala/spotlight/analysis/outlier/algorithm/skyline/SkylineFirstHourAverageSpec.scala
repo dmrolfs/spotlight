@@ -11,6 +11,7 @@ import org.mockito.Mockito._
 import org.joda.{time => joda}
 import com.github.nscala_time.time.JodaImplicits._
 import peds.akka.envelope.WorkId
+import peds.commons.identifier.{ShortUUID, TaggedID}
 import spotlight.analysis.outlier.algorithm.CommonAnalyzer
 import spotlight.analysis.outlier.{DetectOutliersInSeries, DetectUsing, DetectionAlgorithmRouter}
 import spotlight.model.outlier.{OutlierPlan, SeriesOutliers}
@@ -33,6 +34,7 @@ class SkylineFirstHourAverageSpec extends SkylineBaseSpec {
     val algProps = ConfigFactory.parseString( s"""${algoS.name}.tolerance: 3""" )
 
     val plan = mock[OutlierPlan]
+    when( plan.id ).thenReturn( TaggedID( 'plan, ShortUUID() ) )
     when( plan.name ).thenReturn( "mock-plan" )
     when( plan.appliesTo ).thenReturn( SkylineFixture.appliesToAll )
     when( plan.algorithms ).thenReturn( Set(algoS) )
@@ -123,6 +125,7 @@ class SkylineFirstHourAverageSpec extends SkylineBaseSpec {
       val history1 = historyWith( None, series )
       implicit val sender = aggregator.ref
       analyzer ! DetectUsing(
+        plan.id,
         algoS,
         DetectOutliersInSeries(series, plan, Option(subscriber.ref), Set.empty[WorkId]),
         history1,
@@ -152,6 +155,7 @@ class SkylineFirstHourAverageSpec extends SkylineBaseSpec {
       val history2 = historyWith( Option(history1 recordLastPoints series.points), series2 )
 
       analyzer ! DetectUsing(
+        plan.id,
         algoS,
         DetectOutliersInSeries(series2, plan, Option(subscriber.ref), Set.empty[WorkId]),
         history2,
@@ -191,6 +195,7 @@ class SkylineFirstHourAverageSpec extends SkylineBaseSpec {
       val history1 = historyWith( None, series )
       implicit val sender = aggregator.ref
       analyzer ! DetectUsing(
+        plan.id,
           algoS,
           DetectOutliersInSeries(series, plan, Option(subscriber.ref), Set.empty[WorkId]),
           history1,
@@ -220,6 +225,7 @@ class SkylineFirstHourAverageSpec extends SkylineBaseSpec {
       val history2 = historyWith( Option(history1 recordLastPoints series.points), series2 )
 
       analyzer ! DetectUsing(
+        plan.id,
         algoS,
         DetectOutliersInSeries(series2, plan, Option(subscriber.ref), Set.empty[WorkId]),
         history2,
@@ -261,6 +267,7 @@ class SkylineFirstHourAverageSpec extends SkylineBaseSpec {
       val history1 = historyWith( None, series )
       implicit val sender = aggregator.ref
       analyzer ! DetectUsing(
+        plan.id,
         algoS,
         DetectOutliersInSeries(series, plan, Option(subscriber.ref), Set.empty[WorkId]),
         history1,
@@ -286,6 +293,7 @@ class SkylineFirstHourAverageSpec extends SkylineBaseSpec {
       val history2 = historyWith( Option(history1 recordLastPoints series.points), series2 )
 
       analyzer ! DetectUsing(
+        plan.id,
         algoS,
         DetectOutliersInSeries(series2, plan, Option(subscriber.ref), Set.empty[WorkId]),
         history2,

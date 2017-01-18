@@ -78,7 +78,7 @@
 //        ref = model( rt, algoId )
 //      } yield {
 //        ref !+ AlgorithmProtocol.UseConfiguration( AlgorithmModule.identifying.tag(scope), plan.algorithmConfig )
-//        ( name, DetectionAlgorithmRouter.DirectResolver(ref) )
+//        ( name, DetectionAlgorithmRouter.DirectProxy(ref) )
 //      }
 //
 //      context.actorOf(

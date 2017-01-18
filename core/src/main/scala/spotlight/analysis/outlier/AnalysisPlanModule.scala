@@ -13,42 +13,34 @@ import com.typesafe.scalalogging.LazyLogging
 import nl.grons.metrics.scala.{Meter, MetricName}
 import peds.akka.envelope._
 import peds.akka.envelope.pattern.ask
+import peds.akka.metrics.{Instrumented, InstrumentedActor}
 import peds.akka.publish.{EventPublisher, StackableStreamPublisher}
 import peds.archetype.domain.model.core.{EntityIdentifying, EntityLensProvider}
 import peds.commons.identifier.ShortUUID
-import demesne.module.entity.EntityAggregateModule
-import demesne.module.entity.EntityAggregateModule.MakeIndexSpec
-import demesne.module.entity.{messages => EntityMessages}
-import demesne.AggregateMessage
+import demesne._
 import demesne.index.local.IndexLocalAgent
-import demesne.{AggregateProtocol, AggregateRootType, DomainModel}
 import demesne.index.{Directive, IndexBusSubscription, StackableIndexBusPublisher}
 import demesne.module.LocalAggregate
-import peds.akka.metrics.{Instrumented, InstrumentedActor}
+import demesne.module.entity.{EntityAggregateModule, EntityProtocol}
+import demesne.module.entity.EntityAggregateModule.MakeIndexSpec
 import spotlight.analysis.outlier.AnalysisPlanProtocol.{AnalysisFlow, MakeFlow}
 import spotlight.analysis.outlier.OutlierDetection.{DetectionResult, DetectionTimedOut}
-import spotlight.model.outlier.OutlierPlan.Scope
 import spotlight.model.outlier._
-import spotlight.model.timeseries.TimeSeriesBase.Merging
+import spotlight.model.outlier.OutlierPlan.Scope
 import spotlight.model.timeseries._
+import spotlight.model.timeseries.TimeSeriesBase.Merging
 
 
-object AnalysisPlanProtocol extends AggregateProtocol[OutlierPlan#ID]{
-  sealed trait AnalysisPlanMessage
-  sealed abstract class AnalysisPlanCommand extends AnalysisPlanMessage with CommandMessage
-  sealed abstract class AnalysisPlanEvent extends AnalysisPlanMessage with EventMessage
-
+object AnalysisPlanProtocol extends EntityProtocol[OutlierPlan#ID] {
   case class MakeFlow(
-    override val targetId: AnalysisPlanModule.module.TID,
+    override val targetId: MakeFlow#TID,
     parallelism: Int,
     system: ActorSystem,
     timeout: Timeout,
     materializer: Materializer
-  ) extends AggregateMessage with AnalysisPlanMessage {
-    override type ID = AnalysisPlanModule.module.ID
-  }
+  ) extends Message
 
-  case class AnalysisFlow( flow: DetectFlow ) extends AnalysisPlanMessage
+  case class AnalysisFlow( flow: DetectFlow ) extends ProtocolMessage
 
 
   case class AcceptTimeSeries(
@@ -56,7 +48,7 @@ object AnalysisPlanProtocol extends AggregateProtocol[OutlierPlan#ID]{
     override val correlationIds: Set[WorkId],
     override val data: TimeSeries,
     override val scope: Option[OutlierPlan.Scope] = None
-  ) extends AnalysisPlanCommand with CorrelatedSeries {
+  ) extends Command with CorrelatedSeries {
     override def withData( newData: TimeSeries ): CorrelatedData[TimeSeries] = this.copy( data = newData )
     override def withCorrelationIds( newIds: Set[WorkId] ): CorrelatedData[TimeSeries] = this.copy( correlationIds = newIds )
     override def withScope( newScope: Option[Scope] ): CorrelatedData[TimeSeries] = this.copy( scope = newScope )
@@ -65,38 +57,40 @@ object AnalysisPlanProtocol extends AggregateProtocol[OutlierPlan#ID]{
   //todo add info change commands
   //todo reify algorithm
   //      case class AddAlgorithm( override val targetId: OutlierPlan#TID, algorithm: Symbol ) extends Command with AnalysisPlanMessage
-  case class ApplyTo( override val targetId: ApplyTo#TID, appliesTo: OutlierPlan.AppliesTo ) extends AnalysisPlanCommand
+  case class ApplyTo( override val targetId: ApplyTo#TID, appliesTo: OutlierPlan.AppliesTo ) extends Command
 
   case class UseAlgorithms(
     override val targetId: UseAlgorithms#TID,
     algorithms: Set[Symbol],
     algorithmConfig: Config
-  ) extends AnalysisPlanCommand
+  ) extends Command
 
   case class ResolveVia(
     override val targetId: ResolveVia#TID,
     isQuorum: IsQuorum,
     reduce: ReduceOutliers
-  ) extends AnalysisPlanCommand
+  ) extends Command
 
 
-  case class ScopeChanged( override val sourceId: ScopeChanged#TID, appliesTo: OutlierPlan.AppliesTo ) extends AnalysisPlanEvent
+  case class ScopeChanged( override val sourceId: ScopeChanged#TID, appliesTo: OutlierPlan.AppliesTo ) extends Event
 
   case class AlgorithmsChanged(
     override val sourceId: AlgorithmsChanged#TID,
     algorithms: Set[Symbol],
     algorithmConfig: Config
-  ) extends AnalysisPlanEvent
+  ) extends Event
 
   case class AnalysisResolutionChanged(
     override val sourceId: AnalysisResolutionChanged#TID,
     isQuorum: IsQuorum,
     reduce: ReduceOutliers
-  ) extends AnalysisPlanEvent
+  ) extends Event
 
-  case class GetPlan( override val targetId: GetPlan#TID ) extends AnalysisPlanCommand
-  case class PlanInfo( override val sourceId: PlanInfo#TID, info: OutlierPlan ) extends AnalysisPlanEvent {
-    def toSummary: OutlierPlan.Summary = OutlierPlan.Summary( id = sourceId, name = info.name, appliesTo = info.appliesTo )
+  case class GetPlan( override val targetId: GetPlan#TID ) extends Command
+  case class PlanInfo( override val sourceId: PlanInfo#TID, info: OutlierPlan ) extends Event {
+    def toSummary: OutlierPlan.Summary = {
+      OutlierPlan.Summary( id = sourceId, name = info.name, slug = info.slug, appliesTo = info.appliesTo )
+    }
   }
 }
 
@@ -105,10 +99,25 @@ object AnalysisPlanProtocol extends AggregateProtocol[OutlierPlan#ID]{
   * Created by rolfsd on 5/26/16.
   */
 object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumented with LazyLogging {
-  override lazy val metricBaseName: MetricName = MetricName( getClass )
+  override lazy val metricBaseName: MetricName = {
+    MetricName( spotlight.BaseMetricName, spotlight.analysis.outlier.BaseMetricName )
+  }
 
   val droppedSeriesMeter: Meter = metrics.meter( "dropped", "series" )
   val droppedPointsMeter: Meter = metrics.meter( "dropped", "points" )
+
+  val InletBaseMetricName = "inlet"
+  val inletSeries: Meter = metrics.meter( InletBaseMetricName, "series" )
+  val inletPoints: Meter = metrics.meter( InletBaseMetricName, "points" )
+
+  val OutletResultsBaseMetricName = "outlet.results"
+  val outletResults: Meter = metrics.meter( OutletResultsBaseMetricName )
+  val outletResultsAnomalies: Meter = metrics.meter( OutletResultsBaseMetricName, "anomalies" )
+  val outletResultsConformities: Meter = metrics.meter( OutletResultsBaseMetricName, "conformities" )
+  val outletResultsPoints: Meter = metrics.meter( OutletResultsBaseMetricName, "points" )
+  val outletResultsPointsAnomalies: Meter = metrics.meter( OutletResultsBaseMetricName, "points.anomalies" )
+  val outletResultsPointsConformities: Meter = metrics.meter( OutletResultsBaseMetricName, "points.conformities" )
+
 
 
   implicit val identifying: EntityIdentifying[OutlierPlan] = {
@@ -125,25 +134,26 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
   val namedPlanIndex: Symbol = 'NamedPlan
 
   val indexes: MakeIndexSpec = {
+    import spotlight.analysis.outlier.{ AnalysisPlanProtocol => AP }
+
     () => {
       Seq(
         IndexLocalAgent.spec[String, module.TID, OutlierPlan.Summary]( specName = namedPlanIndex, IndexBusSubscription ) {
-          case EntityMessages.Added( sid, Some( p: OutlierPlan ) ) => Directive.Record( p.name, sid, p.toSummary )
-          case EntityMessages.Added( sid, info ) => {
+          case AP.Added( sid, Some( p: OutlierPlan ) ) => Directive.Record( p.name, sid, p.toSummary )
+          case AP.Added( sid, info ) => {
             logger.error( "AnalysisPlanModule: IGNORING ADDED event since info was not Some OutlierPlan: [{}]", info )
             Directive.Ignore
           }
-          case EntityMessages.Disabled( sid, _ ) => Directive.Withdraw( sid )
-          case EntityMessages.Renamed( sid, oldName, newName ) => Directive.ReviseKey( oldName, newName )
-          case m: EntityMessages.EntityMessage => Directive.Ignore
-          case m: AnalysisPlanProtocol.AnalysisPlanMessage => Directive.Ignore
+          case AP.Disabled( sid, _ ) => Directive.Withdraw( sid )
+          case AP.Renamed( sid, oldName, newName ) => Directive.ReviseKey( oldName, newName )
+          case _: AP.ProtocolMessage => Directive.Ignore
         }
       )
     }
   }
 
   val module: EntityAggregateModule[OutlierPlan] = {
-    val b = EntityAggregateModule.builderFor[OutlierPlan].make
+    val b = EntityAggregateModule.builderFor[OutlierPlan, AnalysisPlanProtocol.type].make
     import b.P.{ Tag => BTag, Props => BProps, _ }
 
     b
@@ -151,6 +161,7 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
     .set( BTag, identifying.idTag )
     .set( Environment, LocalAggregate )
     .set( BProps, AggregateRoot.PlanActor.props(_, _) )
+    .set( Protocol, AnalysisPlanProtocol )
     .set( Indexes, indexes )
     .set( IdLens, OutlierPlan.idLens )
     .set( NameLens, OutlierPlan.nameLens )
@@ -193,13 +204,20 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
         def plan: OutlierPlan
 
         def makeRouter()( implicit context: ActorContext ): ActorRef = {
+          def resolverFor( algorithmRootType: AggregateRootType ): DetectionAlgorithmRouter.AlgorithmProxy = {
+//            DetectionAlgorithmRouter.RootTypeProxy( algorithmRootType, model )
+            DetectionAlgorithmRouter.ShardedRootTypeProxy( plan, algorithmRootType, model )
+          }
+
           val algorithmRefs = for {
             name <- plan.algorithms.toSeq
             rt <- DetectionAlgorithmRouter.rootTypeFor( name )( context.dispatcher ).toSeq
-          } yield (name, DetectionAlgorithmRouter.RootTypeResolver( rt, model ))
+          } yield ( name, resolverFor(rt) )
+
+          val routerProps = DetectionAlgorithmRouter.props( plan, Map( algorithmRefs:_* ) )
 
           context.actorOf(
-            DetectionAlgorithmRouter.props( Map( algorithmRefs: _* ) ).withDispatcher( DetectionAlgorithmRouter.DispatcherPath ),
+            routerProps.withDispatcher( DetectionAlgorithmRouter.DispatcherPath ),
             DetectionAlgorithmRouter.name( provider.plan.name )
           )
         }
@@ -257,18 +275,16 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
 
       val IdType = identifying.evTID
 
-      import demesne.module.entity.{messages => EntityMessages}
-
       override def quiescent: Receive = {
-        case EntityMessages.Add( IdType( targetId ), info ) if targetId == aggregateId => {
-          persist( EntityMessages.Added( targetId, info ) ) { e =>
+        case P.Add( IdType( targetId ), info ) if targetId == aggregateId => {
+          persist( P.Added( targetId, info ) ) { e =>
             acceptAndPublish( e )
             log.debug( "AnalysisPlanModule[{}]: notifying [{}] of {}", state.name, sender().path.name, e )
             sender() !+ e // per akka docs: safe to use sender() here
           }
         }
 
-        case EntityMessages.Add( targetId, info ) => {
+        case P.Add( targetId, info ) => {
           log.info(
             "AnalysisPlanModule caught Add message but targetId[{}] does not match aggregateId:[{}] => [{}][{}]",
             (targetId, targetId.id.getClass),
@@ -293,7 +309,7 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
       val planEntity: Receive = {
         case _: P.GetPlan => sender() !+ P.PlanInfo( state.id, state )
 
-        case P.ApplyTo( id, appliesTo ) => persist( P.ScopeChanged( id, appliesTo ) ) {acceptAndPublish}
+        case P.ApplyTo( id, appliesTo ) => persist( P.ScopeChanged( id, appliesTo ) ) { acceptAndPublish }
 
         case P.UseAlgorithms( id, algorithms, config ) => {
           persist( P.AlgorithmsChanged( id, algorithms, config ) ) { e =>
@@ -302,7 +318,7 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
         }
 
         case P.ResolveVia( id, isQuorum, reduce ) => {
-          persist( P.AnalysisResolutionChanged( id, isQuorum, reduce ) ) {acceptAndPublish}
+          persist( P.AnalysisResolutionChanged( id, isQuorum, reduce ) ) { acceptAndPublish }
         }
       }
 
@@ -354,11 +370,14 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
 
       def detectionFlow(p: OutlierPlan, parallelism: Int)(implicit system: ActorSystem, timeout: Timeout): DetectFlow = {
         Flow[TimeSeries]
-        .map { ts => log.debug( "AnalysisPlanModule:FLOW-DETECT: before-filter: [{}]", ts.toString ); ts }
         .map { ts => OutlierDetectionMessage( ts, p ).disjunction }
         .collect { case scalaz.\/-( m ) => m }
-        .map { m => log.debug( "AnalysisPlanModule:FLOW-DETECT: on-to-detection-grid: [{}]", m.toString ); m }
-        .mapAsync( parallelism ) { m =>( detector ?+ m ) }.withAttributes( ActorAttributes supervisionStrategy detectorDecider )
+        .map { m =>
+          inletSeries.mark()
+          inletPoints.mark( m.source.points.size )
+          m
+        }
+        .mapAsync( parallelism ) { m => ( detector ?+ m ) }.withAttributes( ActorAttributes supervisionStrategy detectorDecider )
         .filter {
           case Envelope( DetectionResult( outliers, _ ), _ ) => true
           case DetectionResult( outliers, _ ) => true
@@ -376,6 +395,18 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
         .collect {
           case Envelope( DetectionResult( outliers, _ ), _ ) => outliers
           case DetectionResult( outliers, _ ) => outliers
+        }
+        .map {
+          case m => {
+            val nrPoints = m.source.size
+            val nrAnomalyPoints = m.anomalySize
+            outletResults.mark()
+            outletResultsPoints.mark( nrPoints )
+            if ( m.hasAnomalies ) outletResultsAnomalies.mark() else outletResultsConformities.mark()
+            outletResultsPointsAnomalies.mark( nrAnomalyPoints )
+            outletResultsPointsConformities.mark( nrPoints - nrAnomalyPoints )
+            m
+          }
         }
       }
 

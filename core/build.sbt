@@ -27,6 +27,7 @@ libraryDependencies ++=
     akka.inMemory,
     facility.lang,
     facility.parboiled,
+    facility.squants,
     facility.hadoopClient,
     facility.pyrolite,
     facility.msgpack

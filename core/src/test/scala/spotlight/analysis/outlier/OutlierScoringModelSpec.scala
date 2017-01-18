@@ -3,6 +3,9 @@ package spotlight.analysis.outlier
 import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicInteger
 
+import scala.concurrent.duration._
+import scala.concurrent.{Await, Future}
+import scala.util.Failure
 import akka.actor.ActorSystem
 import akka.pattern.ask
 import akka.stream.scaladsl._
@@ -18,6 +21,8 @@ import org.apache.commons.math3.random.RandomDataGenerator
 import org.joda.{time => joda}
 import org.scalatest.Tag
 import peds.commons.log.Trace
+import spotlight.analysis.outlier.algorithm.{AlgorithmCellShardModule, AlgorithmLookupShardCatalogModule}
+import spotlight.analysis.outlier.{AnalysisPlanProtocol => AP}
 import spotlight.analysis.outlier.algorithm.statistical.SimpleMovingAverageAlgorithm
 import spotlight.model.outlier._
 import spotlight.model.timeseries.TimeSeriesBase.Merging
@@ -25,10 +30,6 @@ import spotlight.model.timeseries.{DataPoint, TimeSeries}
 import spotlight.protocol.PythonPickleProtocol
 import spotlight.testkit.ParallelAkkaSpec
 import spotlight.{Settings, Spotlight}
-
-import scala.concurrent.duration._
-import scala.concurrent.{Await, Future}
-import scala.util.Failure
 
 
 /**
@@ -87,7 +88,10 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
     val protocol = new PythonPickleProtocol
     val stringFlow: Flow[ByteString, ByteString, NotUsed] = Flow[ByteString].via( protocol.framingFlow() )
 
-//    val configurationReloader = Settings.reloader( Array.empty[String] )()()
+    val bus = TestProbe()
+    system.eventStream.subscribe( bus.ref, classOf[AP.Event] )
+
+    //    val configurationReloader = Settings.reloader( Array.empty[String] )()()
 
 //    val algo = SeriesDensityAnalyzer.Algorithm
     val algo = SimpleMovingAverageAlgorithm.algorithm.label
@@ -114,7 +118,12 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
       )
     )
 
-    def rootTypes: Set[AggregateRootType] = Set( AnalysisPlanModule.module.rootType, SimpleMovingAverageAlgorithm.rootType )
+    def rootTypes: Set[AggregateRootType] = Set(
+      AnalysisPlanModule.module.rootType,
+      AlgorithmLookupShardCatalogModule.rootType,
+      AlgorithmCellShardModule.module.rootType,
+      SimpleMovingAverageAlgorithm.rootType
+    )
 
     lazy val boundedContext: BoundedContext = trace.block( "boundedContext" ) {
       implicit val actorTimeout = akka.util.Timeout( 5.seconds.dilated )
@@ -362,6 +371,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
       import com.github.nscala_time.time.OrderingImplicits._
       import f._
       import system.dispatcher
+      import peds.akka.envelope._
 
       val algos = Set( algo )
       val grouping: Option[OutlierPlan.Grouping] = {
@@ -392,8 +402,22 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
         )
       )
 
-      import demesne.module.entity.{messages => EntityMessages}
-      model.aggregateOf( AnalysisPlanModule.module.rootType, defaultPlan.id ) ! EntityMessages.Add( defaultPlan.id, Some(defaultPlan))
+      logger.debug( "default plan = [{}]", defaultPlan )
+      val addMsg = AP.Add( defaultPlan.id, Some(defaultPlan) )
+      logger.debug( "Add message: [{}]", addMsg )
+      model.aggregateOf( AnalysisPlanModule.module.rootType, defaultPlan.id ) !+ addMsg
+      bus.expectMsgClass( max = 5.seconds.dilated, classOf[AP.Added] )
+//      bus.expectMsgPF( max = 5.seconds.dilated, hint = "add plan" ) {
+//        case p: protocol.Added => {
+//          logger.info( "ADD PLAN: p.sourceId[{}]=[{}]   id[{}]=[{}]", p.sourceId.getClass.getCanonicalName, p.sourceId, tid.getClass.getCanonicalName, tid)
+//          p.sourceId mustBe plan.id
+//          assert( p.info.isDefined )
+//          p.info.get mustBe an [OutlierPlan]
+//          val actual = p.info.get.asInstanceOf[OutlierPlan]
+//          actual.name mustBe "TestPlan"
+//          actual.algorithms mustBe Set( algo )
+//        }
+//      }
 
       Thread.sleep( 1000 ) // ugh let plan added
 
