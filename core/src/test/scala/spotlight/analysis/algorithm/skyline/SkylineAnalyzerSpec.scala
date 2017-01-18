@@ -1,4 +1,4 @@
-package spotlight.analysis.outlier.algorithm.skyline
+package spotlight.analysis.algorithm.skyline
 
 import akka.actor.ActorSystem
 
@@ -7,7 +7,7 @@ import scala.concurrent.duration._
 import akka.testkit._
 import com.github.nscala_time.time.JodaImplicits._
 import com.typesafe.config.{Config, ConfigFactory}
-import spotlight.analysis.outlier.{DetectOutliersInSeries, DetectUsing, DetectionAlgorithmRouter}
+import spotlight.analysis.{DetectOutliersInSeries, DetectUsing, DetectionAlgorithmRouter}
 import spotlight.model.outlier._
 import spotlight.model.timeseries.DataPoint
 import org.joda.{time => joda}

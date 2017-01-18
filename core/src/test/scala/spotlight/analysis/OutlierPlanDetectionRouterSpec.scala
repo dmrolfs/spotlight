@@ -1,4 +1,4 @@
-//package spotlight.analysis.outlier
+//package spotlight.analysis
 //
 //import java.util.concurrent.atomic.AtomicInteger
 //import scala.concurrent.{Await, ExecutionContext}
@@ -17,8 +17,8 @@
 //import com.github.nscala_time.time.Imports.{richDateTime, richSDuration}
 //import demesne.{AggregateRootType, BoundedContext, DomainModel}
 //import peds.commons.log.Trace
-//import spotlight.analysis.outlier.OutlierDetection.DetectionResult
-//import spotlight.analysis.outlier.algorithm.skyline.SimpleMovingAverageAnalyzer
+//import spotlight.analysis.OutlierDetection.DetectionResult
+//import spotlight.analysis.algorithm.skyline.SimpleMovingAverageAnalyzer
 //import spotlight.testkit.ParallelAkkaSpec
 //import spotlight.model.outlier._
 //import spotlight.model.timeseries.{DataPoint, ThresholdBoundary, TimeSeries}

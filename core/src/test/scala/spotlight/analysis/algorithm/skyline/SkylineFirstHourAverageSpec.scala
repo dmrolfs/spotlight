@@ -1,4 +1,4 @@
-package spotlight.analysis.outlier.algorithm.skyline
+package spotlight.analysis.algorithm.skyline
 
 import akka.actor.ActorSystem
 
@@ -12,8 +12,8 @@ import org.joda.{time => joda}
 import com.github.nscala_time.time.JodaImplicits._
 import peds.akka.envelope.WorkId
 import peds.commons.identifier.{ShortUUID, TaggedID}
-import spotlight.analysis.outlier.algorithm.CommonAnalyzer
-import spotlight.analysis.outlier.{DetectOutliersInSeries, DetectUsing, DetectionAlgorithmRouter}
+import spotlight.analysis.algorithm.CommonAnalyzer
+import spotlight.analysis.{DetectOutliersInSeries, DetectUsing, DetectionAlgorithmRouter}
 import spotlight.model.outlier.{OutlierPlan, SeriesOutliers}
 import spotlight.model.timeseries.{DataPoint, ThresholdBoundary}
 import spotlight.testkit.TestCorrelatedSeries

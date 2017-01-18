@@ -1,4 +1,4 @@
-package spotlight.analysis.outlier
+package spotlight.analysis
 
 import scala.concurrent.duration._
 import akka.actor.ActorSystem
@@ -9,8 +9,8 @@ import org.joda.{time => joda}
 import org.scalatest.mockito.MockitoSugar
 import org.mockito.Mockito._
 import peds.akka.envelope.{Envelope, WorkId}
-import spotlight.analysis.outlier.DetectionAlgorithmRouter.ShardedRootTypeProxy
-import spotlight.analysis.outlier.algorithm.{AlgorithmLookupShardCatalogModule, AlgorithmLookupShardProtocol}
+import spotlight.analysis.DetectionAlgorithmRouter.ShardedRootTypeProxy
+import spotlight.analysis.algorithm.{AlgorithmLookupShardCatalogModule, AlgorithmLookupShardProtocol}
 import spotlight.model.outlier.{IsQuorum, OutlierPlan, ReduceOutliers}
 import spotlight.model.timeseries.{DataPoint, TimeSeries}
 import spotlight.testkit.ParallelAkkaSpec

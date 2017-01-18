@@ -172,7 +172,7 @@ extends ActorSubscriber with EnvelopingActor with InstrumentedActor with ActorLo
     underlying ! WaitForStart
   }
 
-  import spotlight.analysis.outlier.{ PlanCatalogProtocol => P }
+  import spotlight.analysis.{ PlanCatalogProtocol => P }
 
   override def receive: Receive = LoggingReceive { around( quiscent ) }
 

@@ -13,7 +13,7 @@ import spotlight.analysis.algorithm.AlgorithmModule
 import spotlight.analysis.algorithm.AlgorithmProtocol.Advanced
 import spotlight.analysis.{DetectUsing, RecentHistory}
 import spotlight.model.timeseries._
-import spotlight.analysis.outlier.algorithm.AlgorithmModule.ShapeCompanion
+import spotlight.analysis.algorithm.AlgorithmModule.ShapeCompanion
 
 
 /**

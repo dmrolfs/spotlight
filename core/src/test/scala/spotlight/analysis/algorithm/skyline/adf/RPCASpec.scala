@@ -1,4 +1,4 @@
-package spotlight.analysis.outlier.algorithm.skyline.adf
+package spotlight.analysis.algorithm.skyline.adf
 
 import org.apache.commons.math3.linear.MatrixUtils
 import org.scalatest._

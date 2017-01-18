@@ -45,7 +45,7 @@ object Moment extends LazyLogging {
     }
   }
 
-  final case class Statistics private[outlier](
+  final case class Statistics private[analysis](
     N: Long = 1,
     alpha: Double,
     sum: Double,
@@ -77,7 +77,7 @@ object Moment extends LazyLogging {
   }
 
 
-  final case class SimpleMoment private[outlier](
+  final case class SimpleMoment private[analysis](
     override val alpha: Double,
     override val statistics: Option[Moment.Statistics] = None
   ) extends Moment {
@@ -89,6 +89,6 @@ object Moment extends LazyLogging {
   }
 
 
-  final case class InvalidMomentAlphaError private[outlier]( alpha: Double )
+  final case class InvalidMomentAlphaError private[analysis]( alpha: Double )
   extends IllegalArgumentException( s"cannot create MomentStatistics with alpha [${alpha}] outside [0, 1]" )
 }

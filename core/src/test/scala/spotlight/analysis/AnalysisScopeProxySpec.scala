@@ -1,4 +1,4 @@
-//package spotlight.analysis.outlier
+//package spotlight.analysis
 //
 //import scala.concurrent.duration._
 //import akka.NotUsed
@@ -18,8 +18,8 @@
 //import org.mockito.Mockito._
 //import peds.commons.V
 //import peds.akka.envelope._
-//import spotlight.analysis.outlier.AnalysisPlanProtocol.AcceptTimeSeries
-//import spotlight.analysis.outlier.OutlierDetection.DetectionResult
+//import spotlight.analysis.AnalysisPlanProtocol.AcceptTimeSeries
+//import spotlight.analysis.OutlierDetection.DetectionResult
 //import spotlight.model.outlier._
 //import spotlight.model.outlier.OutlierPlan.Scope
 //import spotlight.model.timeseries._

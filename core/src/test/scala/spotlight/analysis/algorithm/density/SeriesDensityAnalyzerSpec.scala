@@ -1,4 +1,4 @@
-package spotlight.analysis.outlier.algorithm.density
+package spotlight.analysis.algorithm.density
 
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -19,8 +19,8 @@ import peds.akka.envelope.WorkId
 import peds.commons.V
 import peds.commons.identifier.{ShortUUID, TaggedID}
 import shapeless._
-import spotlight.analysis.outlier._
-import spotlight.analysis.outlier.algorithm.{AlgorithmActor, CommonAnalyzer}
+import spotlight.analysis._
+import spotlight.analysis.algorithm.{AlgorithmActor, CommonAnalyzer}
 import spotlight.model.outlier._
 import spotlight.model.timeseries._
 import spotlight.testkit.ParallelAkkaSpec

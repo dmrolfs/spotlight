@@ -26,7 +26,7 @@ object RecentHistory {
   def unapply( recent: RecentHistory ): Option[Seq[PointA]] = Some( recent.points )
 
 
-  final case class RecentHistoryCell private[outlier](
+  final case class RecentHistoryCell private[analysis](
     override val points: Seq[PointA],
     override val retention: Int
   ) extends RecentHistory {

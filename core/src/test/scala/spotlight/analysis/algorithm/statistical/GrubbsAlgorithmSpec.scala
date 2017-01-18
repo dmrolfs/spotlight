@@ -1,4 +1,4 @@
-package spotlight.analysis.outlier.algorithm.statistical
+package spotlight.analysis.algorithm.statistical
 
 import scala.annotation.tailrec
 import akka.actor.ActorSystem
@@ -11,8 +11,8 @@ import org.scalatest.Assertion
 import org.typelevel.scalatest.{DisjunctionMatchers, DisjunctionValues}
 import peds.commons.TryV
 import peds.commons.log.Trace
-import spotlight.analysis.outlier.RecentHistory
-import spotlight.analysis.outlier.algorithm.{AlgorithmModule, AlgorithmModuleSpec, AlgorithmProtocol => P}
+import spotlight.analysis.RecentHistory
+import spotlight.analysis.algorithm.{AlgorithmModule, AlgorithmModuleSpec, AlgorithmProtocol => P}
 import spotlight.model.timeseries._
 
 

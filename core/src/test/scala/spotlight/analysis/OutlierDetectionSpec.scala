@@ -1,4 +1,4 @@
-package spotlight.analysis.outlier
+package spotlight.analysis
 
 import scala.concurrent.duration._
 import akka.actor.{ActorRef, ActorSystem, Props}

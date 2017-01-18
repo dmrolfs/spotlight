@@ -1,4 +1,4 @@
-package spotlight.analysis.outlier
+package spotlight.analysis
 
 import scala.concurrent.Await
 import scala.concurrent.duration._
@@ -18,12 +18,12 @@ import peds.commons.V
 import peds.commons.identifier.{ShortUUID, TaggedID}
 import peds.commons.log.Trace
 import shapeless.Lens
-import spotlight.analysis.outlier.AnalysisPlanModule.AggregateRoot.PlanActor
-import spotlight.analysis.outlier.AnalysisPlanModule.AggregateRoot.PlanActor.{FlowConfigurationProvider, WorkerProvider}
-import spotlight.analysis.outlier.algorithm.statistical.SimpleMovingAverageAlgorithm
+import spotlight.analysis.AnalysisPlanModule.AggregateRoot.PlanActor
+import spotlight.analysis.AnalysisPlanModule.AggregateRoot.PlanActor.{FlowConfigurationProvider, WorkerProvider}
+import spotlight.analysis.algorithm.statistical.SimpleMovingAverageAlgorithm
 import spotlight.model.outlier._
 import spotlight.testkit.EntityModuleSpec
-import spotlight.analysis.outlier.{AnalysisPlanProtocol => P}
+import spotlight.analysis.{AnalysisPlanProtocol => P}
 import spotlight.model.timeseries._
 
 

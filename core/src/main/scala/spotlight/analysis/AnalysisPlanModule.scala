@@ -100,7 +100,7 @@ object AnalysisPlanProtocol extends EntityProtocol[OutlierPlan#ID] {
   */
 object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumented with LazyLogging {
   override lazy val metricBaseName: MetricName = {
-    MetricName( spotlight.BaseMetricName, spotlight.analysis.outlier.BaseMetricName )
+    MetricName( spotlight.BaseMetricName, spotlight.analysis.BaseMetricName )
   }
 
   val droppedSeriesMeter: Meter = metrics.meter( "dropped", "series" )
@@ -134,7 +134,7 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
   val namedPlanIndex: Symbol = 'NamedPlan
 
   val indexes: MakeIndexSpec = {
-    import spotlight.analysis.outlier.{ AnalysisPlanProtocol => AP }
+    import spotlight.analysis.{ AnalysisPlanProtocol => AP }
 
     () => {
       Seq(
@@ -239,7 +239,7 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
       outer: PlanActor.FlowConfigurationProvider with PlanActor.WorkerProvider with EventPublisher =>
 
       import akka.stream.Supervision
-      import spotlight.analysis.outlier.{AnalysisPlanProtocol => P}
+      import spotlight.analysis.{AnalysisPlanProtocol => P}
 
       override lazy val metricBaseName: MetricName = MetricName( classOf[PlanActor] )
       val failuresMeter: Meter = metrics.meter( "failures" )

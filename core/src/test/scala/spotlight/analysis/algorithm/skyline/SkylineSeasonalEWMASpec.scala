@@ -1,4 +1,4 @@
-//package spotlight.analysis.outlier.algorithm.skyline
+//package spotlight.analysis.algorithm.skyline
 //
 //import scala.collection.immutable
 //import scala.concurrent.duration._
@@ -7,7 +7,7 @@
 //import com.typesafe.config.{Config, ConfigFactory}
 //import org.joda.{time => joda}
 //import org.mockito.Mockito._
-//import spotlight.analysis.outlier.{DetectOutliersInSeries, DetectUsing, DetectionAlgorithmRouter, Moment}
+//import spotlight.analysis.{DetectOutliersInSeries, DetectUsing, DetectionAlgorithmRouter, Moment}
 //import spotlight.model.outlier._
 //import spotlight.testkit.TestCorrelatedSeries
 //

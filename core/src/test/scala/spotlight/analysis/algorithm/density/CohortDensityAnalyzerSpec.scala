@@ -1,4 +1,4 @@
-//package spotlight.analysis.outlier.algorithm.density
+//package spotlight.analysis.algorithm.density
 //
 //import java.util.concurrent.atomic.AtomicInteger
 //
@@ -10,8 +10,8 @@
 //import org.joda.{time => joda}
 //import org.scalatest.mockito.MockitoSugar
 //import shapeless._
-//import spotlight.analysis.outlier._
-//import spotlight.analysis.outlier.algorithm.AlgorithmActor
+//import spotlight.analysis._
+//import spotlight.analysis.algorithm.AlgorithmActor
 //import spotlight.model.outlier.{CohortOutliers, NoOutliers, OutlierPlan}
 //import spotlight.model.timeseries._
 //import spotlight.testkit.ParallelAkkaSpec

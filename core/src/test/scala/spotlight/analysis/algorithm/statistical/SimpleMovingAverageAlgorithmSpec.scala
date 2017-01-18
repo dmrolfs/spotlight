@@ -1,4 +1,4 @@
-package spotlight.analysis.outlier.algorithm.statistical
+package spotlight.analysis.algorithm.statistical
 
 import scala.annotation.tailrec
 import akka.actor.ActorSystem
@@ -6,7 +6,7 @@ import com.typesafe.config.Config
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import org.mockito.Mockito._
 import org.scalatest.Assertion
-import spotlight.analysis.outlier.algorithm.{AlgorithmModuleSpec, AlgorithmProtocol => P}
+import spotlight.analysis.algorithm.{AlgorithmModuleSpec, AlgorithmProtocol => P}
 import spotlight.model.timeseries._
 
 

@@ -1,4 +1,4 @@
-package spotlight.analysis.outlier
+package spotlight.analysis
 
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
@@ -13,10 +13,10 @@ import peds.akka.envelope.Envelope
 import demesne.{AggregateRootType, BoundedContext, DomainModel}
 import demesne.testkit.concurrent.CountDownFunction
 import peds.akka.envelope._
-import spotlight.analysis.outlier.PlanCatalogProtocol.CatalogedPlans
-import spotlight.analysis.outlier.{AnalysisPlanProtocol => AP}
+import spotlight.analysis.PlanCatalogProtocol.CatalogedPlans
+import spotlight.analysis.{AnalysisPlanProtocol => AP}
 import spotlight.testkit.ParallelAkkaSpec
-import spotlight.analysis.outlier.{PlanCatalogProtocol => P}
+import spotlight.analysis.{PlanCatalogProtocol => P}
 import spotlight.model.outlier.OutlierPlan
 import spotlight.model.timeseries.Topic
 

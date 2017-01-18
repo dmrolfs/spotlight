@@ -1,4 +1,4 @@
-package spotlight.analysis.outlier.algorithm.skyline
+package spotlight.analysis.algorithm.skyline
 
 import akka.actor.ActorSystem
 
@@ -6,7 +6,7 @@ import scala.concurrent.duration._
 import akka.testkit._
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.LazyLogging
-import spotlight.analysis.outlier.HistoricalStatistics
+import spotlight.analysis.HistoricalStatistics
 import spotlight.model.outlier._
 import spotlight.model.timeseries.{DataPoint, TimeSeries, TimeSeriesBase}
 import spotlight.testkit.ParallelAkkaSpec
@@ -16,7 +16,7 @@ import org.mockito.Mockito._
 import org.scalatest.Tag
 import org.scalatest.mockito.MockitoSugar
 import peds.commons.V
-import spotlight.analysis.outlier.algorithm.CommonAnalyzer
+import spotlight.analysis.algorithm.CommonAnalyzer
 
 
 /**

@@ -263,7 +263,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
   initializeMetrics()  // defer to concrete modules to initiate?
 
   override lazy val metricBaseName: MetricName = {
-    MetricName( spotlight.BaseMetricName, spotlight.analysis.outlier.BaseMetricName, "algorithm", rootType.name )
+    MetricName( spotlight.BaseMetricName, spotlight.analysis.BaseMetricName, "algorithm", rootType.name )
   }
 
   def initializeMetrics(): Unit = {
@@ -639,7 +639,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
 //      case AdvancedType( adv ) => accept( adv )
     }
 
-    import spotlight.analysis.outlier.algorithm.{ AlgorithmProtocol => AP }
+    import spotlight.analysis.algorithm.{ AlgorithmProtocol => AP }
 
     val stateReceiver: Receive = {
       case m: AP.EstimateSize => {

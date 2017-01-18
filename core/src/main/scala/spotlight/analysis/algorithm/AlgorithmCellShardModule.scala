@@ -177,7 +177,7 @@ object AlgorithmCellShardModule extends LazyLogging {
   with demesne.AggregateRoot.Provider {
     outer: EventPublisher =>
 
-    import spotlight.analysis.outlier.algorithm.{ AlgorithmCellShardProtocol => P }
+    import spotlight.analysis.algorithm.{ AlgorithmCellShardProtocol => P }
 
     override lazy val metricBaseName: MetricName = MetricName( classOf[AlgorithmShardingActor] )
 
@@ -189,7 +189,7 @@ object AlgorithmCellShardModule extends LazyLogging {
       override lazy val metricBaseName: MetricName = {
         MetricName(
           spotlight.BaseMetricName,
-          spotlight.analysis.outlier.BaseMetricName,
+          spotlight.analysis.BaseMetricName,
           "algorithm",
           plan.name,
           id.algorithmLabel,
@@ -294,7 +294,7 @@ object AlgorithmCellShardModule extends LazyLogging {
 
     override def receiveCommand: Receive = LoggingReceive { around( routing orElse admin ) }
 
-    import spotlight.analysis.outlier.algorithm.{ AlgorithmProtocol => AP }
+    import spotlight.analysis.algorithm.{ AlgorithmProtocol => AP }
 
     val admin: Receive = {
       case P.Add( id, plan, algorithmRootType, nrCells) if id == aggregateId && Option(state).isEmpty => {

@@ -51,7 +51,7 @@ object OutlierDetectionMessage {
 }
 
 
-final case class DetectOutliersInSeries private[outlier](
+final case class DetectOutliersInSeries private[analysis](
   override val source: TimeSeries,
   override val plan: OutlierPlan,
   override val subscriber: Option[ActorRef],
@@ -64,7 +64,7 @@ final case class DetectOutliersInSeries private[outlier](
 }
 
 
-final case class DetectUsing private[outlier](
+final case class DetectUsing private[analysis](
   override val targetId: DetectUsing#TID,
   algorithm: Symbol,
   payload: OutlierDetectionMessage,
@@ -85,7 +85,7 @@ final case class DetectUsing private[outlier](
 }
 
 
-final case class UnrecognizedPayload private[outlier](
+final case class UnrecognizedPayload private[analysis](
   algorithm: Symbol,
   request: DetectUsing
 ) extends OutlierDetectionMessage {

@@ -89,7 +89,7 @@ object PlanCatalog extends LazyLogging {
     timeout: Timeout,
     materializer: Materializer
   ): Future[Flow[TimeSeries, Outliers, NotUsed]] = {
-    import spotlight.analysis.outlier.{PlanCatalogProtocol => P}
+    import spotlight.analysis.{PlanCatalogProtocol => P}
     implicit val ec = system.dispatcher
 
     for {
@@ -107,7 +107,7 @@ object PlanCatalog extends LazyLogging {
   }
 
 
-  private[outlier] case class PlanRequest( subscriber: ActorRef, startNanos: Long = System.nanoTime() )
+  private[analysis] case class PlanRequest( subscriber: ActorRef, startNanos: Long = System.nanoTime() )
 
 
   trait PlanProvider {
@@ -317,7 +317,7 @@ class PlanCatalog( boundedContext: BoundedContext )
 extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorLogging {
   outer: PlanCatalog.ExecutionProvider with PlanCatalog.PlanProvider =>
 
-  import spotlight.analysis.outlier.{ PlanCatalogProtocol => P, AnalysisPlanProtocol => AP }
+  import spotlight.analysis.{ PlanCatalogProtocol => P, AnalysisPlanProtocol => AP }
 
   override lazy val metricBaseName: MetricName = MetricName( classOf[PlanCatalog] )
 
@@ -642,8 +642,6 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
     implicit ec: ExecutionContext,
     to: Timeout
   ): Future[Map[String, OutlierPlan.Summary]] = {
-    import spotlight.analysis.outlier.{ AnalysisPlanProtocol => AP }
-
     def loadSpecifiedPlans( model: DomainModel ): Seq[Future[(String, OutlierPlan.Summary)]] = {
       missing.toSeq.map { p =>
         log.info( "PlanCatalog[{}]: making plan entity for: [{}]", self.path, p )

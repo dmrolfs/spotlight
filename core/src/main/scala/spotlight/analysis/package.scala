@@ -58,6 +58,6 @@ package object analysis {
   }
 
 
-  final case class PlanMismatchError private[outlier]( plan: OutlierPlan, timeseries: TimeSeriesBase )
+  final case class PlanMismatchError private[analysis]( plan: OutlierPlan, timeseries: TimeSeriesBase )
   extends IllegalStateException( s"plan [${plan.name}:${plan.id}] improperly associated with time series [${timeseries.topic}]" )
 }

@@ -1,4 +1,4 @@
-package spotlight.analysis.outlier.algorithm.statistical
+package spotlight.analysis.algorithm.statistical
 
 import scala.annotation.tailrec
 import akka.actor.ActorSystem
@@ -6,8 +6,8 @@ import com.typesafe.config.Config
 import org.joda.{time => joda}
 import org.apache.commons.math3.stat.descriptive.StatisticalSummary
 import org.scalatest.Assertion
-import spotlight.analysis.outlier.Moment
-import spotlight.analysis.outlier.algorithm.{AlgorithmModuleSpec, AlgorithmProtocol => P}
+import spotlight.analysis.Moment
+import spotlight.analysis.algorithm.{AlgorithmModuleSpec, AlgorithmProtocol => P}
 import spotlight.model.timeseries._
 
 

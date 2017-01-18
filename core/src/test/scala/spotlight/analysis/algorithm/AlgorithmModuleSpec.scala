@@ -1,4 +1,4 @@
-package spotlight.analysis.outlier.algorithm
+package spotlight.analysis.algorithm
 
 import scala.concurrent.duration._
 import scala.reflect.ClassTag
@@ -19,8 +19,8 @@ import peds.archetype.domain.model.core.EntityIdentifying
 import peds.commons.V
 import peds.commons.identifier.ShortUUID
 import peds.commons.log.Trace
-import spotlight.analysis.outlier.{DetectOutliersInSeries, DetectUsing, HistoricalStatistics}
-import spotlight.analysis.outlier.algorithm.{AlgorithmProtocol => P}
+import spotlight.analysis.{DetectOutliersInSeries, DetectUsing, HistoricalStatistics}
+import spotlight.analysis.algorithm.{AlgorithmProtocol => P}
 import spotlight.model.outlier._
 import spotlight.model.timeseries._
 import spotlight.testkit.TestCorrelatedSeries

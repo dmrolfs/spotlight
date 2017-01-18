@@ -1,4 +1,4 @@
-package spotlight.analysis.outlier
+package spotlight.analysis
 
 import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicInteger
@@ -21,9 +21,9 @@ import org.apache.commons.math3.random.RandomDataGenerator
 import org.joda.{time => joda}
 import org.scalatest.Tag
 import peds.commons.log.Trace
-import spotlight.analysis.outlier.algorithm.{AlgorithmCellShardModule, AlgorithmLookupShardCatalogModule}
-import spotlight.analysis.outlier.{AnalysisPlanProtocol => AP}
-import spotlight.analysis.outlier.algorithm.statistical.SimpleMovingAverageAlgorithm
+import spotlight.analysis.algorithm.{AlgorithmCellShardModule, AlgorithmLookupShardCatalogModule}
+import spotlight.analysis.{AnalysisPlanProtocol => AP}
+import spotlight.analysis.algorithm.statistical.SimpleMovingAverageAlgorithm
 import spotlight.model.outlier._
 import spotlight.model.timeseries.TimeSeriesBase.Merging
 import spotlight.model.timeseries.{DataPoint, TimeSeries}

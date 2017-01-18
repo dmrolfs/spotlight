@@ -235,8 +235,7 @@ object AlgorithmLookupShardCatalogModule extends AggregateRootModule with Instru
       outer: EventPublisher =>
 
       import AlgorithmShardingActor.Availability
-      import spotlight.analysis.outlier.algorithm.{ AlgorithmLookupShardProtocol => P }
-
+      import spotlight.analysis.algorithm.{ AlgorithmLookupShardProtocol => P }
 
       override lazy val metricBaseName: MetricName = MetricName( classOf[AlgorithmShardingActor] )
 

@@ -1,4 +1,4 @@
-package spotlight.analysis.outlier
+package spotlight.analysis
 
 import scala.concurrent.Await
 import scala.concurrent.duration._

@@ -50,7 +50,7 @@ object HistoricalStatistics {
   }
 
 
-  final case class ApacheMath3HistoricalStatistics private[outlier](
+  final case class ApacheMath3HistoricalStatistics private[analysis](
     all: MultivariateSummaryStatistics,
     recent: RecentHistory
   ) extends HistoricalStatistics {

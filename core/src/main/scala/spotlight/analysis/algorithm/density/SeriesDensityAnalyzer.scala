@@ -90,7 +90,7 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
   val distanceMeasure: KOp[AlgorithmContext, DistanceMeasure] = kleisli { _.distanceMeasure }
 
   val updateDistanceMoment: KOp[AlgorithmContext, AlgorithmContext] = {
-    import spotlight.analysis.outlier._
+    import spotlight.analysis._
 
     def distanceIsValid( d: DistanceMeasure, h: HistoricalStatistics ): Boolean = {
       // stinks have to resort to this match. Type class is muted due to instantiating distance measure from configuration.
