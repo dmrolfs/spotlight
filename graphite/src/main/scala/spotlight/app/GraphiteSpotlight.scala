@@ -17,7 +17,7 @@ import kamon.Kamon
 import nl.grons.metrics.scala.MetricName
 import peds.akka.metrics.Instrumented
 import peds.akka.stream.StreamMonitor
-import spotlight.analysis.outlier.OutlierScoringModel
+import spotlight.analysis.OutlierScoringModel
 import spotlight.{Settings, Spotlight, SpotlightContext}
 import spotlight.model.outlier._
 import spotlight.model.timeseries.{TimeSeries, Topic}
@@ -98,7 +98,7 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
     }
 
     import spotlight.app.GraphiteSpotlight.{ WatchPoints => GS }
-    import spotlight.analysis.outlier.OutlierScoringModel.{ WatchPoints => OSM }
+    import spotlight.analysis.OutlierScoringModel.{ WatchPoints => OSM }
     StreamMonitor.set( GS.Framing, GS.Intake, OSM.ScoringPlanned, OSM.PlanBuffer, GS.PublishBuffer, OSM.ScoringUnrecognized )
 
     val connections = Tcp().bind( address.getHostName, address.getPort )

@@ -18,7 +18,7 @@ import peds.akka.metrics.Instrumented
 import demesne.BoundedContext
 import peds.akka.stream.StreamMonitor
 import spotlight.{Spotlight, SpotlightContext, Settings}
-import spotlight.analysis.outlier.DetectFlow
+import spotlight.analysis.DetectFlow
 import spotlight.model.outlier.{Outliers, SeriesOutliers}
 import spotlight.model.timeseries.{DataPoint, ThresholdBoundary, TimeSeries}
 import spotlight.protocol.GraphiteSerializationProtocol
@@ -222,8 +222,8 @@ object SingleBatchExample extends Instrumented with StrictLogging {
 
       intakeBuffer ~> timeSeries ~> score ~> publishBuffer ~> filterOutliers ~> flatterFlow ~> unwrap
 
-      import spotlight.analysis.outlier.OutlierScoringModel.{ WatchPoints => OSM }
-      import spotlight.analysis.outlier.PlanCatalog.{ WatchPoints => C }
+      import spotlight.analysis.OutlierScoringModel.{ WatchPoints => OSM }
+      import spotlight.analysis.PlanCatalog.{ WatchPoints => C }
       StreamMonitor.set(
         'intake,
         'scoring,
