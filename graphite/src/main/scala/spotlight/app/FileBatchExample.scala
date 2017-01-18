@@ -26,7 +26,7 @@ import demesne.BoundedContext
 import peds.akka.stream.Limiter
 import peds.commons.TryV
 import spotlight.{Settings, Spotlight, SpotlightContext}
-import spotlight.analysis.outlier.DetectFlow
+import spotlight.analysis.DetectFlow
 import spotlight.model.outlier._
 import spotlight.model.timeseries.{DataPoint, ThresholdBoundary, TimeSeries}
 import spotlight.protocol.GraphiteSerializationProtocol
@@ -148,8 +148,8 @@ object FileBatchExample extends Instrumented with StrictLogging {
 
       import StreamMonitor._
       import WatchPoints._
-      import spotlight.analysis.outlier.OutlierScoringModel.{ WatchPoints => OSM }
-      import spotlight.analysis.outlier.PlanCatalog.{ WatchPoints => C }
+      import spotlight.analysis.OutlierScoringModel.{ WatchPoints => OSM }
+      import spotlight.analysis.PlanCatalog.{ WatchPoints => C }
       StreamMonitor.set(
         DataSource,
         Intake,

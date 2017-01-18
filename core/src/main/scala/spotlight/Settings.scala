@@ -5,7 +5,7 @@ import java.net.{InetAddress, InetSocketAddress}
 import com.typesafe.config._
 import com.typesafe.scalalogging.LazyLogging
 import peds.commons.{V, Valid}
-import spotlight.analysis.outlier.OutlierDetection
+import spotlight.analysis.OutlierDetection
 import spotlight.model.outlier._
 import spotlight.model.timeseries.Topic
 import spotlight.protocol.{GraphiteSerializationProtocol, MessagePackProtocol, PythonPickleProtocol}
@@ -127,7 +127,7 @@ object Settings extends LazyLogging {
   //  }
 
   def detectionBudgetFrom( c: Config ): Option[Duration] = {
-    spotlight.analysis.outlier.durationFrom( c, SettingsPathRoot + "detection-budget" )
+    spotlight.analysis.durationFrom( c, SettingsPathRoot + "detection-budget" )
   }
 
   def maxInDetectionCpuFactorFrom( c: Config ): Option[Double] = {
@@ -315,7 +315,7 @@ object Settings extends LazyLogging {
   ) extends Settings with LazyLogging {
     override def clusterPort: Int = config.getInt( SimpleSettings.AkkaRemotePortPath )
 
-    override def detectionBudget: Duration = spotlight.analysis.outlier.durationFrom( config, Directory.DETECTION_BUDGET ).get
+    override def detectionBudget: Duration = spotlight.analysis.durationFrom( config, Directory.DETECTION_BUDGET ).get
 
     override def parallelismFactor: Double = {
       val path = "spotlight.workflow.detect.parallelism-cpu-factor"

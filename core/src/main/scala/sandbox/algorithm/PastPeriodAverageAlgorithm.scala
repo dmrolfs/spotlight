@@ -6,10 +6,10 @@ import org.apache.commons.math3.ml.clustering.DoublePoint
 import org.joda.{time => joda}
 import com.github.nscala_time.time.Imports._
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
-import spotlight.analysis.outlier.DetectUsing
-import spotlight.analysis.outlier.algorithm.AlgorithmModule
-import spotlight.analysis.outlier.algorithm.AlgorithmModule.ShapeCompanion
-import spotlight.analysis.outlier.algorithm.AlgorithmProtocol.Advanced
+import spotlight.analysis.DetectUsing
+import spotlight.analysis.algorithm.AlgorithmModule
+import spotlight.analysis.algorithm.AlgorithmModule.ShapeCompanion
+import spotlight.analysis.algorithm.AlgorithmProtocol.Advanced
 import spotlight.model.timeseries._
 
 

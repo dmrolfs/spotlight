@@ -22,10 +22,10 @@ import peds.akka.supervision.{IsolatedLifeCycleSupervisor, OneForOneStrategyFact
 import peds.commons.builder.HasBuilder
 import peds.commons.util._
 import shapeless.{Generic, HNil}
-import spotlight.analysis.outlier._
-import spotlight.analysis.outlier.algorithm.{AlgorithmCellShardModule, AlgorithmLookupShardCatalogModule}
-import spotlight.analysis.outlier.{PlanCatalogProtocol => CP}
-import spotlight.analysis.outlier.algorithm.statistical.{ExponentialMovingAverageAlgorithm, GrubbsAlgorithm, SimpleMovingAverageAlgorithm}
+import spotlight.analysis._
+import spotlight.analysis.{PlanCatalogProtocol => CP}
+import spotlight.analysis.algorithm._
+import spotlight.analysis.algorithm.statistical._
 
 
 /**
