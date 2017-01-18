@@ -25,7 +25,6 @@ import demesne.module.entity.{EntityAggregateModule, EntityProtocol}
 import demesne.module.entity.EntityAggregateModule.MakeIndexSpec
 import spotlight.analysis.outlier.AnalysisPlanProtocol.{AnalysisFlow, MakeFlow}
 import spotlight.analysis.outlier.OutlierDetection.{DetectionResult, DetectionTimedOut}
-import spotlight.analysis.outlier.algorithm.AlgorithmShardCatalog
 import spotlight.model.outlier._
 import spotlight.model.outlier.OutlierPlan.Scope
 import spotlight.model.timeseries._
@@ -100,10 +99,25 @@ object AnalysisPlanProtocol extends EntityProtocol[OutlierPlan#ID] {
   * Created by rolfsd on 5/26/16.
   */
 object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumented with LazyLogging {
-  override lazy val metricBaseName: MetricName = MetricName( getClass )
+  override lazy val metricBaseName: MetricName = {
+    MetricName( spotlight.BaseMetricName, spotlight.analysis.outlier.BaseMetricName )
+  }
 
   val droppedSeriesMeter: Meter = metrics.meter( "dropped", "series" )
   val droppedPointsMeter: Meter = metrics.meter( "dropped", "points" )
+
+  val InletBaseMetricName = "inlet"
+  val inletSeries: Meter = metrics.meter( InletBaseMetricName, "series" )
+  val inletPoints: Meter = metrics.meter( InletBaseMetricName, "points" )
+
+  val OutletResultsBaseMetricName = "outlet.results"
+  val outletResults: Meter = metrics.meter( OutletResultsBaseMetricName )
+  val outletResultsAnomalies: Meter = metrics.meter( OutletResultsBaseMetricName, "anomalies" )
+  val outletResultsConformities: Meter = metrics.meter( OutletResultsBaseMetricName, "conformities" )
+  val outletResultsPoints: Meter = metrics.meter( OutletResultsBaseMetricName, "points" )
+  val outletResultsPointsAnomalies: Meter = metrics.meter( OutletResultsBaseMetricName, "points.anomalies" )
+  val outletResultsPointsConformities: Meter = metrics.meter( OutletResultsBaseMetricName, "points.conformities" )
+
 
 
   implicit val identifying: EntityIdentifying[OutlierPlan] = {
@@ -358,6 +372,11 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
         Flow[TimeSeries]
         .map { ts => OutlierDetectionMessage( ts, p ).disjunction }
         .collect { case scalaz.\/-( m ) => m }
+        .map { m =>
+          inletSeries.mark()
+          inletPoints.mark( m.source.points.size )
+          m
+        }
         .mapAsync( parallelism ) { m => ( detector ?+ m ) }.withAttributes( ActorAttributes supervisionStrategy detectorDecider )
         .filter {
           case Envelope( DetectionResult( outliers, _ ), _ ) => true
@@ -376,6 +395,18 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
         .collect {
           case Envelope( DetectionResult( outliers, _ ), _ ) => outliers
           case DetectionResult( outliers, _ ) => outliers
+        }
+        .map {
+          case m => {
+            val nrPoints = m.source.size
+            val nrAnomalyPoints = m.anomalySize
+            outletResults.mark()
+            outletResultsPoints.mark( nrPoints )
+            if ( m.hasAnomalies ) outletResultsAnomalies.mark() else outletResultsConformities.mark()
+            outletResultsPointsAnomalies.mark( nrAnomalyPoints )
+            outletResultsPointsConformities.mark( nrPoints - nrAnomalyPoints )
+            m
+          }
         }
       }
 

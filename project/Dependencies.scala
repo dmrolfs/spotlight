@@ -84,14 +84,15 @@ object Dependencies {
   object metrics {
     val version = "3.1.2"
     def module( id: String ) = "io.dropwizard.metrics" % s"metrics-$id" % "3.1.2"
-    def all = Seq( sigar, core, graphite, metricsScala, hdrhistogram ) ++ kamon.all
+    def all = Seq( sigar, core, graphite, metricsScala, hdrhistogramReservoir, hdrhistogram ) ++ kamon.all
 
     val sigar = "org.hyperic" % "sigar" % "1.6.4"
 
     val core = module( "core" )
     val graphite = module( "graphite" )
     val metricsScala = "nl.grons" %% "metrics-scala" % "3.5.5_a2.3"
-    val hdrhistogram = "org.mpierce.metrics.reservoir" % "hdrhistogram-metrics-reservoir" % "1.1.2"
+    val hdrhistogramReservoir = "org.mpierce.metrics.reservoir" % "hdrhistogram-metrics-reservoir" % "1.1.2"
+    val hdrhistogram = "org.hdrhistogram" % "HdrHistogram" % "2.1.9"
 
     object kamon {
       val version = "0.6.2"

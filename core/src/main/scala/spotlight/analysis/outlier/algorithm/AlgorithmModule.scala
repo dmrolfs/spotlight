@@ -8,7 +8,6 @@ import scala.concurrent.duration._
 import scala.util.Random
 import scala.reflect._
 import akka.actor._
-import akka.actor.Actor.Receive
 import akka.agent.Agent
 import akka.cluster.sharding.ShardRegion
 import akka.event.LoggingReceive
@@ -35,7 +34,6 @@ import peds.akka.publish.{EventPublisher, StackableStreamPublisher}
 import peds.archetype.domain.model.core.{Entity, EntityIdentifying}
 import peds.commons.{KOp, TryV}
 import peds.commons.identifier.{Identifying, ShortUUID, TaggedID}
-import peds.commons.util._
 import demesne._
 import demesne.PassivationSpecification.StopAggregateRoot
 import demesne.repository.{AggregateRootRepository, CommonLocalRepository, EnvelopingAggregateRootRepository}
@@ -235,7 +233,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
       Agent(
         (
           0L,
-          BloomFilter[AlgorithmModule.ID]( numberOfItems = 10000000, falsePositiveRate = 0.1 )
+          BloomFilter[AlgorithmModule.ID]( numberOfItems = 10000, falsePositiveRate = 0.1 )
         )
       )(
         ExecutionContext.global
@@ -264,7 +262,9 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
 
   initializeMetrics()  // defer to concrete modules to initiate?
 
-  override lazy val metricBaseName: MetricName = MetricName( "spotlight.analysis.outlier.algorithm." + rootType.name )
+  override lazy val metricBaseName: MetricName = {
+    MetricName( spotlight.BaseMetricName, spotlight.analysis.outlier.BaseMetricName, "algorithm", rootType.name )
+  }
 
   def initializeMetrics(): Unit = {
     stripLingeringMetrics()
@@ -527,6 +527,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
 
   class AlgorithmActor( override val model: DomainModel, override val rootType: AggregateRootType )
   extends AggregateRoot[State, ID]
+  with SnapshotLimiter
   with Passivating[ID]
   with EnvelopingActor
   with AggregateRoot.Provider
@@ -562,19 +563,6 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
     override lazy val metricBaseName: MetricName = module.metricBaseName
     lazy val executionTimer: Timer = metrics.timer( "execution" )
 
-    var _lastMeaningfulContact: Long = System.nanoTime()
-    def meaningfulTouch(): Long = { _lastMeaningfulContact = System.nanoTime(); _lastMeaningfulContact }
-    def checkNoisyAffect( message: Any ): Boolean = {
-      message match {
-        case m: NotInfluenceReceiveTimeout => false
-        case m => {
-          val check = rootType.passivation.inactivityTimeout.toNanos < ( System.nanoTime() - _lastMeaningfulContact )
-          if ( check ) log.error( "#TEST AlgorithmModule[{}] after-timeout:[{}] received noisy message:[{}]", self.path.name, check, m )
-          check
-        }
-      }
-    }
-
     override var state: State = State( aggregateId )
     override lazy val evState: ClassTag[State] = ClassTag( classOf[State] )
 
@@ -592,13 +580,11 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
 
     val active: Receive = {
       case msg @ DetectUsing( _, algo, payload: DetectOutliersInSeries, _, _ ) => {
-        reportFirstMessage( msg )
-        checkNoisyAffect( msg )
         val aggregator = sender()
 
         val start = System.nanoTime()
         @inline def stopTimer( start: Long ): Unit = {
-          executionTimer.update( /*System.nanoTime()*/ meaningfulTouch() - start, scala.concurrent.duration.NANOSECONDS )
+          executionTimer.update( System.nanoTime() - start, scala.concurrent.duration.NANOSECONDS )
         }
 
         ( makeAlgorithmContext >=> findOutliers >=> toOutliers ).run( msg ) match {
@@ -649,7 +635,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
         }
       }
 
-      case AdvancedType( adv ) => reportFirstMessage( adv ); checkNoisyAffect(adv); touch(); persist( adv ) { accept }
+      case AdvancedType( adv ) => persist( adv ) { accept }
 //      case AdvancedType( adv ) => accept( adv )
     }
 
@@ -657,8 +643,6 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
 
     val stateReceiver: Receive = {
       case m: AP.EstimateSize => {
-        reportFirstMessage( m )
-        checkNoisyAffect(m)
         sender() !+ AP.EstimatedSize(
           sourceId = aggregateId,
           nrShapes = state.shapes.size,
@@ -667,17 +651,14 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
       }
 
       case m @ AP.GetTopicShapeSnapshot( _, topic ) => {
-        reportFirstMessage( m )
-        checkNoisyAffect(m)
         sender() ! AP.TopicShapeSnapshot( aggregateId, algorithm.label, topic, state.shapes.get(topic) )
       }
 
-      case m: AP.GetStateSnapshot => checkNoisyAffect(m); sender() ! AP.StateSnapshot( aggregateId, state )
+      case m: AP.GetStateSnapshot => sender() ! AP.StateSnapshot( aggregateId, state )
     }
 
     val nonfunctional: Receive = {
       case StopAggregateRootType( m ) => {
-        reportFirstMessage( m )
         log.warning( "#TEST #AlgorithmModule[{}] started passivating...", self.path.name )
         startPassivationTimer()
         saveSnapshot( state )
@@ -685,36 +666,30 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
       }
 
       case e @ SaveSnapshotSuccess( meta ) => {
-        reportFirstMessage( e )
-        checkNoisyAffect(e)
         stopSnapshotTimer( e )
-
-//        log.debug(
-//          "[{} - {}]: successful snapshot, deleting journal messages up to sequenceNr: [{}]",
-//          self.path.name, rootType.snapshotPeriod.map{ _.toCoarsest }, meta.sequenceNr
-//        )
-
         startSweepTimer()
         deleteMessages( meta.sequenceNr )
       }
 
       case e @ SaveSnapshotFailure( meta, ex ) => {
-        reportFirstMessage( e )
-        checkNoisyAffect(e)
         stopSnapshotTimer( e )
         log.warning( "[{}] failed to save snapshot. meta:[{}] cause:[{}]", self.path.name, meta, ex )
       }
 
+      case e: DeleteSnapshotsSuccess => {
+        log.warning( "#TEST #DEBUG [{}] successfully cleared snapshots up to: [{}]", self.path.name, e.criteria )
+      }
+
+      case e @ DeleteSnapshotsFailure( criteria, cause ) => {
+        log.warning( "[{}] failed to clear snapshots. meta:[{}] cause:[{}]", self.path.name, criteria, cause )
+      }
+
       case e: DeleteMessagesSuccess => {
-        reportFirstMessage( e )
-        checkNoisyAffect(e)
         stopSweepTimer( e )
 //        log.info( "[{}] successfully cleared journal: [{}]", self.path.name, e )
       }
 
       case e: DeleteMessagesFailure => {
-        reportFirstMessage( e )
-        checkNoisyAffect(e)
         stopSweepTimer( e )
 //        log.info( "[{}] FAILED to clear journal will attempt to clear on subsequent snapshot: [{}]", self.path.name, e )
       }
@@ -729,12 +704,6 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
 
       case e @ SaveSnapshotSuccess( meta ) => {
         stopSnapshotTimer( e )
-
-        log.debug(
-          "AlgorithmModule[{} - {}]: successful passivation snapshot, deleting journal messages up to sequenceNr: [{}]",
-          self.path.name, rootType.snapshotPeriod.map{ _.toCoarsest }, meta.sequenceNr
-        )
-
         startSweepTimer()
         deleteMessages( meta.sequenceNr )
       }
@@ -856,7 +825,6 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
 //                    )
 
                     acc.copy(
-//                      state = acceptance(event, acc.state),
                       shape = shapeCompanion.advance(acc.shape, event),
                       advances = acc.advances :+ event
                     )
@@ -964,23 +932,20 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
       super.saveSnapshot( snapshot )
     }
 
+    def postSnapshot( event: SaveSnapshotSuccess ): Unit = {
+      stopSnapshotTimer( event )
+      startSweepTimer()
+      deleteSnapshots( SnapshotSelectionCriteria( maxSequenceNr = event.metadata.sequenceNr - 1 ) )
+      deleteMessages( event.metadata.sequenceNr )
+    }
 
     override protected def onPersistFailure( cause: Throwable, event: Any, seqNr: Long ): Unit = {
       log.error( "AlgorithmModule[{}] onPersistFailure cause:[{}] event:[{}] seqNr:[{}]", self.path.name, cause, event, seqNr )
       super.onPersistFailure( cause, event, seqNr )
     }
 
-    var _reportOnFirstMessage: Boolean = true
-    def reportFirstMessage( m: Any ): Unit = {
-      if ( _reportOnFirstMessage && state.shapes.nonEmpty ) {
-        log.warning( "#TEST AlgorithmModule[{}]: shapes:[{}] first message: [{}]", self.path.name, state.shapes.size, m.getClass.safeSimpleName )
-      }
-      _reportOnFirstMessage = false
-    }
-
     override def receiveRecover: Receive = {
       case RecoveryCompleted => {
-        _reportOnFirstMessage = true
         log.debug( "#TEST AlgorithmModule[{}]: recovery completed", self.path.name )
       }
     }
@@ -988,6 +953,25 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
     override protected def onRecoveryFailure( cause: Throwable, event: Option[Any] ): Unit = {
       log.error( "AlgorithmModule[{}] onRecoveryFailure cause:[{}] event:[{}]", self.path.name, cause, event )
       super.onRecoveryFailure( cause, event )
+    }
+  }
+}
+
+
+trait SnapshotLimiter extends PersistentActor { outer: ActorLogging =>
+  private var _lastSnapshotNr: Long = 0L
+
+  private def resetSnapshotMonitor(): Unit = _lastSnapshotNr = lastSequenceNr
+  private def journaledEventsSinceSnapshot(): Unit = lastSequenceNr - _lastSnapshotNr
+  private def isSnapshotOld: Boolean = _lastSnapshotNr < lastSequenceNr
+
+  override def saveSnapshot( snapshot: Any ): Unit = {
+    if ( isSnapshotOld ) {
+      log.debug( "[{}] executing snapshot last-snapshot:[{}] last-journaled:[{}]", self.path.name, _lastSnapshotNr, lastSequenceNr )
+      super.saveSnapshot( snapshot )
+      resetSnapshotMonitor()
+    } else {
+      log.debug( "[{}] ignoring snapshot request last-snapshot:[{}] last-journaled:[{}]", self.path.name, _lastSnapshotNr, lastSequenceNr )
     }
   }
 }
@@ -1017,37 +1001,16 @@ trait Passivating[I] extends ActorStack { outer: Actor with ActorLogging =>
   def touch(): Option[Cancellable] = clearInactivityTimeout() flatMap { case (d, m) => setInactivityTimeout( d, m ) }
 
   override def around( r: Receive ): Receive = {
-    case m: NotInfluenceReceiveTimeout => {
-//      log.warning( "#TEST #PASSIVATING: [{}] not influencing passivation timer: [{}]", self.path.name, m )
-      super.around( r )( m )
-    }
-    case StopAggregateRootType( m ) => {
-//      log.warning( "#TEST #PASSIVATING: [{}] not influencing passivation timer: [{}]", self.path.name, m )
-      super.around( r )( m )
-    }
-    case m: SaveSnapshot => {
-//      log.warning( "#TEST #PASSIVATING: [{}] not influencing passivation timer: [{}]", self.path.name, m )
-      super.around( r )( m )
-    }
-    case m: SaveSnapshotSuccess => {
-//      log.warning( "#TEST #PASSIVATING: [{}] not influencing passivation timer: [{}]", self.path.name, m )
-      super.around( r )( m )
-    }
-    case m: SaveSnapshotFailure => {
-//      log.warning( "#TEST #PASSIVATING: [{}] not influencing passivation timer: [{}]", self.path.name, m )
-      super.around( r )( m )
-    }
-    case m: DeleteMessagesSuccess => {
-//      log.warning( "#TEST #PASSIVATING: [{}] not influencing passivation timer: [{}]", self.path.name, m )
-      super.around( r )( m )
-    }
-    case m: DeleteMessagesFailure => {
-//      log.warning( "#TEST #PASSIVATING: [{}] not influencing passivation timer: [{}]", self.path.name, m )
-      super.around( r )( m )
-    }
+    case m: NotInfluenceReceiveTimeout => super.around( r )( m )
+    case StopAggregateRootType( m ) => super.around( r )( m )
+    case m: SaveSnapshot => super.around( r )( m )
+    case m: SaveSnapshotSuccess => super.around( r )( m )
+    case m: SaveSnapshotFailure => super.around( r )( m )
+    case m: DeleteMessagesSuccess => super.around( r )( m )
+    case m: DeleteMessagesFailure => super.around( r )( m )
     case m => {
-      touch()
       super.around( r )( m )
+      touch()
     }
   }
 }
