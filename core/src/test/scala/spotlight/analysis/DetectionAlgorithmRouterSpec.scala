@@ -10,7 +10,7 @@ import org.scalatest.mockito.MockitoSugar
 import org.mockito.Mockito._
 import peds.akka.envelope.{Envelope, WorkId}
 import spotlight.analysis.DetectionAlgorithmRouter.ShardedRootTypeProxy
-import spotlight.analysis.algorithm.{AlgorithmLookupShardCatalogModule, AlgorithmLookupShardProtocol}
+import spotlight.analysis.algorithm.{AlgorithmCellShardModule, AlgorithmCellShardProtocol, AlgorithmLookupShardCatalogModule, AlgorithmLookupShardProtocol}
 import spotlight.model.outlier.{IsQuorum, OutlierPlan, ReduceOutliers}
 import spotlight.model.timeseries.{DataPoint, TimeSeries}
 import spotlight.testkit.ParallelAkkaSpec
@@ -29,9 +29,9 @@ class DetectionAlgorithmRouterSpec extends ParallelAkkaSpec with MockitoSugar {
     val algorithm = TestProbe()
     val algorithmRootType = mock[AggregateRootType]
     when( algorithmRootType.name ).thenReturn { algo.name }
-    val catalogId = AlgorithmLookupShardCatalogModule.idFor( plan, algo.name )
+    val catalogId = AlgorithmCellShardModule.idFor( plan, algo.name )
     val catalog = TestProbe()
-    val catalogRootType = AlgorithmLookupShardCatalogModule.rootType
+    val catalogRootType = AlgorithmCellShardModule.module.rootType
     val model = mock[DomainModel]
     logger.debug( "FIXTURE: SHARD ROOT-TYPE:[{}]", catalogRootType )
     when( model(catalogRootType, catalogId) ).thenReturn( catalog.ref )
@@ -78,18 +78,18 @@ class DetectionAlgorithmRouterSpec extends ParallelAkkaSpec with MockitoSugar {
       model must not be (null)
       algorithmRootType must not be (null)
       catalogId must not be (null)
-      AlgorithmLookupShardCatalogModule.rootType must not be (null)
-      logger.debug( "TEST: SHARD ROOT-TYPE:[{}]", AlgorithmLookupShardCatalogModule.rootType )
+      AlgorithmCellShardModule.module.rootType must not be (null)
+      logger.debug( "TEST: SHARD ROOT-TYPE:[{}]", AlgorithmCellShardModule.module.rootType )
       catalogRootType mustBe catalogRootType
-      AlgorithmLookupShardCatalogModule.rootType mustBe AlgorithmLookupShardCatalogModule.rootType
-      AlgorithmLookupShardCatalogModule.rootType mustBe catalogRootType
-      model( AlgorithmLookupShardCatalogModule.rootType, catalogId ) must be( catalog.ref )
+      AlgorithmCellShardModule.module.rootType mustBe AlgorithmCellShardModule.module.rootType
+      AlgorithmCellShardModule.module.rootType mustBe catalogRootType
+      model( AlgorithmCellShardModule.module.rootType, catalogId ) must be( catalog.ref )
 
       val router = TestActorRef[DetectionAlgorithmRouter]( DetectionAlgorithmRouter.props( plan, Map() ) )
       router.receive( RegisterAlgorithmRootType(algo, algorithmRootType, model, true) )
       logger.debug( "#TEST looking for catalog add..." )
       catalog.expectMsgPF( hint = "catalog-add" ) {
-        case Envelope( m: AlgorithmLookupShardProtocol.Add, _ ) => {
+        case Envelope( m: AlgorithmCellShardProtocol.Add, _ ) => {
           m.plan mustBe plan.toSummary
           m.algorithmRootType mustBe algorithmRootType
         }
@@ -142,7 +142,7 @@ class DetectionAlgorithmRouterSpec extends ParallelAkkaSpec with MockitoSugar {
       logger.debug( "#TEST looking for routing to catalog..." )
       catalog.expectMsgPF( hint = "catalog" ) {
 //        case Envelope( payload, _ ) => payload mustBe msg
-        case Envelope( AlgorithmLookupShardProtocol.RouteMessage(_, payload ), _ ) => {payload mustBe msg }
+        case Envelope( AlgorithmCellShardProtocol.RouteMessage(_, payload ), _ ) => {payload mustBe msg }
         case m => {
           logger.debug( "#TEST NOT FOUND")
           fail( s"not found: ${m}" )

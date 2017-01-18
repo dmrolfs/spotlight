@@ -13,7 +13,7 @@ import peds.commons.log.Trace
 import demesne.AggregateRootType
 import demesne.module.entity.{EntityAggregateModule, EntityProtocol}
 import demesne.testkit.AggregateRootSpec
-import spotlight.analysis.outlier.HistoricalStatistics
+import spotlight.analysis.HistoricalStatistics
 import spotlight.model.outlier._
 import spotlight.model.timeseries._
 
