@@ -210,9 +210,13 @@ object AlgorithmModule extends Instrumented with StrictLogging {
   val snapshotSuccesses: Meter = metrics.meter( "snapshot", "successes" )
   val snapshotFailures: Meter = metrics.meter( "snapshot", "failures" )
 
-  val journalSweepTimer: Timer = metrics.timer( "journal-sweep" )
-  val journalSweepSuccesses: Meter = metrics.meter( "journal-sweep", "successes" )
-  val journalSweepFailures: Meter = metrics.meter( "journal-sweep", "failures" )
+  val snapshotSweepTimer: Timer = metrics.timer( "snapshot.sweep" )
+  val snapshotSweepSuccesses: Meter = metrics.meter( "snapshot.sweep", "successes" )
+  val snapshotSweepFailures: Meter = metrics.meter( "snapshot.sweep", "failures" )
+
+  val journalSweepTimer: Timer = metrics.timer( "journal.sweep" )
+  val journalSweepSuccesses: Meter = metrics.meter( "journal.sweep", "successes" )
+  val journalSweepFailures: Meter = metrics.meter( "journal.sweep", "failures" )
 
   val passivationTimer: Timer = metrics.timer( "passivation" )
 }
@@ -539,8 +543,8 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
     override val journalPluginId: String = "akka.persistence.algorithm.journal.plugin"
     override val snapshotPluginId: String = "akka.persistence.algorithm.snapshot.plugin"
 
-    log.warning(
-      "#TEST #INFO: {} AlgorithmActor instantiated: [{}] with inactivity timeout:[{}]",
+    log.info(
+      "{} AlgorithmActor instantiated: [{}] with inactivity timeout:[{}]",
       algorithm.label, aggregateId, rootType.passivation.inactivityTimeout
     )
 
@@ -570,7 +574,6 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
 
     override val acceptance: Acceptance = {
       case ( AdvancedType(event), cs ) => {
-//        log.warning( "#TEST Algorithm[{}]: advancing with event - topic:[{}] point:[{}]", self.path.name, event.topic, event.point )
         val s = cs.shapes.get( event.topic ) getOrElse shapeCompanion.zero( None )
         cs.withTopicShape( event.topic, shapeCompanion.advance(s, event) )
       }
@@ -665,11 +668,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
         context become LoggingReceive { around( passivating ) }
       }
 
-      case e @ SaveSnapshotSuccess( meta ) => {
-        stopSnapshotTimer( e )
-        startSweepTimer()
-        deleteMessages( meta.sequenceNr )
-      }
+      case e: SaveSnapshotSuccess => postSnapshot( e )
 
       case e @ SaveSnapshotFailure( meta, ex ) => {
         stopSnapshotTimer( e )
@@ -677,20 +676,22 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
       }
 
       case e: DeleteSnapshotsSuccess => {
+        stopSnapshotSweepTimer( e )
         log.warning( "#TEST #DEBUG [{}] successfully cleared snapshots up to: [{}]", self.path.name, e.criteria )
       }
 
       case e @ DeleteSnapshotsFailure( criteria, cause ) => {
+        stopSnapshotSweepTimer( e )
         log.warning( "[{}] failed to clear snapshots. meta:[{}] cause:[{}]", self.path.name, criteria, cause )
       }
 
       case e: DeleteMessagesSuccess => {
-        stopSweepTimer( e )
+        stopJournalSweepTimer( e )
 //        log.info( "[{}] successfully cleared journal: [{}]", self.path.name, e )
       }
 
       case e: DeleteMessagesFailure => {
-        stopSweepTimer( e )
+        stopJournalSweepTimer( e )
 //        log.info( "[{}] FAILED to clear journal will attempt to clear on subsequent snapshot: [{}]", self.path.name, e )
       }
     }
@@ -702,27 +703,33 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
         context stop self
       }
 
-      case e @ SaveSnapshotSuccess( meta ) => {
-        stopSnapshotTimer( e )
-        startSweepTimer()
-        deleteMessages( meta.sequenceNr )
-      }
+      case e: SaveSnapshotSuccess => postSnapshot( e )
 
       case e @ SaveSnapshotFailure( meta, ex ) => {
         stopSnapshotTimer( e )
         log.warning( "[{}] failed to save passivation snapshot. meta:[{}] cause:[{}]", self.path.name, meta, ex )
       }
 
+      case e: DeleteSnapshotsSuccess => {
+        stopSnapshotSweepTimer( e )
+        log.warning( "#TEST #DEBUG [{}] on passivation successfully cleared snapshots up to: [{}]", self.path.name, e.criteria )
+      }
+
+      case e @ DeleteSnapshotsFailure( criteria, cause ) => {
+        stopSnapshotSweepTimer( e )
+        log.warning( "[{}] on passivation failed to clear snapshots. meta:[{}] cause:[{}]", self.path.name, criteria, cause )
+      }
+
 
       case e: DeleteMessagesSuccess => {
-        stopSweepTimer( e )
+        stopJournalSweepTimer( e )
         log.warning( "#TEST #DEBUG[{}] on passivation successfully cleared journal: [{}]", self.path.name, e )
         stopPassivationTimer( e )
         context stop self
       }
 
       case e: DeleteMessagesFailure => {
-        stopSweepTimer( e )
+        stopJournalSweepTimer( e )
         log.warning(
           "[{}] on passivation FAILED to clear journal will attempt to clear on subsequent snapshot: [{}]",
           self.path.name,
@@ -894,9 +901,25 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
       }
     }
 
+    var _snapshotSweepStarted: Long = 0L
+    def startSnapshotSweepTimer(): Unit = { _snapshotSweepStarted = System.nanoTime() }
+    def stopSnapshotSweepTimer( event: Any ): Unit = {
+      if ( 0 < _snapshotSweepStarted) {
+        AlgorithmModule.snapshotSweepTimer.update( System.nanoTime() - _snapshotSweepStarted, NANOSECONDS )
+        _snapshotSweepStarted= 0L
+      }
+
+      event match {
+        case _: DeleteMessagesSuccess => AlgorithmModule.snapshotSweepSuccesses.mark()
+        case _: DeleteMessagesFailure => AlgorithmModule.snapshotSweepFailures.mark()
+        case _ => { }
+      }
+    }
+
+
     var _journalSweepStarted: Long = 0L
-    def startSweepTimer(): Unit = { _journalSweepStarted = System.nanoTime() }
-    def stopSweepTimer( event: Any ): Unit = {
+    def startJournalSweepTimer(): Unit = { _journalSweepStarted = System.nanoTime() }
+    def stopJournalSweepTimer( event: Any ): Unit = {
       if ( 0 < _journalSweepStarted ) {
         AlgorithmModule.journalSweepTimer.update( System.nanoTime() - _journalSweepStarted, NANOSECONDS )
         _journalSweepStarted = 0L
@@ -934,8 +957,15 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
 
     def postSnapshot( event: SaveSnapshotSuccess ): Unit = {
       stopSnapshotTimer( event )
-      startSweepTimer()
+
+      log.warning(
+        "#TEST #DEBUG: AlgorithmModule[{}] lastSequenceNr:[{}] snapshot@[{}] - sweeping snapshots up to [{}]",
+        self.path.name, lastSequenceNr, event.metadata.sequenceNr, event.metadata.sequenceNr - 1
+      )
+      startSnapshotSweepTimer()
       deleteSnapshots( SnapshotSelectionCriteria( maxSequenceNr = event.metadata.sequenceNr - 1 ) )
+
+      startJournalSweepTimer()
       deleteMessages( event.metadata.sequenceNr )
     }
 
