@@ -22,7 +22,7 @@ java -classpath $CPATH \
   -Dconfig.resource=$SPOTLIGHT_CONFIG \
   -Djava.library.path=native \
   -Xms4g \
-  -Xmx10g \
+  -Xmx8g \
   -javaagent:graphite/coreos/aspectjweaver-1.8.8.jar \
   -XX:MaxMetaspaceSize=512m \
   ${MAIN_CLASS} -c 2552 "$@"

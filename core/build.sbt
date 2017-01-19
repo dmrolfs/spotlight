@@ -28,6 +28,7 @@ libraryDependencies ++=
     facility.lang,
     facility.parboiled,
     facility.squants,
+    facility.fastutil,
     facility.hadoopClient,
     facility.pyrolite,
     facility.msgpack

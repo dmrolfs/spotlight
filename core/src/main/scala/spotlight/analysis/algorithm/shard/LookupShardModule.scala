@@ -1,26 +1,25 @@
-package spotlight.analysis.algorithm
+package spotlight.analysis.algorithm.shard
 
-import scala.reflect._
 import scala.concurrent.duration._
+import scala.reflect._
 import akka.actor.{ActorRef, Cancellable, Props}
 import akka.event.LoggingReceive
 import akka.persistence.RecoveryCompleted
 
-import scalaz.{-\/, Validation, \/-}
 import nl.grons.metrics.scala.{Meter, MetricName}
-import squants.information.{Bytes, Information, Kilobytes, Megabytes}
+import squants.information._
+import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap
 import peds.akka.envelope._
-import peds.akka.publish.{EventPublisher, StackableStreamPublisher}
 import peds.akka.metrics.{Instrumented, InstrumentedActor}
-import peds.archetype.domain.model.core.Entity
-import peds.commons.{TryV, Valid}
+import peds.akka.publish.{EventPublisher, StackableStreamPublisher}
 import peds.commons.identifier._
 import peds.commons.util._
+import peds.commons.TryV
 import demesne._
 import demesne.repository.CommonLocalRepository
 import spotlight.analysis.DetectUsing
-import spotlight.analysis.algorithm.AlgorithmLookupShardCatalogModule.AlgoTID
-import spotlight.analysis.algorithm.{AlgorithmProtocol => AP}
+import spotlight.analysis.algorithm.shard.ShardCatalog.ShardCatalogIdentifying
+import spotlight.analysis.algorithm.{AlgorithmModule, AlgorithmProtocol => AP}
 import spotlight.model.outlier.OutlierPlan
 import spotlight.model.timeseries._
 
@@ -28,8 +27,8 @@ import spotlight.model.timeseries._
 /**
   * Created by rolfsd on 12/21/16.
   */
-object AlgorithmLookupShardProtocol extends AggregateProtocol[AlgorithmLookupShardCatalog#ID] {
-//  import AlgorithmLookupShardCatalog.Control
+object LookupShardProtocol extends AggregateProtocol[LookupShardCatalog#ID] {
+//  import LookupShardCatalog.Control
 
   case class Add(
     override val targetId: Add#TID,
@@ -42,10 +41,10 @@ object AlgorithmLookupShardProtocol extends AggregateProtocol[AlgorithmLookupSha
     override val sourceId: Added#TID,
     plan: OutlierPlan.Summary,
     algorithmRootType: AggregateRootType
-//    control: AlgorithmLookupShardCatalog.Control
+//    control: LookupShardCatalog.Control
   ) extends Event
 
-  case class RouteMessage( override val targetId: RouteMessage#TID, payload: Any ) extends Message
+//  case class RouteMessage( override val targetId: RouteMessage#TID, payload: Any ) extends Message
 
 //  case class UseControl( override val targetId: UseControl#TID, control: Control ) extends AlgorithmShardCommand
 //  case class ControlSet( override val sourceId: ControlSet#TID, control: Control ) extends AlgorithmShardEvent
@@ -58,31 +57,35 @@ object AlgorithmLookupShardProtocol extends AggregateProtocol[AlgorithmLookupSha
 }
 
 
-case class AlgorithmLookupShardCatalog(
+//import scala.collection.mutable
+
+case class LookupShardCatalog(
   plan: OutlierPlan.Summary,
   algorithmRootType: AggregateRootType,
-  //  control: AlgorithmLookupShardCatalog.Control,
-  shards: Map[Topic, AlgoTID] = Map.empty[Topic, AlgoTID]
-) extends Entity with Equals {
-  import AlgorithmLookupShardCatalog.identifying
+  //  control: LookupShardCatalog.Control,
+  shards: Object2ObjectOpenHashMap[Topic, AlgoTID] = new Object2ObjectOpenHashMap[Topic, AlgoTID]( ) // set expected size?
+//    shards: mutable.Map[Topic, AlgoTID] = mutable.Map.empty[Topic, AlgoTID]
+) extends ShardCatalog with Equals {
+  import LookupShardCatalog.identifying
 
-  override type ID = identifying.ID
-  override val evID: ClassTag[ID] = ClassTag( classOf[AlgorithmLookupShardCatalog.ID] )
-  override val evTID: ClassTag[TID] = classTag[TID]
-
-  override def id: TID = identifying.tag( AlgorithmLookupShardCatalog.ID( plan.id, algorithmRootType.name ).asInstanceOf[identifying.ID] )
+  override def id: TID = identifying.tag( ShardCatalog.ID( plan.id, algorithmRootType.name ).asInstanceOf[identifying.ID] ).asInstanceOf[TID]
   override def name: String = plan.name
   override def slug: String = plan.slug
 
-  def apply( t: Topic ): AlgoTID = shards( t )
-  def contains( t: Topic ): Boolean = shards contains t
+  def apply( t: Topic ): AlgoTID = shards get t
+  def contains( t: Topic ): Boolean = shards containsKey t
 
-  def assignShard( t: Topic, shard: AlgoTID ): AlgorithmLookupShardCatalog = {
-    val newShards = shards + ( t -> shard )
-    copy( shards = newShards )
+  def assignShard( t: Topic, shard: AlgoTID ): LookupShardCatalog = {
+//    val newShards = shards + ( t -> shard )
+//    copy( shards = newShards )
+//    shards += ( t -> shard )
+    shards.put( t, shard )
+    this
   }
 
   def tally: Map[AlgoTID, Int] = {
+    import scala.collection.JavaConversions._
+
     val zero = Map( shards.values.toSet[AlgoTID].map{ s => ( s, 0 ) }.toSeq:_* )
     shards.foldLeft( zero ){ case (acc, (_, aid)) =>
       val newTally = acc( aid ) + 1
@@ -90,13 +93,13 @@ case class AlgorithmLookupShardCatalog(
     }
   }
 
-  override def canEqual( rhs: Any ): Boolean = rhs.isInstanceOf[AlgorithmLookupShardCatalog]
+  override def canEqual( rhs: Any ): Boolean = rhs.isInstanceOf[LookupShardCatalog]
 
   override def hashCode: Int = 41 + id.##
 
   override def equals( rhs: Any ): Boolean = {
     rhs match {
-      case that: AlgorithmLookupShardCatalog => {
+      case that: LookupShardCatalog => {
         if ( this eq that ) true
         else {
           ( that.## == this.## ) &&
@@ -112,43 +115,9 @@ case class AlgorithmLookupShardCatalog(
   override def toString(): String = getClass.safeSimpleName + s"( plan:${plan} algorithm:${algorithmRootType.name} )"
 }
 
-object AlgorithmLookupShardCatalog {
-  final case class ID( planId: OutlierPlan#ID, algorithmLabel: String ) {
-    override def toString: String = planId + ":" + algorithmLabel
-  }
-
-  object ID {
-    def fromString( rep: String ): Valid[ID] = {
-      Validation
-      .fromTryCatchNonFatal {
-        val Array( pid, algo ) = rep.split( ':' )
-        ID( planId = ShortUUID(pid), algorithmLabel = algo )
-      }
-      .toValidationNel
-    }
-  }
-
-  implicit val identifying: Identifying[AlgorithmLookupShardCatalog] = {
-    new Identifying[AlgorithmLookupShardCatalog] {
-      override type ID = AlgorithmLookupShardCatalog.ID
-      override val evID: ClassTag[ID] = classTag[ID]
-      override val evTID: ClassTag[TID] = classTag[TID]
-
-      override def fromString( idrep: String ): ID = {
-        AlgorithmLookupShardCatalog.ID.fromString( idrep ).disjunction match {
-          case \/-( id ) => id
-          case -\/( exs ) => {
-            exs foreach { ex => logger.error( s"failed to parse id string [${idrep}] into ${evID}", ex ) }
-            throw exs.head
-          }
-        }
-      }
-
-      override def nextId: TryV[TID] = -\/( new IllegalStateException("AlgorithmLookupShardCatalog does not support nextId") )
-
-      override val idTag: Symbol = Symbol( "shard-catalog" )
-      override def idOf( c: AlgorithmLookupShardCatalog ): TID = c.id.asInstanceOf[TID]
-    }
+object LookupShardCatalog {
+  implicit val identifying: Identifying[LookupShardCatalog] = new ShardCatalogIdentifying[LookupShardCatalog] {
+    override val idTag: Symbol = Symbol( "lookup-shard" )
   }
 
 
@@ -164,19 +133,10 @@ object AlgorithmLookupShardCatalog {
 }
 
 
-object AlgorithmLookupShardCatalogModule extends AggregateRootModule with Instrumented { module =>
-  override type ID = AlgorithmLookupShardCatalog#ID
-  type AlgoTID = AlgorithmModule.TID
+object LookupShardModule extends AggregateRootModule { module =>
+  override type ID = LookupShardCatalog#ID
 
-
-  def idFor( plan: OutlierPlan.Summary, algorithmLabel: String ): TID = {
-    //todo: this casting bit wrt path dependent types is driving me nuts
-    identifying.tag( AlgorithmLookupShardCatalog.ID( plan.id, algorithmLabel ).asInstanceOf[identifying.ID] ).asInstanceOf[TID]
-  }
-
-  override lazy val metricBaseName: MetricName = MetricName( getClass )
-
-  implicit val identifying: Identifying[AlgorithmLookupShardCatalog] = AlgorithmLookupShardCatalog.identifying
+  implicit val identifying: Identifying[LookupShardCatalog] = LookupShardCatalog.identifying
   override def nextId: TryV[TID] = identifying.nextIdAs[TID]
 
 
@@ -186,24 +146,24 @@ object AlgorithmLookupShardCatalogModule extends AggregateRootModule with Instru
     override val identifying: Identifying[_] = module.identifying
     override val snapshotPeriod: Option[FiniteDuration] = None
     override def repositoryProps( implicit model: DomainModel ): Props = {
-      CommonLocalRepository.props( model, this, AggregateRoot.AlgorithmShardingActor.props( _: DomainModel, _: AggregateRootType ) )
+      CommonLocalRepository.props( model, this, AggregateRoot.ShardingActor.props( _: DomainModel, _: AggregateRootType ) )
     }
   }
 
   object AggregateRoot {
-    object AlgorithmShardingActor {
+    object ShardingActor {
       def props( model: DomainModel, rootType: AggregateRootType ): Props = Props( new Default(model, rootType) )
 
       def name( rootType: AggregateRootType ): String = rootType.name + "ShardCatalog"
 
       private class Default( model: DomainModel, rootType: AggregateRootType )
-      extends AlgorithmShardingActor( model, rootType )
-              with StackableStreamPublisher
+      extends ShardingActor( model, rootType )
+      with StackableStreamPublisher
 
 
-      case class Availability private[AlgorithmLookupShardCatalogModule](
+      case class Availability private[LookupShardModule](
         shardSizes: Map[AlgoTID, AP.EstimatedSize] = Map.empty[AlgoTID, AP.EstimatedSize],
-        control: AlgorithmLookupShardCatalog.Control
+        control: LookupShardCatalog.Control
       ) {
         def withNewShardId( shard: AlgoTID ): Availability = {
           val newShardSizes = shardSizes + ( shard -> AP.EstimatedSize(shard, 0, Bytes(0)) )
@@ -228,24 +188,34 @@ object AlgorithmLookupShardCatalogModule extends AggregateRootModule with Instru
       }
     }
 
-    class AlgorithmShardingActor(override val model: DomainModel, override val rootType: AggregateRootType )
-    extends demesne.AggregateRoot[AlgorithmLookupShardCatalog, AlgorithmLookupShardCatalog#ID]
+    class ShardingActor( override val model: DomainModel, override val rootType: AggregateRootType )
+    extends demesne.AggregateRoot[LookupShardCatalog, LookupShardCatalog#ID]
     with InstrumentedActor
     with demesne.AggregateRoot.Provider {
       outer: EventPublisher =>
 
-      import AlgorithmShardingActor.Availability
-      import spotlight.analysis.algorithm.{ AlgorithmLookupShardProtocol => P }
+      import ShardingActor.Availability
+      import spotlight.analysis.algorithm.shard.{LookupShardProtocol => P}
 
-      override lazy val metricBaseName: MetricName = MetricName( classOf[AlgorithmShardingActor] )
+//      override val journalPluginId: String = "akka.persistence.algorithm.journal.plugin"
+//      override val snapshotPluginId: String = "akka.persistence.algorithm.snapshot.plugin"
+
+      override lazy val metricBaseName: MetricName = MetricName( classOf[ShardingActor] )
 
       var shardMetrics: Option[ShardMetrics] = None
 
-      class ShardMetrics( plan: OutlierPlan.Summary, id: AlgorithmLookupShardCatalog.ID ) extends Instrumented {
-        val ShardBaseName = "shard"
+      class ShardMetrics( plan: OutlierPlan.Summary, id: ShardCatalog.ID ) extends Instrumented {
+        val ShardBaseName = "lookup-shard"
 
         override lazy val metricBaseName: MetricName = {
-          AlgorithmLookupShardCatalogModule.metricBaseName.append( plan.name, id.algorithmLabel, ShardBaseName )
+          MetricName(
+            spotlight.BaseMetricName,
+            spotlight.analysis.BaseMetricName,
+            "algorithm",
+            plan.name,
+            id.algorithmLabel,
+            ShardBaseName
+          )
         }
 
         val CountName = "count"
@@ -257,7 +227,6 @@ object AlgorithmLookupShardCatalogModule extends AggregateRootModule with Instru
 
         val assignmentsMeter: Meter = metrics.meter( AssignmentsName )
         val routingMeter: Meter = metrics.meter( RoutingsName )
-
 
         initializeMetrics()
 
@@ -279,7 +248,7 @@ object AlgorithmLookupShardCatalogModule extends AggregateRootModule with Instru
         }
 
         def stripLingeringMetrics(): Unit = {
-          import com.codahale.metrics.{ Metric, MetricFilter }
+          import com.codahale.metrics.{Metric, MetricFilter}
 
           metrics.registry.removeMatching(
             new MetricFilter {
@@ -308,20 +277,20 @@ object AlgorithmLookupShardCatalogModule extends AggregateRootModule with Instru
 
       override def parseId( idrep: String ): TID = identifying.safeParseTid[TID]( idrep )( classTag[TID] )
 
-      override var state: AlgorithmLookupShardCatalog = _
-      override val evState: ClassTag[AlgorithmLookupShardCatalog] = classTag[AlgorithmLookupShardCatalog]
+      override var state: LookupShardCatalog = _
+      override val evState: ClassTag[LookupShardCatalog] = classTag[LookupShardCatalog]
       var availability: Availability = _
 
       override def acceptance: Acceptance = {
-        case ( P.Added(tid, p, rt), s ) if Option(s).isEmpty => {
+        case ( LookupShardProtocol.Added(tid, p, rt ), s ) if Option( s ).isEmpty => {
           if ( shardMetrics.isEmpty ) {
-            shardMetrics = Some( new ShardMetrics(plan = p, id = tid.id.asInstanceOf[AlgorithmLookupShardCatalog.ID] ) )
+            shardMetrics = Some( new ShardMetrics(plan = p, id = tid.id.asInstanceOf[ShardCatalog.ID] ) )
           }
 
-          AlgorithmLookupShardCatalog( plan = p, algorithmRootType = rt )
+          LookupShardCatalog( plan = p, algorithmRootType = rt )
         }
 
-        case ( P.ShardAssigned(_, t, aid), s ) => s.assignShard( t, aid )
+        case ( LookupShardProtocol.ShardAssigned(_, t, aid ), s ) => s.assignShard( t, aid )
 //        case (P.ControlSet(_, c), s ) if c != s.control => s.copy( control = c )
       }
 
@@ -329,8 +298,10 @@ object AlgorithmLookupShardCatalogModule extends AggregateRootModule with Instru
 
 
       def dispatchEstimateRequests( forCandidates: AlgoTID => Boolean ): Unit = {
+        import scala.collection.JavaConversions._
+
         for {
-          s <- Option( state ).toSet[AlgorithmLookupShardCatalog]
+          s <- Option( state ).toSet[LookupShardCatalog]
           allShards = s.shards.values.toSet
           tally = s.tally
           candidates = allShards filter forCandidates
@@ -342,14 +313,13 @@ object AlgorithmLookupShardCatalogModule extends AggregateRootModule with Instru
       }
 
 
-      case object UpdateAvailability extends P.ProtocolMessage
+      case object UpdateAvailability extends LookupShardProtocol.ProtocolMessage
       val AvailabilityCheckPeriod: FiniteDuration = 10.seconds
 
       override def receiveRecover: Receive = {
         case RecoveryCompleted => {
-          import scala.concurrent.duration._
 
-          shardMetrics = Option( state ) map { s => new ShardMetrics( s.plan, s.id.id.asInstanceOf[AlgorithmLookupShardCatalog.ID] ) }
+          shardMetrics = Option( state ) map { s => new ShardMetrics( s.plan, s.id.id.asInstanceOf[ShardCatalog.ID] ) }
 
           dispatchEstimateRequests( _ => true )
 
@@ -366,7 +336,7 @@ object AlgorithmLookupShardCatalogModule extends AggregateRootModule with Instru
         }
       }
 
-      override def receiveCommand: Receive = active( Availability(control = AlgorithmLookupShardCatalog.Control.BySize( Kilobytes(500 ) ) ) )
+      override def receiveCommand: Receive = active( Availability(control = LookupShardCatalog.Control.BySize(Megabytes(3))))
 
       def active( newAvailability: Availability ): Receive = {
         availability = newAvailability
@@ -375,11 +345,11 @@ object AlgorithmLookupShardCatalogModule extends AggregateRootModule with Instru
       }
 
       val admin: Receive = {
-        case P.Add( id, plan, algorithmRootType) if id == aggregateId && Option(state).isEmpty => {
+        case LookupShardProtocol.Add( id, plan, algorithmRootType ) if id == aggregateId && Option( state ).isEmpty => {
           persist( P.Added(id, plan, algorithmRootType) ) { acceptAndPublish }
         }
 
-        case P.Add( id, _, algorithmRootType ) if id == aggregateId && Option(state).nonEmpty => { }
+        case LookupShardProtocol.Add( id, _, algorithmRootType ) if id == aggregateId && Option( state ).nonEmpty => { }
 
         case UpdateAvailability => dispatchEstimateRequests( availability.isCandidate )
       }
@@ -392,14 +362,14 @@ object AlgorithmLookupShardCatalogModule extends AggregateRootModule with Instru
           referenceFor( sid ) forwardEnvelope m.copy( targetId = sid )
         }
 
-        case P.RouteMessage( _, payload ) if knownRouting isDefinedAt payload => {
+        case ShardProtocol.RouteMessage( _, payload ) if knownRouting isDefinedAt payload => {
           log.debug( "ShardCatalog[{}]: known RouteMessage received. extracting payload:[{}]", self.path.name, payload )
           knownRouting( payload )
         }
       }
 
       def unknownRouting( availability: Availability ): Receive = {
-        case P.RouteMessage( _, payload ) if assignRouting isDefinedAt payload => {
+        case ShardProtocol.RouteMessage( _, payload ) if assignRouting isDefinedAt payload => {
           log.debug( "ShardCatalog[{}]: unknown RouteMessage received. extracting payload:[{}]", self.path.name, payload )
           assignRouting( payload )
         }
@@ -408,7 +378,7 @@ object AlgorithmLookupShardCatalogModule extends AggregateRootModule with Instru
 
         case estimate: AP.EstimatedSize => {
           log.info(
-            "AlgorithmLookupShardCatalog[{}] shard:[{}] shapes:[{}] estimated average shape size:[{}]",
+            "LookupShardCatalog[{}] shard:[{}] shapes:[{}] estimated average shape size:[{}]",
             self.path.name, estimate.sourceId, estimate.nrShapes, estimate.averageSizePerShape
           )
 
@@ -431,7 +401,8 @@ object AlgorithmLookupShardCatalogModule extends AggregateRootModule with Instru
           }
           .foreach { aid =>
             log.debug( "ShardCatalog[{}]: unknown topic:[{}] routed to algorithm shard:[{}]", self.path.name, m.topic, aid )
-            persist( P.ShardAssigned(aggregateId, m.topic, aid) ) { e =>
+            persistAsync( P.ShardAssigned(aggregateId, m.topic, aid) ) { e =>
+//val e = P.ShardAssigned(aggregateId, m.topic, aid)
               accept( e )
 
               shardMetrics foreach { sm =>

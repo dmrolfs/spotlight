@@ -1,25 +1,21 @@
-package spotlight.analysis.algorithm
+package spotlight.analysis.algorithm.shard
 
-import scala.reflect._
 import scala.concurrent.duration._
+import scala.reflect._
 import akka.actor.{ActorRef, Cancellable, Props}
 import akka.event.LoggingReceive
 import akka.persistence.RecoveryCompleted
 
-import scalaz.{-\/, Validation, \/-}
 import com.typesafe.scalalogging.LazyLogging
 import nl.grons.metrics.scala.{Histogram, Meter, MetricName}
 import peds.akka.envelope._
-import peds.akka.publish.{EventPublisher, StackableStreamPublisher}
 import peds.akka.metrics.{Instrumented, InstrumentedActor}
-import peds.archetype.domain.model.core.Entity
-import peds.commons.{TryV, Valid}
+import peds.akka.publish.{EventPublisher, StackableStreamPublisher}
 import peds.commons.identifier._
 import peds.commons.util._
 import demesne._
 import demesne.module.{LocalAggregate, SimpleAggregateModule}
 import spotlight.analysis.DetectUsing
-import spotlight.analysis.algorithm.AlgorithmCellShardModule.AlgoTID
 import spotlight.analysis.algorithm.{AlgorithmProtocol => AP}
 import spotlight.model.outlier.OutlierPlan
 import spotlight.model.timeseries._
@@ -28,7 +24,7 @@ import spotlight.model.timeseries._
 /**
   * Created by rolfsd on 12/21/16.
   */
-object AlgorithmCellShardProtocol extends AggregateProtocol[AlgorithmCellShardCatalog#ID] {
+object CellShardProtocol extends AggregateProtocol[CellShardCatalog#ID] {
   case class Add(
     override val targetId: Add#TID,
     plan: OutlierPlan.Summary,
@@ -45,39 +41,35 @@ object AlgorithmCellShardProtocol extends AggregateProtocol[AlgorithmCellShardCa
 
 //  case class CellAdded( override val sourceId: CellAdded#TID, cellId: AlgorithmModule.TID ) extends Event
 
-  case class RouteMessage( override val targetId: RouteMessage#TID, payload: Any ) extends Message
+//  case class RouteMessage( override val targetId: RouteMessage#TID, payload: Any ) extends Message
 }
 
 
-case class AlgorithmCellShardCatalog(
+case class CellShardCatalog(
   plan: OutlierPlan.Summary,
   algorithmRootType: AggregateRootType,
   cells: Vector[AlgoTID]
-) extends Entity with Equals with LazyLogging {
-  import AlgorithmCellShardCatalog.identifying
+) extends ShardCatalog with Equals with LazyLogging {
+  import CellShardCatalog.identifying
 
-  override type ID = identifying.ID
-  override val evID: ClassTag[ID] = ClassTag( classOf[AlgorithmCellShardCatalog.ID] )
-  override val evTID: ClassTag[TID] = classTag[TID]
-
-  override def id: TID = identifying.tag( AlgorithmCellShardCatalog.ID( plan.id, algorithmRootType.name ).asInstanceOf[identifying.ID] )
+  override def id: TID = identifying.tag( ShardCatalog.ID( plan.id, algorithmRootType.name ).asInstanceOf[identifying.ID] ).asInstanceOf[TID]
   override def name: String = plan.name
   override def slug: String = plan.slug
 
   def apply( t: Topic ): AlgoTID = {
-    logger.debug( "#TEST: AlgorithmCellShardCatalog.apply: topic:[{}] cells:[{}] t.##:[{}] tpos:[{}]", t, cells.size.toString, t.##.toString, (math.abs(t.##) % cells.size).toString )
+    logger.debug( "#TEST: CellShardCatalog.apply: topic:[{}] cells:[{}] t.##:[{}] tpos:[{}]", t, cells.size.toString, t.##.toString, (math.abs(t.##) % cells.size).toString )
     cells( math.abs(t.##) % cells.size )
   }
 
   def contains( t: Topic ): Boolean = true
 
-  override def canEqual( rhs: Any ): Boolean = rhs.isInstanceOf[AlgorithmCellShardCatalog]
+  override def canEqual( rhs: Any ): Boolean = rhs.isInstanceOf[CellShardCatalog]
 
   override def hashCode: Int = 41 + id.##
 
   override def equals( rhs: Any ): Boolean = {
     rhs match {
-      case that: AlgorithmCellShardCatalog => {
+      case that: CellShardCatalog => {
         if ( this eq that ) true
         else {
           ( that.## == this.## ) &&
@@ -93,97 +85,62 @@ case class AlgorithmCellShardCatalog(
   override def toString(): String = getClass.safeSimpleName + s"( plan:${plan} algorithm:${algorithmRootType.name} )"
 }
 
-object AlgorithmCellShardCatalog {
-  final case class ID( planId: OutlierPlan#ID, algorithmLabel: String ) {
-    override def toString: String = planId + ":" + algorithmLabel
-  }
-
-  object ID {
-    def fromString( rep: String ): Valid[ID] = {
-      Validation
-      .fromTryCatchNonFatal {
-        val Array( pid, algo ) = rep.split( ':' )
-        ID( planId = ShortUUID(pid), algorithmLabel = algo )
-      }
-      .toValidationNel
-    }
-  }
-
-  implicit val identifying: Identifying[AlgorithmCellShardCatalog] = {
-    new Identifying[AlgorithmCellShardCatalog] {
-      override type ID = AlgorithmCellShardCatalog.ID
-      override val evID: ClassTag[ID] = classTag[ID]
-      override val evTID: ClassTag[TID] = classTag[TID]
-
-      override def fromString( idrep: String ): ID = {
-        AlgorithmCellShardCatalog.ID.fromString( idrep ).disjunction match {
-          case \/-( id ) => id
-          case -\/( exs ) => {
-            exs foreach { ex => logger.error( s"failed to parse id string [${idrep}] into ${evID}", ex ) }
-            throw exs.head
-          }
-        }
-      }
-
-      override def nextId: TryV[TID] = -\/( new IllegalStateException("AlgorithmCellShardCatalog does not support nextId") )
-
-      override val idTag: Symbol = Symbol( "shard-cell-catalog" )
-      override def idOf( c: AlgorithmCellShardCatalog): TID = c.id.asInstanceOf[TID]
-    }
+object CellShardCatalog {
+  implicit val identifying: Identifying[CellShardCatalog] = new ShardCatalog.ShardCatalogIdentifying[CellShardCatalog] {
+    override val idTag: Symbol = Symbol( "cell-shard" )
   }
 }
 
 
-object AlgorithmCellShardModule extends LazyLogging {
-  type ID = AlgorithmCellShardCatalog#ID
-  type TID = AlgorithmCellShardCatalog#TID
-  type AlgoTID = AlgorithmModule.TID
+object CellShardModule extends LazyLogging {
+  type ID = CellShardCatalog#ID
+  type TID = CellShardCatalog#TID
 
 
-  def idFor( plan: OutlierPlan.Summary, algorithmLabel: String ): TID = {
-    //todo: this casting bit wrt path dependent types is driving me nuts
-    identifying.tag( AlgorithmCellShardCatalog.ID( plan.id, algorithmLabel ).asInstanceOf[identifying.ID] ).asInstanceOf[TID]
-  }
+//  def idFor( plan: OutlierPlan.Summary, algorithmLabel: String ): TID = {
+//    //todo: this casting bit wrt path dependent types is driving me nuts
+//    identifying.tag( ShardCatalog.ID( plan.id, algorithmLabel ).asInstanceOf[identifying.ID] ).asInstanceOf[TID]
+//  }
 
-  implicit val identifying: Identifying[AlgorithmCellShardCatalog] = AlgorithmCellShardCatalog.identifying
+  implicit val identifying: Identifying[CellShardCatalog] = CellShardCatalog.identifying
 
 
-  val module: SimpleAggregateModule[AlgorithmCellShardCatalog] = {
-    val b = SimpleAggregateModule.builderFor[AlgorithmCellShardCatalog].make
-    import b.P.{ Tag => BTag, Props => BProps, _ }
+  val module: SimpleAggregateModule[CellShardCatalog] = {
+    val b = SimpleAggregateModule.builderFor[CellShardCatalog].make
+    import b.P.{Props => BProps, Tag => BTag, _}
 
     b
     .builder
     .set( BTag, identifying.idTag )
     .set( Environment, LocalAggregate )
-    .set( BProps, AlgorithmShardingActor.props(_, _) )
+    .set( BProps, ShardingActor.props(_, _ ) )
     .build()
   }
 
 
-  object AlgorithmShardingActor {
+  object ShardingActor {
     def props( model: DomainModel, rootType: AggregateRootType ): Props = Props( new Default(model, rootType) )
 
     def name( rootType: AggregateRootType ): String = rootType.name + "ShardCatalog"
 
     private class Default( model: DomainModel, rootType: AggregateRootType )
-    extends AlgorithmShardingActor( model, rootType )
-    with StackableStreamPublisher
+    extends ShardingActor( model, rootType )
+            with StackableStreamPublisher
   }
 
-  class AlgorithmShardingActor( override val model: DomainModel, override val rootType: AggregateRootType )
-  extends demesne.AggregateRoot[AlgorithmCellShardCatalog, AlgorithmCellShardCatalog#ID]
+  class ShardingActor(override val model: DomainModel, override val rootType: AggregateRootType )
+  extends demesne.AggregateRoot[CellShardCatalog, CellShardCatalog#ID]
   with InstrumentedActor
   with demesne.AggregateRoot.Provider {
     outer: EventPublisher =>
 
-    import spotlight.analysis.algorithm.{ AlgorithmCellShardProtocol => P }
+    import spotlight.analysis.algorithm.shard.{CellShardProtocol => P}
 
-    override lazy val metricBaseName: MetricName = MetricName( classOf[AlgorithmShardingActor] )
+    override lazy val metricBaseName: MetricName = MetricName( classOf[ShardingActor] )
 
     var shardMetrics: Option[ShardMetrics] = None
 
-    class ShardMetrics( plan: OutlierPlan.Summary, id: AlgorithmCellShardCatalog.ID ) extends Instrumented {
+    class ShardMetrics( plan: OutlierPlan.Summary, id: ShardCatalog.ID ) extends Instrumented {
       val ShardBaseName = "cell-shard"
 
       override lazy val metricBaseName: MetricName = {
@@ -213,7 +170,7 @@ object AlgorithmCellShardModule extends LazyLogging {
       }
 
       def stripLingeringMetrics(): Unit = {
-        import com.codahale.metrics.{ Metric, MetricFilter }
+        import com.codahale.metrics.{Metric, MetricFilter}
 
         metrics.registry.removeMatching(
           new MetricFilter {
@@ -238,16 +195,16 @@ object AlgorithmCellShardModule extends LazyLogging {
 
     override def parseId( idrep: String ): TID = identifying.safeParseTid[TID]( idrep )( classTag[TID] )
 
-    override var state: AlgorithmCellShardCatalog= _
-    override val evState: ClassTag[AlgorithmCellShardCatalog] = classTag[AlgorithmCellShardCatalog]
+    override var state: CellShardCatalog= _
+    override val evState: ClassTag[CellShardCatalog] = classTag[CellShardCatalog]
 
     override def acceptance: Acceptance = {
-      case ( P.Added(tid, p, rt, cells), s ) if Option(s).isEmpty => {
+      case ( CellShardProtocol.Added(tid, p, rt, cells ), s ) if Option( s ).isEmpty => {
         if ( shardMetrics.isEmpty ) {
-          shardMetrics = Some( new ShardMetrics(plan = p, id = tid.id.asInstanceOf[AlgorithmCellShardCatalog.ID] ) )
+          shardMetrics = Some( new ShardMetrics(plan = p, id = tid.id.asInstanceOf[ShardCatalog.ID] ) )
         }
 
-        AlgorithmCellShardCatalog( p, rt, cells )
+        CellShardCatalog( p, rt, cells )
       }
 
 //      case ( P.CellAdded(tid, cellId), s ) => s.copy( cells = s.cells :+ cellId )
@@ -258,7 +215,7 @@ object AlgorithmCellShardModule extends LazyLogging {
 
     def dispatchEstimateRequests(): Unit = {
       for {
-        s <- Option( state ).toSet[AlgorithmCellShardCatalog]
+        s <- Option( state ).toSet[CellShardCatalog]
         allShards = s.cells
         sid <- allShards
         ref = model( s.algorithmRootType, sid )
@@ -268,14 +225,13 @@ object AlgorithmCellShardModule extends LazyLogging {
     }
 
 
-    case object UpdateAvailability extends P.ProtocolMessage
+    case object UpdateAvailability extends CellShardProtocol.ProtocolMessage
     val AvailabilityCheckPeriod: FiniteDuration = 10.seconds
 
     override def receiveRecover: Receive = {
       case RecoveryCompleted => {
-        import scala.concurrent.duration._
 
-        shardMetrics = Option( state ) map { s => new ShardMetrics( s.plan, s.id.id.asInstanceOf[AlgorithmCellShardCatalog.ID] ) }
+        shardMetrics = Option( state ) map { s => new ShardMetrics( s.plan, s.id.id.asInstanceOf[ShardCatalog.ID] ) }
 
         dispatchEstimateRequests()
 
@@ -294,11 +250,12 @@ object AlgorithmCellShardModule extends LazyLogging {
 
     override def receiveCommand: Receive = LoggingReceive { around( routing orElse admin ) }
 
-    import spotlight.analysis.algorithm.{ AlgorithmProtocol => AP }
+    import spotlight.analysis.algorithm.{AlgorithmProtocol => AP}
 
     val admin: Receive = {
-      case P.Add( id, plan, algorithmRootType, nrCells) if id == aggregateId && Option(state).isEmpty => {
-        import scalaz._, Scalaz.{ id => _, _ }
+      case CellShardProtocol.Add( id, plan, algorithmRootType, nrCells ) if id == aggregateId && Option( state ).isEmpty => {
+        import scalaz._
+        import Scalaz.{id => _, _}
 
         List.fill( nrCells ){ algorithmRootType.identifying.nextId map { _.asInstanceOf[AlgoTID] } }.sequenceU match {
           case \/-( cells ) => persist( P.Added(id, plan, algorithmRootType, cells.toVector) ) { acceptAndPublish }
@@ -308,7 +265,7 @@ object AlgorithmCellShardModule extends LazyLogging {
         }
       }
 
-      case e: P.Add if e.targetId == aggregateId && Option(state).nonEmpty => { }
+      case e: CellShardProtocol.Add if e.targetId == aggregateId && Option( state ).nonEmpty => { }
 
       case UpdateAvailability => dispatchEstimateRequests()
     }
@@ -321,7 +278,7 @@ object AlgorithmCellShardModule extends LazyLogging {
         referenceFor( sid ) forwardEnvelope m.copy( targetId = sid )
       }
 
-      case P.RouteMessage( _, payload ) if routing isDefinedAt payload => {
+      case ShardProtocol.RouteMessage( _, payload ) if routing isDefinedAt payload => {
         log.debug( "ShardCatalog[{}]: known RouteMessage received. extracting payload:[{}]", self.path.name, payload )
         routing( payload )
       }

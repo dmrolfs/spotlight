@@ -87,6 +87,9 @@ package object timeseries {
 
 
   case class Topic( name: String ) {
+
+    override def hashCode(): Int = scala.util.hashing.MurmurHash3.stringHash( name )
+
     override def toString: String = name
   }
 

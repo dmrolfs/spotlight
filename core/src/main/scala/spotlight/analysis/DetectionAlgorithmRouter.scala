@@ -17,6 +17,7 @@ import peds.commons.concurrent._
 import peds.commons.identifier.{ShortUUID, TaggedID}
 import shapeless.TypeCase
 import spotlight.analysis.algorithm._
+import spotlight.analysis.algorithm.shard._
 import spotlight.analysis.algorithm.statistical._
 import spotlight.model.outlier.OutlierPlan
 
@@ -255,18 +256,21 @@ object DetectionAlgorithmRouter extends LazyLogging {
     algorithmRootType: AggregateRootType,
     model: DomainModel
   ) extends AlgorithmProxy {
-    val catalogId: AlgorithmCellShardModule.TID = AlgorithmCellShardModule.idFor( plan, algorithmRootType.name )
+    val shardRootType: AggregateRootType = LookupShardModule.rootType
+//    val shardRootType: AggregateRootType = CellShardModule.module.rootType
+
+    implicit val scIdentifying = shardRootType.identifying
+    val catalogId: ShardCatalog#TID = ShardCatalog.idFor( plan, algorithmRootType.name )
     val catalogRef: ActorRef = {
-//      val ref = model( AlgorithmLookupShardCatalogModule.rootType, catalogId )
-//      ref !+ AlgorithmLookupShardProtocol.Add( catalogId, plan, algorithmRootType )
-      val ref = model( AlgorithmCellShardModule.module.rootType, catalogId )
-      ref !+ AlgorithmCellShardProtocol.Add( catalogId, plan, algorithmRootType, 10000 ) // 5000 good // 2000 good // 1000 good w 10% drops
+      val ref = model( shardRootType, catalogId )
+//      ref !+ CellShardProtocol.Add( catalogId, plan, algorithmRootType, 5000 ) // 5000 good // 2000 good // 1000 good w 10% drops
+      ref !+ LookupShardProtocol.Add( catalogId, plan, algorithmRootType )
       ref
     }
 
 
     override def forward( message: Any )( implicit sender: ActorRef, context: ActorContext ): Unit = {
-      referenceFor(message) forwardEnvelope AlgorithmCellShardProtocol.RouteMessage( catalogId, message )
+      referenceFor(message) forwardEnvelope ShardProtocol.RouteMessage( catalogId, message )
     }
 
     override def referenceFor( message: Any )( implicit context: ActorContext ): ActorRef = catalogRef

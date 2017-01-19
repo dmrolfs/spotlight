@@ -110,6 +110,7 @@ object Dependencies {
   }
 
   object facility {
+    val fastutil = "it.unimi.dsi" % "fastutil" % "7.0.13" withSources() withJavadoc()
     val bloomFilter = "com.github.alexandrnikitin" %% "bloom-filter" % "0.7.0" withSources() withJavadoc()
     val json4sJackson = "org.json4s" %% "json4s-jackson" % "3.5.0"
     val uuid = "com.eaio.uuid" % "uuid" % "3.4"
