@@ -263,8 +263,8 @@ object DetectionAlgorithmRouter extends LazyLogging {
     val catalogId: ShardCatalog#TID = ShardCatalog.idFor( plan, algorithmRootType.name )
     val catalogRef: ActorRef = {
       val ref = model( shardRootType, catalogId )
-//      ref !+ CellShardProtocol.Add( catalogId, plan, algorithmRootType, 5000 ) // 5000 good // 2000 good // 1000 good w 10% drops
-      ref !+ LookupShardProtocol.Add( catalogId, plan, algorithmRootType )
+      ref !+ CellShardProtocol.Add( catalogId, plan, algorithmRootType, 5000 ) // 5000 good // 2000 good // 1000 good w 10% drops
+//      ref !+ LookupShardProtocol.Add( catalogId, plan, algorithmRootType )
       ref
     }
 
