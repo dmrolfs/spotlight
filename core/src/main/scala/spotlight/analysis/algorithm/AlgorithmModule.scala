@@ -27,9 +27,9 @@ import org.apache.commons.math3.ml.clustering.DoublePoint
 import com.codahale.metrics.{Metric, MetricFilter}
 import nl.grons.metrics.scala.{Meter, MetricName, Timer}
 import squants.information.{Bytes, Information}
-import peds.akka.ActorStack
 import peds.akka.envelope._
 import peds.akka.metrics.{Instrumented, InstrumentedActor}
+import peds.akka.persistence.{Passivating, SnapshotLimiter}
 import peds.akka.publish.{EventPublisher, StackableStreamPublisher}
 import peds.archetype.domain.model.core.{Entity, EntityIdentifying}
 import peds.commons.{KOp, TryV}
@@ -39,6 +39,7 @@ import demesne.PassivationSpecification.StopAggregateRoot
 import demesne.repository.{AggregateRootRepository, CommonLocalRepository, EnvelopingAggregateRootRepository}
 import demesne.repository.AggregateRootRepository.{ClusteredAggregateContext, LocalAggregateContext}
 import spotlight.analysis._
+import spotlight.analysis.algorithm.AlgorithmModule.ID
 import spotlight.model.outlier.{NoOutliers, OutlierPlan, Outliers}
 import spotlight.model.timeseries._
 
@@ -74,7 +75,11 @@ object AlgorithmProtocol extends AggregateProtocol[AlgorithmModule.ID] {
   ) extends Event
 
   case class GetStateSnapshot( override val targetId: AlgorithmModule.TID ) extends Command with NotInfluenceReceiveTimeout
-  case class StateSnapshot(override val sourceId: StateSnapshot#TID, snapshot: AnalysisState) extends Event
+
+  case class StateSnapshot(
+    override val sourceId: StateSnapshot#TID,
+    snapshot: AnalysisState
+  ) extends Event with NotInfluenceReceiveTimeout
 
   case class Advanced(
     override val sourceId: Advanced#TID,
@@ -532,13 +537,16 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
   class AlgorithmActor( override val model: DomainModel, override val rootType: AggregateRootType )
   extends AggregateRoot[State, ID]
   with SnapshotLimiter
-  with Passivating[ID]
+  with Passivating
   with EnvelopingActor
   with AggregateRoot.Provider
   with InstrumentedActor {
     publisher: EventPublisher =>
 
+
     setInactivityTimeout( inactivity = rootType.passivation.inactivityTimeout, message = StopAggregateRoot(aggregateId) )
+
+    override val StopMessageType: ClassTag[_] = classTag[StopAggregateRoot[ID]]
 
     override val journalPluginId: String = "akka.persistence.algorithm.journal.plugin"
     override val snapshotPluginId: String = "akka.persistence.algorithm.snapshot.plugin"
@@ -571,6 +579,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
     override lazy val evState: ClassTag[State] = ClassTag( classOf[State] )
 
     var algorithmContext: Context = _
+
 
     override val acceptance: Acceptance = {
       case ( AdvancedType(event), cs ) => {
@@ -661,33 +670,47 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
     }
 
     val nonfunctional: Receive = {
-      case StopAggregateRootType( m ) => {
-        log.warning( "#TEST #AlgorithmModule[{}] started passivating...", self.path.name )
+      case StopMessageType( m ) if isRedundantSnapshot => {
+        context become LoggingReceive { around( active orElse passivating( PassivationSaga(snapshot = PassivationSaga.Complete)) ) }
+        log.warning( "#TEST #AlgorithmModule[{}] started passivating with current snapshot...", self.path.name )
         startPassivationTimer()
-        saveSnapshot( state )
-        context become LoggingReceive { around( passivating ) }
+        postSnapshot( lastSequenceNr - 1L, true )
       }
 
-      case e: SaveSnapshotSuccess => postSnapshot( e )
+      case StopMessageType( m ) => {
+        context become LoggingReceive { around( active orElse passivating() ) }
+        log.warning( "#TEST #AlgorithmModule[{}] started passivating with old snapshot...", self.path.name )
+        startPassivationTimer()
+        saveSnapshot( state )
+      }
+
+      case e: SaveSnapshotSuccess => {
+        log.warning(
+          "#TEST [{}] save snapshot successful to:[{}]. deleting old snapshots before and journals -- meta:[{}]",
+          self.path.name, e.metadata.sequenceNr, e.metadata
+        )
+
+        postSnapshot( e.metadata.sequenceNr, true )
+      }
 
       case e @ SaveSnapshotFailure( meta, ex ) => {
-        stopSnapshotTimer( e )
         log.warning( "[{}] failed to save snapshot. meta:[{}] cause:[{}]", self.path.name, meta, ex )
+        postSnapshot( lastSequenceNr - 1L, false )
       }
 
       case e: DeleteSnapshotsSuccess => {
         stopSnapshotSweepTimer( e )
-        log.warning( "#TEST #DEBUG [{}] successfully cleared snapshots up to: [{}]", self.path.name, e.criteria )
+//        log.debug( "#TEST #DEBUG [{}] successfully cleared snapshots up to: [{}]", self.path.name, e.criteria )
       }
 
       case e @ DeleteSnapshotsFailure( criteria, cause ) => {
         stopSnapshotSweepTimer( e )
-        log.warning( "[{}] failed to clear snapshots. meta:[{}] cause:[{}]", self.path.name, criteria, cause )
+        log.info( "[{}] failed to clear snapshots. meta:[{}] cause:[{}]", self.path.name, criteria, cause )
       }
 
       case e: DeleteMessagesSuccess => {
         stopJournalSweepTimer( e )
-//        log.info( "[{}] successfully cleared journal: [{}]", self.path.name, e )
+//        log.debug( "[{}] successfully cleared journal: [{}]", self.path.name, e )
       }
 
       case e: DeleteMessagesFailure => {
@@ -696,28 +719,77 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
       }
     }
 
-    val passivating: Receive = {
+    object PassivationSaga {
+      sealed trait Status
+      case object Pending extends Status
+      case object Complete extends Status
+      case object Failed extends Status
+    }
+
+    case class PassivationSaga(
+      snapshot: PassivationSaga.Status = PassivationSaga.Pending,
+      snapshotSweep: PassivationSaga.Status = PassivationSaga.Pending,
+      journalSweep: PassivationSaga.Status = PassivationSaga.Pending
+    ) {
+      def isComplete: Boolean = {
+        val result = {
+          ( snapshot != PassivationSaga.Pending ) &&
+          ( snapshotSweep != PassivationSaga.Pending ) &&
+          ( journalSweep != PassivationSaga.Pending )
+        }
+
+        log.warning( "#TEST [{}] passivation saga status: is-complete:[{}] saga:[{}]", self.path.name, result, this )
+        result
+      }
+
+      override def toString: String = {
+        s"PassivationSaga( snapshot:${snapshot} sweeps:[snapshot:${snapshotSweep} journal:${journalSweep}] )"
+      }
+    }
+
+    def passivationStep( saga: PassivationSaga ): Unit = {
+      if ( saga.isComplete ) {
+        log.warning( "#TEST #DEBUG [{}] passivation completed. stopping actor with shapes:[{}]", self.path.name, state.shapes.size )
+        context stop self
+      } else {
+        log.warning( "#TEST #DEBUG [{}] passivation progressing but not complete: [{}]", self.path.name, saga )
+        context become LoggingReceive { around( passivating(saga) ) }
+      }
+    }
+
+    def passivating( saga: PassivationSaga = PassivationSaga() ): Receive = {
       case e: demesne.PassivationSpecification.StopAggregateRoot[_] => {
         stopPassivationTimer( e )
         log.warning( "AlgorithmModule[{}] immediate passivation upon repeat stop command", self.path.name )
         context stop self
       }
 
-      case e: SaveSnapshotSuccess => postSnapshot( e )
+      case e: SaveSnapshotSuccess => {
+        log.warning(
+          "#TEST [{}] save passivation snapshot successful to:[{}]. deleting old snapshots before and journals -- meta:[{}]",
+          self.path.name, e.metadata.sequenceNr, e.metadata
+        )
+
+        passivationStep( saga.copy( snapshot = PassivationSaga.Complete ) )
+        postSnapshot( e.metadata.sequenceNr, true )
+      }
 
       case e @ SaveSnapshotFailure( meta, ex ) => {
-        stopSnapshotTimer( e )
         log.warning( "[{}] failed to save passivation snapshot. meta:[{}] cause:[{}]", self.path.name, meta, ex )
+        postSnapshot( lastSequenceNr - 1L, false )
+        passivationStep( saga.copy( snapshot = PassivationSaga.Failed ) )
       }
 
       case e: DeleteSnapshotsSuccess => {
         stopSnapshotSweepTimer( e )
         log.warning( "#TEST #DEBUG [{}] on passivation successfully cleared snapshots up to: [{}]", self.path.name, e.criteria )
+        passivationStep( saga.copy( snapshotSweep = PassivationSaga.Complete ) )
       }
 
       case e @ DeleteSnapshotsFailure( criteria, cause ) => {
         stopSnapshotSweepTimer( e )
         log.warning( "[{}] on passivation failed to clear snapshots. meta:[{}] cause:[{}]", self.path.name, criteria, cause )
+        passivationStep( saga.copy( snapshotSweep = PassivationSaga.Failed ) )
       }
 
 
@@ -725,7 +797,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
         stopJournalSweepTimer( e )
         log.warning( "#TEST #DEBUG[{}] on passivation successfully cleared journal: [{}]", self.path.name, e )
         stopPassivationTimer( e )
-        context stop self
+        passivationStep( saga.copy( journalSweep = PassivationSaga.Complete ) )
       }
 
       case e: DeleteMessagesFailure => {
@@ -737,20 +809,20 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
         )
 
         stopPassivationTimer( e )
-        context stop self
+        passivationStep( saga.copy( journalSweep = PassivationSaga.Failed ) )
       }
     }
 
     override def unhandled( message: Any ): Unit = {
       message match {
 //        case m: DetectUsing if Option(state).isDefined && m.algorithm.name == state.algorithm.name && m.scope == state.id => {
-        case m: DetectUsing if m.algorithm.name == state.algorithm.name => {
-          val ex = AlgorithmProtocol.AlgorithmUsedBeforeRegistrationError( aggregateId, algorithm.label, self.path )
-          log.error( ex, "algorithm actor [{}] not registered for scope:[{}]", algorithm.label, aggregateId )
-        }
+//        case m: DetectUsing if m.algorithm.name == state.algorithm.name => {
+//          val ex = AlgorithmProtocol.AlgorithmUsedBeforeRegistrationError( aggregateId, algorithm.label, self.path )
+//          log.error( ex, "algorithm actor [{}] not registered for scope:[{}]", algorithm.label, aggregateId )
+//        }
 
         case m: DetectUsing => {
-          log.error( "algorithm [{}] does not recognize requested payload: [{}]", algorithm, m )
+          log.error( "[{}] algorithm [{}] does not recognize requested payload: [{}]", self.path.name, algorithm, m )
           sender() !+ UnrecognizedPayload( algorithm.label, m )
         }
 
@@ -861,7 +933,8 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
 
     private val recordAdvancements: KOp[Seq[Advanced], Seq[Advanced]] = {
       kleisli[TryV, Seq[Advanced], Seq[Advanced]] { advances =>
-        advances foreach { evt => persist( evt ){ accept } }
+        persistAll( advances.to[scala.collection.immutable.Seq] ){ accept }
+//        advances foreach { evt => persist( evt ){ accept } }
 //        advances foreach { accept }
         advances.right
       }
@@ -888,17 +961,13 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
     // -- nonfunctional operations --
     var _snapshotStarted: Long = 0L
     def startSnapshotTimer(): Unit = { _snapshotStarted = System.nanoTime() }
-    def stopSnapshotTimer( event: Any ): Unit = {
+    def stopSnapshotTimer( success: Boolean ): Unit = {
       if ( 0 < _snapshotStarted ) {
         AlgorithmModule.snapshotTimer.update( System.nanoTime() - _snapshotStarted, NANOSECONDS )
         _snapshotStarted = 0L
       }
 
-      event match {
-        case _: SaveSnapshotSuccess => AlgorithmModule.snapshotSuccesses.mark()
-        case _: SaveSnapshotFailure => AlgorithmModule.snapshotFailures.mark()
-        case _ => { }
-      }
+      if ( success ) AlgorithmModule.snapshotSuccesses.mark() else AlgorithmModule.snapshotFailures.mark()
     }
 
     var _snapshotSweepStarted: Long = 0L
@@ -910,8 +979,8 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
       }
 
       event match {
-        case _: DeleteMessagesSuccess => AlgorithmModule.snapshotSweepSuccesses.mark()
-        case _: DeleteMessagesFailure => AlgorithmModule.snapshotSweepFailures.mark()
+        case _: DeleteSnapshotsSuccess => AlgorithmModule.snapshotSweepSuccesses.mark()
+        case _: DeleteSnapshotsFailure=> AlgorithmModule.snapshotSweepFailures.mark()
         case _ => { }
       }
     }
@@ -951,22 +1020,20 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
 
 
     override def saveSnapshot( snapshot: Any ): Unit = {
+      log.warning( "#TEST [{}] saveSnapshot", self.path.name )
       startSnapshotTimer()
       super.saveSnapshot( snapshot )
     }
 
-    def postSnapshot( event: SaveSnapshotSuccess ): Unit = {
-      stopSnapshotTimer( event )
+    def postSnapshot( snapshotSequenceNr: Long, success: Boolean ): Unit = {
+      log.warning( "#TEST [{}] postSnapshot event:[{}]", self.path.name, snapshotSequenceNr )
+      stopSnapshotTimer( success )
 
-      log.warning(
-        "#TEST #DEBUG: AlgorithmModule[{}] lastSequenceNr:[{}] snapshot@[{}] - sweeping snapshots up to [{}]",
-        self.path.name, lastSequenceNr, event.metadata.sequenceNr, event.metadata.sequenceNr - 1
-      )
       startSnapshotSweepTimer()
-      deleteSnapshots( SnapshotSelectionCriteria( maxSequenceNr = event.metadata.sequenceNr - 1 ) )
+      deleteSnapshots( SnapshotSelectionCriteria( maxSequenceNr = snapshotSequenceNr - 1 ) )
 
       startJournalSweepTimer()
-      deleteMessages( event.metadata.sequenceNr )
+      deleteMessages( snapshotSequenceNr )
     }
 
     override protected def onPersistFailure( cause: Throwable, event: Any, seqNr: Long ): Unit = {
@@ -983,64 +1050,6 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
     override protected def onRecoveryFailure( cause: Throwable, event: Option[Any] ): Unit = {
       log.error( "AlgorithmModule[{}] onRecoveryFailure cause:[{}] event:[{}]", self.path.name, cause, event )
       super.onRecoveryFailure( cause, event )
-    }
-  }
-}
-
-
-trait SnapshotLimiter extends PersistentActor { outer: ActorLogging =>
-  private var _lastSnapshotNr: Long = 0L
-
-  private def resetSnapshotMonitor(): Unit = _lastSnapshotNr = lastSequenceNr
-  private def journaledEventsSinceSnapshot(): Unit = lastSequenceNr - _lastSnapshotNr
-  private def isSnapshotOld: Boolean = _lastSnapshotNr < lastSequenceNr
-
-  override def saveSnapshot( snapshot: Any ): Unit = {
-    if ( isSnapshotOld ) {
-      log.debug( "[{}] executing snapshot last-snapshot:[{}] last-journaled:[{}]", self.path.name, _lastSnapshotNr, lastSequenceNr )
-      super.saveSnapshot( snapshot )
-      resetSnapshotMonitor()
-    } else {
-      log.debug( "[{}] ignoring snapshot request last-snapshot:[{}] last-journaled:[{}]", self.path.name, _lastSnapshotNr, lastSequenceNr )
-    }
-  }
-}
-
-
-trait Passivating[I] extends ActorStack { outer: Actor with ActorLogging =>
-  val StopAggregateRootType: ClassTag[StopAggregateRoot[I]] = classTag[StopAggregateRoot[I]]
-  private var _inactivity: Option[(Cancellable, FiniteDuration, Any)] = None
-
-  def clearInactivityTimeout(): Option[(FiniteDuration, Any)] = {
-    val remainder = _inactivity map { case (c, d, m) => c.cancel(); (d, m) }
-    _inactivity = None
-    remainder
-  }
-
-  def setInactivityTimeout( inactivity: Duration, message: Any = ReceiveTimeout ): Option[Cancellable] = {
-    clearInactivityTimeout()
-    if ( !inactivity.isFinite() ) None
-    else {
-      val f = FiniteDuration( inactivity.toNanos, NANOSECONDS )
-      val c = context.system.scheduler.scheduleOnce( f, self, message )( context.dispatcher, self )
-      _inactivity = Some( (c, f, message) )
-      Some( c )
-    }
-  }
-
-  def touch(): Option[Cancellable] = clearInactivityTimeout() flatMap { case (d, m) => setInactivityTimeout( d, m ) }
-
-  override def around( r: Receive ): Receive = {
-    case m: NotInfluenceReceiveTimeout => super.around( r )( m )
-    case StopAggregateRootType( m ) => super.around( r )( m )
-    case m: SaveSnapshot => super.around( r )( m )
-    case m: SaveSnapshotSuccess => super.around( r )( m )
-    case m: SaveSnapshotFailure => super.around( r )( m )
-    case m: DeleteMessagesSuccess => super.around( r )( m )
-    case m: DeleteMessagesFailure => super.around( r )( m )
-    case m => {
-      super.around( r )( m )
-      touch()
     }
   }
 }
