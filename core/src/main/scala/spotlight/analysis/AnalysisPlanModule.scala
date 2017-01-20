@@ -1,6 +1,8 @@
 package spotlight.analysis
 
 import scala.reflect._
+import scala.concurrent.duration._
+import scala.concurrent.{Await, TimeoutException}
 import akka.NotUsed
 import akka.actor._
 import akka.pattern.AskTimeoutException
@@ -13,7 +15,6 @@ import com.typesafe.config.Config
 import com.typesafe.scalalogging.LazyLogging
 import nl.grons.metrics.scala.{Meter, MetricName}
 import peds.akka.envelope._
-import peds.akka.envelope.pattern.ask
 import peds.akka.metrics.{Instrumented, InstrumentedActor}
 import peds.akka.publish.{EventPublisher, StackableStreamPublisher}
 import peds.archetype.domain.model.core.{EntityIdentifying, EntityLensProvider}
@@ -24,14 +25,13 @@ import demesne.index.{Directive, IndexBusSubscription, StackableIndexBusPublishe
 import demesne.module.LocalAggregate
 import demesne.module.entity.{EntityAggregateModule, EntityProtocol}
 import demesne.module.entity.EntityAggregateModule.MakeIndexSpec
+import peds.akka.supervision.{IsolatedDefaultSupervisor, IsolatedLifeCycleSupervisor, OneForOneStrategyFactory}
 import spotlight.analysis.AnalysisPlanProtocol.{AnalysisFlow, MakeFlow}
 import spotlight.analysis.OutlierDetection.{DetectionResult, DetectionTimedOut}
 import spotlight.model.outlier._
 import spotlight.model.outlier.OutlierPlan.Scope
 import spotlight.model.timeseries._
 import spotlight.model.timeseries.TimeSeriesBase.Merging
-
-import scala.concurrent.TimeoutException
 
 
 object AnalysisPlanProtocol extends EntityProtocol[OutlierPlan#ID] {
@@ -164,6 +164,7 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
     .set( BTag, identifying.idTag )
     .set( Environment, LocalAggregate )
     .set( BProps, AggregateRoot.PlanActor.props(_, _) )
+    .set( PassivateTimeout, 5.minutes )
     .set( Protocol, AnalysisPlanProtocol )
     .set( Indexes, indexes )
     .set( IdLens, OutlierPlan.idLens )
@@ -206,6 +207,47 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
 
         def plan: OutlierPlan
 
+        def routerName: String = DetectionAlgorithmRouter.name( provider.plan.name )
+        def detectorName: String = OutlierDetection.name( provider.plan.name )
+
+        def startDetectionDrivers(): (ActorRef, ActorRef, ActorRef) = {
+          import peds.akka.supervision.IsolatedLifeCycleSupervisor.{ WaitForStart, GetChildren, Children, Started }
+          import akka.pattern.ask
+
+          implicit val ec = context.dispatcher
+          implicit val timeout = Timeout( 1.second )
+
+          val driverSupervisor = context.system.actorOf(
+            Props(
+              new IsolatedDefaultSupervisor() with OneForOneStrategyFactory {
+                override def childStarter() = {
+                  val router = makeRouter()
+                  val detector = makeDetector( router )
+                }
+              }
+            ),
+            "DetectionDrivers"
+          )
+
+          val drivers = {
+            for {
+              _ <- ( driverSupervisor ? WaitForStart ).mapTo[Started.type]
+              cs <- ( driverSupervisor ? GetChildren ).mapTo[Children]
+            } yield {
+              val actors = {
+                for {
+                  router <- cs.children collectFirst { case c if c.name contains provider.routerName => c.child }
+                  detector <- cs.children collectFirst { case c if c.name contains provider.detectorName => c.child }
+                } yield ( driverSupervisor, detector, router )
+              }
+
+              actors.get
+            }
+          }
+
+          Await.result( drivers, 1.second )
+        }
+
         def makeRouter()( implicit context: ActorContext ): ActorRef = {
           def resolverFor( algorithmRootType: AggregateRootType ): DetectionAlgorithmRouter.AlgorithmProxy = {
 //            DetectionAlgorithmRouter.RootTypeProxy( algorithmRootType, model )
@@ -218,17 +260,13 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
           } yield ( name, resolverFor(rt) )
 
           val routerProps = DetectionAlgorithmRouter.props( plan, Map( algorithmRefs:_* ) )
-
-          context.actorOf(
-            routerProps.withDispatcher( DetectionAlgorithmRouter.DispatcherPath ),
-            DetectionAlgorithmRouter.name( provider.plan.name )
-          )
+          context.actorOf( routerProps.withDispatcher( DetectionAlgorithmRouter.DispatcherPath ), provider.routerName )
         }
 
         def makeDetector( routerRef: ActorRef )( implicit context: ActorContext ): ActorRef = {
           context.actorOf(
             OutlierDetection.props( routerRef ).withDispatcher( OutlierDetection.DispatcherPath ),
-            OutlierDetection.name( plan.name )
+            provider.detectorName
           )
         }
       }
@@ -253,11 +291,7 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
 
       override val evState: ClassTag[OutlierPlan] = ClassTag( classOf[OutlierPlan] )
 
-      lazy val (detector, router) = {
-        val r = outer.makeRouter()
-        (outer.makeDetector( r ), r)
-      }
-
+      lazy val (drivers, detector, router) = startDetectionDrivers()
 
       override def acceptance: Acceptance = entityAcceptance orElse {
         case (e: P.ScopeChanged, s) => {
@@ -372,7 +406,10 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
       }
 
       def detectionFlow( p: OutlierPlan, parallelism: Int )( implicit system: ActorSystem, timeout: Timeout ): DetectFlow = {
+        import peds.akka.envelope.pattern.ask
+
         implicit val ec = system.dispatcher
+
         Flow[TimeSeries]
         .map { ts => OutlierDetectionMessage( ts, p ).disjunction }
         .collect { case scalaz.\/-( m ) => m }
@@ -381,20 +418,12 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
           inletPoints.mark( m.source.points.size )
           m
         }
-        .mapAsync( parallelism ) { m =>
+        .mapAsyncUnordered( parallelism ) { m =>
           ( detector ?+ m )
           .recover {
             case ex: TimeoutException => {
               log.error(
-                "scala timeout[{}] waiting for detection plan:[{}] topic:[{}]",
-                timeout.duration.toCoarsest, m.plan.name, m.topic
-              )
-
-              DetectionTimedOut( m.source, m.plan )
-            }
-            case ex: AskTimeoutException => {
-              log.error(
-                "ask timeout[{}] waiting for detection plan:[{}] topic:[{}]",
+                "timeout[{}] waiting for detection plan:[{}] topic:[{}]",
                 timeout.duration.toCoarsest, m.plan.name, m.topic
               )
 
