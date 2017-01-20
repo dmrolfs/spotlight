@@ -3,6 +3,7 @@ package spotlight.analysis
 import scala.reflect._
 import akka.NotUsed
 import akka.actor._
+import akka.pattern.AskTimeoutException
 import akka.stream.Supervision.Decider
 import akka.stream.{ActorAttributes, Materializer}
 import akka.stream.scaladsl.Flow
@@ -29,6 +30,8 @@ import spotlight.model.outlier._
 import spotlight.model.outlier.OutlierPlan.Scope
 import spotlight.model.timeseries._
 import spotlight.model.timeseries.TimeSeriesBase.Merging
+
+import scala.concurrent.TimeoutException
 
 
 object AnalysisPlanProtocol extends EntityProtocol[OutlierPlan#ID] {
@@ -368,7 +371,8 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
         .mapConcat {identity}
       }
 
-      def detectionFlow(p: OutlierPlan, parallelism: Int)(implicit system: ActorSystem, timeout: Timeout): DetectFlow = {
+      def detectionFlow( p: OutlierPlan, parallelism: Int )( implicit system: ActorSystem, timeout: Timeout ): DetectFlow = {
+        implicit val ec = system.dispatcher
         Flow[TimeSeries]
         .map { ts => OutlierDetectionMessage( ts, p ).disjunction }
         .collect { case scalaz.\/-( m ) => m }
@@ -377,7 +381,27 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
           inletPoints.mark( m.source.points.size )
           m
         }
-        .mapAsync( parallelism ) { m => ( detector ?+ m ) }.withAttributes( ActorAttributes supervisionStrategy detectorDecider )
+        .mapAsync( parallelism ) { m =>
+          ( detector ?+ m )
+          .recover {
+            case ex: TimeoutException => {
+              log.error(
+                "scala timeout[{}] waiting for detection plan:[{}] topic:[{}]",
+                timeout.duration.toCoarsest, m.plan.name, m.topic
+              )
+
+              DetectionTimedOut( m.source, m.plan )
+            }
+            case ex: AskTimeoutException => {
+              log.error(
+                "ask timeout[{}] waiting for detection plan:[{}] topic:[{}]",
+                timeout.duration.toCoarsest, m.plan.name, m.topic
+              )
+
+              DetectionTimedOut( m.source, m.plan )
+            }
+          }
+        }.withAttributes( ActorAttributes supervisionStrategy detectorDecider )
         .filter {
           case Envelope( DetectionResult( outliers, _ ), _ ) => true
           case DetectionResult( outliers, _ ) => true

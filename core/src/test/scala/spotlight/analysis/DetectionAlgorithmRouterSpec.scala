@@ -10,8 +10,7 @@ import org.scalatest.mockito.MockitoSugar
 import org.mockito.Mockito._
 import peds.akka.envelope.{Envelope, WorkId}
 import spotlight.analysis.DetectionAlgorithmRouter.ShardedRootTypeProxy
-import spotlight.analysis.algorithm.shard.{CellShardModule, CellShardProtocol}
-import spotlight.analysis.algorithm.AlgorithmCellShardModule
+import spotlight.analysis.algorithm.shard.{CellShardModule, CellShardProtocol, ShardCatalog, ShardProtocol}
 import spotlight.model.outlier.{IsQuorum, OutlierPlan, ReduceOutliers}
 import spotlight.model.timeseries.{DataPoint, TimeSeries}
 import spotlight.testkit.ParallelAkkaSpec
@@ -30,7 +29,8 @@ class DetectionAlgorithmRouterSpec extends ParallelAkkaSpec with MockitoSugar {
     val algorithm = TestProbe()
     val algorithmRootType = mock[AggregateRootType]
     when( algorithmRootType.name ).thenReturn { algo.name }
-    val catalogId = CellShardModule.idFor( plan, algo.name )
+    implicit val shardIdentifying = CellShardModule.identifying
+    val catalogId = ShardCatalog.idFor( plan, algo.name )
     val catalog = TestProbe()
     val catalogRootType = CellShardModule.module.rootType
     val model = mock[DomainModel]
@@ -94,6 +94,9 @@ class DetectionAlgorithmRouterSpec extends ParallelAkkaSpec with MockitoSugar {
           m.plan mustBe plan.toSummary
           m.algorithmRootType mustBe algorithmRootType
         }
+        case Envelope( m, _ ) => {
+          m mustBe a [CellShardProtocol.Add]
+        }
       }
       logger.debug( "#TEST ...catalog add passed" )
 
@@ -143,7 +146,7 @@ class DetectionAlgorithmRouterSpec extends ParallelAkkaSpec with MockitoSugar {
       logger.debug( "#TEST looking for routing to catalog..." )
       catalog.expectMsgPF( hint = "catalog" ) {
 //        case Envelope( payload, _ ) => payload mustBe msg
-        case Envelope( CellShardProtocol.RouteMessage(_, payload ), _ ) => {payload mustBe msg }
+        case Envelope( ShardProtocol.RouteMessage(_, payload ), _ ) => {payload mustBe msg }
         case m => {
           logger.debug( "#TEST NOT FOUND")
           fail( s"not found: ${m}" )

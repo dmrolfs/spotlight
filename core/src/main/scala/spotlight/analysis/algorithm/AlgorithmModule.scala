@@ -463,7 +463,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
           new SnapshotSpecification {
             override val snapshotInterval: FiniteDuration = 30.seconds
             override val snapshotInitialDelay: FiniteDuration = {
-              val delay = snapshotInterval * AlgorithmModule.snapshotFactorizer.nextDouble()
+              val delay = snapshotInterval + snapshotInterval * AlgorithmModule.snapshotFactorizer.nextDouble()
               FiniteDuration( delay.toMillis, MILLISECONDS )
             }
           }
@@ -563,7 +563,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
 
     override def postStop(): Unit = {
       clearInactivityTimeout()
-      log.warning( "#TEST AlgorithmModule[{}]: actor stopped with {} shapes", self.path.name, state.shapes.size )
+      // log.warning( "#TEST AlgorithmModule[{}]: actor stopped with {} shapes", self.path.name, state.shapes.size )
       super.postStop()
     }
 
@@ -672,23 +672,23 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
     val nonfunctional: Receive = {
       case StopMessageType( m ) if isRedundantSnapshot => {
         context become LoggingReceive { around( active orElse passivating( PassivationSaga(snapshot = PassivationSaga.Complete)) ) }
-        log.warning( "#TEST #AlgorithmModule[{}] started passivating with current snapshot...", self.path.name )
+        log.debug( "AlgorithmModule[{}] started passivating with current snapshot...", self.path.name )
         startPassivationTimer()
         postSnapshot( lastSequenceNr - 1L, true )
       }
 
       case StopMessageType( m ) => {
         context become LoggingReceive { around( active orElse passivating() ) }
-        log.warning( "#TEST #AlgorithmModule[{}] started passivating with old snapshot...", self.path.name )
+        log.debug( "AlgorithmModule[{}] started passivating with old snapshot...", self.path.name )
         startPassivationTimer()
         saveSnapshot( state )
       }
 
       case e: SaveSnapshotSuccess => {
-        log.warning(
-          "#TEST [{}] save snapshot successful to:[{}]. deleting old snapshots before and journals -- meta:[{}]",
-          self.path.name, e.metadata.sequenceNr, e.metadata
-        )
+        // log.warning(
+        //   "#TEST [{}] save snapshot successful to:[{}]. deleting old snapshots before and journals -- meta:[{}]",
+        //   self.path.name, e.metadata.sequenceNr, e.metadata
+        // )
 
         postSnapshot( e.metadata.sequenceNr, true )
       }
@@ -738,7 +738,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
           ( journalSweep != PassivationSaga.Pending )
         }
 
-        log.warning( "#TEST [{}] passivation saga status: is-complete:[{}] saga:[{}]", self.path.name, result, this )
+        log.debug( "AlgorithmModule[{}] passivation saga status: is-complete:[{}] saga:[{}]", self.path.name, result, this )
         result
       }
 
@@ -749,10 +749,10 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
 
     def passivationStep( saga: PassivationSaga ): Unit = {
       if ( saga.isComplete ) {
-        log.warning( "#TEST #DEBUG [{}] passivation completed. stopping actor with shapes:[{}]", self.path.name, state.shapes.size )
+        log.debug( "AlgorithmModule[{}] passivation completed. stopping actor with shapes:[{}]", self.path.name, state.shapes.size )
         context stop self
       } else {
-        log.warning( "#TEST #DEBUG [{}] passivation progressing but not complete: [{}]", self.path.name, saga )
+        log.debug( "AlgorithmModule[{}] passivation progressing but not complete: [{}]", self.path.name, saga )
         context become LoggingReceive { around( passivating(saga) ) }
       }
     }
@@ -765,10 +765,10 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
       }
 
       case e: SaveSnapshotSuccess => {
-        log.warning(
-          "#TEST [{}] save passivation snapshot successful to:[{}]. deleting old snapshots before and journals -- meta:[{}]",
-          self.path.name, e.metadata.sequenceNr, e.metadata
-        )
+        // log.warning(
+        //   "#TEST [{}] save passivation snapshot successful to:[{}]. deleting old snapshots before and journals -- meta:[{}]",
+        //   self.path.name, e.metadata.sequenceNr, e.metadata
+        // )
 
         passivationStep( saga.copy( snapshot = PassivationSaga.Complete ) )
         postSnapshot( e.metadata.sequenceNr, true )
@@ -782,20 +782,20 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
 
       case e: DeleteSnapshotsSuccess => {
         stopSnapshotSweepTimer( e )
-        log.warning( "#TEST #DEBUG [{}] on passivation successfully cleared snapshots up to: [{}]", self.path.name, e.criteria )
+        log.debug( "AlgorithmModule[{}] on passivation successfully cleared snapshots up to: [{}]", self.path.name, e.criteria )
         passivationStep( saga.copy( snapshotSweep = PassivationSaga.Complete ) )
       }
 
       case e @ DeleteSnapshotsFailure( criteria, cause ) => {
         stopSnapshotSweepTimer( e )
-        log.warning( "[{}] on passivation failed to clear snapshots. meta:[{}] cause:[{}]", self.path.name, criteria, cause )
+        log.warning( "AlgorithmModule[{}] on passivation failed to clear snapshots. meta:[{}] cause:[{}]", self.path.name, criteria, cause )
         passivationStep( saga.copy( snapshotSweep = PassivationSaga.Failed ) )
       }
 
 
       case e: DeleteMessagesSuccess => {
         stopJournalSweepTimer( e )
-        log.warning( "#TEST #DEBUG[{}] on passivation successfully cleared journal: [{}]", self.path.name, e )
+        log.debug( "AlgorithmModule[{}] on passivation successfully cleared journal: [{}]", self.path.name, e )
         stopPassivationTimer( e )
         passivationStep( saga.copy( journalSweep = PassivationSaga.Complete ) )
       }
@@ -1020,13 +1020,13 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
 
 
     override def saveSnapshot( snapshot: Any ): Unit = {
-      log.warning( "#TEST [{}] saveSnapshot", self.path.name )
+      // log.warning( "#TEST [{}] saveSnapshot", self.path.name )
       startSnapshotTimer()
       super.saveSnapshot( snapshot )
     }
 
     def postSnapshot( snapshotSequenceNr: Long, success: Boolean ): Unit = {
-      log.warning( "#TEST [{}] postSnapshot event:[{}]", self.path.name, snapshotSequenceNr )
+      // log.warning( "#TEST [{}] postSnapshot event:[{}]", self.path.name, snapshotSequenceNr )
       stopSnapshotTimer( success )
 
       startSnapshotSweepTimer()
@@ -1043,7 +1043,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
 
     override def receiveRecover: Receive = {
       case RecoveryCompleted => {
-        log.debug( "#TEST AlgorithmModule[{}]: recovery completed", self.path.name )
+        // log.debug( "#TEST AlgorithmModule[{}]: recovery completed", self.path.name )
       }
     }
 

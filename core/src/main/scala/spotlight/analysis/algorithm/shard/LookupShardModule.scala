@@ -6,7 +6,7 @@ import akka.actor.{ActorRef, Cancellable, Props}
 import akka.event.LoggingReceive
 import akka.persistence.RecoveryCompleted
 
-import nl.grons.metrics.scala.{Meter, MetricName}
+import nl.grons.metrics.scala.{Meter, MetricName, Timer}
 import squants.information._
 import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap
 import peds.akka.envelope._
@@ -224,9 +224,11 @@ object LookupShardModule extends AggregateRootModule { module =>
         val AssignmentsName = "assignments"
         val RoutingsName = "routings"
         val HitRateGaugeName = "hit-percentage"
+//        val LookupName = "lookup"
 
         val assignmentsMeter: Meter = metrics.meter( AssignmentsName )
         val routingMeter: Meter = metrics.meter( RoutingsName )
+//        val lookupTimer: Timer = metrics.timer( LookupName )
 
         initializeMetrics()
 
@@ -244,7 +246,7 @@ object LookupShardModule extends AggregateRootModule { module =>
             availability.shardSizes.values.foldLeft( Bytes(0) ){ _ + _.size }.toKilobytes
           }
 
-          metrics.gauge( HitRateGaugeName ) { 100.0 * ( 1.0 - (routingMeter.count.toDouble / assignmentsMeter.count.toDouble) ) }
+          metrics.gauge( HitRateGaugeName ) { 100.0 * ( 1.0 - (assignmentsMeter.count.toDouble / routingMeter.count.toDouble) ) }
         }
 
         def stripLingeringMetrics(): Unit = {

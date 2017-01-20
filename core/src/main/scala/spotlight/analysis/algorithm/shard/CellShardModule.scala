@@ -55,10 +55,11 @@ case class CellShardCatalog(
   override def id: TID = identifying.tag( ShardCatalog.ID( plan.id, algorithmRootType.name ).asInstanceOf[identifying.ID] ).asInstanceOf[TID]
   override def name: String = plan.name
   override def slug: String = plan.slug
+  val size: Int = cells.size
 
   def apply( t: Topic ): AlgoTID = {
     logger.debug( "#TEST: CellShardCatalog.apply: topic:[{}] cells:[{}] t.##:[{}] tpos:[{}]", t, cells.size.toString, t.##.toString, (math.abs(t.##) % cells.size).toString )
-    cells( math.abs(t.##) % cells.size )
+    cells( math.abs(t.##) % size )
   }
 
   def contains( t: Topic ): Boolean = true

@@ -256,7 +256,7 @@ object DetectionAlgorithmRouter extends LazyLogging {
     algorithmRootType: AggregateRootType,
     model: DomainModel
   ) extends AlgorithmProxy {
-    val shardRootType: AggregateRootType = LookupShardModule.rootType
+    val shardRootType: AggregateRootType = CellShardModule.module.rootType
 //    val shardRootType: AggregateRootType = CellShardModule.module.rootType
 
     implicit val scIdentifying = shardRootType.identifying
