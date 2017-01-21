@@ -210,14 +210,14 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
         def routerName: String = DetectionAlgorithmRouter.name( provider.plan.name )
         def detectorName: String = OutlierDetection.name( provider.plan.name )
 
-        def startDetectionDrivers(): (ActorRef, ActorRef, ActorRef) = {
+        def startWorkers(): (ActorRef, ActorRef, ActorRef) = {
           import peds.akka.supervision.IsolatedLifeCycleSupervisor.{ WaitForStart, GetChildren, Children, Started }
           import akka.pattern.ask
 
           implicit val ec = context.dispatcher
           implicit val timeout = Timeout( 1.second )
 
-          val driverSupervisor = context.system.actorOf(
+          val foreman = context.system.actorOf(
             Props(
               new IsolatedDefaultSupervisor() with OneForOneStrategyFactory {
                 override def childStarter() = {
@@ -226,26 +226,26 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
                 }
               }
             ),
-            "DetectionDrivers"
+            s"${plan.name}-foreman"
           )
 
-          val drivers = {
+          val f = {
             for {
-              _ <- ( driverSupervisor ? WaitForStart ).mapTo[Started.type]
-              cs <- ( driverSupervisor ? GetChildren ).mapTo[Children]
+              _ <- ( foreman ? WaitForStart ).mapTo[Started.type]
+              cs <- ( foreman ? GetChildren ).mapTo[Children]
             } yield {
               val actors = {
                 for {
                   router <- cs.children collectFirst { case c if c.name contains provider.routerName => c.child }
                   detector <- cs.children collectFirst { case c if c.name contains provider.detectorName => c.child }
-                } yield ( driverSupervisor, detector, router )
+                } yield ( foreman, detector, router )
               }
 
               actors.get
             }
           }
 
-          Await.result( drivers, 1.second )
+          Await.result( f, 1.second )
         }
 
         def makeRouter()( implicit context: ActorContext ): ActorRef = {
@@ -291,7 +291,7 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
 
       override val evState: ClassTag[OutlierPlan] = ClassTag( classOf[OutlierPlan] )
 
-      lazy val (drivers, detector, router) = startDetectionDrivers()
+      lazy val (foreman, detector, router) = startWorkers()
 
       override def acceptance: Acceptance = entityAcceptance orElse {
         case (e: P.ScopeChanged, s) => {

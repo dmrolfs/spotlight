@@ -14,10 +14,10 @@ import peds.akka.envelope._
 import peds.akka.metrics.InstrumentedActor
 import peds.commons.{TryV, Valid}
 import peds.commons.concurrent._
-import peds.commons.identifier.{ShortUUID, TaggedID}
+import peds.commons.identifier.{Identifying, ShortUUID, TaggedID}
 import shapeless.TypeCase
 import spotlight.analysis.algorithm._
-import spotlight.analysis.algorithm.shard._
+import spotlight.analysis.algorithm.shard.{CellShardingStrategy, ShardCatalog, ShardProtocol}
 import spotlight.analysis.algorithm.statistical._
 import spotlight.model.outlier.OutlierPlan
 
@@ -256,24 +256,17 @@ object DetectionAlgorithmRouter extends LazyLogging {
     algorithmRootType: AggregateRootType,
     model: DomainModel
   ) extends AlgorithmProxy {
-    val shardRootType: AggregateRootType = CellShardModule.module.rootType
-//    val shardRootType: AggregateRootType = CellShardModule.module.rootType
+    val shardingStrategy = CellShardingStrategy
+    implicit val scIdentifying: Identifying[ShardCatalog.ID] = shardingStrategy.identifying
 
-    implicit val scIdentifying = shardRootType.identifying
-    val catalogId: ShardCatalog#TID = ShardCatalog.idFor( plan, algorithmRootType.name )
-    val catalogRef: ActorRef = {
-      val ref = model( shardRootType, catalogId )
-      ref !+ CellShardProtocol.Add( catalogId, plan, algorithmRootType, 5000 ) // 5000 good // 2000 good // 1000 good w 10% drops
-//      ref !+ LookupShardProtocol.Add( catalogId, plan, algorithmRootType )
-      ref
-    }
-
+    val shardingId: ShardCatalog#TID = shardingStrategy.idFor( plan, algorithmRootType.name )
+    val shardingRef = shardingStrategy.actorFor( plan, algorithmRootType )( model )
 
     override def forward( message: Any )( implicit sender: ActorRef, context: ActorContext ): Unit = {
-      referenceFor(message) forwardEnvelope ShardProtocol.RouteMessage( catalogId, message )
+      referenceFor(message) forwardEnvelope ShardProtocol.RouteMessage( shardingId, message )
     }
 
-    override def referenceFor( message: Any )( implicit context: ActorContext ): ActorRef = catalogRef
+    override def referenceFor( message: Any )( implicit context: ActorContext ): ActorRef = shardingRef
   }
 }
 

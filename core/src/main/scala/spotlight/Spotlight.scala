@@ -211,7 +211,7 @@ object Spotlight extends Instrumented with StrictLogging {
 
     import akka.pattern.ask
     implicit val ec = bc.system.dispatcher
-    implicit val timeout = Timeout( 30.seconds )
+    implicit val timeout = Timeout( 270.seconds ) // 90% of 5.minutes
 
     for {
       ChildStarted( catalog ) <- ( catalogSupervisor ? StartChild(catalogProps, PlanCatalog.name) ).mapTo[ChildStarted]
