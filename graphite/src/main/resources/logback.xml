@@ -10,7 +10,7 @@
   <timestamp key="bySecond" datePattern="yyyyMMdd'T'HHmmss"/>
 
   <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
-    <file>${LOG_HOME}/graphite-${bySecond}.log</file>
+    <file>${LOG_HOME}/spotlight-${bySecond}.log</file>
     <append>true</append>
     <!-- encoders are assigned the type
          ch.qos.logback.classic.encoder.PatternLayoutEncoder by default -->
@@ -20,7 +20,7 @@
     </encoder>
     <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
       <!-- rollover daily -->
-      <fileNamePattern>${LOG_HOME}/graphite-%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+      <fileNamePattern>${LOG_HOME}/spotlight-%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
       <!--<minIndex>1</minIndex>-->
       <!--<maxIndex>3</maxIndex>-->
       <timeBasedFileNamingAndTriggeringPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
