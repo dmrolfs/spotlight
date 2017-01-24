@@ -70,11 +70,11 @@ object OutlierDetection extends Instrumented with StrictLogging {
 
   private[OutlierDetection] object DetectionRequest {
     def from( m: OutlierDetectionMessage, subscriber: ActorRef )( implicit wid: WorkId ): DetectionRequest = {
-      logger.debug( "req = [{}]", m )
-      logger.debug( "req.correlationIds = [{}]", m.correlationIds )
-      logger.debug( "workId:[{}]", wid )
+      // logger.debug( "req = [{}]", m )
+      // logger.debug( "req.correlationIds = [{}]", m.correlationIds )
+      // logger.debug( "workId:[{}]", wid )
       val wids = if ( m.correlationIds.nonEmpty ) m.correlationIds else Set( wid )
-      logger.debug( "request correlationIds = [{}]", wids )
+      // logger.debug( "request correlationIds = [{}]", wids )
       DetectionRequest( subscriber, wids )
     }
   }
