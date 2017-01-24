@@ -35,11 +35,9 @@ import peds.archetype.domain.model.core.{Entity, EntityIdentifying}
 import peds.commons.{KOp, TryV}
 import peds.commons.identifier.{Identifying, ShortUUID, TaggedID}
 import demesne._
-import demesne.PassivationSpecification.StopAggregateRoot
 import demesne.repository.{AggregateRootRepository, CommonLocalRepository, EnvelopingAggregateRootRepository}
 import demesne.repository.AggregateRootRepository.{ClusteredAggregateContext, LocalAggregateContext}
 import spotlight.analysis._
-import spotlight.analysis.algorithm.AlgorithmModule.ID
 import spotlight.model.outlier.{NoOutliers, OutlierPlan, Outliers}
 import spotlight.model.timeseries._
 
@@ -238,7 +236,6 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
 
     val ShardsMetricName = "shards"
     val shards: Agent[(Long, BloomFilter[AlgorithmModule.ID])] = {
-//      Agent( BloomFilter[AlgorithmModule.ID](maxFalsePosProbability = 0.01, size = 10000000) )( ExecutionContext.global )
       Agent(
         (
           0L,
@@ -258,12 +255,6 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
           ss add id
           ( c + 1L, ss )
         }
-
-//        if ( ss.has_?(id) ) ss
-//        else {
-//          logger.info( "created new {} algorithm shard: {}", rootType.name, id )
-//          ss + id
-//        }
       }
     }
   }
@@ -461,7 +452,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
 
         Some(
           new SnapshotSpecification {
-            override val snapshotInterval: FiniteDuration = 5.minutes // 2.minutes
+            override val snapshotInterval: FiniteDuration = 3.minutes // 2.minutes // 5.minutes okay
             override val snapshotInitialDelay: FiniteDuration = {
               val delay = snapshotInterval + snapshotInterval * AlgorithmModule.snapshotFactorizer.nextDouble()
               FiniteDuration( delay.toMillis, MILLISECONDS )
@@ -543,10 +534,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
   with InstrumentedActor {
     publisher: EventPublisher =>
 
-
-    setInactivityTimeout( inactivity = rootType.passivation.inactivityTimeout, message = StopAggregateRoot(aggregateId) )
-
-    override val StopMessageType: ClassTag[_] = classTag[StopAggregateRoot[ID]]
+    setInactivityTimeout( inactivity = rootType.passivation.inactivityTimeout, message = ReceiveTimeout /*StopAggregateRoot(aggregateId)*/ )
 
     override val journalPluginId: String = "akka.persistence.algorithm.journal.plugin"
     override val snapshotPluginId: String = "akka.persistence.algorithm.snapshot.plugin"
@@ -563,8 +551,23 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
 
     override def postStop(): Unit = {
       clearInactivityTimeout()
-      // log.warning( "#TEST AlgorithmModule[{}]: actor stopped with {} shapes", self.path.name, state.shapes.size )
+      log.info( "AlgorithmModule[{}]: actor stopped with {} shapes", self.path.name, state.shapes.size )
       super.postStop()
+    }
+
+    override def passivate(): Unit = {
+      startPassivationTimer()
+      if ( isRedundantSnapshot ) {
+        import PassivationSaga.Complete
+        context become LoggingReceive { around( active orElse passivating( PassivationSaga(snapshot = Complete)) ) }
+        log.warning( "AlgorithmModule[{}] passivation started with current snapshot...", self.path.name )
+        postSnapshot( lastSequenceNr - 1L, true )
+      } else {
+        context become LoggingReceive { around( active orElse passivating() ) }
+        log.warning( "AlgorithmModule[{}] passivation started with old snapshot...", self.path.name )
+        startPassivationTimer()
+        saveSnapshot( state )
+      }
     }
 
     override def parseId( idstr: String ): TID = {

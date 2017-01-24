@@ -25,6 +25,7 @@ libraryDependencies ++=
     facility.scopt,
     demesne.core,
     akka.inMemory,
+    facility.offheap,
     facility.lang,
     facility.parboiled,
     facility.squants,
@@ -38,6 +39,8 @@ libraryDependencies ++=
     "org.python" % "jython-standalone" % "2.5.3",
     "com.github.marklister" %% "product-collections" % "1.4.3"
   )
+
+addCompilerPlugin("org.scalamacros" % "paradise" % "2.1.0" cross CrossVersion.full)
 
 //libraryDependencies += ( "com.jsuereth" %% "scala-arm" % "2.0.0-M1" )
 //

@@ -17,7 +17,7 @@ import peds.commons.concurrent._
 import peds.commons.identifier.{Identifying, ShortUUID, TaggedID}
 import shapeless.TypeCase
 import spotlight.analysis.algorithm._
-import spotlight.analysis.algorithm.shard.{CellShardingStrategy, ShardCatalog, ShardProtocol}
+import spotlight.analysis.algorithm.shard.{CellShardingStrategy, LookupShardingStrategy, ShardCatalog, ShardProtocol}
 import spotlight.analysis.algorithm.statistical._
 import spotlight.model.outlier.OutlierPlan
 
