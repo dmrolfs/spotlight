@@ -583,11 +583,23 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
 
     var algorithmContext: Context = _
 
+    //todo: experimental feature. disabled via MaxValue for now - initial tests helped to limit to 10000 topics for inmem
+    var _advances: Int = 0
+    val AdvanceLimit: Int = 10000
 
     override val acceptance: Acceptance = {
       case ( AdvancedType(event), cs ) => {
         val s = cs.shapes.get( event.topic ) getOrElse shapeCompanion.zero( None )
-        cs.withTopicShape( event.topic, shapeCompanion.advance(s, event) )
+        _advances += 1
+        val newState = cs.withTopicShape( event.topic, shapeCompanion.advance(s, event) )
+
+        if ( AdvanceLimit < _advances ) {
+          log.debug( "advance limit exceed before snapshot time - taking snapshot with sweeps.." )
+          _advances = 0
+          saveSnapshot( newState )
+        }
+
+        newState
       }
     }
 
@@ -611,13 +623,9 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
 
           case -\/( ex: AlgorithmModule.InsufficientDataSize ) => {
             stopTimer( start )
-            log.error(
-              ex,
+            log.info(
               "[{}] skipped [{}] analysis on [{}] @ [{}] due to insufficient data - no outliers marked for interval",
-              workId,
-              algo.name,
-              payload.plan.name + "][" + payload.topic,
-              payload.source.interval
+              workId, algo.name, payload.plan.name + "][" + payload.topic, payload.source.interval
             )
 
             // don't let aggregator time out just due to error in algorithm
@@ -634,10 +642,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
             log.error(
               ex,
               "[{}] failed [{}] analysis on [{}] @ [{}] - no outliers marked for interval",
-              workId,
-              algo.name,
-              payload.plan.name + "][" + payload.topic,
-              payload.source.interval
+              workId, algo.name, payload.plan.name + "][" + payload.topic, payload.source.interval
             )
             // don't let aggregator time out just due to error in algorithm
             aggregator !+ NoOutliers(
@@ -673,25 +678,13 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
     }
 
     val nonfunctional: Receive = {
-      case StopMessageType( m ) if isRedundantSnapshot => {
-        context become LoggingReceive { around( active orElse passivating( PassivationSaga(snapshot = PassivationSaga.Complete)) ) }
-        log.debug( "AlgorithmModule[{}] started passivating with current snapshot...", self.path.name )
-        startPassivationTimer()
-        postSnapshot( lastSequenceNr - 1L, true )
-      }
-
-      case StopMessageType( m ) => {
-        context become LoggingReceive { around( active orElse passivating() ) }
-        log.debug( "AlgorithmModule[{}] started passivating with old snapshot...", self.path.name )
-        startPassivationTimer()
-        saveSnapshot( state )
-      }
+      case StopMessageType( m ) => passivate() // not used in normal case as handled by AggregateRoot
 
       case e: SaveSnapshotSuccess => {
-        // log.warning(
-        //   "#TEST [{}] save snapshot successful to:[{}]. deleting old snapshots before and journals -- meta:[{}]",
-        //   self.path.name, e.metadata.sequenceNr, e.metadata
-        // )
+        log.debug(
+          "[{}] save snapshot successful to:[{}]. deleting old snapshots before and journals -- meta:[{}]",
+          self.path.name, e.metadata.sequenceNr, e.metadata
+        )
 
         postSnapshot( e.metadata.sequenceNr, true )
       }
@@ -703,22 +696,22 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
 
       case e: DeleteSnapshotsSuccess => {
         stopSnapshotSweepTimer( e )
-//        log.debug( "#TEST #DEBUG [{}] successfully cleared snapshots up to: [{}]", self.path.name, e.criteria )
+       log.debug( "[{}] successfully cleared snapshots up to: [{}]", self.path.name, e.criteria )
       }
 
       case e @ DeleteSnapshotsFailure( criteria, cause ) => {
         stopSnapshotSweepTimer( e )
-        log.info( "[{}] failed to clear snapshots. meta:[{}] cause:[{}]", self.path.name, criteria, cause )
+        log.warning( "[{}] failed to clear snapshots. meta:[{}] cause:[{}]", self.path.name, criteria, cause )
       }
 
       case e: DeleteMessagesSuccess => {
         stopJournalSweepTimer( e )
-//        log.debug( "[{}] successfully cleared journal: [{}]", self.path.name, e )
+       log.debug( "[{}] successfully cleared journal: [{}]", self.path.name, e )
       }
 
       case e: DeleteMessagesFailure => {
         stopJournalSweepTimer( e )
-//        log.info( "[{}] FAILED to clear journal will attempt to clear on subsequent snapshot: [{}]", self.path.name, e )
+       log.warning( "[{}] FAILED to clear journal will attempt to clear on subsequent snapshot: [{}]", self.path.name, e )
       }
     }
 
@@ -761,17 +754,17 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
     }
 
     def passivating( saga: PassivationSaga = PassivationSaga() ): Receive = {
-      case e: demesne.PassivationSpecification.StopAggregateRoot[_] => {
+      case StopMessageType( e ) => {
         stopPassivationTimer( e )
         log.warning( "AlgorithmModule[{}] immediate passivation upon repeat stop command", self.path.name )
         context stop self
       }
 
       case e: SaveSnapshotSuccess => {
-        // log.warning(
-        //   "#TEST [{}] save passivation snapshot successful to:[{}]. deleting old snapshots before and journals -- meta:[{}]",
-        //   self.path.name, e.metadata.sequenceNr, e.metadata
-        // )
+        log.debug(
+          "[{}] save passivation snapshot successful to:[{}]. deleting old snapshots before and journals -- meta:[{}]",
+          self.path.name, e.metadata.sequenceNr, e.metadata
+        )
 
         passivationStep( saga.copy( snapshot = PassivationSaga.Complete ) )
         postSnapshot( e.metadata.sequenceNr, true )
@@ -1029,7 +1022,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
     }
 
     def postSnapshot( snapshotSequenceNr: Long, success: Boolean ): Unit = {
-      // log.warning( "#TEST [{}] postSnapshot event:[{}]", self.path.name, snapshotSequenceNr )
+      log.debug( "[{}] postSnapshot event:[{}] success:[{}]", self.path.name, snapshotSequenceNr, success )
       stopSnapshotTimer( success )
 
       startSnapshotSweepTimer()
