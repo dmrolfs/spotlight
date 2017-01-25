@@ -81,15 +81,15 @@ case class LookupShardCatalog(
     this
   }
 
-  def tally: Map[AlgoTID, Int] = {
-    import scala.collection.JavaConversions._
-
-    val zero = Map( shards.values.toSet[AlgoTID].map{ s => ( s, 0 ) }.toSeq:_* )
-    shards.foldLeft( zero ){ case (acc, (_, aid)) =>
-      val newTally = acc( aid ) + 1
-      acc + ( aid -> newTally )
-    }
-  }
+//  def tally: Map[AlgoTID, Int] = {
+//    import scala.collection.JavaConversions._
+//
+//    val zero = Map( shards.values.toSet[AlgoTID].map{ s => ( s, 0 ) }.toSeq:_* )
+//    shards.foldLeft( zero ){ case (acc, (_, aid)) =>
+//      val newTally = acc( aid ) + 1
+//      acc + ( aid -> newTally )
+//    }
+//  }
 
   override def canEqual( rhs: Any ): Boolean = rhs.isInstanceOf[LookupShardCatalog]
 
@@ -313,7 +313,6 @@ object LookupShardModule extends AggregateRootModule { module =>
         for {
           s <- Option( state ).toSet[LookupShardCatalog]
           allShards = s.shards.values.toSet
-          tally = s.tally
           candidates = allShards filter forCandidates
           cid <- candidates
           ref = referenceFor( cid )

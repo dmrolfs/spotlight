@@ -19,7 +19,6 @@ import bloomfilter.CanGenerateHashFrom.CanGenerateHashFromString
 import scalaz._
 import Scalaz._
 import scalaz.Kleisli.{ask, kleisli}
-import shapeless.TypeCase
 import com.typesafe.config.Config
 import com.typesafe.config.ConfigException.BadValue
 import com.typesafe.scalalogging.{LazyLogging, StrictLogging}
@@ -330,7 +329,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
 
     override def withTopicShape( topic: Topic, shape: Shape ): Self = copy( shapes = shapes + (topic -> shape) )
 
-    override def toString: String = s"""State( algorithm:${algorithm.name} id:[${id}] shapes:[${shapes.mkString(", ")}] )"""
+    override def toString: String = s"""State( algorithm:${algorithm.name} id:[${id}] shapes:[${shapes.size}] )"""
   }
 
 
@@ -429,9 +428,9 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
   }
 
   override type ID = AlgorithmModule.ID
-  val IdType = TypeCase[TID]
+  val IdType: ClassTag[TID] = classTag[TID]
   override def nextId: TryV[TID] = module.identifying.nextIdAs[TID]
-  val AdvancedType = TypeCase[Advanced]
+  val AdvancedType: ClassTag[Advanced] = classTag[Advanced]
 
 
   override lazy val rootType: AggregateRootType = new RootType
@@ -466,8 +465,8 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
 
     override lazy val name: String = module.shardName
     override lazy val identifying: Identifying[_] = module.identifying
-//    override def repositoryProps( implicit model: DomainModel ): Props = Repository localProps model //todo change to clustered with multi-jvm testing of cluster
-    override def repositoryProps( implicit model: DomainModel ): Props = CommonLocalRepository.props( model, this, AlgorithmActor.props( _: DomainModel, _: AggregateRootType ) )
+    override def repositoryProps( implicit model: DomainModel ): Props = Repository localProps model //todo change to clustered with multi-jvm testing of cluster
+//    override def repositoryProps( implicit model: DomainModel ): Props = CommonLocalRepository.props( model, this, AlgorithmActor.props( _: DomainModel, _: AggregateRootType ) )
     override def maximumNrClusterNodes: Int = module.maximumNrClusterNodes
     override def aggregateIdFor: ShardRegion.ExtractEntityId = super.aggregateIdFor orElse {
       case AdvancedType( a ) => ( a.sourceId.id.toString, a )
@@ -488,7 +487,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
       Backoff.onStop(
         childProps = aggregateProps,
         childName = id,
-        minBackoff = 3.seconds,
+        minBackoff = 50.milliseconds,
         maxBackoff = 5.minutes,
         randomFactor = 0.2
       )
@@ -560,11 +559,11 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
       if ( isRedundantSnapshot ) {
         import PassivationSaga.Complete
         context become LoggingReceive { around( active orElse passivating( PassivationSaga(snapshot = Complete)) ) }
-        log.warning( "AlgorithmModule[{}] passivation started with current snapshot...", self.path.name )
+        log.info( "AlgorithmModule[{}] passivation started with current snapshot...", self.path.name )
         postSnapshot( lastSequenceNr - 1L, true )
       } else {
         context become LoggingReceive { around( active orElse passivating() ) }
-        log.warning( "AlgorithmModule[{}] passivation started with old snapshot...", self.path.name )
+        log.info( "AlgorithmModule[{}] passivation started with old snapshot...", self.path.name )
         startPassivationTimer()
         saveSnapshot( state )
       }
@@ -585,7 +584,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
 
     //todo: experimental feature. disabled via MaxValue for now - initial tests helped to limit to 10000 topics for inmem
     var _advances: Int = 0
-    val AdvanceLimit: Int = 10000
+    val AdvanceLimit: Int = Int.MaxValue // 10000
 
     override val acceptance: Acceptance = {
       case ( AdvancedType(event), cs ) => {
