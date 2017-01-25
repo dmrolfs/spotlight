@@ -59,13 +59,13 @@ object ReduceOutliers extends LazyLogging {
       source: TimeSeriesBase,
       plan: OutlierPlan
     ): V[Outliers] = {
-      logger.debug(
-        "REDUCE before [{}]:[{}]:\n\t+ outliers: [{}]\n\t+ threshold: [{}]",
-        plan.name,
-        source.topic,
-        results.values.cast[SeriesOutliers].map{_.outliers.mkString( ", " )},
-        results.values.map{_.thresholdBoundaries.mkString( ", " ) }
-      )
+      // logger.debug(
+      //   "REDUCE before [{}]:[{}]:\n\t+ outliers: [{}]\n\t+ threshold: [{}]",
+      //   plan.name,
+      //   source.topic,
+      //   results.values.cast[SeriesOutliers].map{_.outliers.mkString( ", " )},
+      //   results.values.map{_.thresholdBoundaries.mkString( ", " ) }
+      // )
 
       for {
         r <- checkResults( results, plan, source.topic ).disjunction
@@ -90,7 +90,7 @@ object ReduceOutliers extends LazyLogging {
           }:_*
         )
       }
-      logger.debug( "REDUCE combined threshold: [{}]", combinedThresholds.mkString(",") )
+      // logger.debug( "REDUCE combined threshold: [{}]", combinedThresholds.mkString(",") )
 
       logDebug( results, source, plan, tally, corroboratedTimestamps, corroboratedOutliers )
 

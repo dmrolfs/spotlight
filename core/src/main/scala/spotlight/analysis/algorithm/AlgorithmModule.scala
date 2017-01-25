@@ -19,7 +19,6 @@ import bloomfilter.CanGenerateHashFrom.CanGenerateHashFromString
 import scalaz._
 import Scalaz._
 import scalaz.Kleisli.{ask, kleisli}
-import shapeless.TypeCase
 import com.typesafe.config.Config
 import com.typesafe.config.ConfigException.BadValue
 import com.typesafe.scalalogging.{LazyLogging, StrictLogging}
@@ -35,11 +34,9 @@ import peds.archetype.domain.model.core.{Entity, EntityIdentifying}
 import peds.commons.{KOp, TryV}
 import peds.commons.identifier.{Identifying, ShortUUID, TaggedID}
 import demesne._
-import demesne.PassivationSpecification.StopAggregateRoot
 import demesne.repository.{AggregateRootRepository, CommonLocalRepository, EnvelopingAggregateRootRepository}
 import demesne.repository.AggregateRootRepository.{ClusteredAggregateContext, LocalAggregateContext}
 import spotlight.analysis._
-import spotlight.analysis.algorithm.AlgorithmModule.ID
 import spotlight.model.outlier.{NoOutliers, OutlierPlan, Outliers}
 import spotlight.model.timeseries._
 
@@ -238,7 +235,6 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
 
     val ShardsMetricName = "shards"
     val shards: Agent[(Long, BloomFilter[AlgorithmModule.ID])] = {
-//      Agent( BloomFilter[AlgorithmModule.ID](maxFalsePosProbability = 0.01, size = 10000000) )( ExecutionContext.global )
       Agent(
         (
           0L,
@@ -258,12 +254,6 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
           ss add id
           ( c + 1L, ss )
         }
-
-//        if ( ss.has_?(id) ) ss
-//        else {
-//          logger.info( "created new {} algorithm shard: {}", rootType.name, id )
-//          ss + id
-//        }
       }
     }
   }
@@ -339,7 +329,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
 
     override def withTopicShape( topic: Topic, shape: Shape ): Self = copy( shapes = shapes + (topic -> shape) )
 
-    override def toString: String = s"""State( algorithm:${algorithm.name} id:[${id}] shapes:[${shapes.mkString(", ")}] )"""
+    override def toString: String = s"""State( algorithm:${algorithm.name} id:[${id}] shapes:[${shapes.size}] )"""
   }
 
 
@@ -438,9 +428,9 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
   }
 
   override type ID = AlgorithmModule.ID
-  val IdType = TypeCase[TID]
+  val IdType: ClassTag[TID] = classTag[TID]
   override def nextId: TryV[TID] = module.identifying.nextIdAs[TID]
-  val AdvancedType = TypeCase[Advanced]
+  val AdvancedType: ClassTag[Advanced] = classTag[Advanced]
 
 
   override lazy val rootType: AggregateRootType = new RootType
@@ -461,7 +451,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
 
         Some(
           new SnapshotSpecification {
-            override val snapshotInterval: FiniteDuration = 5.minutes // 2.minutes
+            override val snapshotInterval: FiniteDuration = 3.minutes // 2.minutes // 5.minutes okay
             override val snapshotInitialDelay: FiniteDuration = {
               val delay = snapshotInterval + snapshotInterval * AlgorithmModule.snapshotFactorizer.nextDouble()
               FiniteDuration( delay.toMillis, MILLISECONDS )
@@ -475,8 +465,8 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
 
     override lazy val name: String = module.shardName
     override lazy val identifying: Identifying[_] = module.identifying
-//    override def repositoryProps( implicit model: DomainModel ): Props = Repository localProps model //todo change to clustered with multi-jvm testing of cluster
-    override def repositoryProps( implicit model: DomainModel ): Props = CommonLocalRepository.props( model, this, AlgorithmActor.props( _: DomainModel, _: AggregateRootType ) )
+    override def repositoryProps( implicit model: DomainModel ): Props = Repository localProps model //todo change to clustered with multi-jvm testing of cluster
+//    override def repositoryProps( implicit model: DomainModel ): Props = CommonLocalRepository.props( model, this, AlgorithmActor.props( _: DomainModel, _: AggregateRootType ) )
     override def maximumNrClusterNodes: Int = module.maximumNrClusterNodes
     override def aggregateIdFor: ShardRegion.ExtractEntityId = super.aggregateIdFor orElse {
       case AdvancedType( a ) => ( a.sourceId.id.toString, a )
@@ -497,7 +487,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
       Backoff.onStop(
         childProps = aggregateProps,
         childName = id,
-        minBackoff = 3.seconds,
+        minBackoff = 50.milliseconds,
         maxBackoff = 5.minutes,
         randomFactor = 0.2
       )
@@ -543,10 +533,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
   with InstrumentedActor {
     publisher: EventPublisher =>
 
-
-    setInactivityTimeout( inactivity = rootType.passivation.inactivityTimeout, message = StopAggregateRoot(aggregateId) )
-
-    override val StopMessageType: ClassTag[_] = classTag[StopAggregateRoot[ID]]
+    setInactivityTimeout( inactivity = rootType.passivation.inactivityTimeout, message = ReceiveTimeout /*StopAggregateRoot(aggregateId)*/ )
 
     override val journalPluginId: String = "akka.persistence.algorithm.journal.plugin"
     override val snapshotPluginId: String = "akka.persistence.algorithm.snapshot.plugin"
@@ -563,8 +550,23 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
 
     override def postStop(): Unit = {
       clearInactivityTimeout()
-      // log.warning( "#TEST AlgorithmModule[{}]: actor stopped with {} shapes", self.path.name, state.shapes.size )
+      log.info( "AlgorithmModule[{}]: actor stopped with {} shapes", self.path.name, state.shapes.size )
       super.postStop()
+    }
+
+    override def passivate(): Unit = {
+      startPassivationTimer()
+      if ( isRedundantSnapshot ) {
+        import PassivationSaga.Complete
+        context become LoggingReceive { around( active orElse passivating( PassivationSaga(snapshot = Complete)) ) }
+        log.info( "AlgorithmModule[{}] passivation started with current snapshot...", self.path.name )
+        postSnapshot( lastSequenceNr - 1L, true )
+      } else {
+        context become LoggingReceive { around( active orElse passivating() ) }
+        log.info( "AlgorithmModule[{}] passivation started with old snapshot...", self.path.name )
+        startPassivationTimer()
+        saveSnapshot( state )
+      }
     }
 
     override def parseId( idstr: String ): TID = {
@@ -580,11 +582,23 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
 
     var algorithmContext: Context = _
 
+    //todo: experimental feature. disabled via MaxValue for now - initial tests helped to limit to 10000 topics for inmem
+    var _advances: Int = 0
+    val AdvanceLimit: Int = Int.MaxValue // 10000
 
     override val acceptance: Acceptance = {
       case ( AdvancedType(event), cs ) => {
         val s = cs.shapes.get( event.topic ) getOrElse shapeCompanion.zero( None )
-        cs.withTopicShape( event.topic, shapeCompanion.advance(s, event) )
+        _advances += 1
+        val newState = cs.withTopicShape( event.topic, shapeCompanion.advance(s, event) )
+
+        if ( AdvanceLimit < _advances ) {
+          log.debug( "advance limit exceed before snapshot time - taking snapshot with sweeps.." )
+          _advances = 0
+          saveSnapshot( newState )
+        }
+
+        newState
       }
     }
 
@@ -608,13 +622,9 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
 
           case -\/( ex: AlgorithmModule.InsufficientDataSize ) => {
             stopTimer( start )
-            log.error(
-              ex,
+            log.info(
               "[{}] skipped [{}] analysis on [{}] @ [{}] due to insufficient data - no outliers marked for interval",
-              workId,
-              algo.name,
-              payload.plan.name + "][" + payload.topic,
-              payload.source.interval
+              workId, algo.name, payload.plan.name + "][" + payload.topic, payload.source.interval
             )
 
             // don't let aggregator time out just due to error in algorithm
@@ -631,10 +641,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
             log.error(
               ex,
               "[{}] failed [{}] analysis on [{}] @ [{}] - no outliers marked for interval",
-              workId,
-              algo.name,
-              payload.plan.name + "][" + payload.topic,
-              payload.source.interval
+              workId, algo.name, payload.plan.name + "][" + payload.topic, payload.source.interval
             )
             // don't let aggregator time out just due to error in algorithm
             aggregator !+ NoOutliers(
@@ -670,25 +677,13 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
     }
 
     val nonfunctional: Receive = {
-      case StopMessageType( m ) if isRedundantSnapshot => {
-        context become LoggingReceive { around( active orElse passivating( PassivationSaga(snapshot = PassivationSaga.Complete)) ) }
-        log.debug( "AlgorithmModule[{}] started passivating with current snapshot...", self.path.name )
-        startPassivationTimer()
-        postSnapshot( lastSequenceNr - 1L, true )
-      }
-
-      case StopMessageType( m ) => {
-        context become LoggingReceive { around( active orElse passivating() ) }
-        log.debug( "AlgorithmModule[{}] started passivating with old snapshot...", self.path.name )
-        startPassivationTimer()
-        saveSnapshot( state )
-      }
+      case StopMessageType( m ) => passivate() // not used in normal case as handled by AggregateRoot
 
       case e: SaveSnapshotSuccess => {
-        // log.warning(
-        //   "#TEST [{}] save snapshot successful to:[{}]. deleting old snapshots before and journals -- meta:[{}]",
-        //   self.path.name, e.metadata.sequenceNr, e.metadata
-        // )
+        log.debug(
+          "[{}] save snapshot successful to:[{}]. deleting old snapshots before and journals -- meta:[{}]",
+          self.path.name, e.metadata.sequenceNr, e.metadata
+        )
 
         postSnapshot( e.metadata.sequenceNr, true )
       }
@@ -700,22 +695,22 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
 
       case e: DeleteSnapshotsSuccess => {
         stopSnapshotSweepTimer( e )
-//        log.debug( "#TEST #DEBUG [{}] successfully cleared snapshots up to: [{}]", self.path.name, e.criteria )
+       log.debug( "[{}] successfully cleared snapshots up to: [{}]", self.path.name, e.criteria )
       }
 
       case e @ DeleteSnapshotsFailure( criteria, cause ) => {
         stopSnapshotSweepTimer( e )
-        log.info( "[{}] failed to clear snapshots. meta:[{}] cause:[{}]", self.path.name, criteria, cause )
+        log.warning( "[{}] failed to clear snapshots. meta:[{}] cause:[{}]", self.path.name, criteria, cause )
       }
 
       case e: DeleteMessagesSuccess => {
         stopJournalSweepTimer( e )
-//        log.debug( "[{}] successfully cleared journal: [{}]", self.path.name, e )
+       log.debug( "[{}] successfully cleared journal: [{}]", self.path.name, e )
       }
 
       case e: DeleteMessagesFailure => {
         stopJournalSweepTimer( e )
-//        log.info( "[{}] FAILED to clear journal will attempt to clear on subsequent snapshot: [{}]", self.path.name, e )
+       log.warning( "[{}] FAILED to clear journal will attempt to clear on subsequent snapshot: [{}]", self.path.name, e )
       }
     }
 
@@ -758,17 +753,17 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
     }
 
     def passivating( saga: PassivationSaga = PassivationSaga() ): Receive = {
-      case e: demesne.PassivationSpecification.StopAggregateRoot[_] => {
+      case StopMessageType( e ) => {
         stopPassivationTimer( e )
         log.warning( "AlgorithmModule[{}] immediate passivation upon repeat stop command", self.path.name )
         context stop self
       }
 
       case e: SaveSnapshotSuccess => {
-        // log.warning(
-        //   "#TEST [{}] save passivation snapshot successful to:[{}]. deleting old snapshots before and journals -- meta:[{}]",
-        //   self.path.name, e.metadata.sequenceNr, e.metadata
-        // )
+        log.debug(
+          "[{}] save passivation snapshot successful to:[{}]. deleting old snapshots before and journals -- meta:[{}]",
+          self.path.name, e.metadata.sequenceNr, e.metadata
+        )
 
         passivationStep( saga.copy( snapshot = PassivationSaga.Complete ) )
         postSnapshot( e.metadata.sequenceNr, true )
@@ -1026,7 +1021,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
     }
 
     def postSnapshot( snapshotSequenceNr: Long, success: Boolean ): Unit = {
-      // log.warning( "#TEST [{}] postSnapshot event:[{}]", self.path.name, snapshotSequenceNr )
+      log.debug( "[{}] postSnapshot event:[{}] success:[{}]", self.path.name, snapshotSequenceNr, success )
       stopSnapshotTimer( success )
 
       startSnapshotSweepTimer()

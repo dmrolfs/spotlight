@@ -1,6 +1,7 @@
 package spotlight.analysis
 
 import scala.concurrent.{ExecutionContext, Future}
+import scala.reflect._
 import akka.actor._
 import akka.agent.Agent
 import akka.event.LoggingReceive
@@ -15,9 +16,8 @@ import peds.akka.metrics.InstrumentedActor
 import peds.commons.{TryV, Valid}
 import peds.commons.concurrent._
 import peds.commons.identifier.{Identifying, ShortUUID, TaggedID}
-import shapeless.TypeCase
 import spotlight.analysis.algorithm._
-import spotlight.analysis.algorithm.shard.{CellShardingStrategy, ShardCatalog, ShardProtocol}
+import spotlight.analysis.algorithm.shard._
 import spotlight.analysis.algorithm.statistical._
 import spotlight.model.outlier.OutlierPlan
 
@@ -238,8 +238,8 @@ object DetectionAlgorithmRouter extends LazyLogging {
     override def referenceFor( message: Any )( implicit context: ActorContext ): ActorRef = reference
   }
 
-  case class RootTypeProxy(algorithmRootType: AggregateRootType, model: DomainModel ) extends AlgorithmProxy {
-    val TidType = TypeCase[TaggedID[ShortUUID]]
+  case class RootTypeProxy( algorithmRootType: AggregateRootType, model: DomainModel ) extends AlgorithmProxy {
+    val TidType: ClassTag[TaggedID[ShortUUID]] = classTag[TaggedID[ShortUUID]]
 
     override def referenceFor( message: Any )( implicit context: ActorContext ): ActorRef = {
       message match {

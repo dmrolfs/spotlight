@@ -248,7 +248,7 @@ object FileBatchExample extends Instrumented with StrictLogging {
       val filterOutliers = b.add(
         Flow[Outliers]
 //        .buffer( 10, OverflowStrategy.backpressure ).watchFlow( 'filterOutliers )
-        .collect { case s: SeriesOutliers => s }.watchFlow( WatchPoints.Results )
+        .collect { case s: SeriesOutliers => s }//.watchFlow( WatchPoints.Results )
       )
 
       val flatter = b.add(
@@ -267,7 +267,7 @@ object FileBatchExample extends Instrumented with StrictLogging {
       val unwrap = b.add(
         Flow[List[SimpleFlattenedOutlier]]
         .mapConcat(identity)
-        .map { o => logger.info( "RESULT: {}", o ); o }
+        // .map { o => logger.info( "RESULT: {}", o ); o }
       )
 
       intakeBuffer ~> timeSeries ~> limiter ~> score ~> /*publishBuffer ~>*/ filterOutliers ~> flatter ~> unwrap

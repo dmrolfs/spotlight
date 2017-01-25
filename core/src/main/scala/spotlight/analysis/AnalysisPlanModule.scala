@@ -179,7 +179,7 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
     object PlanActor {
       def props( model: DomainModel, rootType: AggregateRootType ): Props = Props( new Default( model, rootType ) )
 
-      private class Default(model: DomainModel, rootType: AggregateRootType)
+      private class Default( model: DomainModel, rootType: AggregateRootType )
       extends PlanActor( model, rootType )
       with WorkerProvider
       with FlowConfigurationProvider
@@ -217,6 +217,7 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
           implicit val ec = context.dispatcher
           implicit val timeout = Timeout( 1.second )
 
+          log.warning( "creating foreman by [{}]", self.path )
           val foreman = context.system.actorOf(
             Props(
               new IsolatedDefaultSupervisor() with OneForOneStrategyFactory {
@@ -228,6 +229,7 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
             ),
             s"${plan.name}-foreman"
           )
+          log.warning( "[{}] foreman = [{}]", self.path, foreman )
 
           val f = {
             for {
@@ -270,7 +272,6 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
           )
         }
       }
-
     }
 
     class PlanActor( override val model: DomainModel, override val rootType: AggregateRootType )
@@ -291,7 +292,7 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
 
       override val evState: ClassTag[OutlierPlan] = ClassTag( classOf[OutlierPlan] )
 
-      lazy val (foreman, detector, router) = startWorkers()
+      var detector: ActorRef = _
 
       override def acceptance: Acceptance = entityAcceptance orElse {
         case (e: P.ScopeChanged, s) => {
@@ -316,6 +317,9 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
         case P.Add( IdType( targetId ), info ) if targetId == aggregateId => {
           persist( P.Added( targetId, info ) ) { e =>
             acceptAndPublish( e )
+            val (_, d, _) = startWorkers()
+            outer.detector = d
+
             log.debug( "AnalysisPlanModule[{}]: notifying [{}] of {}", state.name, sender().path.name, e )
             sender() !+ e // per akka docs: safe to use sender() here
           }

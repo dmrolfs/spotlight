@@ -343,76 +343,87 @@ object Settings extends LazyLogging {
     private def makePlans( planSpecifications: Config ): Set[OutlierPlan] = {
       import scala.collection.JavaConversions._
 
-      val result = planSpecifications.root.collect{ case (n, s: ConfigObject) => (n, s.toConfig) }.toSeq.map {
-        case (name, spec) => {
-          val IS_DEFAULT = "is-default"
-          val TOPICS = "topics"
-          val REGEX = "regex"
+      val result = {
+        planSpecifications
+        .root
+        .collect { case (n, s: ConfigObject) => (n, s.toConfig) }
+        .toSeq
+        .map {
+          case (name, spec) => {
+            logger.warn(
+              "#TEST #INFO Settings making plan from specification[origin:{} @ {}]: [{}]",
+              spec.origin(), spec.origin().lineNumber().toString, spec
+            )
 
-          val grouping: Option[OutlierPlan.Grouping] = {
-            val GROUP_LIMIT = "group.limit"
-            val GROUP_WITHIN = "group.within"
-            val limit = if ( spec hasPath GROUP_LIMIT ) spec getInt GROUP_LIMIT else 10000
-            logger.info( "CONFIGURATION spec: [{}]", spec )
-            val window = if ( spec hasPath GROUP_WITHIN ) {
-              Some( FiniteDuration( spec.getDuration( GROUP_WITHIN ).toNanos, NANOSECONDS ) )
+            val IS_DEFAULT = "is-default"
+            val TOPICS = "topics"
+            val REGEX = "regex"
+
+            val grouping: Option[OutlierPlan.Grouping] = {
+              val GROUP_LIMIT = "group.limit"
+              val GROUP_WITHIN = "group.within"
+              val limit = if ( spec hasPath GROUP_LIMIT ) spec getInt GROUP_LIMIT else 10000
+              logger.info( "CONFIGURATION spec: [{}]", spec )
+              val window = if ( spec hasPath GROUP_WITHIN ) {
+                Some( FiniteDuration( spec.getDuration( GROUP_WITHIN ).toNanos, NANOSECONDS ) )
+              } else {
+                None
+              }
+
+              window map { w => OutlierPlan.Grouping( limit, w ) }
+            }
+
+            //todo: add configuration for at-least and majority
+            val ( timeout, algorithms ) = pullCommonPlanFacets( spec )
+
+            if ( spec.hasPath(IS_DEFAULT) && spec.getBoolean(IS_DEFAULT) ) {
+              logger info s"topic[$name] default plan origin: ${spec.origin} line:${spec.origin.lineNumber}"
+              Some(
+                OutlierPlan.default(
+                  name = name,
+                  timeout = timeout,
+                  isQuorum = makeIsQuorum( spec, algorithms.size ),
+                  reduce = makeOutlierReducer( spec ),
+                  algorithms = algorithms,
+                  grouping = grouping,
+                  planSpecification = spec
+                )
+              )
+            } else if ( spec hasPath TOPICS ) {
+              import scala.collection.JavaConverters._
+              logger info s"topic[$name] topic plan origin: ${spec.origin} line:${spec.origin.lineNumber}"
+
+              Some(
+                OutlierPlan.forTopics(
+                  name = name,
+                  timeout = timeout,
+                  isQuorum = makeIsQuorum( spec, algorithms.size ),
+                  reduce = makeOutlierReducer( spec ),
+                  algorithms = algorithms,
+                  grouping = grouping,
+                  planSpecification = spec,
+                  extractTopic = OutlierDetection.extractOutlierDetectionTopic,
+                  topics = spec.getStringList(TOPICS).asScala.map{ Topic(_) }.toSet
+                )
+              )
+            } else if ( spec hasPath REGEX ) {
+              logger info s"topic[$name] regex plan origin: ${spec.origin} line:${spec.origin.lineNumber}"
+              Some(
+                OutlierPlan.forRegex(
+                  name = name,
+                  timeout = timeout,
+                  isQuorum = makeIsQuorum( spec, algorithms.size ),
+                  reduce = makeOutlierReducer( spec ),
+                  algorithms = algorithms,
+                  grouping = grouping,
+                  planSpecification = spec,
+                  extractTopic = OutlierDetection.extractOutlierDetectionTopic,
+                  regex = new Regex( spec.getString(REGEX) )
+                )
+              )
             } else {
               None
             }
-
-            window map { w => OutlierPlan.Grouping( limit, w ) }
-          }
-
-          //todo: add configuration for at-least and majority
-          val ( timeout, algorithms ) = pullCommonPlanFacets( spec )
-
-          if ( spec.hasPath(IS_DEFAULT) && spec.getBoolean(IS_DEFAULT) ) {
-            logger info s"topic[$name] default plan origin: ${spec.origin} line:${spec.origin.lineNumber}"
-            Some(
-              OutlierPlan.default(
-                name = name,
-                timeout = timeout,
-                isQuorum = makeIsQuorum( spec, algorithms.size ),
-                reduce = makeOutlierReducer( spec ),
-                algorithms = algorithms,
-                grouping = grouping,
-                planSpecification = spec
-              )
-            )
-          } else if ( spec hasPath TOPICS ) {
-            import scala.collection.JavaConverters._
-            logger info s"topic[$name] topic plan origin: ${spec.origin} line:${spec.origin.lineNumber}"
-
-            Some(
-              OutlierPlan.forTopics(
-                name = name,
-                timeout = timeout,
-                isQuorum = makeIsQuorum( spec, algorithms.size ),
-                reduce = makeOutlierReducer( spec ),
-                algorithms = algorithms,
-                grouping = grouping,
-                planSpecification = spec,
-                extractTopic = OutlierDetection.extractOutlierDetectionTopic,
-                topics = spec.getStringList(TOPICS).asScala.map{ Topic(_) }.toSet
-              )
-            )
-          } else if ( spec hasPath REGEX ) {
-            logger info s"topic[$name] regex plan origin: ${spec.origin} line:${spec.origin.lineNumber}"
-            Some(
-              OutlierPlan.forRegex(
-                name = name,
-                timeout = timeout,
-                isQuorum = makeIsQuorum( spec, algorithms.size ),
-                reduce = makeOutlierReducer( spec ),
-                algorithms = algorithms,
-                grouping = grouping,
-                planSpecification = spec,
-                extractTopic = OutlierDetection.extractOutlierDetectionTopic,
-                regex = new Regex( spec.getString(REGEX) )
-              )
-            )
-          } else {
-            None
           }
         }
       }

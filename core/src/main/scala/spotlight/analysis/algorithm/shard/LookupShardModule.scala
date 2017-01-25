@@ -6,7 +6,7 @@ import akka.actor.{ActorRef, Cancellable, Props}
 import akka.event.LoggingReceive
 import akka.persistence.RecoveryCompleted
 
-import nl.grons.metrics.scala.{Meter, MetricName, Timer}
+import nl.grons.metrics.scala.{Meter, MetricName}
 import squants.information._
 import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap
 import peds.akka.envelope._
@@ -57,13 +57,11 @@ object LookupShardProtocol extends AggregateProtocol[LookupShardCatalog#ID] {
 }
 
 
-//import scala.collection.mutable
-
 case class LookupShardCatalog(
   plan: OutlierPlan.Summary,
   algorithmRootType: AggregateRootType,
   //  control: LookupShardCatalog.Control,
-  shards: Object2ObjectOpenHashMap[Topic, AlgoTID] = new Object2ObjectOpenHashMap[Topic, AlgoTID]( ) // set expected size?
+  shards: Object2ObjectOpenHashMap[Topic, AlgoTID] = new Object2ObjectOpenHashMap[Topic, AlgoTID](2750000) // set expected size? 
 //    shards: mutable.Map[Topic, AlgoTID] = mutable.Map.empty[Topic, AlgoTID]
 ) extends ShardCatalog with Equals {
   import LookupShardCatalog.identifying
@@ -83,15 +81,15 @@ case class LookupShardCatalog(
     this
   }
 
-  def tally: Map[AlgoTID, Int] = {
-    import scala.collection.JavaConversions._
-
-    val zero = Map( shards.values.toSet[AlgoTID].map{ s => ( s, 0 ) }.toSeq:_* )
-    shards.foldLeft( zero ){ case (acc, (_, aid)) =>
-      val newTally = acc( aid ) + 1
-      acc + ( aid -> newTally )
-    }
-  }
+//  def tally: Map[AlgoTID, Int] = {
+//    import scala.collection.JavaConversions._
+//
+//    val zero = Map( shards.values.toSet[AlgoTID].map{ s => ( s, 0 ) }.toSeq:_* )
+//    shards.foldLeft( zero ){ case (acc, (_, aid)) =>
+//      val newTally = acc( aid ) + 1
+//      acc + ( aid -> newTally )
+//    }
+//  }
 
   override def canEqual( rhs: Any ): Boolean = rhs.isInstanceOf[LookupShardCatalog]
 
@@ -126,7 +124,7 @@ object LookupShardCatalog {
   }
 
   object Control {
-    final case class BySize( threshold: Information = Megabytes(10) ) extends Control {
+    final case class BySize( threshold: Information ) extends Control {
       override def withinThreshold( estimate: AP.EstimatedSize ): Boolean = estimate.size <= threshold
     }
   }
@@ -185,6 +183,13 @@ object LookupShardModule extends AggregateRootModule { module =>
         @inline def nonEmpty: Boolean = !isEmpty
 
         val isCandidate: AlgoTID => Boolean = { aid: AlgoTID => available.contains( aid ) || !shardSizes.contains( aid ) }
+
+        override def toString(): String = {
+          val shardStatuses = shardSizes map { case (aid, e) =>
+            s"(open:${control.withinThreshold(e)} shapes:${e.nrShapes} size:${e.size})"
+          }
+          s"""Availability( shards[${shardSizes.size}]: control:${control} ${shardStatuses.mkString("[", ", ", "]")}"""
+        }
       }
     }
 
@@ -197,8 +202,7 @@ object LookupShardModule extends AggregateRootModule { module =>
       import ShardingActor.Availability
       import spotlight.analysis.algorithm.shard.{LookupShardProtocol => P}
 
-//      override val journalPluginId: String = "akka.persistence.algorithm.journal.plugin"
-//      override val snapshotPluginId: String = "akka.persistence.algorithm.snapshot.plugin"
+      override def saveSnapshot( snapshot: Any ): Unit = { log.error( "[{}] should not snaphot!!", self.path ) }
 
       override lazy val metricBaseName: MetricName = MetricName( classOf[ShardingActor] )
 
@@ -279,6 +283,10 @@ object LookupShardModule extends AggregateRootModule { module =>
 
       override def parseId( idrep: String ): TID = identifying.safeParseTid[TID]( idrep )( classTag[TID] )
 
+//      import ShardingActor.Lookup
+//      implicit val alloc = scala.offheap.malloc
+//      val shards: Lookup = Lookup.apply()
+
       override var state: LookupShardCatalog = _
       override val evState: ClassTag[LookupShardCatalog] = classTag[LookupShardCatalog]
       var availability: Availability = _
@@ -305,7 +313,6 @@ object LookupShardModule extends AggregateRootModule { module =>
         for {
           s <- Option( state ).toSet[LookupShardCatalog]
           allShards = s.shards.values.toSet
-          tally = s.tally
           candidates = allShards filter forCandidates
           cid <- candidates
           ref = referenceFor( cid )
@@ -342,7 +349,7 @@ object LookupShardModule extends AggregateRootModule { module =>
 
       def active( newAvailability: Availability ): Receive = {
         availability = newAvailability
-        log.info( "ShardCatalog[{}] updating availability to:[{}]", self.path.name, newAvailability )
+        log.debug( "ShardCatalog[{}] updating availability to:[{}]", self.path.name, newAvailability )
         LoggingReceive { around( knownRouting orElse unknownRouting( newAvailability ) orElse admin ) }
       }
 
@@ -371,10 +378,7 @@ object LookupShardModule extends AggregateRootModule { module =>
       }
 
       def unknownRouting( availability: Availability ): Receive = {
-        case ShardProtocol.RouteMessage( _, payload ) if assignRouting isDefinedAt payload => {
-          log.debug( "ShardCatalog[{}]: unknown RouteMessage received. extracting payload:[{}]", self.path.name, payload )
-          assignRouting( payload )
-        }
+        case ShardProtocol.RouteMessage( _, payload ) if assignRouting isDefinedAt payload => assignRouting( payload )
 
         case m: DetectUsing if assignRouting isDefinedAt m => assignRouting( m )
 
@@ -398,7 +402,7 @@ object LookupShardModule extends AggregateRootModule { module =>
           .getOrElse {
             val nid = state.algorithmRootType.identifying.nextIdAs[AlgoTID]
             nid foreach { n => context become active( availability withNewShardId n ) }
-            log.warning( "ShardCatalog[{}]: creating new shard id: NID[{}]  root-type:[{}] tag:[{}]", self.path.name, nid, state.algorithmRootType, state.algorithmRootType.identifying.idTag.name )
+            log.info( "ShardCatalog[{}]: creating new shard id: NID[{}]  root-type:[{}] tag:[{}]", self.path.name, nid, state.algorithmRootType, state.algorithmRootType.identifying.idTag.name )
             nid
           }
           .foreach { aid =>
@@ -412,7 +416,7 @@ object LookupShardModule extends AggregateRootModule { module =>
                 sm.routingMeter.mark()
               }
 
-              log.info( "ShardCatalog[{}]: topic [{}] assigned and routed to algorithm shard:[{}]", self.path.name, m.topic, e.algorithmId )
+              log.debug( "ShardCatalog[{}]: topic [{}] assigned and routed to algorithm shard:[{}]", self.path.name, m.topic, e.algorithmId )
               //todo should message be reworked for shard's aid? since that's different than router and shard-catalog or should router use routeMessage and forward
               referenceFor( e.algorithmId ) forwardEnvelope m.copy( targetId = aid ) //okay to close over sender in persist handler
             }

@@ -161,7 +161,7 @@ object PlanCatalog extends LazyLogging {
     applicationPlans: Set[OutlierPlan] = Set.empty[OutlierPlan]
   ) extends PlanCatalog( boundedContext ) with DefaultExecutionProvider with PlanProvider {
     //todo also load from plan index?
-    override lazy val specifiedPlans: Set[OutlierPlan] = applicationPlans ++ loadPlans( configuration )
+    override lazy val specifiedPlans: Set[OutlierPlan] = applicationPlans // ++ loadPlans( configuration ) //todo: loadPlans is duplicative since Settings provides to props()
 
     private def loadPlans( specification: Config ): Set[OutlierPlan] = {
       import Default.OutlierPlansPath
@@ -184,7 +184,10 @@ object PlanCatalog extends LazyLogging {
     }
 
     private def makePlan( name: String, planSpecification: Config )( budget: Duration ): Option[OutlierPlan] = {
-      logger.info( "PlanCatalog making plan from specification: [{}]", planSpecification )
+      logger.info(
+        "PlanCatalog[{}] making plan from specification[origin:{} @ {}]: [{}]",
+        self.path.name, planSpecification.origin(), planSpecification.origin().lineNumber().toString, planSpecification
+      )
 
       //todo: bring initialization of plans into module init and base config on init config?
       val utilization = 0.9
