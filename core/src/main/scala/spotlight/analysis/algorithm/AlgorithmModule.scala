@@ -227,6 +227,16 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
   import AlgorithmModule.{ AnalysisState, ShapeCompanion, StrictSelf }
   import AlgorithmProtocol.Advanced
 
+  implicit val identifying: EntityIdentifying[AnalysisState] = {
+    val i = new EntityIdentifying[AnalysisState] with ShortUUID.ShortUuidIdentifying[AnalysisState] {
+      override lazy val idTag: Symbol = algorithm.label
+      override val evEntity: ClassTag[AnalysisState] = classTag[AnalysisState]
+    }
+
+    logger.warn( "ALGO_MODULE identifying = [{}]", i)
+    i
+  }
+
 
   object ShardMonitor {
     implicit val canGenerateShortUUIDHash = new CanGenerateHashFrom[ShortUUID] {
@@ -420,13 +430,6 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
   }
 
 
-  implicit val identifying: EntityIdentifying[AnalysisState] = {
-    new EntityIdentifying[AnalysisState] with ShortUUID.ShortUuidIdentifying[AnalysisState] {
-      override lazy val idTag: Symbol = algorithm.label
-      override val evEntity: ClassTag[AnalysisState] = classTag[AnalysisState]
-    }
-  }
-
   override type ID = AlgorithmModule.ID
   val IdType: ClassTag[TID] = classTag[TID]
   override def nextId: TryV[TID] = module.identifying.nextIdAs[TID]
@@ -464,7 +467,11 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
     override val passivateTimeout: Duration = Duration( 1, MINUTES )
 
     override lazy val name: String = module.shardName
-    override lazy val identifying: Identifying[_] = module.identifying
+    override lazy val identifying: Identifying[_] = {
+      val mid = module.identifying
+      logger.warn( "ALGO_ROOT_TYPE.identifying = [{}]", mid )
+      mid
+    }
     override def repositoryProps( implicit model: DomainModel ): Props = Repository localProps model //todo change to clustered with multi-jvm testing of cluster
 //    override def repositoryProps( implicit model: DomainModel ): Props = CommonLocalRepository.props( model, this, AlgorithmActor.props( _: DomainModel, _: AggregateRootType ) )
     override def maximumNrClusterNodes: Int = module.maximumNrClusterNodes

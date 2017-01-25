@@ -10,7 +10,7 @@ import org.scalatest.mockito.MockitoSugar
 import org.mockito.Mockito._
 import peds.akka.envelope.{Envelope, WorkId}
 import spotlight.analysis.DetectionAlgorithmRouter.ShardedRootTypeProxy
-import spotlight.analysis.algorithm.shard.{CellShardModule, CellShardProtocol, ShardCatalog, ShardProtocol}
+import spotlight.analysis.shard.{CellShardModule, CellShardProtocol, ShardCatalog, ShardProtocol}
 import spotlight.model.outlier.{IsQuorum, OutlierPlan, ReduceOutliers}
 import spotlight.model.timeseries.{DataPoint, TimeSeries}
 import spotlight.testkit.ParallelAkkaSpec

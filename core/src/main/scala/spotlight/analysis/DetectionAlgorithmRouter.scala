@@ -17,7 +17,7 @@ import peds.commons.{TryV, Valid}
 import peds.commons.concurrent._
 import peds.commons.identifier.{Identifying, ShortUUID, TaggedID}
 import spotlight.analysis.algorithm._
-import spotlight.analysis.algorithm.shard._
+import spotlight.analysis.shard._
 import spotlight.analysis.algorithm.statistical._
 import spotlight.model.outlier.OutlierPlan
 
@@ -256,7 +256,7 @@ object DetectionAlgorithmRouter extends LazyLogging {
     algorithmRootType: AggregateRootType,
     model: DomainModel
   ) extends AlgorithmProxy {
-    val shardingStrategy = CellShardingStrategy
+    val shardingStrategy = CellShardingStrategy //todo: make settings / configuration driven
     implicit val scIdentifying: Identifying[ShardCatalog.ID] = shardingStrategy.identifying
 
     val shardingId: ShardCatalog#TID = shardingStrategy.idFor( plan, algorithmRootType.name )

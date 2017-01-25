@@ -1,4 +1,4 @@
-package spotlight.analysis.algorithm.shard
+package spotlight.analysis.shard
 
 import demesne.MessageLike
 

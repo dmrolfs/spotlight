@@ -1,4 +1,4 @@
-package spotlight.analysis.algorithm.shard
+package spotlight.analysis.shard
 
 import scala.concurrent.duration._
 import scala.reflect._
@@ -18,7 +18,7 @@ import peds.commons.TryV
 import demesne._
 import demesne.repository.CommonLocalRepository
 import spotlight.analysis.DetectUsing
-import spotlight.analysis.algorithm.shard.ShardCatalog.ShardCatalogIdentifying
+import spotlight.analysis.shard.ShardCatalog.ShardCatalogIdentifying
 import spotlight.analysis.algorithm.{AlgorithmModule, AlgorithmProtocol => AP}
 import spotlight.model.outlier.OutlierPlan
 import spotlight.model.timeseries._
@@ -200,7 +200,7 @@ object LookupShardModule extends AggregateRootModule { module =>
       outer: EventPublisher =>
 
       import ShardingActor.Availability
-      import spotlight.analysis.algorithm.shard.{LookupShardProtocol => P}
+      import spotlight.analysis.shard.{LookupShardProtocol => P}
 
       override def saveSnapshot( snapshot: Any ): Unit = { log.error( "[{}] should not snaphot!!", self.path ) }
 

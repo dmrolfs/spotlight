@@ -1,4 +1,4 @@
-package spotlight.analysis.algorithm.shard
+package spotlight.analysis.shard
 
 import scala.reflect._
 import scalaz.{-\/, Validation, \/-}

@@ -1,4 +1,6 @@
-package spotlight.analysis.algorithm
+package spotlight.analysis
+
+import spotlight.analysis.algorithm.AlgorithmModule
 
 
 /**

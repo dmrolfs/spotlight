@@ -25,7 +25,7 @@ import shapeless.{Generic, HNil}
 import spotlight.analysis._
 import spotlight.analysis.{PlanCatalogProtocol => CP}
 import spotlight.analysis.algorithm._
-import spotlight.analysis.algorithm.shard.{CellShardModule, LookupShardModule}
+import spotlight.analysis.shard.{CellShardModule, LookupShardModule}
 import spotlight.analysis.algorithm.statistical._
 
 
@@ -85,8 +85,8 @@ object Spotlight extends Instrumented with StrictLogging {
   val systemRootTypes: Set[AggregateRootType] = {
     Set(
       AnalysisPlanModule.module.rootType,
-         LookupShardModule.rootType,
-         CellShardModule.module.rootType,
+      LookupShardModule.rootType,
+      CellShardModule.module.rootType,
       SimpleMovingAverageAlgorithm.rootType,
       GrubbsAlgorithm.rootType,
       ExponentialMovingAverageAlgorithm.rootType

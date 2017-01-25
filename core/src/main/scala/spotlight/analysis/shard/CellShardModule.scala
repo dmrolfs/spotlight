@@ -1,4 +1,4 @@
-package spotlight.analysis.algorithm.shard
+package spotlight.analysis.shard
 
 import scala.concurrent.duration._
 import scala.reflect._
@@ -135,7 +135,7 @@ object CellShardModule extends LazyLogging {
   with demesne.AggregateRoot.Provider {
     outer: EventPublisher =>
 
-    import spotlight.analysis.algorithm.shard.{CellShardProtocol => P}
+    import spotlight.analysis.shard.{CellShardProtocol => P}
 
     override lazy val metricBaseName: MetricName = MetricName( classOf[ShardingActor] )
 
@@ -258,6 +258,7 @@ object CellShardModule extends LazyLogging {
         import scalaz._
         import Scalaz.{id => _, _}
 
+log.warning( "algorithmRootType:[{}].identifying:[{}]", Option(algorithmRootType), Option(algorithmRootType).map(_.identifying) )
         List.fill( nrCells ){ algorithmRootType.identifying.nextId map { _.asInstanceOf[AlgoTID] } }.sequenceU match {
           case \/-( cells ) => persist( P.Added(id, plan, algorithmRootType, cells.toVector) ) { acceptAndPublish }
           case -\/( ex ) => {
