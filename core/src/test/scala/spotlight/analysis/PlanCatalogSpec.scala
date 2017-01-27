@@ -13,6 +13,7 @@ import peds.akka.envelope.Envelope
 import demesne.{AggregateRootType, BoundedContext, DomainModel}
 import demesne.testkit.concurrent.CountDownFunction
 import peds.akka.envelope._
+import spotlight.Settings
 import spotlight.analysis.PlanCatalogProtocol.CatalogedPlans
 import spotlight.analysis.{AnalysisPlanProtocol => AP}
 import spotlight.testkit.ParallelAkkaSpec
@@ -154,11 +155,22 @@ class PlanCatalogSpec extends ParallelAkkaSpec with ScalaFutures with StrictLogg
       import f._
       import akka.pattern.ask
 
+      val planSpecs = Settings.detectionPlansConfigFrom( config )
+      assert( planSpecs.hasPath( "foo" ) )
+      logger.debug( "#TEST planSpecs.foo = [{}]", planSpecs.getConfig("foo") )
       logger.info( "TEST: ==============  STARTING TEST  ==============")
       whenReady( index.futureEntries, timeout(3.seconds.dilated) ) { _ mustBe empty }
 
       logger.info( "TEST: ==============  CREATING CATALOG  ==============")
-      val catalog = system.actorOf( PlanCatalog.props( config )( boundedContext ) )
+      val catalog = system.actorOf(
+        PlanCatalog.props(
+          config,
+          applicationPlans = Settings.PlanFactory.makePlans( planSpecs, 30.seconds )
+        )(
+          boundedContext
+        )
+      )
+
       val foo = (catalog ? P.WaitForStart).mapTo[P.Started.type]
       Await.ready( foo, 15.seconds.dilated )
 

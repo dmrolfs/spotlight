@@ -10,7 +10,7 @@ import org.scalatest.mockito.MockitoSugar
 import org.mockito.Mockito._
 import peds.akka.envelope.{Envelope, WorkId}
 import spotlight.analysis.DetectionAlgorithmRouter.ShardedRootTypeProxy
-import spotlight.analysis.shard.{CellShardModule, CellShardProtocol, ShardCatalog, ShardProtocol}
+import spotlight.analysis.shard._
 import spotlight.model.outlier.{IsQuorum, OutlierPlan, ReduceOutliers}
 import spotlight.model.timeseries.{DataPoint, TimeSeries}
 import spotlight.testkit.ParallelAkkaSpec
@@ -36,6 +36,7 @@ class DetectionAlgorithmRouterSpec extends ParallelAkkaSpec with MockitoSugar {
     val model = mock[DomainModel]
     logger.debug( "FIXTURE: SHARD ROOT-TYPE:[{}]", catalogRootType )
     when( model(catalogRootType, catalogId) ).thenReturn( catalog.ref )
+    when( model.configuration ).thenReturn( _config )
 
     lazy val plan = makePlan( "TestPlan", None )
     def makePlan( name: String, g: Option[OutlierPlan.Grouping] ): OutlierPlan = {
@@ -77,6 +78,14 @@ class DetectionAlgorithmRouterSpec extends ParallelAkkaSpec with MockitoSugar {
     "route detection messages" taggedAs WIP in { f: Fixture =>
       import f._
       model must not be (null)
+      val testConfig = ConfigFactory.parseString(
+        s"""
+           | spotlight.detection-plans.${plan.name}.shard: ${CellShardingStrategy.key}
+         """.stripMargin
+      )
+      when( model.configuration ).thenReturn( testConfig.withFallback( config ) )
+      model.configuration.getString( s"spotlight.detection-plans.${plan.name}.shard" ) mustBe CellShardingStrategy.key
+
       algorithmRootType must not be (null)
       catalogId must not be (null)
       CellShardModule.module.rootType must not be (null)
@@ -88,7 +97,7 @@ class DetectionAlgorithmRouterSpec extends ParallelAkkaSpec with MockitoSugar {
 
       val router = TestActorRef[DetectionAlgorithmRouter]( DetectionAlgorithmRouter.props( plan, Map() ) )
       router.receive( RegisterAlgorithmRootType(algo, algorithmRootType, model, true) )
-      logger.debug( "#TEST looking for catalog add..." )
+      logger.debug( "#TEST looking for shard catalog add..." )
       catalog.expectMsgPF( hint = "catalog-add" ) {
         case Envelope( m: CellShardProtocol.Add, _ ) => {
           m.plan mustBe plan.toSummary

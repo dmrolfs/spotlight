@@ -39,8 +39,6 @@ object Dependencies {
 
     val kryo = "com.github.romix.akka" %% "akka-kryo-serialization" % "0.5.0"
     val kryoSerializers = "de.javakaffee" % "kryo-serializers" % "0.41"
-
-    val inMemory = "com.github.dnvriend" %% "akka-persistence-inmemory" % "1.3.17"
   }
 
   object persistence {
@@ -153,14 +151,12 @@ object Dependencies {
     val scalatest = "org.scalatest" %% "scalatest" % "3.0.0" withSources() withJavadoc()
     val scalazMatchers = "org.typelevel" %% "scalaz-scalatest" % "1.1.0" withSources() withJavadoc()
 
+    val inmemory = "com.github.dnvriend" %% "akka-persistence-inmemory" % "1.3.18"
+
     object mockito {
       val version = "1.10.19"
       def module( id: String ) = "org.mockito" % s"mockito-$id" % version withSources() withJavadoc()
       val core = module( "core" )
-    }
-
-    object persistence {
-      val testkit = "com.github.krasserm" % "akka-persistence-testkit_2.11" % "0.3.4"
     }
   }
 

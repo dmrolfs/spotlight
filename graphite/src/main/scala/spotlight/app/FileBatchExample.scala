@@ -12,6 +12,7 @@ import akka.event.LoggingReceive
 import akka.stream.scaladsl.{FileIO, Flow, Framing, GraphDSL, Keep, Sink, Source}
 import akka.stream._
 import akka.util.ByteString
+import com.persist.logging.LoggingSystem
 
 import scalaz.{-\/, \/, \/-}
 import com.typesafe.scalalogging.{Logger, StrictLogging}
@@ -45,6 +46,7 @@ object FileBatchExample extends Instrumented with StrictLogging {
     logger.info( "demesne build info: {}", demesne.BuildInfo )
 
     implicit val actorSystem = ActorSystem( "Spotlight" )
+    val loggingSystem = LoggingSystem( actorSystem, spotlight.BuildInfo.name, spotlight.BuildInfo.version, java.net.InetAddress.getLocalHost.getHostName )
     val deadListener = actorSystem.actorOf( DeadListenerActor.props, "dead-listener" )
     actorSystem.eventStream.subscribe( deadListener, classOf[DeadLetter] )
 
@@ -61,6 +63,7 @@ object FileBatchExample extends Instrumented with StrictLogging {
         println( s"\nAPP:${count.get()} batch completed finding ${results.size} outliers:" )
         results.zipWithIndex foreach { case (o, i) => println( s"${i+1}: ${o}") }
         println( "APP:  **********************************************\n\n" )
+        loggingSystem.stop
         actorSystem.terminate()
       }
 
@@ -68,6 +71,7 @@ object FileBatchExample extends Instrumented with StrictLogging {
         println( "\n\nAPP:  ********************************************** " )
         println( s"\nAPP: ${count.get()} batch completed with ERROR: ${ex}" )
         println( "APP:  **********************************************\n\n" )
+        loggingSystem.stop
         actorSystem.terminate()
       }
     }
