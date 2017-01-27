@@ -233,13 +233,20 @@ object DetectionAlgorithmRouter extends LazyLogging {
     )(
       implicit model: DomainModel
     ): AlgorithmProxy = {
-      val r = ShardingStrategy
-      .from( plan )
-      .map { strategy => ShardedRootTypeProxy( plan, algorithmRootType, strategy, model ) }
-      .getOrElse { RootTypeProxy( algorithmRootType, model ) }
+      val strategy = ShardingStrategy from plan
 
-      logger.warn( "#TEST AlgorithmProxy.fromProxy( plan:[{}] algorithm:[{}] ) = [{}]", plan.name, algorithmRootType.name, r )
-      r
+      val proxy = {
+        strategy
+        .map { strategy => ShardedRootTypeProxy( plan, algorithmRootType, strategy, model ) }
+        .getOrElse { RootTypeProxy( algorithmRootType, model ) }
+      }
+
+      logger.warn(
+        "using [{}] algorithm sharding strategy: AlgorithmProxy.fromProxy( plan:[{}] algorithm:[{}] ) = [{}]",
+        strategy.map{ _.key }, plan.name, algorithmRootType.name, proxy
+      )
+
+      proxy
     }
   }
 
