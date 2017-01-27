@@ -145,6 +145,13 @@ object Settings extends LazyLogging {
     if ( c hasPath Path ) Some( c getInt Path ) else None
   }
 
+  def detectionPlansConfigFrom( c: Config ): Config = {
+    if ( c hasPath Directory.PLAN_PATH ) c getConfig Directory.PLAN_PATH
+    else {
+      logger.warn( "no plan specifications found at expected configuration path:[{}]", Directory.PLAN_PATH )
+      ConfigFactory.empty()
+    }
+  }
 
   type Reload = () => V[Settings]
 
@@ -322,133 +329,11 @@ object Settings extends LazyLogging {
       if ( config hasPath path ) config.getDouble( path ) else 1.0
     }
 
-    override val plans: Set[OutlierPlan] = makePlans( config.getConfig( Settings.Directory.PLAN_PATH ) ) //todo support plan reloading
-    override def planOrigin: ConfigOrigin = config.getConfig( Settings.Directory.PLAN_PATH ).origin()
+    override val plans: Set[OutlierPlan] = PlanFactory.makePlans( detectionPlansConfigFrom( config ), detectionBudget ) //todo support plan reloading
+    override def planOrigin: ConfigOrigin = detectionPlansConfigFrom( config ).origin()
     override def workflowBufferSize: Int = config.getInt( Directory.WORKFLOW_BUFFER_SIZE )
     override def tcpInboundBufferSize: Int = config.getInt( Directory.TCP_INBOUND_BUFFER_SIZE )
 
-    private def makeIsQuorum( spec: Config, algorithmSize: Int ): IsQuorum = {
-      val MAJORITY = "majority"
-      val AT_LEAST = "at-least"
-      if ( spec hasPath AT_LEAST ) {
-        val trigger = spec getInt AT_LEAST
-        IsQuorum.AtLeastQuorumSpecification( totalIssued = algorithmSize, triggerPoint = trigger )
-      } else {
-        val trigger = if ( spec hasPath MAJORITY ) spec.getDouble( MAJORITY ) else 50D
-        IsQuorum.MajorityQuorumSpecification( totalIssued = algorithmSize, triggerPoint = ( trigger / 100D) )
-      }
-    }
-
-
-    private def makePlans( planSpecifications: Config ): Set[OutlierPlan] = {
-      import scala.collection.JavaConversions._
-
-      val result = {
-        planSpecifications
-        .root
-        .collect { case (n, s: ConfigObject) => (n, s.toConfig) }
-        .toSeq
-        .map {
-          case (name, spec) => {
-            logger.warn(
-              "#TEST #INFO Settings making plan from specification[origin:{} @ {}]: [{}]",
-              spec.origin(), spec.origin().lineNumber().toString, spec
-            )
-
-            val IS_DEFAULT = "is-default"
-            val TOPICS = "topics"
-            val REGEX = "regex"
-
-            val grouping: Option[OutlierPlan.Grouping] = {
-              val GROUP_LIMIT = "group.limit"
-              val GROUP_WITHIN = "group.within"
-              val limit = if ( spec hasPath GROUP_LIMIT ) spec getInt GROUP_LIMIT else 10000
-              logger.info( "CONFIGURATION spec: [{}]", spec )
-              val window = if ( spec hasPath GROUP_WITHIN ) {
-                Some( FiniteDuration( spec.getDuration( GROUP_WITHIN ).toNanos, NANOSECONDS ) )
-              } else {
-                None
-              }
-
-              window map { w => OutlierPlan.Grouping( limit, w ) }
-            }
-
-            //todo: add configuration for at-least and majority
-            val ( timeout, algorithms ) = pullCommonPlanFacets( spec )
-
-            if ( spec.hasPath(IS_DEFAULT) && spec.getBoolean(IS_DEFAULT) ) {
-              logger info s"topic[$name] default plan origin: ${spec.origin} line:${spec.origin.lineNumber}"
-              Some(
-                OutlierPlan.default(
-                  name = name,
-                  timeout = timeout,
-                  isQuorum = makeIsQuorum( spec, algorithms.size ),
-                  reduce = makeOutlierReducer( spec ),
-                  algorithms = algorithms,
-                  grouping = grouping,
-                  planSpecification = spec
-                )
-              )
-            } else if ( spec hasPath TOPICS ) {
-              import scala.collection.JavaConverters._
-              logger info s"topic[$name] topic plan origin: ${spec.origin} line:${spec.origin.lineNumber}"
-
-              Some(
-                OutlierPlan.forTopics(
-                  name = name,
-                  timeout = timeout,
-                  isQuorum = makeIsQuorum( spec, algorithms.size ),
-                  reduce = makeOutlierReducer( spec ),
-                  algorithms = algorithms,
-                  grouping = grouping,
-                  planSpecification = spec,
-                  extractTopic = OutlierDetection.extractOutlierDetectionTopic,
-                  topics = spec.getStringList(TOPICS).asScala.map{ Topic(_) }.toSet
-                )
-              )
-            } else if ( spec hasPath REGEX ) {
-              logger info s"topic[$name] regex plan origin: ${spec.origin} line:${spec.origin.lineNumber}"
-              Some(
-                OutlierPlan.forRegex(
-                  name = name,
-                  timeout = timeout,
-                  isQuorum = makeIsQuorum( spec, algorithms.size ),
-                  reduce = makeOutlierReducer( spec ),
-                  algorithms = algorithms,
-                  grouping = grouping,
-                  planSpecification = spec,
-                  extractTopic = OutlierDetection.extractOutlierDetectionTopic,
-                  regex = new Regex( spec.getString(REGEX) )
-                )
-              )
-            } else {
-              None
-            }
-          }
-        }
-      }
-
-      result.flatten.toSet
-    }
-
-    private def pullCommonPlanFacets( spec: Config ): (Duration, Set[Symbol]) = {
-      import scala.collection.JavaConversions._
-
-      def effectiveBudget( budget: Duration, utilization: Double ): Duration = {
-        budget match {
-          case b if b.isFinite() => utilization * b
-          case b => b
-        }
-      }
-
-      val AlgorithmsPath = "algorithms"
-      val algorithms = {
-        if ( spec hasPath AlgorithmsPath ) spec.getStringList( AlgorithmsPath ).toSet.map{ a: String => Symbol( a ) }
-        else Set.empty[Symbol]
-      }
-
-      ( effectiveBudget( detectionBudget, 0.8D ), algorithms )
-    }
   }
 
   case class UsageConfigurationError private[Settings]( usage: String ) extends IllegalArgumentException( usage )
@@ -508,4 +393,133 @@ object Settings extends LazyLogging {
       )
     }
   }
+
+
+  object PlanFactory {
+    def makePlans( planSpecifications: Config, detectionBudget: Duration ): Set[OutlierPlan] = {
+      import scala.collection.JavaConversions._
+
+      logger.debug( "#TEST settings.makePlans with budget:[{}] specs:[\n{}\n]", detectionBudget, planSpecifications )
+      val result = {
+        planSpecifications
+        .root
+        .collect { case (n, s: ConfigObject) => (n, s.toConfig) }
+        .toSeq
+        .map {
+          case (name, spec) => {
+            logger.info(
+              "Settings making plan from specification[origin:{} @ {}]: [{}]",
+              spec.origin(), spec.origin().lineNumber().toString, spec
+            )
+
+            val IS_DEFAULT = "is-default"
+            val TOPICS = "topics"
+            val REGEX = "regex"
+
+            val grouping: Option[OutlierPlan.Grouping] = {
+              val GROUP_LIMIT = "group.limit"
+              val GROUP_WITHIN = "group.within"
+              val limit = if ( spec hasPath GROUP_LIMIT ) spec getInt GROUP_LIMIT else 10000
+              logger.info( "CONFIGURATION spec: [{}]", spec )
+              val window = if ( spec hasPath GROUP_WITHIN ) {
+                Some( FiniteDuration( spec.getDuration( GROUP_WITHIN ).toNanos, NANOSECONDS ) )
+              } else {
+                None
+              }
+
+              window map { w => OutlierPlan.Grouping( limit, w ) }
+            }
+
+            //todo: add configuration for at-least and majority
+            val ( timeout, algorithms ) = pullCommonPlanFacets( spec, detectionBudget )
+
+            if ( spec.hasPath(IS_DEFAULT) && spec.getBoolean(IS_DEFAULT) ) {
+              logger info s"topic[$name] default plan origin: ${spec.origin} line:${spec.origin.lineNumber}"
+              Some(
+                OutlierPlan.default(
+                  name = name,
+                  timeout = timeout,
+                  isQuorum = makeIsQuorum( spec, algorithms.size ),
+                  reduce = makeOutlierReducer( spec ),
+                  algorithms = algorithms,
+                  grouping = grouping,
+                  planSpecification = spec
+                )
+              )
+            } else if ( spec hasPath TOPICS ) {
+              import scala.collection.JavaConverters._
+              logger info s"topic[$name] topic plan origin: ${spec.origin} line:${spec.origin.lineNumber}"
+
+              Some(
+                OutlierPlan.forTopics(
+                  name = name,
+                  timeout = timeout,
+                  isQuorum = makeIsQuorum( spec, algorithms.size ),
+                  reduce = makeOutlierReducer( spec ),
+                  algorithms = algorithms,
+                  grouping = grouping,
+                  planSpecification = spec,
+                  extractTopic = OutlierDetection.extractOutlierDetectionTopic,
+                  topics = spec.getStringList(TOPICS).asScala.map{ Topic(_) }.toSet
+                )
+              )
+            } else if ( spec hasPath REGEX ) {
+              logger info s"topic[$name] regex plan origin: ${spec.origin} line:${spec.origin.lineNumber}"
+              Some(
+                OutlierPlan.forRegex(
+                  name = name,
+                  timeout = timeout,
+                  isQuorum = makeIsQuorum( spec, algorithms.size ),
+                  reduce = makeOutlierReducer( spec ),
+                  algorithms = algorithms,
+                  grouping = grouping,
+                  planSpecification = spec,
+                  extractTopic = OutlierDetection.extractOutlierDetectionTopic,
+                  regex = new Regex( spec.getString(REGEX) )
+                )
+              )
+            } else {
+              None
+            }
+          }
+        }
+      }
+
+      logger.debug( "#TEST settings.factor.makePlans: [{}]", result.mkString( "\n", "\n", "\n" ) )
+      result.flatten.toSet
+    }
+
+    private def pullCommonPlanFacets( spec: Config, detectionBudget: Duration ): (Duration, Set[Symbol]) = {
+      import scala.collection.JavaConversions._
+
+      def effectiveBudget( budget: Duration, utilization: Double ): Duration = {
+        budget match {
+          case b if b.isFinite() => utilization * b
+          case b => b
+        }
+      }
+
+      val AlgorithmsPath = "algorithms"
+      val algorithms = {
+        if ( spec hasPath AlgorithmsPath ) spec.getStringList( AlgorithmsPath ).toSet.map{ a: String => Symbol( a ) }
+        else Set.empty[Symbol]
+      }
+
+      ( effectiveBudget( detectionBudget, 0.8D ), algorithms )
+    }
+
+    private def makeIsQuorum( spec: Config, algorithmSize: Int ): IsQuorum = {
+      val MAJORITY = "majority"
+      val AT_LEAST = "at-least"
+      if ( spec hasPath AT_LEAST ) {
+        val trigger = spec getInt AT_LEAST
+        IsQuorum.AtLeastQuorumSpecification( totalIssued = algorithmSize, triggerPoint = trigger )
+      } else {
+        val trigger = if ( spec hasPath MAJORITY ) spec.getDouble( MAJORITY ) else 50D
+        IsQuorum.MajorityQuorumSpecification( totalIssued = algorithmSize, triggerPoint = ( trigger / 100D) )
+      }
+    }
+  }
 }
+
+
