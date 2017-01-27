@@ -14,7 +14,7 @@ object Dependencies {
   }
 
   object demesne {
-    val version = "2.1.1"
+    val version = "2.1.2-SNAPSHOT"
     def module( id: String ) = "com.github.dmrolfs" %% s"demesne-$id" % version withSources() withJavadoc()
     val core = module( "core" )
     val testkit = module( "testkit" )
@@ -65,6 +65,7 @@ object Dependencies {
   }
 
   object log {
+    val persistLogging = "com.persist" %% "persist-logging" % "1.2.6"
     val typesafe = "com.typesafe.scala-logging" %% "scala-logging" % "3.5.0"
 
     object logback {
@@ -78,7 +79,7 @@ object Dependencies {
     val slf4j = "org.slf4j" % "slf4j-api" % "1.7.21" intransitive
     val log4jOverSlf4j = "org.slf4j" % "log4j-over-slf4j" % "1.7.21"
 
-    def all = Seq( typesafe, logback.core, logback.classic, slf4j, log4jOverSlf4j )
+    def all = Seq( typesafe, logback.core, logback.classic, slf4j, log4jOverSlf4j, persistLogging )
   }
 
   object metrics {
