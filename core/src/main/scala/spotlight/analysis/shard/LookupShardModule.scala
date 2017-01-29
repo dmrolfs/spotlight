@@ -33,14 +33,18 @@ object LookupShardProtocol extends AggregateProtocol[LookupShardCatalog#ID] {
   case class Add(
     override val targetId: Add#TID,
     plan: OutlierPlan.Summary,
-    algorithmRootType: AggregateRootType
+    algorithmRootType: AggregateRootType,
+    expectedNrTopics: Int,
+    controlBySize: Information
 //    control: Option[Control] = None
   ) extends Command
 
   case class Added(
     override val sourceId: Added#TID,
     plan: OutlierPlan.Summary,
-    algorithmRootType: AggregateRootType
+    algorithmRootType: AggregateRootType,
+    expectedNrTopics: Int,
+    controlBySize: Information
 //    control: LookupShardCatalog.Control
   ) extends Event
 
@@ -60,8 +64,8 @@ object LookupShardProtocol extends AggregateProtocol[LookupShardCatalog#ID] {
 case class LookupShardCatalog(
   plan: OutlierPlan.Summary,
   algorithmRootType: AggregateRootType,
-  //  control: LookupShardCatalog.Control,
-  shards: Object2ObjectOpenHashMap[Topic, AlgoTID] = new Object2ObjectOpenHashMap[Topic, AlgoTID](2750000) // set expected size? 
+  control: LookupShardCatalog.Control,
+  shards: Object2ObjectOpenHashMap[Topic, AlgoTID]
 //    shards: mutable.Map[Topic, AlgoTID] = mutable.Map.empty[Topic, AlgoTID]
 ) extends ShardCatalog with Equals {
   import LookupShardCatalog.identifying
@@ -114,6 +118,8 @@ case class LookupShardCatalog(
 }
 
 object LookupShardCatalog {
+  def makeShardMap( size: Int ): Object2ObjectOpenHashMap[Topic, AlgoTID] = new Object2ObjectOpenHashMap[Topic, AlgoTID]( size )
+
   implicit val identifying: Identifying[LookupShardCatalog] = new ShardCatalogIdentifying[LookupShardCatalog] {
     override val idTag: Symbol = Symbol( "lookup-shard" )
   }
@@ -292,12 +298,21 @@ object LookupShardModule extends AggregateRootModule { module =>
       var availability: Availability = _
 
       override def acceptance: Acceptance = {
-        case ( LookupShardProtocol.Added(tid, p, rt ), s ) if Option( s ).isEmpty => {
+        case ( LookupShardProtocol.Added(tid, p, rt, nrTopics, bySize ), s ) if Option( s ).isEmpty => {
           if ( shardMetrics.isEmpty ) {
             shardMetrics = Some( new ShardMetrics(plan = p, id = tid.id.asInstanceOf[ShardCatalog.ID] ) )
           }
 
-          LookupShardCatalog( plan = p, algorithmRootType = rt )
+          val newState = LookupShardCatalog(
+            plan = p,
+            algorithmRootType = rt,
+            control = LookupShardCatalog.Control.BySize( bySize ),
+            shards = LookupShardCatalog.makeShardMap( nrTopics )
+          )
+
+          context become LoggingReceive { around( active( Availability(control = newState.control) ) ) }
+
+          newState
         }
 
         case ( LookupShardProtocol.ShardAssigned(_, t, aid ), s ) => s.assignShard( t, aid )
@@ -354,11 +369,11 @@ object LookupShardModule extends AggregateRootModule { module =>
       }
 
       val admin: Receive = {
-        case LookupShardProtocol.Add( id, plan, algorithmRootType ) if id == aggregateId && Option( state ).isEmpty => {
-          persist( P.Added(id, plan, algorithmRootType) ) { acceptAndPublish }
+        case LookupShardProtocol.Add( id, p, art, nrTopics, bySize ) if id == aggregateId && Option( state ).isEmpty => {
+          persist( P.Added(id, p, art, nrTopics, bySize) ) { acceptAndPublish }
         }
 
-        case LookupShardProtocol.Add( id, _, algorithmRootType ) if id == aggregateId && Option( state ).nonEmpty => { }
+        case e: LookupShardProtocol.Add if e.targetId == aggregateId && Option( state ).nonEmpty => { }
 
         case UpdateAvailability => dispatchEstimateRequests( availability.isCandidate )
       }
