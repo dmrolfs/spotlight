@@ -16,6 +16,7 @@ import peds.akka.metrics.InstrumentedActor
 import peds.commons.{TryV, Valid}
 import peds.commons.concurrent._
 import peds.commons.identifier.{Identifying, ShortUUID, TaggedID}
+import peds.commons.util._
 import spotlight.analysis.algorithm._
 import spotlight.analysis.shard._
 import spotlight.analysis.algorithm.statistical._
@@ -290,6 +291,13 @@ object DetectionAlgorithmRouter extends LazyLogging {
     }
 
     override def referenceFor( message: Any )( implicit context: ActorContext ): ActorRef = shardingRef
+    override def toString: String = {
+      s"${getClass.safeSimpleName}( " +
+      s"plan:[${plan.name}] " +
+      s"algorithmRootType:[${algorithmRootType.name}] " +
+      s"strategy:[${strategy}] " +
+      s"model:[${model}] )"
+    }
   }
 }
 
