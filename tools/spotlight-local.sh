@@ -21,6 +21,7 @@ java -classpath $CPATH \
   -Dspotlight.config=$SPOTLIGHT_CONFIG \
   -Dconfig.resource=$SPOTLIGHT_CONFIG \
   -Djava.library.path=native \
+  -DSLF4J_LEVEL=WARN \
   -Xms4g \
   -Xmx10g \
   -javaagent:graphite/coreos/aspectjweaver-1.8.8.jar \

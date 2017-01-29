@@ -97,12 +97,6 @@ object CellShardModule extends LazyLogging {
   type ID = CellShardCatalog#ID
   type TID = CellShardCatalog#TID
 
-
-//  def idFor( plan: OutlierPlan.Summary, algorithmLabel: String ): TID = {
-//    //todo: this casting bit wrt path dependent types is driving me nuts
-//    identifying.tag( ShardCatalog.ID( plan.id, algorithmLabel ).asInstanceOf[identifying.ID] ).asInstanceOf[TID]
-//  }
-
   implicit val identifying: Identifying[CellShardCatalog] = CellShardCatalog.identifying
 
 

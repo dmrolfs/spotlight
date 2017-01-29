@@ -126,6 +126,8 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] with OptionVa
     }
 
     class Module extends FixtureModule {
+      override def passivateTimeout: Duration = Duration.Undefined
+      override def snapshotPeriod: Option[FiniteDuration] = None
       override def aggregateRootPropsOp: AggregateRootProps = testProps( _, _ )
       override type Protocol = outer.Protocol
       override val protocol: Protocol = outer.protocol
@@ -164,6 +166,8 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] with OptionVa
     }
 
     class Module extends FixtureModule {
+      override def passivateTimeout: Duration = Duration.Undefined
+      override def snapshotPeriod: Option[FiniteDuration] = None
       override def aggregateRootPropsOp: AggregateRootProps = {
         ( m: DomainModel,rt: AggregateRootType ) => Props( new FixtureOutlierPlanActor( m, rt ) )
       }
@@ -309,16 +313,14 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] with OptionVa
       bus.expectNoMsg()
     }
 
-    "change appliesTo" in { f: Fixture =>
+    "change appliesTo" taggedAs WIP in { f: Fixture =>
       import f._
 
       entity !+ protocol.Add( tid, Some(plan) )
       bus.expectMsgType[protocol.Added]
 
       //anonymous partial functions extend Serialiazble
-      val extract: OutlierPlan.ExtractTopic = {
-        case m => Some("TestTopic")
-      }
+      val extract: OutlierPlan.ExtractTopic = { case m => Some("TestTopic") }
 
       val testApplies: OutlierPlan.AppliesTo = OutlierPlan.AppliesTo.topics( Set("foo", "bar"), extract )
 

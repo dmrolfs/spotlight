@@ -251,15 +251,15 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
         }
 
         def makeRouter()( implicit context: ActorContext ): ActorRef = {
-          def resolverFor( algorithmRootType: AggregateRootType ): DetectionAlgorithmRouter.AlgorithmProxy = {
-//            DetectionAlgorithmRouter.RootTypeProxy( algorithmRootType, model )
-            DetectionAlgorithmRouter.ShardedRootTypeProxy( plan, algorithmRootType, model )
-          }
-
           val algorithmRefs = for {
             name <- plan.algorithms.toSeq
             rt <- DetectionAlgorithmRouter.rootTypeFor( name )( context.dispatcher ).toSeq
-          } yield ( name, resolverFor(rt) )
+          } yield {
+            (
+              name,
+              DetectionAlgorithmRouter.AlgorithmProxy.proxyFor( plan, rt )( model )
+            )
+          }
 
           val routerProps = DetectionAlgorithmRouter.props( plan, Map( algorithmRefs:_* ) )
           context.actorOf( routerProps.withDispatcher( DetectionAlgorithmRouter.DispatcherPath ), provider.routerName )
@@ -297,7 +297,9 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
       override def acceptance: Acceptance = entityAcceptance orElse {
         case (e: P.ScopeChanged, s) => {
           //todo: cast for expediency. my ideal is to define a Lens in the OutlierPlan trait; minor solace is this module is in the same package
-          s.asInstanceOf[OutlierPlan.SimpleOutlierPlan].copy( appliesTo = e.appliesTo )
+          val r = s.asInstanceOf[OutlierPlan.SimpleOutlierPlan].copy( appliesTo = e.appliesTo )
+          log.debug( "#TEST acceptance... e:[{}] s-before:[{}] s-after:[{}]", e, s, r)
+          r
         }
 
         case (e: P.AlgorithmsChanged, s) => {
@@ -316,6 +318,7 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
       override def quiescent: Receive = {
         case P.Add( IdType( targetId ), info ) if targetId == aggregateId => {
           persist( P.Added( targetId, info ) ) { e =>
+            log.debug( "AnalysisPlanModule: Added.info:[{}]", info )
             acceptAndPublish( e )
             val (_, d, _) = startWorkers()
             outer.detector = d
@@ -350,7 +353,10 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
       val planEntity: Receive = {
         case _: P.GetPlan => sender() !+ P.PlanInfo( state.id, state )
 
-        case P.ApplyTo( id, appliesTo ) => persist( P.ScopeChanged( id, appliesTo ) ) { acceptAndPublish }
+        case P.ApplyTo( id, appliesTo ) => {
+          log.debug( s"#TEST received ApplyTo.. stats:\ntype:[${myComponentType}]\npath:[${myComponentPath}\nworkId:[${workId}]\nmessageNumber:[${messageNumber}]\nrequestId:[${requestId}]\nheader:[${envelopeHeader}]" )
+          persist( P.ScopeChanged( id, appliesTo ) ) { acceptAndPublish }
+        }
 
         case P.UseAlgorithms( id, algorithms, config ) => {
           persist( P.AlgorithmsChanged( id, algorithms, config ) ) { e =>

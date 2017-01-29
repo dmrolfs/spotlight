@@ -22,6 +22,7 @@ import peds.akka.envelope.pattern.{ask => envAsk}
 import peds.akka.metrics.InstrumentedActor
 import peds.akka.stream.CommonActorPublisher
 import demesne.{BoundedContext, DomainModel}
+import spotlight.Settings
 import spotlight.analysis.OutlierDetection.DetectionResult
 import spotlight.analysis.PlanCatalog.WatchPoints
 import spotlight.model.outlier.{IsQuorum, OutlierPlan, Outliers, ReduceOutliers}
@@ -67,15 +68,7 @@ object PlanCatalog extends LazyLogging {
   )(
     implicit boundedContext: BoundedContext
   ): Props = {
-    Props(
-      Default(
-        boundedContext,
-        configuration,
-        maxInFlightCpuFactor,
-        applicationDetectionBudget,
-        applicationPlans
-      )
-    )
+    Props( new Default(boundedContext, configuration, applicationPlans, maxInFlightCpuFactor, applicationDetectionBudget) )
     // .withDispatcher( "spotlight.planCatalog.stash-dispatcher" )
   }
 
@@ -128,13 +121,11 @@ object PlanCatalog extends LazyLogging {
     override val maxInFlight: Int = ( Runtime.getRuntime.availableProcessors() * maxInFlightCpuFactor ).toInt
 
     override lazy val detectionBudget: Duration = {
-      applicationDetectionBudget getOrElse {
-        loadDetectionBudget( configuration ) getOrElse { 10.seconds.toCoarsest }
+      applicationDetectionBudget
+      .getOrElse {
+        Settings.detectionBudgetFrom( configuration )
+        .getOrElse { 10.seconds.toCoarsest }
       }
-    }
-
-    private def loadDetectionBudget( specification: Config ): Option[Duration] = {
-      durationFrom( specification, Default.DetectionBudgetPath )
     }
 
     def correlationId: WorkId = {
@@ -148,181 +139,180 @@ object PlanCatalog extends LazyLogging {
   }
 
 
-  object Default {
-    val DetectionBudgetPath = "spotlight.workflow.detect.timeout"
-    val OutlierPlansPath = "spotlight.detection-plans"
-  }
-
-  final case class Default private[PlanCatalog](
+  final class Default private[PlanCatalog](
     boundedContext: BoundedContext,
-    configuration: Config,
-    maxInFlightCpuFactor: Double = 8.0,
-    applicationDetectionBudget: Option[Duration] = None,
-    applicationPlans: Set[OutlierPlan] = Set.empty[OutlierPlan]
+    override val configuration: Config,
+    override val specifiedPlans: Set[OutlierPlan],
+    override val maxInFlightCpuFactor: Double = 8.0,
+    override val applicationDetectionBudget: Option[Duration] = None
   ) extends PlanCatalog( boundedContext ) with DefaultExecutionProvider with PlanProvider {
+    log.debug( "#TEST specifiedPlans = {}", specifiedPlans )
     //todo also load from plan index?
-    override lazy val specifiedPlans: Set[OutlierPlan] = applicationPlans // ++ loadPlans( configuration ) //todo: loadPlans is duplicative since Settings provides to props()
+//    override lazy val specifiedPlans: Set[OutlierPlan] = applicationPlans // ++ loadPlans( configuration ) //todo: loadPlans is duplicative since Settings provides to props()
 
-    private def loadPlans( specification: Config ): Set[OutlierPlan] = {
-      import Default.OutlierPlansPath
+//    private def loadPlans( specification: Config ): Set[OutlierPlan] = {
+//      val planSpecs = Settings detectionPlansConfigFrom specification
+//      if ( planSpecs.nonEmpty ) {
+//        log.debug( "specification = [{}]", planSpecs.root().render() )
+//        import scala.collection.JavaConversions._
+//        // since config is java API needed for collect
+//
+//        planSpecs.root
+//        .collect { case (n, s: ConfigObject) => (n, s.toConfig) }
+//        .toSet[(String, Config)]
+//        .map { case (name, spec) => makePlan( name, spec )( detectionBudget ) }
+//        .flatten
+//      } else {
+//        log.warning( "[{}]: no plan specifications found in settings", self.path )
+//        Set.empty[OutlierPlan]
+//      }
+//    }
 
-      if ( specification hasPath OutlierPlansPath ) {
-        val planSpecs = specification getConfig OutlierPlansPath
-        log.debug( "specification = [{}]", planSpecs.root().render() )
-        import scala.collection.JavaConversions._
-        // since config is java API needed for collect
+//    private def makePlan( name: String, planSpecification: Config )( budget: Duration ): Option[OutlierPlan] = {
+//      logger.info(
+//        "PlanCatalog[{}] making plan from specification[origin:{} @ {}]: [{}]",
+//        self.path.name, planSpecification.origin(), planSpecification.origin().lineNumber().toString, planSpecification
+//      )
+//
+//      //todo: bring initialization of plans into module init and base config on init config?
+//      val utilization = 0.9
+//      val timeout = budget * utilization
+//
+//      val grouping: Option[OutlierPlan.Grouping] = {
+//        val GROUP_LIMIT = "group.limit"
+//        val GROUP_WITHIN = "group.within"
+//        val limit = if ( planSpecification hasPath GROUP_LIMIT ) planSpecification getInt GROUP_LIMIT else 10000
+//        val window = if ( planSpecification hasPath GROUP_WITHIN ) {
+//          Some( FiniteDuration( planSpecification.getDuration( GROUP_WITHIN ).toNanos, NANOSECONDS ) )
+//        } else {
+//          None
+//        }
+//
+//        window map { w => OutlierPlan.Grouping( limit, w ) }
+//      }
+//
+//      //todo: add configuration for at-least and majority
+//      val algorithms = planAlgorithms( planSpecification )
+//
+//      val IS_DEFAULT = "is-default"
+//      val TOPICS = "topics"
+//      val REGEX = "regex"
+//
+//      if ( planSpecification.hasPath(IS_DEFAULT) && planSpecification.getBoolean(IS_DEFAULT) ) {
+//        logger.info(
+//          "PlanCatalog: topic[{}] default-type plan specification origin:[{}] line:[{}]",
+//          name,
+//          planSpecification.origin,
+//          planSpecification.origin.lineNumber.toString
+//        )
+//
+//        Some(
+//          OutlierPlan.default(
+//            name = name,
+//            timeout = timeout,
+//            isQuorum = makeIsQuorum( planSpecification, algorithms.size ),
+//            reduce = makeOutlierReducer( planSpecification),
+//            algorithms = algorithms,
+//            grouping = grouping,
+//            planSpecification = planSpecification
+//          )
+//        )
+//      } else if ( planSpecification hasPath TOPICS ) {
+//        import scala.collection.JavaConverters._
+//        logger.info(
+//          "PlanCatalog: topic:[{}] topic-based plan specification origin:[{}] line:[{}]",
+//          name,
+//          planSpecification.origin,
+//          planSpecification.origin.lineNumber.toString
+//        )
+//
+//        Some(
+//          OutlierPlan.forTopics(
+//            name = name,
+//            timeout = timeout,
+//            isQuorum = makeIsQuorum( planSpecification, algorithms.size ),
+//            reduce = makeOutlierReducer( planSpecification ),
+//            algorithms = algorithms,
+//            grouping = grouping,
+//            planSpecification = planSpecification,
+//            extractTopic = OutlierDetection.extractOutlierDetectionTopic,
+//            topics = planSpecification.getStringList( TOPICS ).asScala.map{ Topic(_) }.toSet
+//          )
+//        )
+//      } else if ( planSpecification hasPath REGEX ) {
+//        logger.info(
+//          "PlanCatalog: topic:[{}] regex-based plan specification origin:[{}] line:[{}]",
+//          name,
+//          planSpecification.origin,
+//          planSpecification.origin.lineNumber.toString
+//        )
+//
+//        Some(
+//          OutlierPlan.forRegex(
+//            name = name,
+//            timeout = timeout,
+//            isQuorum = makeIsQuorum( planSpecification, algorithms.size ),
+//            reduce = makeOutlierReducer( planSpecification ),
+//            algorithms = algorithms,
+//            grouping = grouping,
+//            planSpecification = planSpecification,
+//            extractTopic = OutlierDetection.extractOutlierDetectionTopic,
+//            regex = new Regex( planSpecification getString REGEX )
+//          )
+//        )
+//      } else {
+//        None
+//      }
+//    }
 
-        planSpecs.root
-        .collect { case (n, s: ConfigObject) => (n, s.toConfig) }
-        .toSet[(String, Config)]
-        .map { case (name, spec) => makePlan( name, spec )( detectionBudget ) }
-        .flatten
-      } else {
-        log.warning( "PlanCatalog[{}]: no plan specifications found at configuration path:[{}]", self.path, OutlierPlansPath )
-        Set.empty[OutlierPlan]
-      }
-    }
-
-    private def makePlan( name: String, planSpecification: Config )( budget: Duration ): Option[OutlierPlan] = {
-      logger.info(
-        "PlanCatalog[{}] making plan from specification[origin:{} @ {}]: [{}]",
-        self.path.name, planSpecification.origin(), planSpecification.origin().lineNumber().toString, planSpecification
-      )
-
-      //todo: bring initialization of plans into module init and base config on init config?
-      val utilization = 0.9
-      val timeout = budget * utilization
-
-      val grouping: Option[OutlierPlan.Grouping] = {
-        val GROUP_LIMIT = "group.limit"
-        val GROUP_WITHIN = "group.within"
-        val limit = if ( planSpecification hasPath GROUP_LIMIT ) planSpecification getInt GROUP_LIMIT else 10000
-        val window = if ( planSpecification hasPath GROUP_WITHIN ) {
-          Some( FiniteDuration( planSpecification.getDuration( GROUP_WITHIN ).toNanos, NANOSECONDS ) )
-        } else {
-          None
-        }
-
-        window map { w => OutlierPlan.Grouping( limit, w ) }
-      }
-
-      //todo: add configuration for at-least and majority
-      val algorithms = planAlgorithms( planSpecification )
-
-      val IS_DEFAULT = "is-default"
-      val TOPICS = "topics"
-      val REGEX = "regex"
-
-      if ( planSpecification.hasPath(IS_DEFAULT) && planSpecification.getBoolean(IS_DEFAULT) ) {
-        logger.info(
-          "PlanCatalog: topic[{}] default-type plan specification origin:[{}] line:[{}]",
-          name,
-          planSpecification.origin,
-          planSpecification.origin.lineNumber.toString
-        )
-
-        Some(
-          OutlierPlan.default(
-            name = name,
-            timeout = timeout,
-            isQuorum = makeIsQuorum( planSpecification, algorithms.size ),
-            reduce = makeOutlierReducer( planSpecification),
-            algorithms = algorithms,
-            grouping = grouping,
-            planSpecification = planSpecification
-          )
-        )
-      } else if ( planSpecification hasPath TOPICS ) {
-        import scala.collection.JavaConverters._
-        logger.info(
-          "PlanCatalog: topic:[{}] topic-based plan specification origin:[{}] line:[{}]",
-          name,
-          planSpecification.origin,
-          planSpecification.origin.lineNumber.toString
-        )
-
-        Some(
-          OutlierPlan.forTopics(
-            name = name,
-            timeout = timeout,
-            isQuorum = makeIsQuorum( planSpecification, algorithms.size ),
-            reduce = makeOutlierReducer( planSpecification ),
-            algorithms = algorithms,
-            grouping = grouping,
-            planSpecification = planSpecification,
-            extractTopic = OutlierDetection.extractOutlierDetectionTopic,
-            topics = planSpecification.getStringList( TOPICS ).asScala.map{ Topic(_) }.toSet
-          )
-        )
-      } else if ( planSpecification hasPath REGEX ) {
-        logger.info(
-          "PlanCatalog: topic:[{}] regex-based plan specification origin:[{}] line:[{}]",
-          name,
-          planSpecification.origin,
-          planSpecification.origin.lineNumber.toString
-        )
-
-        Some(
-          OutlierPlan.forRegex(
-            name = name,
-            timeout = timeout,
-            isQuorum = makeIsQuorum( planSpecification, algorithms.size ),
-            reduce = makeOutlierReducer( planSpecification ),
-            algorithms = algorithms,
-            grouping = grouping,
-            planSpecification = planSpecification,
-            extractTopic = OutlierDetection.extractOutlierDetectionTopic,
-            regex = new Regex( planSpecification getString REGEX )
-          )
-        )
-      } else {
-        None
-      }
-    }
-
-    private def planAlgorithms( spec: Config ): Set[Symbol] = {
-      import scala.collection.JavaConversions._
-      val AlgorithmsPath = "algorithms"
-      if ( spec hasPath AlgorithmsPath ) spec.getStringList( AlgorithmsPath ).toSet.map{ a: String => Symbol( a ) }
-      else Set.empty[Symbol]
-    }
-
-    private def makeIsQuorum( spec: Config, algorithmSize: Int ): IsQuorum = {
-      val MAJORITY = "majority"
-      val AT_LEAST = "at-least"
-      if ( spec hasPath AT_LEAST ) {
-        val trigger = spec getInt AT_LEAST
-        IsQuorum.AtLeastQuorumSpecification( totalIssued = algorithmSize, triggerPoint = trigger )
-      } else {
-        val trigger = if ( spec hasPath MAJORITY ) spec.getDouble( MAJORITY ) else 50D
-        IsQuorum.MajorityQuorumSpecification( totalIssued = algorithmSize, triggerPoint = ( trigger / 100D) )
-      }
-    }
-
-    private def makeOutlierReducer( spec: Config ): ReduceOutliers = {
-      val AT_LEAST = "at-least"
-      if ( spec hasPath AT_LEAST ) {
-        val threshold = spec getInt AT_LEAST
-        ReduceOutliers.byCorroborationCount( threshold )
-      } else {
-        val MAJORITY = "majority"
-        val threshold = if ( spec hasPath MAJORITY ) spec.getDouble( MAJORITY ) else 50D
-        ReduceOutliers.byCorroborationPercentage( threshold )
-      }
-    }
+//    private def planAlgorithms( spec: Config ): Set[Symbol] = {
+//      import scala.collection.JavaConversions._
+//      val AlgorithmsPath = "algorithms"
+//      if ( spec hasPath AlgorithmsPath ) spec.getStringList( AlgorithmsPath ).toSet.map{ a: String => Symbol( a ) }
+//      else Set.empty[Symbol]
+//    }
+//
+//    private def makeIsQuorum( spec: Config, algorithmSize: Int ): IsQuorum = {
+//      val MAJORITY = "majority"
+//      val AT_LEAST = "at-least"
+//      if ( spec hasPath AT_LEAST ) {
+//        val trigger = spec getInt AT_LEAST
+//        IsQuorum.AtLeastQuorumSpecification( totalIssued = algorithmSize, triggerPoint = trigger )
+//      } else {
+//        val trigger = if ( spec hasPath MAJORITY ) spec.getDouble( MAJORITY ) else 50D
+//        IsQuorum.MajorityQuorumSpecification( totalIssued = algorithmSize, triggerPoint = ( trigger / 100D) )
+//      }
+//    }
+//
+//    private def makeOutlierReducer( spec: Config ): ReduceOutliers = {
+//      val AT_LEAST = "at-least"
+//      if ( spec hasPath AT_LEAST ) {
+//        val threshold = spec getInt AT_LEAST
+//        ReduceOutliers.byCorroborationCount( threshold )
+//      } else {
+//        val MAJORITY = "majority"
+//        val threshold = if ( spec hasPath MAJORITY ) spec.getDouble( MAJORITY ) else 50D
+//        ReduceOutliers.byCorroborationPercentage( threshold )
+//      }
+//    }
   }
 
 
   case object NoRegisteredPlansError extends IllegalStateException("Cannot create detection model without registered plans")
 }
 
-class PlanCatalog( boundedContext: BoundedContext )
+abstract class PlanCatalog( boundedContext: BoundedContext )
 extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorLogging {
   outer: PlanCatalog.ExecutionProvider with PlanCatalog.PlanProvider =>
 
   import spotlight.analysis.{ PlanCatalogProtocol => P, AnalysisPlanProtocol => AP }
 
   override lazy val metricBaseName: MetricName = MetricName( classOf[PlanCatalog] )
+
+  case object Initialize extends P.CatalogMessage
+  case object InitializeCompleted extends P.CatalogMessage
+  override def preStart(): Unit = self ! Initialize
+
 
   val fallbackIndex: Agent[Map[String, OutlierPlan.Summary]] = {
     Agent( Map.empty[String, OutlierPlan.Summary] )( scala.concurrent.ExecutionContext.global )
@@ -411,11 +401,6 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
     }
   }
 
-
-  case object Initialize extends P.CatalogMessage
-  case object InitializeCompleted extends P.CatalogMessage
-
-  override def preStart(): Unit = self ! Initialize
 
   var outstandingWork: Map[WorkId, ActorRef] = Map.empty[WorkId, ActorRef]
 

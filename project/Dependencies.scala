@@ -14,7 +14,7 @@ object Dependencies {
   }
 
   object demesne {
-    val version = "2.1.1"
+    val version = "2.1.2-SNAPSHOT"
     def module( id: String ) = "com.github.dmrolfs" %% s"demesne-$id" % version withSources() withJavadoc()
     val core = module( "core" )
     val testkit = module( "testkit" )
@@ -39,8 +39,6 @@ object Dependencies {
 
     val kryo = "com.github.romix.akka" %% "akka-kryo-serialization" % "0.5.0"
     val kryoSerializers = "de.javakaffee" % "kryo-serializers" % "0.41"
-
-    val inMemory = "com.github.dnvriend" %% "akka-persistence-inmemory" % "1.3.17"
   }
 
   object persistence {
@@ -65,6 +63,7 @@ object Dependencies {
   }
 
   object log {
+    val persistLogging = "com.persist" %% "persist-logging" % "1.2.6"
     val typesafe = "com.typesafe.scala-logging" %% "scala-logging" % "3.5.0"
 
     object logback {
@@ -78,7 +77,7 @@ object Dependencies {
     val slf4j = "org.slf4j" % "slf4j-api" % "1.7.21" intransitive
     val log4jOverSlf4j = "org.slf4j" % "log4j-over-slf4j" % "1.7.21"
 
-    def all = Seq( typesafe, logback.core, logback.classic, slf4j, log4jOverSlf4j )
+    def all = Seq( typesafe, logback.core, logback.classic, slf4j, log4jOverSlf4j, persistLogging )
   }
 
   object metrics {
@@ -152,14 +151,12 @@ object Dependencies {
     val scalatest = "org.scalatest" %% "scalatest" % "3.0.0" withSources() withJavadoc()
     val scalazMatchers = "org.typelevel" %% "scalaz-scalatest" % "1.1.0" withSources() withJavadoc()
 
+    val inmemory = "com.github.dnvriend" %% "akka-persistence-inmemory" % "1.3.18"
+
     object mockito {
       val version = "1.10.19"
       def module( id: String ) = "org.mockito" % s"mockito-$id" % version withSources() withJavadoc()
       val core = module( "core" )
-    }
-
-    object persistence {
-      val testkit = "com.github.krasserm" % "akka-persistence-testkit_2.11" % "0.3.4"
     }
   }
 

@@ -48,6 +48,10 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[OutlierPlan] { 
   class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends EntityFixture( _config, _system, _slug ) {
     class Module extends EntityAggregateModule[OutlierPlan] { testModule =>
       private val trace: Trace[_] = Trace[Module]
+
+      override def passivateTimeout: Duration = Duration( 2, SECONDS )
+      override def snapshotPeriod: Option[FiniteDuration] = Some( 1.second )
+
       override val idLens: Lens[OutlierPlan, TaggedID[ShortUUID]] = OutlierPlan.idLens
       override val nameLens: Lens[OutlierPlan, String] = OutlierPlan.nameLens
       override def aggregateRootPropsOp: AggregateRootProps = testProps( _, _ )

@@ -16,6 +16,7 @@ import peds.akka.metrics.InstrumentedActor
 import peds.commons.{TryV, Valid}
 import peds.commons.concurrent._
 import peds.commons.identifier.{Identifying, ShortUUID, TaggedID}
+import peds.commons.util._
 import spotlight.analysis.algorithm._
 import spotlight.analysis.shard._
 import spotlight.analysis.algorithm.statistical._
@@ -226,6 +227,30 @@ object DetectionAlgorithmRouter extends LazyLogging {
   }
 
 
+  object AlgorithmProxy {
+    def proxyFor(
+      plan: OutlierPlan.Summary,
+      algorithmRootType: AggregateRootType
+    )(
+      implicit model: DomainModel
+    ): AlgorithmProxy = {
+      val strategy = ShardingStrategy from plan
+
+      val proxy = {
+        strategy
+        .map { strategy => ShardedRootTypeProxy( plan, algorithmRootType, strategy, model ) }
+        .getOrElse { RootTypeProxy( algorithmRootType, model ) }
+      }
+
+      logger.warn(
+        "using [{}] algorithm sharding strategy: AlgorithmProxy.fromProxy( plan:[{}] algorithm:[{}] ) = [{}]",
+        strategy.map{ _.key }, plan.name, algorithmRootType.name, proxy
+      )
+
+      proxy
+    }
+  }
+
   sealed abstract class AlgorithmProxy {
     def forward( message: Any )( implicit sender: ActorRef, context: ActorContext ): Unit = {
       referenceFor( message ) forwardEnvelope message
@@ -254,19 +279,25 @@ object DetectionAlgorithmRouter extends LazyLogging {
   case class ShardedRootTypeProxy(
     plan: OutlierPlan.Summary,
     algorithmRootType: AggregateRootType,
-    model: DomainModel
+    strategy: ShardingStrategy,
+    implicit val model: DomainModel
   ) extends AlgorithmProxy {
-    val shardingStrategy = CellShardingStrategy //todo: make settings / configuration driven
-    implicit val scIdentifying: Identifying[ShardCatalog.ID] = shardingStrategy.identifying
-
-    val shardingId: ShardCatalog#TID = shardingStrategy.idFor( plan, algorithmRootType.name )
-    val shardingRef = shardingStrategy.actorFor( plan, algorithmRootType )( model )
+    implicit val scIdentifying: Identifying[ShardCatalog.ID] = strategy.identifying
+    val shardingId: ShardCatalog#TID = strategy.idFor( plan, algorithmRootType.name )
+    val shardingRef = strategy.actorFor( plan, algorithmRootType )( model )
 
     override def forward( message: Any )( implicit sender: ActorRef, context: ActorContext ): Unit = {
       referenceFor(message) forwardEnvelope ShardProtocol.RouteMessage( shardingId, message )
     }
 
     override def referenceFor( message: Any )( implicit context: ActorContext ): ActorRef = shardingRef
+    override def toString: String = {
+      s"${getClass.safeSimpleName}( " +
+      s"plan:[${plan.name}] " +
+      s"algorithmRootType:[${algorithmRootType.name}] " +
+      s"strategy:[${strategy}] " +
+      s"model:[${model}] )"
+    }
   }
 }
 
@@ -276,7 +307,7 @@ class DetectionAlgorithmRouter extends Actor with EnvelopingActor with Instrumen
   import DetectionAlgorithmRouter._
 
   var routingTable: Map[Symbol, AlgorithmProxy] = provider.initialRoutingTable
-  def addRoute( algorithm: Symbol, resolver: AlgorithmProxy ): Unit = {routingTable += ( algorithm -> resolver ) }
+  def addRoute( algorithm: Symbol, resolver: AlgorithmProxy ): Unit = { routingTable += ( algorithm -> resolver ) }
   log.debug( "DetectionAlgorithmRouter[{}] created with routing-table:[{}]", self.path.name, routingTable.mkString("\n", ",", "\n") )
 
   def contains( algorithm: Symbol ): Boolean = {
@@ -292,7 +323,10 @@ class DetectionAlgorithmRouter extends Actor with EnvelopingActor with Instrumen
     }
 
     case RegisterAlgorithmRootType( algorithm, algorithmRootType, model, true ) => {
-      addRoute( algorithm, ShardedRootTypeProxy( plan, algorithmRootType, model ) )
+      log.debug( "#TEST received RegisterAlgorithmRootType for algo:[{}] rt:[{}], model:[{}]", algorithm, algorithmRootType, model )
+      addRoute( algorithm, AlgorithmProxy.proxyFor(plan, algorithmRootType)( model ) )
+      log.debug( "#TEST route added... notifying sender:[{}]", sender() )
+//      addRoute( algorithm, ShardedRootTypeProxy( plan, algorithmRootType, model ) )
       sender() !+ AlgorithmRegistered( algorithm )
     }
 

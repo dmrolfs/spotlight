@@ -14,6 +14,7 @@ import demesne.AggregateRootType
 import demesne.module.entity.{EntityAggregateModule, EntityProtocol}
 import demesne.testkit.AggregateRootSpec
 import spotlight.analysis.HistoricalStatistics
+import spotlight.analysis.shard.CellShardModule
 import spotlight.model.outlier._
 import spotlight.model.timeseries._
 
@@ -37,7 +38,7 @@ abstract class EntityModuleSpec[E <: Entity : ClassTag] extends AggregateRootSpe
     type Module <: EntityAggregateModule[E]
     val module: Module
 
-    override def rootTypes: Set[AggregateRootType] = Set( module.rootType )
+    override def rootTypes: Set[AggregateRootType] = Set( module.rootType, CellShardModule.module.rootType )
 
     val appliesToAll: OutlierPlan.AppliesTo = {
       val isQuorun: IsQuorum = IsQuorum.AtLeastQuorumSpecification(0, 0)

@@ -14,8 +14,7 @@ libraryDependencies ++=
     persistence.leveldb,
     persistence.leveldbjni,
     facility.json4sJackson,
-    akka.persistence,
-    akka.inMemory
+    akka.persistence
   )
 
 testOptions in Test += Tests.Argument( "-oDF" )
