@@ -115,9 +115,6 @@ object Spotlight extends Instrumented with StrictLogging {
     Done
   }
 
-  val kamonStartTask: StartTask = StartTask.withFunction( "start Kamon monitoring" ){ bc => kamon.Kamon.start(); Done }
-
-
   def systemConfiguration( context: SpotlightContext ): Kleisli[Future, Array[String], SystemSettings] = {
     kleisli[Future, Array[String], SystemSettings] { args =>
       def spotlightConfig: String = Option( System getProperty "spotlight.config" ) getOrElse { "application.conf" }

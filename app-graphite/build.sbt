@@ -21,7 +21,7 @@ testOptions in Test += Tests.Argument( "-oDF" )
 
 mainClass in (Compile, run) := Some("spotlight.app.GraphiteSpotlight")
 
-mainClass in assembly := Some("spotlight.stream.GraphiteSpotlight")
+mainClass in assembly := Some("spotlight.app.GraphiteSpotlight")
 
 assemblyJarName in assembly := s"${organizationName.value}-${name.value}-${version.value}.jar"
 
