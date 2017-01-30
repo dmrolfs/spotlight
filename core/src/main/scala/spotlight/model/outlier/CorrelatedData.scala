@@ -2,7 +2,7 @@ package spotlight.model.outlier
 
 import peds.akka.envelope.WorkId
 import shapeless.Lens
-import spotlight.model.outlier.OutlierPlan.Scope
+import spotlight.model.outlier.AnalysisPlan.Scope
 
 
 /**
@@ -11,14 +11,14 @@ import spotlight.model.outlier.OutlierPlan.Scope
 trait CorrelatedData[T] {
   def data: T
   def correlationIds: Set[WorkId]
-  def scope: Option[OutlierPlan.Scope] = None
+  def scope: Option[AnalysisPlan.Scope] = None
   def withData( newData: T ): CorrelatedData[T]
   def withCorrelationIds( newIds: Set[WorkId] ): CorrelatedData[T]
-  def withScope( newScope: Option[OutlierPlan.Scope] ): CorrelatedData[T]
+  def withScope( newScope: Option[AnalysisPlan.Scope] ): CorrelatedData[T]
 }
 
 object CorrelatedData {
-  def unapply( cdata: CorrelatedData[_] ): Option[(Any, Set[WorkId], Option[OutlierPlan.Scope])] = {
+  def unapply( cdata: CorrelatedData[_] ): Option[(Any, Set[WorkId], Option[AnalysisPlan.Scope])] = {
     Some( cdata.data, cdata.correlationIds, cdata.scope )
   }
 
@@ -32,7 +32,7 @@ object CorrelatedData {
     override def set( cd: CorrelatedData[T] )( cids: Set[WorkId] ): CorrelatedData[T] = cd withCorrelationIds cids
   }
 
-  def scopeLens[T]: Lens[CorrelatedData[T], Option[OutlierPlan.Scope]] = new Lens[CorrelatedData[T], Option[OutlierPlan.Scope]] {
+  def scopeLens[T]: Lens[CorrelatedData[T], Option[AnalysisPlan.Scope]] = new Lens[CorrelatedData[T], Option[AnalysisPlan.Scope]] {
     override def get( cd: CorrelatedData[T] ): Option[Scope] = cd.scope
     override def set( cd: CorrelatedData[T] )( s: Option[Scope] ): CorrelatedData[T] = cd withScope s
   }

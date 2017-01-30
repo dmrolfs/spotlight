@@ -1,0 +1,208 @@
+<configuration>
+  <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder>
+      <!-- <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern> -->
+      <!--<pattern>%date [%thread] %-5level %logger{36} - %message%n</pattern>-->
+      <pattern>[%-5level]%highlight [%d{HH:mm:ss.SSS}] [%thread] [%logger{36}] %message%n</pattern>
+    </encoder>
+  </appender>
+
+  <timestamp key="bySecond" datePattern="yyyyMMdd'T'HHmmss"/>
+
+  <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+    <file>${LOG_HOME}/spotlight-${bySecond}.log</file>
+    <append>true</append>
+    <!-- encoders are assigned the type
+         ch.qos.logback.classic.encoder.PatternLayoutEncoder by default -->
+    <encoder>
+      <!--<pattern>%-4relative [%thread] %-5level %logger{35} - %msg%n</pattern>-->
+      <pattern>[%-5level]%highlight [%-4relative] [%thread] [%logger{35}] %msg%n</pattern>
+    </encoder>
+    <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+      <!-- rollover daily -->
+      <fileNamePattern>${LOG_HOME}/spotlight-%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+      <!--<minIndex>1</minIndex>-->
+      <!--<maxIndex>3</maxIndex>-->
+      <timeBasedFileNamingAndTriggeringPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
+        <!-- or whenever the file size reaches 1GB -->
+        <maxFileSize>1GB</maxFileSize>
+      </timeBasedFileNamingAndTriggeringPolicy>
+    </rollingPolicy>
+  </appender>
+
+  <appender name="DEBUG_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+    <file>${LOG_HOME}/debug.log</file>
+    <append>true</append>
+    <encoder>
+      <pattern>%-4relative [%thread] %-5level %logger{35} - %msg%n</pattern>
+    </encoder>
+    <rollingPolicy class="ch.qos.logback.core.rolling.FixedWindowRollingPolicy">
+      <!-- rollover daily -->
+      <fileNamePattern>${LOG_HOME}/debug-%i.log.gz</fileNamePattern>
+      <!--<cleanHistoryOnStart>true</cleanHistoryOnStart>-->
+      <minIndex>1</minIndex>
+      <maxIndex>1</maxIndex>
+    </rollingPolicy>
+    <triggeringPolicy class="ch.qos.logback.core.rolling.SizeBasedTriggeringPolicy">
+      <maxFileSize>1GB</maxFileSize>
+    </triggeringPolicy>
+  </appender>
+
+  <appender name="CONFIG_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+    <file>${LOG_HOME}/config-render.log</file>
+    <append>false</append>
+    <encoder>
+      <pattern>%msg%n</pattern>
+    </encoder>
+    <rollingPolicy class="ch.qos.logback.core.rolling.FixedWindowRollingPolicy">
+      <fileNamePattern>${LOG_HOME}/config-render-%i.log.gz</fileNamePattern>
+      <!--<cleanHistoryOnStart>true</cleanHistoryOnStart>-->
+      <minIndex>1</minIndex>
+      <maxIndex>3</maxIndex>
+    </rollingPolicy>
+    <triggeringPolicy class="ch.qos.logback.core.rolling.SizeBasedTriggeringPolicy">
+      <maxFileSize>1GB</maxFileSize>
+    </triggeringPolicy>
+  </appender>
+
+  <appender name="OUTLIERS_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+    <file>${LOG_HOME}/outliers.log</file>
+    <append>true</append>
+    <encoder>
+      <pattern>%msg%n</pattern>
+    </encoder>
+    <rollingPolicy class="ch.qos.logback.core.rolling.FixedWindowRollingPolicy">
+      <fileNamePattern>${LOG_HOME}/outliers-%i.log.gz</fileNamePattern>
+      <!--<cleanHistoryOnStart>true</cleanHistoryOnStart>-->
+      <minIndex>1</minIndex>
+      <maxIndex>3</maxIndex>
+    </rollingPolicy>
+    <triggeringPolicy class="ch.qos.logback.core.rolling.SizeBasedTriggeringPolicy">
+      <maxFileSize>1GB</maxFileSize>
+    </triggeringPolicy>
+  </appender>
+
+  <appender name="METRIC_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+    <file>${LOG_HOME}/metrics.txt</file>
+    <append>true</append>
+    <encoder>
+      <pattern>%msg%n</pattern>
+    </encoder>
+    <rollingPolicy class="ch.qos.logback.core.rolling.FixedWindowRollingPolicy">
+      <!-- rollover daily -->
+      <fileNamePattern>${LOG_HOME}/metrics-%i.txt.gz</fileNamePattern>
+      <!--<cleanHistoryOnStart>true</cleanHistoryOnStart>-->
+      <minIndex>1</minIndex>
+      <maxIndex>3</maxIndex>
+    </rollingPolicy>
+    <triggeringPolicy class="ch.qos.logback.core.rolling.SizeBasedTriggeringPolicy">
+      <maxFileSize>1GB</maxFileSize>
+    </triggeringPolicy>
+  </appender>
+
+  <appender name="UNRECOGNIZED_METRICS_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+    <file>${LOG_HOME}/unrecognized-metrics.txt</file>
+    <append>true</append>
+    <encoder>
+      <pattern>%msg%n</pattern>
+    </encoder>
+    <rollingPolicy class="ch.qos.logback.core.rolling.FixedWindowRollingPolicy">
+      <!-- rollover daily -->
+      <fileNamePattern>${LOG_HOME}/unrecognized-metrics-%i.txt.gz</fileNamePattern>
+      <!--<cleanHistoryOnStart>true</cleanHistoryOnStart>-->
+      <minIndex>1</minIndex>
+      <maxIndex>3</maxIndex>
+    </rollingPolicy>
+    <triggeringPolicy class="ch.qos.logback.core.rolling.SizeBasedTriggeringPolicy">
+      <maxFileSize>1GB</maxFileSize>
+    </triggeringPolicy>
+  </appender>
+
+  <!--<appender name="TRAINING_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">-->
+    <!--<file>${LOG_HOME}/training.csv</file>-->
+    <!--<append>true</append>-->
+    <!--<encoder>-->
+      <!--<pattern>%msg%n</pattern>-->
+    <!--</encoder>-->
+    <!--<rollingPolicy class="ch.qos.logback.core.rolling.FixedWindowRollingPolicy">-->
+      <!--&lt;!&ndash; rollover daily &ndash;&gt;-->
+      <!--<fileNamePattern>${LOG_HOME}/training-%i.csv.gz</fileNamePattern>-->
+      <!--&lt;!&ndash;<cleanHistoryOnStart>true</cleanHistoryOnStart>&ndash;&gt;-->
+      <!--<minIndex>1</minIndex>-->
+      <!--<maxIndex>3</maxIndex>-->
+      <!--<timeBasedFileNamingAndTriggeringPolicy class="ch.qos.logback.core.rolling.SizeBasedTriggeringPolicy">-->
+        <!--<maxFileSize>1GB</maxFileSize>-->
+      <!--</timeBasedFileNamingAndTriggeringPolicy>-->
+    <!--</rollingPolicy>-->
+  <!--</appender>-->
+
+  <appender name="STREAM_MONITOR_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+    <file>${LOG_HOME}/monitor.csv</file>
+    <append>true</append>
+    <encoder>
+      <pattern>%msg%n</pattern>
+    </encoder>
+    <rollingPolicy class="ch.qos.logback.core.rolling.FixedWindowRollingPolicy">
+      <fileNamePattern>${LOG_HOME}/monitor-%i.csv.gz</fileNamePattern>
+      <!--<cleanHistoryOnStart>true</cleanHistoryOnStart>-->
+      <minIndex>1</minIndex>
+      <maxIndex>3</maxIndex>
+    </rollingPolicy>
+    <triggeringPolicy class="ch.qos.logback.core.rolling.SizeBasedTriggeringPolicy">
+      <maxFileSize>1GB</maxFileSize>
+    </triggeringPolicy>
+  </appender>
+
+  <appender name="PUBLISH_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+    <file>${LOG_HOME}/publish.log</file>
+    <append>true</append>
+    <encoder>
+      <pattern>%msg%n</pattern>
+    </encoder>
+    <rollingPolicy class="ch.qos.logback.core.rolling.FixedWindowRollingPolicy">
+      <fileNamePattern>${LOG_HOME}/publish-%i.log.gz</fileNamePattern>
+      <!--<cleanHistoryOnStart>true</cleanHistoryOnStart>-->
+      <minIndex>1</minIndex>
+      <maxIndex>3</maxIndex>
+    </rollingPolicy>
+    <triggeringPolicy class="ch.qos.logback.core.rolling.SizeBasedTriggeringPolicy">
+      <maxFileSize>1GB</maxFileSize>
+    </triggeringPolicy>
+  </appender>
+
+  <logger name="Metrics" level="OFF" additivity="false">
+    <appender-ref ref="METRIC_FILE" />
+  </logger>
+
+  <logger name="Unrecognized" level="DEBUG" additivity="false">
+    <appender-ref ref="UNRECOGNIZED_METRICS_FILE" />
+  </logger>
+
+  <logger name="Config" level="DEBUG" additivity="false">
+    <appender-ref ref="CONFIG_FILE" />
+  </logger>
+
+  <logger name="StreamMonitor" level="OFF" additivity="false">
+    <appender-ref ref="STREAM_MONITOR_FILE" />
+  </logger>
+
+  <logger name="Outliers" level="OFF" additivity="false">
+    <appender-ref ref="OUTLIERS_FILE" />
+  </logger>
+
+  <logger name="Publish" level="OFF" additivity="false">
+    <appender-ref ref="PUBLISH_FILE" />
+  </logger>
+
+  <logger name="Debug" level="OFF" additivity="false">
+    <appender-ref ref="DEBUG_FILE" />
+  </logger>
+
+  <!--<root level="DEBUG">-->
+  <!--<root level="INFO">-->
+  <root level="WARN">
+  <!--<root level="ERROR">-->
+    <appender-ref ref="STDOUT" />
+    <appender-ref ref="FILE" />
+  </root>
+</configuration>

@@ -6,11 +6,10 @@ import org.apache.commons.math3.ml.clustering.DoublePoint
 import org.joda.{time => joda}
 import com.github.nscala_time.time.Imports._
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
-import peds.commons.log.Trace
-import spotlight.analysis.outlier.DetectUsing
-import spotlight.analysis.outlier.algorithm.AlgorithmModule
-import spotlight.analysis.outlier.algorithm.AlgorithmModule.ShapeCompanion
-import spotlight.analysis.outlier.algorithm.AlgorithmProtocol.Advanced
+import spotlight.analysis.DetectUsing
+import spotlight.analysis.algorithm.AlgorithmModule
+import spotlight.analysis.algorithm.AlgorithmModule.ShapeCompanion
+import spotlight.analysis.algorithm.AlgorithmProtocol.Advanced
 import spotlight.model.timeseries._
 
 
@@ -18,8 +17,6 @@ import spotlight.model.timeseries._
   * Created by rolfsd on 10/14/16.
   */
 object PastPeriodAverageAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfiguration { outer =>
-  private val trace = Trace[PastPeriodAverageAlgorithm.type]
-
   sealed abstract class Period extends Equals {
     def descriptor: Int
     def timestamp: joda.DateTime
@@ -48,7 +45,7 @@ object PastPeriodAverageAlgorithm extends AlgorithmModule with AlgorithmModule.M
     def assign( dp: DataPoint ): PeriodValue = ( Period.assign(dp.timestamp), dp.value )
     def assign( timestamp: joda.DateTime ): Period = PeriodImpl( descriptor = timestamp.getMonthOfYear, timestamp )
 
-    def isCandidateMoreRecent( p: Period, candidate: Period ): Boolean = trace.block("isCandidateMoreRecent") {
+    def isCandidateMoreRecent( p: Period, candidate: Period ): Boolean = {
       logger.debug( "TEST: p.desciptor[{}] == candidate.descriptor[{}]: {}", p.descriptor.toString, candidate.descriptor.toString, (p.descriptor == candidate.descriptor).toString)
       logger.debug( "TEST: p.timestamp[{}] < candidate.timestamp[{}]: {}", p.timestamp, candidate.timestamp, (p.timestamp < candidate.timestamp).toString)
       ( p.descriptor == candidate.descriptor ) && ( p.timestamp < candidate.timestamp )
@@ -77,7 +74,7 @@ object PastPeriodAverageAlgorithm extends AlgorithmModule with AlgorithmModule.M
     def inCurrentPeriod( ts: joda.DateTime ): Boolean = ts.getMonthOfYear == joda.DateTime.now.getMonthOfYear
     def inCurrentPeriod( period: Period ): Boolean = period.descriptor == joda.DateTime.now.getMonthOfYear
 
-    def withPeriodValue( period: Period, value: Double ): Shape = trace.block( "withPeriodValue" ) {
+    def withPeriodValue( period: Period, value: Double ): Shape = {
       if ( inCurrentPeriod(period) ) withCurrentPeriod( period, value )
       else {
         val i = priorPeriods indexWhere { case (p, _) => p.descriptor == period.descriptor }
@@ -88,7 +85,7 @@ object PastPeriodAverageAlgorithm extends AlgorithmModule with AlgorithmModule.M
       }
     }
 
-    def withCurrentPeriod( p: Period, v: Double ): Shape = trace.block( "withCurrentPeriod" ) {
+    def withCurrentPeriod( p: Period, v: Double ): Shape = {
       currentPeriodValue
       .map { case (current, _) =>
         if ( Period.isCandidateMoreRecent( current, p ) ) this.copy( currentPeriodValue = Some( (p, v) ) ) else this
@@ -96,14 +93,14 @@ object PastPeriodAverageAlgorithm extends AlgorithmModule with AlgorithmModule.M
       .getOrElse { this.copy( currentPeriodValue = Some( (p, v) ) ) }
     }
 
-    def withUpdatedPriorPeriod( p: Period, v: Double, index: Int ): Shape = trace.block( "withUpdatedPriorPeriod" ) {
+    def withUpdatedPriorPeriod( p: Period, v: Double, index: Int ): Shape = {
       val (h, c :: t) = priorPeriods splitAt index
       val newPriors = h ::: ( (p, v) :: t )
       logger.debug( "TEST: priorPeriods=[{}] newPriors:[{}]", priorPeriods, newPriors )
       this.copy( priorPeriods = newPriors )
     }
 
-    def withNewPriorPeriod( p: Period, v: Double ): Shape = trace.block("withNewPriorPeriod") {
+    def withNewPriorPeriod( p: Period, v: Double ): Shape = {
       val newPriors = resize( ( (p, v) :: priorPeriods ) sortBy { _._1 } )
       this.copy( priorPeriods = newPriors )
     }

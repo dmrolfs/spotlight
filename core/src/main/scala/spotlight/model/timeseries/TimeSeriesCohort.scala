@@ -6,7 +6,6 @@ import shapeless.Lens
 import org.joda.{ time => joda }
 import com.github.nscala_time.time.Imports._
 import peds.commons.Valid
-import peds.commons.log.Trace
 import peds.commons.math.Interpolator
 
 
@@ -18,8 +17,6 @@ trait TimeSeriesCohort extends TimeSeriesBase {
 }
 
 object TimeSeriesCohort {
-  val trace = Trace[TimeSeriesCohort.type]
-
   def apply( topic: Topic, data: IndexedSeq[TimeSeries], precision: TimeUnit ): TimeSeriesCohort = {
     SimpleTimeSeriesCohort( topic, data, precision )
   }
@@ -113,8 +110,6 @@ object TimeSeriesCohort {
     override val data: IndexedSeq[TimeSeries],
     override val precision: TimeUnit
   ) extends TimeSeriesCohort {
-    val trace = Trace[SimpleTimeSeriesCohort]
-
     override def points: Seq[DataPoint] = data flatMap { _.points }
 
     override val start: Option[joda.DateTime] = {
@@ -153,7 +148,7 @@ object TimeSeriesCohort {
      *
      * @return a sequence of interpolated values per time frame.
      */
-    override lazy val toMatrix: Matrix[(joda.DateTime, Double)] = trace.block( "toMatrix" ) {
+    override lazy val toMatrix: Matrix[(joda.DateTime, Double)] = {
       val result = for {
         s <- start
         e <- end
@@ -166,18 +161,14 @@ object TimeSeriesCohort {
             points = d.points.filter{ frame.bounds contains _.timestamp }.toList
           } yield {
             points match {
-              case Nil => trace.block( "empty-framing" ) { None }
-              case p :: Nil => trace.block( s"singlepoint-framing[$p]" ) { Some( (p.timestamp, p.value) ) }
-              case pts => trace.block( "multipoint-framing" ) {
+              case Nil => None
+              case p :: Nil => Some( (p.timestamp, p.value) )
+              case pts => {
                 val xs = pts map { _.timestamp.getMillis.toDouble }
                 val ys = pts map { _.value }
                 val result = Interpolator( xs.toArray, ys.toArray ) map { interpolate =>
                   ( frame.mid, interpolate(frame.mid.getMillis.toDouble) )
                 }
-
-                trace( s"""xs=[${xs.map(_.toLong).mkString(",")}]""" )
-                trace( s"""ys=[${ys.mkString(",")}]""" )
-                trace( s"""result=[${result.map(r => (r._1.getMillis, r._2))}]""" )
 
                 result.toOption
               }

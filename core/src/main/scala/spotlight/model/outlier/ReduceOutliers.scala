@@ -15,13 +15,13 @@ trait ReduceOutliers extends Serializable {
   def apply(
     results: OutlierAlgorithmResults,
     source: TimeSeriesBase,
-    plan: OutlierPlan
+    plan: AnalysisPlan
   ): V[Outliers]
 }
 
 object ReduceOutliers extends LazyLogging {
   def byCorroborationPercentage( threshold: Double ): ReduceOutliers = new CorroboratedReduceOutliers {
-    override def isCorroborated: Check = ( plan: OutlierPlan ) => ( count: Int ) => {
+    override def isCorroborated: Check = ( plan: AnalysisPlan ) => ( count: Int ) => {
       ( threshold / 100D * plan.algorithms.size.toDouble ) <= count
     }
 
@@ -30,7 +30,7 @@ object ReduceOutliers extends LazyLogging {
 
 
   def byCorroborationCount( minimum: Int ): ReduceOutliers = new CorroboratedReduceOutliers {
-    override def isCorroborated: Check = ( plan: OutlierPlan ) => ( count: Int ) => {
+    override def isCorroborated: Check = ( plan: AnalysisPlan ) => ( count: Int ) => {
       minimum <= count || plan.algorithms.size <= count
     }
 
@@ -39,16 +39,16 @@ object ReduceOutliers extends LazyLogging {
 
 
 
-  final case class EmptyResultsError private[outlier]( plan: OutlierPlan, topic: Topic )
+  final case class EmptyResultsError private[outlier]( plan: AnalysisPlan, topic: Topic )
   extends IllegalStateException( s"ReduceOutliers called on empty results in plan:[${plan.name}] topic:[${topic}]" )
 
-  def checkResults( results: OutlierAlgorithmResults, plan: OutlierPlan, topic: Topic ): Valid[OutlierAlgorithmResults] = {
+  def checkResults( results: OutlierAlgorithmResults, plan: AnalysisPlan, topic: Topic ): Valid[OutlierAlgorithmResults] = {
     if ( results.nonEmpty ) results.successNel
     else Validation.failureNel( EmptyResultsError( plan, topic ) )
   }
 
   object CorroboratedReduceOutliers {
-    type Check = OutlierPlan => Int => Boolean
+    type Check = AnalysisPlan => Int => Boolean
   }
 
   abstract class CorroboratedReduceOutliers extends ReduceOutliers {
@@ -57,15 +57,15 @@ object ReduceOutliers extends LazyLogging {
     override def apply(
       results: OutlierAlgorithmResults,
       source: TimeSeriesBase,
-      plan: OutlierPlan
+      plan: AnalysisPlan
     ): V[Outliers] = {
-      logger.debug(
-        "REDUCE before [{}]:[{}]:\n\t+ outliers: [{}]\n\t+ threshold: [{}]",
-        plan.name,
-        source.topic,
-        results.values.cast[SeriesOutliers].map{_.outliers.mkString( ", " )},
-        results.values.map{_.thresholdBoundaries.mkString( ", " ) }
-      )
+      // logger.debug(
+      //   "REDUCE before [{}]:[{}]:\n\t+ outliers: [{}]\n\t+ threshold: [{}]",
+      //   plan.name,
+      //   source.topic,
+      //   results.values.cast[SeriesOutliers].map{_.outliers.mkString( ", " )},
+      //   results.values.map{_.thresholdBoundaries.mkString( ", " ) }
+      // )
 
       for {
         r <- checkResults( results, plan, source.topic ).disjunction
@@ -76,7 +76,7 @@ object ReduceOutliers extends LazyLogging {
     private def reduce(
       results: OutlierAlgorithmResults,
       source: TimeSeriesBase,
-      plan: OutlierPlan
+      plan: AnalysisPlan
     ): Valid[Outliers] = {
       val tally = OutlierAlgorithmResults tally results
 
@@ -90,7 +90,7 @@ object ReduceOutliers extends LazyLogging {
           }:_*
         )
       }
-      logger.debug( "REDUCE combined threshold: [{}]", combinedThresholds.mkString(",") )
+      // logger.debug( "REDUCE combined threshold: [{}]", combinedThresholds.mkString(",") )
 
       logDebug( results, source, plan, tally, corroboratedTimestamps, corroboratedOutliers )
 
@@ -106,7 +106,7 @@ object ReduceOutliers extends LazyLogging {
     private def logDebug(
       results: OutlierAlgorithmResults,
       source: TimeSeriesBase,
-      plan: OutlierPlan,
+      plan: AnalysisPlan,
       tally: Map[joda.DateTime, Set[Symbol]],
       corroboratedTimestamps: Set[joda.DateTime],
       corroboratedOutliers: Seq[DataPoint]

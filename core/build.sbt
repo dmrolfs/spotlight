@@ -6,6 +6,12 @@ name := "spotlight-core"
 
 description := "lorem ipsum."
 
+enablePlugins( BuildInfoPlugin )
+
+buildInfoKeys := Seq[BuildInfoKey]( name, version, scalaVersion, sbtVersion )
+
+buildInfoPackage := "spotlight"
+
 libraryDependencies ++=
   commonDependencies ++
   metrics.all ++
@@ -13,23 +19,29 @@ libraryDependencies ++=
 //  facility.avro.all ++
   Seq(
     //  facility.pureConfig,
-//    akka.streams,
     facility.math3,
 //    facility.suanshu, // don't want to use due to $$$
     facility.scopt,
     demesne.core,
-    akka.inMemory,
+    facility.offheap,
     facility.lang,
     facility.parboiled,
+    facility.squants,
+    facility.fastutil,
     facility.hadoopClient,
     facility.pyrolite,
-    facility.msgpack
+    facility.msgpack,
+    persistence.leveldb,
+    persistence.leveldbjni
   ) ++ Dependencies.Scope.test(
     akka.streamsTestkit,
     demesne.testkit,
+    quality.inmemory,
     "org.python" % "jython-standalone" % "2.5.3",
     "com.github.marklister" %% "product-collections" % "1.4.3"
   )
+
+addCompilerPlugin("org.scalamacros" % "paradise" % "2.1.0" cross CrossVersion.full)
 
 //libraryDependencies += ( "com.jsuereth" %% "scala-arm" % "2.0.0-M1" )
 //

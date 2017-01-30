@@ -5,15 +5,16 @@ import scala.reflect.ClassTag
 import akka.actor.{ActorRef, ActorSystem}
 import com.typesafe.config.Config
 import org.joda.{time => joda}
-import demesne.AggregateRootType
-import demesne.module.entity.EntityAggregateModule
-import demesne.testkit.AggregateRootSpec
 import org.apache.commons.math3.random.RandomDataGenerator
 import org.scalatest.concurrent.ScalaFutures
 import peds.archetype.domain.model.core.{Entity, EntityIdentifying}
 import peds.commons.V
 import peds.commons.log.Trace
-import spotlight.analysis.outlier.HistoricalStatistics
+import demesne.AggregateRootType
+import demesne.module.entity.{EntityAggregateModule, EntityProtocol}
+import demesne.testkit.AggregateRootSpec
+import spotlight.analysis.HistoricalStatistics
+import spotlight.analysis.shard.CellShardModule
 import spotlight.model.outlier._
 import spotlight.model.timeseries._
 
@@ -37,26 +38,26 @@ abstract class EntityModuleSpec[E <: Entity : ClassTag] extends AggregateRootSpe
     type Module <: EntityAggregateModule[E]
     val module: Module
 
-    override def rootTypes: Set[AggregateRootType] = Set( module.rootType )
+    override def rootTypes: Set[AggregateRootType] = Set( module.rootType, CellShardModule.module.rootType )
 
-    val appliesToAll: OutlierPlan.AppliesTo = {
+    val appliesToAll: AnalysisPlan.AppliesTo = {
       val isQuorun: IsQuorum = IsQuorum.AtLeastQuorumSpecification(0, 0)
       val reduce: ReduceOutliers = new ReduceOutliers {
         import scalaz._
         override def apply(
           results: OutlierAlgorithmResults,
           source: TimeSeriesBase,
-          plan: OutlierPlan
+          plan: AnalysisPlan
         ): V[Outliers] = Validation.failureNel[Throwable, Outliers]( new IllegalStateException("should not use" ) ).disjunction
       }
 
       import scala.concurrent.duration._
-      val grouping: Option[OutlierPlan.Grouping] = {
+      val grouping: Option[AnalysisPlan.Grouping] = {
         val window = None
-        window map { w => OutlierPlan.Grouping( limit = 10000, w ) }
+        window map { w => AnalysisPlan.Grouping( limit = 10000, w ) }
       }
 
-      OutlierPlan.default( "", 1.second, isQuorun, reduce, Set.empty[Symbol], grouping ).appliesTo
+      AnalysisPlan.default( "", 1.second, isQuorun, reduce, Set.empty[Symbol], grouping ).appliesTo
     }
 
     implicit val nowTimestamp: joda.DateTime = joda.DateTime.now

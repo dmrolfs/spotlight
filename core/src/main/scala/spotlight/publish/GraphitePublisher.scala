@@ -21,7 +21,7 @@ import com.typesafe.scalalogging.{LazyLogging, Logger}
 import org.slf4j.LoggerFactory
 import nl.grons.metrics.scala.{Meter, Timer}
 import spotlight.model.timeseries.Topic
-import spotlight.model.outlier.{OutlierPlan, Outliers}
+import spotlight.model.outlier.{AnalysisPlan, Outliers}
 import spotlight.protocol.PythonPickleProtocol
 
 
@@ -55,8 +55,8 @@ object GraphitePublisher extends LazyLogging {
     def createSocket( address: InetSocketAddress ): Socket
     def batchSize: Int
     def batchInterval: FiniteDuration = 5.seconds
-    def publishingTopic( p: OutlierPlan, t: Topic ): Topic = s"${p.name}.${t}"
-    def publishThresholdBoundaries(p: OutlierPlan, algorithm: Symbol ): Boolean = {
+    def publishingTopic( p: AnalysisPlan, t: Topic ): Topic = s"${p.name}.${t}"
+    def publishThresholdBoundaries(p: AnalysisPlan, algorithm: Symbol ): Boolean = {
       val publishKey = algorithm.name + ".publish-threshold"
       if ( p.algorithmConfig hasPath publishKey ) p.algorithmConfig getBoolean publishKey else false
     }

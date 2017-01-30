@@ -1,5 +1,7 @@
 package spotlight.model
 
+import bloomfilter.CanGenerateHashFrom
+import bloomfilter.CanGenerateHashFrom.CanGenerateHashFromString
 import org.joda.{time => joda}
 import org.apache.commons.math3.ml.clustering.DoublePoint
 import peds.akka.envelope.WorkId
@@ -85,11 +87,18 @@ package object timeseries {
 
 
   case class Topic( name: String ) {
+
+    override def hashCode(): Int = scala.util.hashing.MurmurHash3.stringHash( name )
+
     override def toString: String = name
   }
 
 
   object Topic {
+    implicit object CanGenerateTopicHash extends CanGenerateHashFrom[Topic] {
+      override def generateHash( from: Topic ): Long = CanGenerateHashFromString generateHash from.name
+    }
+
     implicit def fromString( topic: String ): Topic = Topic( name = topic )
 
     def findAncestor( topics: Topic* ): Topic = {
