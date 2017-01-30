@@ -66,7 +66,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
     val sender = TestProbe()
     val subscriber = TestProbe()
 
-    val appliesToAll: OutlierPlan.AppliesTo = {
+    val appliesToAll: AnalysisPlan.AppliesTo = {
       val isQuorun: IsQuorum = IsQuorum.AtLeastQuorumSpecification( 0, 0 )
       val reduce: ReduceOutliers = new ReduceOutliers {
 
@@ -75,19 +75,19 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
         override def apply(
           results: OutlierAlgorithmResults,
           source: TimeSeriesBase,
-          plan: OutlierPlan
+          plan: AnalysisPlan
         ): V[Outliers] = {
           Validation.failureNel[Throwable, Outliers]( new IllegalStateException( "should not use" ) ).disjunction
         }
       }
 
       import scala.concurrent.duration._
-      val grouping: Option[OutlierPlan.Grouping] = {
+      val grouping: Option[AnalysisPlan.Grouping] = {
         val window = None
-        window map { w => OutlierPlan.Grouping( limit = 10000, w ) }
+        window map { w => AnalysisPlan.Grouping( limit = 10000, w ) }
       }
 
-      OutlierPlan.default( "", 1.second, isQuorun, reduce, Set.empty[Symbol], grouping ).appliesTo
+      AnalysisPlan.default( "", 1.second, isQuorun, reduce, Set.empty[Symbol], grouping ).appliesTo
     }
 
     implicit val nowTimestamp: joda.DateTime = joda.DateTime.now
@@ -96,8 +96,8 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
 
     lazy val id: module.TID = nextId()
 
-    val scope = OutlierPlan.Scope( plan = "TestPlan", topic = "test.topic" )
-    val plan = mock[OutlierPlan]
+    val scope = AnalysisPlan.Scope( plan = "TestPlan", topic = "test.topic" )
+    val plan = mock[AnalysisPlan]
     when( plan.id ).thenReturn( fixture.id )
     when( plan.name ).thenReturn( scope.plan )
     when( plan.appliesTo ).thenReturn( fixture.appliesToAll )

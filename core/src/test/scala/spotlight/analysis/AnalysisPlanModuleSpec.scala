@@ -30,16 +30,16 @@ import spotlight.model.timeseries._
 /**
   * Created by rolfsd on 6/15/16.
   */
-class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] with OptionValues { outer =>
+class AnalysisPlanModuleSpec extends EntityModuleSpec[AnalysisPlan] with OptionValues { outer =>
   override type ID = AnalysisPlanModule.module.ID
   override type Protocol = AnalysisPlanProtocol.type
   override val protocol: Protocol = AnalysisPlanProtocol
 
 
-  abstract class FixtureModule extends EntityAggregateModule[OutlierPlan] { testModule =>
+  abstract class FixtureModule extends EntityAggregateModule[AnalysisPlan] { testModule =>
     private val trace: Trace[_] = Trace[FixtureModule]
-    override val idLens: Lens[OutlierPlan, TaggedID[ShortUUID]] = OutlierPlan.idLens
-    override val nameLens: Lens[OutlierPlan, String] = OutlierPlan.nameLens
+    override val idLens: Lens[AnalysisPlan, TaggedID[ShortUUID]] = AnalysisPlan.idLens
+    override val nameLens: Lens[AnalysisPlan, String] = AnalysisPlan.nameLens
     //      override def aggregateRootPropsOp: AggregateRootProps = testProps( _, _ )( proxy )
     override def environment: AggregateEnvironment = LocalAggregate
   }
@@ -63,8 +63,8 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] with OptionVa
     lazy val plan = makePlan( "TestPlan", None )
     override lazy val tid: TID = plan.id
 
-    def makePlan( name: String, g: Option[OutlierPlan.Grouping] ): OutlierPlan = {
-      OutlierPlan.default(
+    def makePlan( name: String, g: Option[AnalysisPlan.Grouping] ): AnalysisPlan = {
+      AnalysisPlan.default(
         name = name,
         algorithms = Set( algo ),
         grouping = g,
@@ -87,7 +87,7 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] with OptionVa
     lazy val algo: Symbol = SimpleMovingAverageAlgorithm.algorithm.label
 
 
-    def stateFrom( ar: ActorRef, tid: module.TID ): OutlierPlan = {
+    def stateFrom( ar: ActorRef, tid: module.TID ): AnalysisPlan = {
       import scala.concurrent.ExecutionContext.Implicits.global
       import akka.pattern.ask
       Await.result(
@@ -113,10 +113,10 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] with OptionVa
     val proxyProbe = TestProbe()
 
     def testProps( model: DomainModel, rootType: AggregateRootType ): Props = {
-      Props( new TestOutlierPlanActor( model, rootType ) )
+      Props( new TestAnalysisPlanActor( model, rootType ) )
     }
 
-    class TestOutlierPlanActor( model: DomainModel, rootType: AggregateRootType )
+    class TestAnalysisPlanActor( model: DomainModel, rootType: AggregateRootType )
     extends PlanActor( model, rootType )
     with WorkerProvider
     with FlowConfigurationProvider
@@ -142,7 +142,7 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] with OptionVa
 //    var proxyProbes = Map.empty[Topic, TestProbe]
     val proxyProbe = TestProbe( "proxy" )
 
-    class FixtureOutlierPlanActor( model: DomainModel, rootType: AggregateRootType)
+    class FixtureAnalysisPlanActor( model: DomainModel, rootType: AggregateRootType)
     extends AnalysisPlanModule.AggregateRoot.PlanActor( model, rootType )
     with WorkerProvider
     with FlowConfigurationProvider
@@ -169,7 +169,7 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] with OptionVa
       override def passivateTimeout: Duration = Duration.Undefined
       override def snapshotPeriod: Option[FiniteDuration] = None
       override def aggregateRootPropsOp: AggregateRootProps = {
-        ( m: DomainModel,rt: AggregateRootType ) => Props( new FixtureOutlierPlanActor( m, rt ) )
+        ( m: DomainModel,rt: AggregateRootType ) => Props( new FixtureAnalysisPlanActor( m, rt ) )
       }
 
       override type Protocol = outer.Protocol
@@ -177,12 +177,12 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] with OptionVa
     }
 
     override val module: Module = new Module
-//    new EntityAggregateModule[OutlierPlan] {
+//    new EntityAggregateModule[AnalysisPlan] {
 //      override val environment: AggregateEnvironment = LocalAggregate
-//      override def idLens: Lens[OutlierPlan, TaggedID[ShortUUID]] = OutlierPlan.idLens
-//      override def nameLens: Lens[OutlierPlan, String] = OutlierPlan.nameLens
+//      override def idLens: Lens[AnalysisPlan, TaggedID[ShortUUID]] = AnalysisPlan.idLens
+//      override def nameLens: Lens[AnalysisPlan, String] = AnalysisPlan.nameLens
 //      override def aggregateRootPropsOp: AggregateRootProps = {
-//        ( model: DomainModel, rootType: AggregateRootType ) => Props( new FixtureOutlierPlanActor( model, rootType ) )
+//        ( model: DomainModel, rootType: AggregateRootType ) => Props( new FixtureAnalysisPlanActor( model, rootType ) )
 //      }
 //    }
   }
@@ -194,8 +194,8 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] with OptionVa
   "AnalysisPlanModule" should {
 //    "make proxy for topic" in { f: Fixture =>
 //      import f._
-//      val planRef = TestActorRef[AnalysisPlanModule.AggregateRoot.OutlierPlanActor](
-//        AnalysisPlanModule.AggregateRoot.OutlierPlanActor.props( model, module.rootType )
+//      val planRef = TestActorRef[AnalysisPlanModule.AggregateRoot.AnalysisPlanActor](
+//        AnalysisPlanModule.AggregateRoot.AnalysisPlanActor.props( model, module.rootType )
 //      )
 //
 //      planRef.underlyingActor.state = plan
@@ -290,7 +290,7 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] with OptionVa
 //      testProbe.expectNoMsg()
 //    }
 
-    "add OutlierPlan" in { f: Fixture =>
+    "add AnalysisPlan" in { f: Fixture =>
       import f._
 
       entity ! protocol.Add( tid, Some(plan) )
@@ -299,8 +299,8 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] with OptionVa
           logger.info( "ADD PLAN: p.sourceId[{}]=[{}]   id[{}]=[{}]", p.sourceId.getClass.getCanonicalName, p.sourceId, tid.getClass.getCanonicalName, tid)
           p.sourceId mustBe plan.id
           assert( p.info.isDefined )
-          p.info.get mustBe an [OutlierPlan]
-          val actual = p.info.get.asInstanceOf[OutlierPlan]
+          p.info.get mustBe an [AnalysisPlan]
+          val actual = p.info.get.asInstanceOf[AnalysisPlan]
           actual.name mustBe "TestPlan"
           actual.algorithms mustBe Set( algo )
         }
@@ -320,9 +320,9 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] with OptionVa
       bus.expectMsgType[protocol.Added]
 
       //anonymous partial functions extend Serialiazble
-      val extract: OutlierPlan.ExtractTopic = { case m => Some("TestTopic") }
+      val extract: AnalysisPlan.ExtractTopic = { case m => Some("TestTopic") }
 
-      val testApplies: OutlierPlan.AppliesTo = OutlierPlan.AppliesTo.topics( Set("foo", "bar"), extract )
+      val testApplies: AnalysisPlan.AppliesTo = AnalysisPlan.AppliesTo.topics( Set("foo", "bar"), extract )
 
       entity !+ AnalysisPlanProtocol.ApplyTo( tid, testApplies )
       bus.expectMsgPF( max = 3.seconds.dilated, hint = "applies to" ) {
@@ -377,7 +377,7 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] with OptionVa
         override def apply(
           results: OutlierAlgorithmResults,
           source: TimeSeriesBase,
-          plan: OutlierPlan
+          plan: AnalysisPlan
         ): V[Outliers] =  {
           Validation.failureNel[Throwable, Outliers]( new IllegalStateException( "dummy" ) ).disjunction
         }
@@ -431,14 +431,14 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[OutlierPlan] with OptionVa
 //          pid mustBe planTid
 //          cids mustBe empty
 //          ts mustBe series
-//          scope.value mustBe OutlierPlan.Scope( p, t )
+//          scope.value mustBe AnalysisPlan.Scope( p, t )
 //        }
 //
 //        case P.AcceptTimeSeries( pid, cids, ts, scope) => {
 //          pid mustBe planTid
 //          cids mustBe empty
 //          ts mustBe series
-//          scope.value mustBe OutlierPlan.Scope( p, t )
+//          scope.value mustBe AnalysisPlan.Scope( p, t )
 //        }
 //      }
 //    }

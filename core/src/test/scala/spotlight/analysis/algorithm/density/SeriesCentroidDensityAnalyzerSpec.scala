@@ -35,7 +35,7 @@ class SeriesCentroidDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSug
   class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends AkkaFixture( _config, _system, _slug ) {
     val algoS = SeriesCentroidDensityAnalyzer.Algorithm
 //    val algoC = CohortDensityAnalyzer.Algorithm
-    val plan = mock[OutlierPlan]
+    val plan = mock[AnalysisPlan]
     when( plan.id ).thenReturn( TaggedID( 'plan, ShortUUID() ) )
     val router = TestProbe()
     val subscriber = TestProbe()

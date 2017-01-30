@@ -15,7 +15,7 @@ import peds.commons.{KOp, TryV, Valid}
 import peds.commons.util._
 import spotlight.analysis._
 import spotlight.analysis.algorithm.AlgorithmActor._
-import spotlight.model.outlier.{NoOutliers, OutlierPlan, Outliers}
+import spotlight.model.outlier.{NoOutliers, AnalysisPlan, Outliers}
 import spotlight.model.timeseries._
 
 
@@ -32,8 +32,8 @@ object CommonAnalyzer {
     override def data: Seq[DoublePoint] = underlying.data
     override def algorithm: Symbol = underlying.algorithm
     override def topic: Topic = underlying.topic
-    override def plan: OutlierPlan = underlying.plan
-    override def historyKey: OutlierPlan.Scope = underlying.historyKey
+    override def plan: AnalysisPlan = underlying.plan
+    override def historyKey: AnalysisPlan.Scope = underlying.historyKey
     override def history: HistoricalStatistics = underlying.history
     override def source: TimeSeriesBase = underlying.source
     override def messageConfig: Config = underlying.messageConfig
@@ -127,7 +127,7 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
   def findOutliers: KOp[AlgorithmContext, (Outliers, AlgorithmContext)]
 
   //todo dmr place into Agent for use & concurrency *across* actor instances?
-  var _scopedContexts: Map[OutlierPlan.Scope, WrappingContext] = Map.empty[OutlierPlan.Scope, WrappingContext]
+  var _scopedContexts: Map[AnalysisPlan.Scope, WrappingContext] = Map.empty[AnalysisPlan.Scope, WrappingContext]
 
   def setScopedContext( c: WrappingContext ): Unit = {_scopedContexts += c.historyKey -> c }
   def wrapContext(c: AlgorithmContext ): Valid[WrappingContext]

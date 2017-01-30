@@ -150,7 +150,7 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
           override def createSocket( address: InetSocketAddress ): Socket = {
             new Socket( destinationAddress.getAddress, destinationAddress.getPort )
           }
-          override def publishingTopic( p: OutlierPlan, t: Topic ): Topic = {
+          override def publishingTopic( p: AnalysisPlan, t: Topic ): Topic = {
             OutlierScoringModel.OutlierMetricPrefix + super.publishingTopic( p, t )
           }
         }

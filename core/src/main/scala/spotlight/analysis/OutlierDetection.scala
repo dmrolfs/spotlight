@@ -16,14 +16,14 @@ import peds.akka.metrics.{Instrumented, InstrumentedActor}
 import peds.commons.TryV
 import peds.commons.identifier.ShortUUID
 import spotlight.model.timeseries._
-import spotlight.model.outlier.{CorrelatedData, OutlierPlan, Outliers}
+import spotlight.model.outlier.{CorrelatedData, AnalysisPlan, Outliers}
 
 
 object OutlierDetection extends Instrumented with ClassLogging {
   sealed trait DetectionProtocol
   case class DetectionResult( outliers: Outliers, correlationIds: Set[WorkId] ) extends DetectionProtocol
   case class UnrecognizedTopic( topic: Topic ) extends DetectionProtocol
-  case class DetectionTimedOut( source: TimeSeriesBase, plan: OutlierPlan ) extends DetectionProtocol
+  case class DetectionTimedOut( source: TimeSeriesBase, plan: AnalysisPlan ) extends DetectionProtocol
 
 
   def props( routerRef: ActorRef ): Props = Props( new Default(routerRef) )
@@ -53,7 +53,7 @@ object OutlierDetection extends Instrumented with ClassLogging {
   }
 
 
-  val extractOutlierDetectionTopic: OutlierPlan.ExtractTopic = {
+  val extractOutlierDetectionTopic: AnalysisPlan.ExtractTopic = {
     case e @ Envelope( payload, _ ) if extractOutlierDetectionTopic isDefinedAt payload => extractOutlierDetectionTopic( payload )
     case m: OutlierDetectionMessage => Some(m.topic)
     case CorrelatedData( ts: TimeSeriesBase, _, _ ) => Some( ts.topic )
@@ -167,7 +167,7 @@ class OutlierDetection extends Actor with EnvelopingActor with InstrumentedActor
   }
 
 
-  def dispatch( m: OutlierDetectionMessage, p: OutlierPlan )( implicit ec: ExecutionContext ): TryV[ActorRef] = {
+  def dispatch( m: OutlierDetectionMessage, p: AnalysisPlan )( implicit ec: ExecutionContext ): TryV[ActorRef] = {
     log.debug( Map("@msg" -> "dispatching", "topic" -> m.topic.toString, "plan" -> m.plan.name), id = requestId )
 
     for {
@@ -185,9 +185,9 @@ class OutlierDetection extends Actor with EnvelopingActor with InstrumentedActor
 
 
   //todo store/hydrate
-  var _history: Map[OutlierPlan.Scope, HistoricalStatistics] = Map.empty[OutlierPlan.Scope, HistoricalStatistics]
-  def updateHistory( data: TimeSeriesBase, plan: OutlierPlan ): HistoricalStatistics = {
-    val key = OutlierPlan.Scope( plan, data.topic )
+  var _history: Map[AnalysisPlan.Scope, HistoricalStatistics] = Map.empty[AnalysisPlan.Scope, HistoricalStatistics]
+  def updateHistory( data: TimeSeriesBase, plan: AnalysisPlan ): HistoricalStatistics = {
+    val key = AnalysisPlan.Scope( plan, data.topic )
 
     val initialHistory = _history get key getOrElse { HistoricalStatistics( 2, false ) }
     val sentHistory = data.points.foldLeft( initialHistory ) { (h, dp) => h :+ dp }
@@ -198,7 +198,7 @@ class OutlierDetection extends Actor with EnvelopingActor with InstrumentedActor
     sentHistory
   }
 
-  var _score: Map[(OutlierPlan, Topic), (Long, Long)] = Map.empty[(OutlierPlan, Topic), (Long, Long)]
+  var _score: Map[(AnalysisPlan, Topic), (Long, Long)] = Map.empty[(AnalysisPlan, Topic), (Long, Long)]
 
   def updateScore( os: Outliers ): Unit = {
     val key = (os.plan, os.topic)
@@ -228,9 +228,9 @@ class OutlierDetection extends Actor with EnvelopingActor with InstrumentedActor
     }
   }
 
-  val fullExtractTopic: OutlierPlan.ExtractTopic = OutlierDetection.extractOutlierDetectionTopic orElse { case _ => None }
+  val fullExtractTopic: AnalysisPlan.ExtractTopic = OutlierDetection.extractOutlierDetectionTopic orElse { case _ => None }
 
-  def aggregatorNameForMessage( m: OutlierDetectionMessage, p: OutlierPlan ): String = {
+  def aggregatorNameForMessage( m: OutlierDetectionMessage, p: AnalysisPlan ): String = {
     val extractedTopic = fullExtractTopic( m ) getOrElse {
       log.warn( Map("@msg" -> "failed to extract ID from message", "message" -> m, "plan" -> p.name), id = requestId )
       "__UNKNOWN_ID__"

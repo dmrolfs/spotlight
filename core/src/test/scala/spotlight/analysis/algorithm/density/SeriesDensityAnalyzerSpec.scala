@@ -40,22 +40,22 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
   object Fixture {
     import scalaz._
 
-    val appliesToAll: OutlierPlan.AppliesTo = {
+    val appliesToAll: AnalysisPlan.AppliesTo = {
       val isQuorun: IsQuorum = IsQuorum.AtLeastQuorumSpecification(0, 0)
       val reduce: ReduceOutliers = new ReduceOutliers {
         override def apply(
           results: OutlierAlgorithmResults,
           source: TimeSeriesBase,
-          plan: OutlierPlan
+          plan: AnalysisPlan
         ): V[Outliers] = Validation.failureNel[Throwable, Outliers]( new IllegalStateException("should not use" ) ).disjunction
       }
 
-      val grouping: Option[OutlierPlan.Grouping] = {
+      val grouping: Option[AnalysisPlan.Grouping] = {
         val window = None
-        window map { w => OutlierPlan.Grouping( limit = 10000, w ) }
+        window map { w => AnalysisPlan.Grouping( limit = 10000, w ) }
       }
 
-      OutlierPlan.default( "", 1.second, isQuorun, reduce, Set.empty[Symbol], grouping ).appliesTo
+      AnalysisPlan.default( "", 1.second, isQuorun, reduce, Set.empty[Symbol], grouping ).appliesTo
     }
   }
 
@@ -63,7 +63,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
     val metric = Topic( "metric.a" )
     val algoS = SeriesDensityAnalyzer.Algorithm
 //    val algoC = CohortDensityAnalyzer.Algorithm
-    val plan = mock[OutlierPlan]
+    val plan = mock[AnalysisPlan]
     when( plan.id ).thenReturn( TaggedID( 'plan, ShortUUID() ) )
     when( plan.appliesTo ).thenReturn( Fixture.appliesToAll )
     when( plan.algorithms ) thenReturn Set( algoS )
@@ -507,12 +507,12 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       analyzerB.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
 
       val densityExpectedB_A = makeDensityExpectedHistory( pointsA, None, None )
-      analyzerB.underlyingActor._scopedContexts.get( OutlierPlan.Scope(plan, metric) ) mustBe None
+      analyzerB.underlyingActor._scopedContexts.get( AnalysisPlan.Scope(plan, metric) ) mustBe None
       analyzerB ! msgA
       aggregator.expectMsgPF( 2.seconds.dilated, "default-foo-A" ) {
         case m: SeriesOutliers => {
           assertDescriptiveStats(
-            analyzerB.underlyingActor._scopedContexts( OutlierPlan.Scope(plan, metric) ).asInstanceOf[SeriesDensityAnalyzer.Context].distanceStatistics,
+            analyzerB.underlyingActor._scopedContexts( AnalysisPlan.Scope(plan, metric) ).asInstanceOf[SeriesDensityAnalyzer.Context].distanceStatistics,
             densityExpectedB_A
           )
           m.topic mustBe metric
@@ -527,7 +527,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       aggregator.expectMsgPF( 2.seconds.dilated, "default-foo-AB" ){
         case m: NoOutliers => {
           assertDescriptiveStats(
-            analyzerB.underlyingActor._scopedContexts( OutlierPlan.Scope(plan, metric) ).asInstanceOf[SeriesDensityAnalyzer.Context].distanceStatistics,
+            analyzerB.underlyingActor._scopedContexts( AnalysisPlan.Scope(plan, metric) ).asInstanceOf[SeriesDensityAnalyzer.Context].distanceStatistics,
             densityExpectedB_AB
           )
           m.topic mustBe metric

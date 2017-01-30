@@ -6,7 +6,7 @@ import peds.archetype.domain.model.core.Entity
 import peds.commons.{TryV, Valid}
 import peds.commons.identifier.{Identifying, ShortUUID}
 import peds.commons.util._
-import spotlight.model.outlier.OutlierPlan
+import spotlight.model.outlier.AnalysisPlan
 
 
 /**
@@ -19,12 +19,12 @@ trait ShardCatalog extends Entity {
 }
 
 object ShardCatalog {
-  def idFor[I]( plan: OutlierPlan.Summary, algorithmLabel: String )( implicit identifying: Identifying[I] ): ShardCatalog#TID = {
+  def idFor[I]( plan: AnalysisPlan.Summary, algorithmLabel: String )( implicit identifying: Identifying[I] ): ShardCatalog#TID = {
     identifying.tag( ShardCatalog.ID( plan.id, algorithmLabel ).asInstanceOf[identifying.ID] ).asInstanceOf[ShardCatalog#TID]
   }
 
 
-  final case class ID( planId: OutlierPlan#ID, algorithmLabel: String ) {
+  final case class ID( planId: AnalysisPlan#ID, algorithmLabel: String ) {
     override def toString: String = planId + ":" + algorithmLabel
   }
 

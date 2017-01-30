@@ -7,8 +7,8 @@ import demesne.{AggregateRootType, DomainModel}
 import peds.commons.identifier.Identifying
 import peds.akka.envelope._
 import spotlight.Settings
-import spotlight.model.outlier.OutlierPlan
-import spotlight.model.outlier.OutlierPlan.Summary
+import spotlight.model.outlier.AnalysisPlan
+import spotlight.model.outlier.AnalysisPlan.Summary
 import squants.information.{Bytes, Information, Megabytes}
 
 /**
@@ -17,11 +17,11 @@ import squants.information.{Bytes, Information, Megabytes}
 sealed trait ShardingStrategy {
   val rootType: AggregateRootType
   def key: String
-  def makeAddCommand( plan: OutlierPlan.Summary, algorithmRootType: AggregateRootType ): Option[Any]
+  def makeAddCommand( plan: AnalysisPlan.Summary, algorithmRootType: AggregateRootType ): Option[Any]
 
   implicit lazy val identifying: Identifying[ShardCatalog.ID] = rootType.identifying.asInstanceOf[Identifying[ShardCatalog.ID]]
 
-  def actorFor( plan: OutlierPlan.Summary, algorithmRootType: AggregateRootType )( implicit model: DomainModel ): ActorRef = {
+  def actorFor( plan: AnalysisPlan.Summary, algorithmRootType: AggregateRootType )( implicit model: DomainModel ): ActorRef = {
     val sid = idFor( plan, algorithmRootType.name )
     val ref = model( rootType, sid )
     val add = makeAddCommand( plan, algorithmRootType )
@@ -29,7 +29,7 @@ sealed trait ShardingStrategy {
     ref
   }
 
-  def idFor( plan: OutlierPlan.Summary, algorithmLabel: String )( implicit identifying: Identifying[ShardCatalog#ID] ): ShardCatalog#TID = {
+  def idFor( plan: AnalysisPlan.Summary, algorithmLabel: String )( implicit identifying: Identifying[ShardCatalog#ID] ): ShardCatalog#TID = {
     identifying.tag( ShardCatalog.ID( plan.id, algorithmLabel ).asInstanceOf[identifying.ID] ).asInstanceOf[ShardCatalog#TID]
   }
 }
@@ -47,7 +47,7 @@ object ShardingStrategy extends ClassLogging {
     LookupShardingStrategy.key -> LookupShardingStrategy.make
   )
 
-  def from( plan: OutlierPlan.Summary )( implicit model: DomainModel ): Option[ShardingStrategy] = {
+  def from( plan: AnalysisPlan.Summary )( implicit model: DomainModel ): Option[ShardingStrategy] = {
     import scala.collection.JavaConversions._
     import shapeless.syntax.typeable._
 

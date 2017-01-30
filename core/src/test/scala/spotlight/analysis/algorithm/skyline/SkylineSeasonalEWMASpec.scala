@@ -29,7 +29,7 @@
 //         |${algoS.name}.bins = 4
 //       """.stripMargin
 //    )
-//    val plan = mock[OutlierPlan]
+//    val plan = mock[AnalysisPlan]
 //    when( plan.name ).thenReturn( "mock-plan" )
 //    when( plan.appliesTo ).thenReturn( SkylineFixture.appliesToAll )
 //    when( plan.algorithms ).thenReturn( Set(algoS) )

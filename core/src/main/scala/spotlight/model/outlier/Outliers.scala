@@ -16,7 +16,7 @@ abstract class Outliers extends Equals {
   def size: Int
   def anomalySize: Int
   def source: Source
-  def plan: OutlierPlan
+  def plan: AnalysisPlan
   def thresholdBoundaries: Map[Symbol, Seq[ThresholdBoundary]]
 
   override def hashCode: Int = {
@@ -60,7 +60,7 @@ object Outliers {
 
   def forSeries(
     algorithms: Set[Symbol],
-    plan: OutlierPlan,
+    plan: AnalysisPlan,
     source: TimeSeriesBase,
     outliers: Seq[DataPoint],
     thresholdBoundaries: Map[Symbol, Seq[ThresholdBoundary]]
@@ -77,20 +77,20 @@ object Outliers {
   }
 
   //todo
-  def forCohort( algorithms: Set[Symbol], plan: OutlierPlan, source: TimeSeriesBase, outliers: Seq[TimeSeries] ): Valid[Outliers] = ???
+  def forCohort( algorithms: Set[Symbol], plan: AnalysisPlan, source: TimeSeriesBase, outliers: Seq[TimeSeries] ): Valid[Outliers] = ???
 
   def unapply( so: Outliers ): Option[(Topic, Set[Symbol], Boolean, so.Source)] = {
     Some( (so.topic, so.algorithms, so.hasAnomalies, so.source) )
   }
 
 
-  def checkAlgorithms( algorithms: Set[Symbol], plan: OutlierPlan ): Valid[Set[Symbol]] = {
+  def checkAlgorithms( algorithms: Set[Symbol], plan: AnalysisPlan ): Valid[Set[Symbol]] = {
     val notIncluded = algorithms filter { !plan.algorithms.contains(_) }
     if ( notIncluded.isEmpty ) algorithms.successNel
     else Validation.failureNel( PlanAlgorithmsMismatchError( notIncluded, plan ) )
   }
 
-  def checkSeriesSource( source: TimeSeriesBase, plan: OutlierPlan ): Valid[TimeSeries] = {
+  def checkSeriesSource( source: TimeSeriesBase, plan: AnalysisPlan ): Valid[TimeSeries] = {
     if ( !plan.appliesTo( source ) ) Validation.failureNel( PlanSourceMismatchError(source, plan) )
     else {
       source match {
@@ -116,11 +116,11 @@ object Outliers {
     else Validation.failureNel( ThresholdBoundaryAlgorithmMismatchError( boundaryAlgorithms, algorithms ) )
   }
 
-  final case class PlanAlgorithmsMismatchError private[outlier]( algorithms: Set[Symbol], plan: OutlierPlan )
+  final case class PlanAlgorithmsMismatchError private[outlier]( algorithms: Set[Symbol], plan: AnalysisPlan )
     extends IllegalArgumentException( s"""cannot create Outliers for algorithms[${algorithms.mkString(",")}] not included in plan [$plan]""" )
 
 
-  final case class PlanSourceMismatchError private[outlier]( source: TimeSeriesBase, plan: OutlierPlan )
+  final case class PlanSourceMismatchError private[outlier]( source: TimeSeriesBase, plan: AnalysisPlan )
     extends IllegalArgumentException( s"""cannot create Outliers since plan [$plan] does not apply to source[${source.topic}]""" )
 
 
@@ -138,7 +138,7 @@ object Outliers {
 case class NoOutliers(
   override val algorithms: Set[Symbol],
   override val source: TimeSeriesBase,
-  override val plan: OutlierPlan,
+  override val plan: AnalysisPlan,
   override val thresholdBoundaries: Map[Symbol, Seq[ThresholdBoundary]] = Map.empty[Symbol, Seq[ThresholdBoundary]]
 ) extends Outliers {
   override type Source = TimeSeriesBase
@@ -153,7 +153,7 @@ case class NoOutliers(
 case class SeriesOutliers(
   override val algorithms: Set[Symbol],
   override val source: TimeSeries,
-  override val plan: OutlierPlan,
+  override val plan: AnalysisPlan,
   outliers: Seq[DataPoint],
   override val thresholdBoundaries: Map[Symbol, Seq[ThresholdBoundary]] = Map.empty[Symbol, Seq[ThresholdBoundary]]
 ) extends Outliers {
@@ -221,7 +221,7 @@ case class SeriesOutliers(
 case class CohortOutliers(
   override val algorithms: Set[Symbol],
   override val source: TimeSeriesCohort,
-  override val plan: OutlierPlan,
+  override val plan: AnalysisPlan,
   outliers: Set[TimeSeries],
   override val thresholdBoundaries: Map[Symbol, Seq[ThresholdBoundary]] = Map.empty[Symbol, Seq[ThresholdBoundary]]
 ) extends Outliers {

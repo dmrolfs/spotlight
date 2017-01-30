@@ -44,12 +44,12 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
       )
     )
 
-    val grouping: Option[OutlierPlan.Grouping] = {
+    val grouping: Option[AnalysisPlan.Grouping] = {
       val window = None
-      window map { w => OutlierPlan.Grouping( limit = 10000, w ) }
+      window map { w => AnalysisPlan.Grouping( limit = 10000, w ) }
     }
 
-    val plan = OutlierPlan.forTopics(
+    val plan = AnalysisPlan.forTopics(
       name = "plan-a",
       timeout = 2.seconds,
       isQuorum = isQuorumA,
@@ -61,7 +61,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
       topics = Set( Topic("metric") )
     )
 
-    val plans: Set[OutlierPlan] = Set( plan )
+    val plans: Set[AnalysisPlan] = Set( plan )
   }
 
   def assertHistoricalStats( actual: HistoricalStatistics, expected: HistoricalStatistics ): Unit = {
@@ -84,12 +84,12 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
     "apply default plan if no other plan is assigned" in { f: Fixture =>
       import f._
 
-      val grouping: Option[OutlierPlan.Grouping] = {
+      val grouping: Option[AnalysisPlan.Grouping] = {
         val window = None
-        window map { w => OutlierPlan.Grouping( limit = 10000, w ) }
+        window map { w => AnalysisPlan.Grouping( limit = 10000, w ) }
       }
 
-      val defaultPlan = OutlierPlan.default(
+      val defaultPlan = AnalysisPlan.default(
         name = "DEFAULT_PLAN",
         timeout = 2.seconds,
         algorithms = Set( 'foo, 'bar ),
@@ -132,12 +132,12 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
     "apply plan if assigned" in { f: Fixture =>
       import f._
 
-      val grouping: Option[OutlierPlan.Grouping] = {
+      val grouping: Option[AnalysisPlan.Grouping] = {
         val window = None
-        window map { w => OutlierPlan.Grouping( limit = 10000, w ) }
+        window map { w => AnalysisPlan.Grouping( limit = 10000, w ) }
       }
 
-      val defaultPlan = OutlierPlan.default(
+      val defaultPlan = AnalysisPlan.default(
         name = "dummy",
         timeout = 2.seconds,
         isQuorum = isQuorumA,
@@ -179,12 +179,12 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
     "apply default plan if nameExtractor does not apply and no other plan is assigned" in { f: Fixture =>
       import f._
 
-      val grouping: Option[OutlierPlan.Grouping] = {
+      val grouping: Option[AnalysisPlan.Grouping] = {
         val window = None
-        window map { w => OutlierPlan.Grouping( limit = 10000, w ) }
+        window map { w => AnalysisPlan.Grouping( limit = 10000, w ) }
       }
 
-      val defaultPlan = OutlierPlan.default(
+      val defaultPlan = AnalysisPlan.default(
         name = "DEFAULT_PLAN",
         algorithms = Set( 'zed ),
         grouping = grouping,
@@ -297,12 +297,12 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
         DataPoint( new joda.DateTime(467), 11 )
       )
 
-      val grouping: Option[OutlierPlan.Grouping] = {
+      val grouping: Option[AnalysisPlan.Grouping] = {
         val window = None
-        window map { w => OutlierPlan.Grouping( limit = 10000, w ) }
+        window map { w => AnalysisPlan.Grouping( limit = 10000, w ) }
       }
 
-      val defaultPlan = OutlierPlan.default(
+      val defaultPlan = AnalysisPlan.default(
         name = "dummy",
         timeout = 2.seconds,
         isQuorum = isQuorumA,

@@ -20,7 +20,7 @@ import demesne.repository.CommonLocalRepository
 import spotlight.analysis.DetectUsing
 import spotlight.analysis.shard.ShardCatalog.ShardCatalogIdentifying
 import spotlight.analysis.algorithm.{AlgorithmModule, AlgorithmProtocol => AP}
-import spotlight.model.outlier.OutlierPlan
+import spotlight.model.outlier.AnalysisPlan
 import spotlight.model.timeseries._
 
 
@@ -32,7 +32,7 @@ object LookupShardProtocol extends AggregateProtocol[LookupShardCatalog#ID] {
 
   case class Add(
     override val targetId: Add#TID,
-    plan: OutlierPlan.Summary,
+    plan: AnalysisPlan.Summary,
     algorithmRootType: AggregateRootType,
     expectedNrTopics: Int,
     controlBySize: Information
@@ -41,7 +41,7 @@ object LookupShardProtocol extends AggregateProtocol[LookupShardCatalog#ID] {
 
   case class Added(
     override val sourceId: Added#TID,
-    plan: OutlierPlan.Summary,
+    plan: AnalysisPlan.Summary,
     algorithmRootType: AggregateRootType,
     expectedNrTopics: Int,
     controlBySize: Information
@@ -62,7 +62,7 @@ object LookupShardProtocol extends AggregateProtocol[LookupShardCatalog#ID] {
 
 
 case class LookupShardCatalog(
-  plan: OutlierPlan.Summary,
+  plan: AnalysisPlan.Summary,
   algorithmRootType: AggregateRootType,
   control: LookupShardCatalog.Control,
   shards: Object2ObjectOpenHashMap[Topic, AlgoTID]
@@ -214,7 +214,7 @@ object LookupShardModule extends AggregateRootModule { module =>
 
       var shardMetrics: Option[ShardMetrics] = None
 
-      class ShardMetrics( plan: OutlierPlan.Summary, id: ShardCatalog.ID ) extends Instrumented {
+      class ShardMetrics( plan: AnalysisPlan.Summary, id: ShardCatalog.ID ) extends Instrumented {
         val ShardBaseName = "lookup-shard"
 
         override lazy val metricBaseName: MetricName = {

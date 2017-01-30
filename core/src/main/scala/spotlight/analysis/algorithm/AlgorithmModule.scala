@@ -37,7 +37,7 @@ import demesne._
 import demesne.repository.{AggregateRootRepository, CommonLocalRepository, EnvelopingAggregateRootRepository}
 import demesne.repository.AggregateRootRepository.{ClusteredAggregateContext, LocalAggregateContext}
 import spotlight.analysis._
-import spotlight.model.outlier.{NoOutliers, OutlierPlan, Outliers}
+import spotlight.model.outlier.{NoOutliers, AnalysisPlan, Outliers}
 import spotlight.model.timeseries._
 
 
@@ -365,7 +365,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
     def tolerance: Double
     def recent: RecentHistory
 
-    def plan: OutlierPlan = message.payload.plan
+    def plan: AnalysisPlan = message.payload.plan
     def source: TimeSeriesBase = message.source
     def configuration: Config = message.plan.algorithmConfig
 

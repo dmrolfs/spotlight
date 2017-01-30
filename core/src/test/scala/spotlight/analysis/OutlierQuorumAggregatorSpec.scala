@@ -43,7 +43,7 @@ class OutlierQuorumAggregatorSpec extends ParallelAkkaSpec with MockitoSugar {
     when( some.thresholdBoundaries ) thenReturn Map.empty[Symbol, Seq[ThresholdBoundary]]
 
     val demoReduce = new ReduceOutliers {
-      override def apply( results: OutlierAlgorithmResults, source: TimeSeriesBase, plan: OutlierPlan ): V[ Outliers ] = {
+      override def apply( results: OutlierAlgorithmResults, source: TimeSeriesBase, plan: AnalysisPlan ): V[ Outliers ] = {
         import scalaz.Scalaz._
         val outlierCount = results.foldLeft( 0 ) { (cnt, r) => cnt + r._2.anomalySize }
         val result = if ( outlierCount > 0 ) fixture.some else fixture.none
@@ -51,13 +51,13 @@ class OutlierQuorumAggregatorSpec extends ParallelAkkaSpec with MockitoSugar {
       }
     }
 
-    val grouping: Option[OutlierPlan.Grouping] = {
+    val grouping: Option[AnalysisPlan.Grouping] = {
       val window = None
-      window map { w => OutlierPlan.Grouping( limit = 10000, w ) }
+      window map { w => AnalysisPlan.Grouping( limit = 10000, w ) }
     }
 
-    def plan( to: FiniteDuration ): OutlierPlan = {
-      OutlierPlan.default(
+    def plan( to: FiniteDuration ): AnalysisPlan = {
+      AnalysisPlan.default(
         name = "default",
         timeout = to,
         isQuorum = IsQuorum.AtLeastQuorumSpecification( 1, 1 ),

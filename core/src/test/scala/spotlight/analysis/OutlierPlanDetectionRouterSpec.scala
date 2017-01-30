@@ -28,8 +28,8 @@
 ///**
 // * Created by rolfsd on 10/28/15.
 // */
-//class OutlierPlanDetectionRouterSpec extends ParallelAkkaSpec {
-//  import OutlierPlanDetectionRouterSpec._
+//class AnalysisPlanDetectionRouterSpec extends ParallelAkkaSpec {
+//  import AnalysisPlanDetectionRouterSpec._
 //
 //  class Fixture extends AkkaFixture { fixture =>
 //    def status[T]( label: String ): Flow[T, T, NotUsed] = {
@@ -86,32 +86,32 @@
 //
 //    val subscriber = TestProbe( "subscriber-probe" )
 //
-//    val grouping: Option[OutlierPlan.Grouping] = {
+//    val grouping: Option[AnalysisPlan.Grouping] = {
 //      val window = None
-//      window map { w => OutlierPlan.Grouping( limit = 10000, w ) }
+//      window map { w => AnalysisPlan.Grouping( limit = 10000, w ) }
 //    }
 //
 //    val plan = makePlan( "MyFixturePlan", grouping )
 //
 //    val plans = Set( plan )
 //
-//    def makePlanRouter( ps: Set[OutlierPlan] = fixture.plans ): TestActorRef[OutlierPlanDetectionRouter] = {
-//      TestActorRef[OutlierPlanDetectionRouter](
+//    def makePlanRouter( ps: Set[AnalysisPlan] = fixture.plans ): TestActorRef[AnalysisPlanDetectionRouter] = {
+//      TestActorRef[AnalysisPlanDetectionRouter](
 //        Props(
-//          new OutlierPlanDetectionRouter with OutlierPlanDetectionRouter.ConfigurationProvider {
+//          new AnalysisPlanDetectionRouter with AnalysisPlanDetectionRouter.ConfigurationProvider {
 //            override def detector: ActorRef = fixture.detector.ref
 //            override def detectionBudget: FiniteDuration = 500.millis
 //            override def bufferSize: Int = 100
 //            override def parallelismFactor: Double = 1.0
-////            override def plans: Set[OutlierPlan] = ps
+////            override def plans: Set[AnalysisPlan] = ps
 //          }
 //        ),
 //        "FixturePlanRouter"
 //      )
 //    }
 //
-//    def makePlan( name: String, g: Option[OutlierPlan.Grouping] ): OutlierPlan = {
-//      OutlierPlan.default(
+//    def makePlan( name: String, g: Option[AnalysisPlan.Grouping] ): AnalysisPlan = {
+//      AnalysisPlan.default(
 //        name = name,
 //        algorithms = Set( algo ),
 //        grouping = g,
@@ -142,7 +142,7 @@
 //  val NEXT = Tag( "next" )
 //  val DONE = Tag( "done" )
 //
-//  "OutlierPlanDetectionRouter" should {
+//  "AnalysisPlanDetectionRouter" should {
 ////    "make functioning plan stream" in { f: Fixture =>
 ////      import f._
 ////      val actual = makePlanRouter().underlyingActor.makePlanStream( plan, subscriber.ref )
@@ -173,7 +173,7 @@
 ////    "make plan-dependent streams" in { f: Fixture =>
 ////      import f._
 ////
-////      val p1 = makePlan( "p1", Some( OutlierPlan.Grouping(10, 300.seconds) ) )
+////      val p1 = makePlan( "p1", Some( AnalysisPlan.Grouping(10, 300.seconds) ) )
 ////      val p2 = makePlan( "p2", None )
 ////
 //////      val m1 = OutlierDetectionMessage( TimeSeries("dummy", Seq()), p1 ).toOption.get
@@ -184,14 +184,14 @@
 ////      val pr = makePlanRouter( Set(p1, p2) )
 ////      val a1 = pr.underlyingActor.streamIngressFor( p1, subscriber.ref )
 ////      log.info( "first actual ingress = [{}]", a1 )
-////      log.info( "first actual graph = [{}]", pr.underlyingActor.planStreams( OutlierPlanDetectionRouter.Key( p1.id, subscriber.ref ) ) )
+////      log.info( "first actual graph = [{}]", pr.underlyingActor.planStreams( AnalysisPlanDetectionRouter.Key( p1.id, subscriber.ref ) ) )
 ////      a1 ! m1
 ////      detector.expectNoMsg( 500.millis.dilated )
 ////      subscriber.expectNoMsg( 500.millis.dilated )
 ////
 ////      val a2 = pr.underlyingActor.streamIngressFor( p2, subscriber.ref )
 ////      log.info( "second actual ingress = [{}]", a2 )
-////      log.info( "second actual graph = [{}]", pr.underlyingActor.planStreams( OutlierPlanDetectionRouter.Key( p2.id, subscriber.ref ) ) )
+////      log.info( "second actual graph = [{}]", pr.underlyingActor.planStreams( AnalysisPlanDetectionRouter.Key( p2.id, subscriber.ref ) ) )
 ////      a1 must not be a2
 ////      a2 ! m2
 ////      detector.expectMsgClass( 200.millis.dilated, classOf[DetectOutliersInSeries] )
@@ -201,7 +201,7 @@
 ////    "router receive uses plan-dependent streams" taggedAs (WIP) in { f: Fixture =>
 ////      import f._
 ////
-////      val p1 = makePlan( "p1", Some( OutlierPlan.Grouping(10, 300.seconds) ) )
+////      val p1 = makePlan( "p1", Some( AnalysisPlan.Grouping(10, 300.seconds) ) )
 ////      val p2 = makePlan( "p2", None )
 ////
 ////      val points = makeDataPoints( values = Seq.fill( 9 )( 1.0 ) )
@@ -224,16 +224,16 @@
 ////    "router actor uses plan-dependent streams" in { f: Fixture =>
 ////      import f._
 ////
-////      val p1 = makePlan( "p1", Some( OutlierPlan.Grouping(10, 300.seconds) ) )
+////      val p1 = makePlan( "p1", Some( AnalysisPlan.Grouping(10, 300.seconds) ) )
 ////      val p2 = makePlan( "p2", None )
 ////
 ////      val points = makeDataPoints( values = Seq.fill( 9 )( 1.0 ) )
 ////      val ts = spike( points )( points.size - 1 )
 ////
-////      val m1 = ( ts, OutlierPlan.Scope(p1, ts.topic) )
-////      val m2 = ( ts, OutlierPlan.Scope(p2, ts.topic) )
+////      val m1 = ( ts, AnalysisPlan.Scope(p1, ts.topic) )
+////      val m2 = ( ts, AnalysisPlan.Scope(p2, ts.topic) )
 ////
-////      val routerProps = OutlierPlanDetectionRouter.props(
+////      val routerProps = AnalysisPlanDetectionRouter.props(
 ////        detectorRef = detector.ref,
 ////        detectionBudget = 2.seconds,
 ////        bufferSize = 100,
@@ -260,7 +260,7 @@
 //      val testPlans = Set( p1 /*, p2*/ )
 //
 //      val planRouterRef = system.actorOf(
-//        OutlierPlanDetectionRouter.props(
+//        AnalysisPlanDetectionRouter.props(
 //          detectorRef = detector.ref,
 //          detectionBudget = 2.seconds,
 //          bufferSize = 100,
@@ -270,7 +270,7 @@
 //      )
 //      logger.debug( "TEST: planRouterRef=[{}]", planRouterRef)
 //
-//      val planDetectionFlow = OutlierPlanDetectionRouter.flow( planRouterRef )
+//      val planDetectionFlow = AnalysisPlanDetectionRouter.flow( planRouterRef )
 //      logger.debug( "TEST: planDetectionFlow=[{}]", planDetectionFlow )
 //
 //      val preFlow = {
@@ -279,7 +279,7 @@
 //          logger.debug( "PLAN NAMES:[{}]", testPlans.map{_.name}.mkString(",") )
 //          testPlans collect { case p if p appliesTo ts =>
 //            logger.debug( "plan [{}] applies to ts [{}]", p.name, ts.topic )
-//            (ts, OutlierPlan.Scope(p, ts.topic))
+//            (ts, AnalysisPlan.Scope(p, ts.topic))
 //          }
 //        }
 //        .mapConcat { identity }
@@ -395,12 +395,12 @@
 ////      import com.github.nscala_time.time.OrderingImplicits._
 ////
 ////      val algos = Set( algo )
-////      val grouping: Option[OutlierPlan.Grouping] = {
+////      val grouping: Option[AnalysisPlan.Grouping] = {
 ////        val window = None
-////        window map { w => OutlierPlan.Grouping( limit = 10000, w ) }
+////        window map { w => AnalysisPlan.Grouping( limit = 10000, w ) }
 ////      }
 ////
-////      val defaultPlan = OutlierPlan.default(
+////      val defaultPlan = AnalysisPlan.default(
 ////        name = "DEFAULT_PLAN",
 ////        algorithms = algos,
 ////        grouping = grouping,
@@ -670,8 +670,8 @@
 //  }
 //}
 //
-//object OutlierPlanDetectionRouterSpec {
-//  val trace = Trace[OutlierPlanDetectionRouterSpec.type]
+//object AnalysisPlanDetectionRouterSpec {
+//  val trace = Trace[AnalysisPlanDetectionRouterSpec.type]
 //
 //  def spike( data: Seq[DataPoint], value: Double = 1000D )( position: Int = data.size - 1 ): TimeSeries = {
 //    val (front, last) = data.sortBy{ _.timestamp.getMillis }.splitAt( position )

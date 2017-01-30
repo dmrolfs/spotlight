@@ -30,10 +30,10 @@ with LazyLogging {
     val points = Seq( DataPoint(now, 1.01), DataPoint(now+1.second, 2.02), DataPoint(now+2.seconds, 3.02) )
     val series = TimeSeries( "foo", points )
 
-    val all = mock[OutlierPlan.AppliesTo]
+    val all = mock[AnalysisPlan.AppliesTo]
     when( all.apply(any) ) thenReturn true
 
-    val plan = mock[OutlierPlan]
+    val plan = mock[AnalysisPlan]
     when( plan.algorithms ) thenReturn Set( algo1, algo2, algo3 )
     when( plan.appliesTo ).thenReturn( all )
 

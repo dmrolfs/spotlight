@@ -17,7 +17,7 @@ import demesne._
 import demesne.module.{LocalAggregate, SimpleAggregateModule}
 import spotlight.analysis.DetectUsing
 import spotlight.analysis.algorithm.{AlgorithmProtocol => AP}
-import spotlight.model.outlier.OutlierPlan
+import spotlight.model.outlier.AnalysisPlan
 import spotlight.model.timeseries._
 
 
@@ -27,14 +27,14 @@ import spotlight.model.timeseries._
 object CellShardProtocol extends AggregateProtocol[CellShardCatalog#ID] {
   case class Add(
     override val targetId: Add#TID,
-    plan: OutlierPlan.Summary,
+    plan: AnalysisPlan.Summary,
     algorithmRootType: AggregateRootType,
     nrCells: Int
   ) extends Command
 
   case class Added(
     override val sourceId: Added#TID,
-    plan: OutlierPlan.Summary,
+    plan: AnalysisPlan.Summary,
     algorithmRootType: AggregateRootType,
     cells: Vector[AlgoTID]
   ) extends Event
@@ -46,7 +46,7 @@ object CellShardProtocol extends AggregateProtocol[CellShardCatalog#ID] {
 
 
 case class CellShardCatalog(
-  plan: OutlierPlan.Summary,
+  plan: AnalysisPlan.Summary,
   algorithmRootType: AggregateRootType,
   cells: Vector[AlgoTID]
 ) extends ShardCatalog with Equals with LazyLogging {
@@ -135,7 +135,7 @@ object CellShardModule extends LazyLogging {
 
     var shardMetrics: Option[ShardMetrics] = None
 
-    class ShardMetrics( plan: OutlierPlan.Summary, id: ShardCatalog.ID ) extends Instrumented {
+    class ShardMetrics( plan: AnalysisPlan.Summary, id: ShardCatalog.ID ) extends Instrumented {
       val ShardBaseName = "cell-shard"
 
       override lazy val metricBaseName: MetricName = {

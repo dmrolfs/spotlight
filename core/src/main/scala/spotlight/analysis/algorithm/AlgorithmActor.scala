@@ -15,15 +15,15 @@ import peds.akka.metrics.InstrumentedActor
 import peds.commons.{KOp, TryV}
 import peds.commons.math.MahalanobisDistance
 import spotlight.analysis.{DetectUsing, DetectionAlgorithmRouter, HistoricalStatistics, RecentHistory, UnrecognizedPayload}
-import spotlight.model.outlier.OutlierPlan
+import spotlight.model.outlier.AnalysisPlan
 import spotlight.model.timeseries._
 
 
 @deprecated( "replaced by AlgorithmModule and AlgorithmModule.AlgorithmProtocol", "v2" )
 sealed trait AlgorithmProtocolOLD
 object AlgorithmProtocolOLD extends {
-  case class Register( scopeId: OutlierPlan.Scope, routerRef: ActorRef ) extends AlgorithmProtocolOLD
-  case class Registered( scopeId: OutlierPlan.Scope ) extends AlgorithmProtocolOLD
+  case class Register( scopeId: AnalysisPlan.Scope, routerRef: ActorRef ) extends AlgorithmProtocolOLD
+  case class Registered( scopeId: AnalysisPlan.Scope ) extends AlgorithmProtocolOLD
 }
 
 
@@ -122,8 +122,8 @@ object AlgorithmActor {
     def data: Seq[DoublePoint]
     def algorithm: Symbol
     def topic: Topic
-    def plan: OutlierPlan
-    def historyKey: OutlierPlan.Scope
+    def plan: AnalysisPlan
+    def historyKey: AnalysisPlan.Scope
     def history: HistoricalStatistics
     def source: TimeSeriesBase
     def thresholdBoundaries: Seq[ThresholdBoundary]
@@ -151,8 +151,8 @@ object AlgorithmActor {
     ) extends AlgorithmContext {
       override val algorithm: Symbol = message.algorithm
       override val topic: Topic = message.topic
-      override def plan: OutlierPlan = message.plan
-      override val historyKey: OutlierPlan.Scope = OutlierPlan.Scope( plan, topic )
+      override def plan: AnalysisPlan = message.plan
+      override val historyKey: AnalysisPlan.Scope = AnalysisPlan.Scope( plan, topic )
       override def history: HistoricalStatistics = message.history
       override def messageConfig: Config = message.properties
 

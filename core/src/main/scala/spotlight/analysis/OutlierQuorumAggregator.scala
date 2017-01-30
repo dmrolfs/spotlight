@@ -16,15 +16,15 @@ import spotlight.model.timeseries.{TimeSeriesBase, Topic}
 
 
 object OutlierQuorumAggregator {
-  def props( plan: OutlierPlan, source: TimeSeriesBase ): Props = Props( new DefaultOutlierQuorumAggregator(plan, source) )
+  def props( plan: AnalysisPlan, source: TimeSeriesBase ): Props = Props( new DefaultOutlierQuorumAggregator(plan, source) )
 
-  private class DefaultOutlierQuorumAggregator( plan: OutlierPlan, source: TimeSeriesBase )
+  private class DefaultOutlierQuorumAggregator( plan: AnalysisPlan, source: TimeSeriesBase )
   extends OutlierQuorumAggregator( plan, source )
   with ConfigurationProvider {
     override val warningsBeforeTimeout: Int = 3
   }
 
-  case class AnalysisTimedOut( topic: Topic, plan: OutlierPlan )
+  case class AnalysisTimedOut( topic: Topic, plan: AnalysisPlan )
 
 
   trait ConfigurationProvider {
@@ -42,7 +42,7 @@ object OutlierQuorumAggregator {
 /**
  * Created by rolfsd on 9/28/15.
  */
-class OutlierQuorumAggregator( plan: OutlierPlan, source: TimeSeriesBase )
+class OutlierQuorumAggregator( plan: AnalysisPlan, source: TimeSeriesBase )
 extends Actor with EnvelopingActor with InstrumentedActor with ActorLogging { outer: ConfigurationProvider =>
   import OutlierQuorumAggregator._
 

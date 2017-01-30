@@ -6,7 +6,7 @@ import akka.stream.scaladsl.Flow
 import com.typesafe.config.Config
 import org.apache.commons.math3.ml.distance.{DistanceMeasure, EuclideanDistance}
 import peds.commons.math.MahalanobisDistance
-import spotlight.model.outlier.{OutlierPlan, Outliers}
+import spotlight.model.outlier.{AnalysisPlan, Outliers}
 import spotlight.model.timeseries.{TimeSeries, TimeSeriesBase}
 
 
@@ -18,7 +18,7 @@ package object analysis {
 
   type DetectFlow = Flow[TimeSeries, Outliers, NotUsed]
 
-  type TimeSeriesScope = (TimeSeries, OutlierPlan.Scope)
+  type TimeSeriesScope = (TimeSeries, AnalysisPlan.Scope)
 
 
   def durationFrom( config: Config, path: String ): Option[Duration] = {
@@ -58,6 +58,6 @@ package object analysis {
   }
 
 
-  final case class PlanMismatchError private[analysis]( plan: OutlierPlan, timeseries: TimeSeriesBase )
+  final case class PlanMismatchError private[analysis]( plan: AnalysisPlan, timeseries: TimeSeriesBase )
   extends IllegalStateException( s"plan [${plan.name}:${plan.id}] improperly associated with time series [${timeseries.topic}]" )
 }

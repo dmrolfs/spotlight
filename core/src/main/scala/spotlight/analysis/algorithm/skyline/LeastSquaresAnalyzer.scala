@@ -190,7 +190,7 @@ class LeastSquaresAnalyzer( override val router: ActorRef ) extends CommonAnalyz
 //  }
 //
 //  private def logDebug(
-//    plan: spotlight.model.outlier.OutlierPlan,
+//    plan: spotlight.model.outlier.AnalysisPlan,
 //    source: TimeSeriesBase,
 //    pt: DataPoint,
 //    meanError: Double,

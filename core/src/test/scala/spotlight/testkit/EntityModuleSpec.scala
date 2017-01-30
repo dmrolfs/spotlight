@@ -40,24 +40,24 @@ abstract class EntityModuleSpec[E <: Entity : ClassTag] extends AggregateRootSpe
 
     override def rootTypes: Set[AggregateRootType] = Set( module.rootType, CellShardModule.module.rootType )
 
-    val appliesToAll: OutlierPlan.AppliesTo = {
+    val appliesToAll: AnalysisPlan.AppliesTo = {
       val isQuorun: IsQuorum = IsQuorum.AtLeastQuorumSpecification(0, 0)
       val reduce: ReduceOutliers = new ReduceOutliers {
         import scalaz._
         override def apply(
           results: OutlierAlgorithmResults,
           source: TimeSeriesBase,
-          plan: OutlierPlan
+          plan: AnalysisPlan
         ): V[Outliers] = Validation.failureNel[Throwable, Outliers]( new IllegalStateException("should not use" ) ).disjunction
       }
 
       import scala.concurrent.duration._
-      val grouping: Option[OutlierPlan.Grouping] = {
+      val grouping: Option[AnalysisPlan.Grouping] = {
         val window = None
-        window map { w => OutlierPlan.Grouping( limit = 10000, w ) }
+        window map { w => AnalysisPlan.Grouping( limit = 10000, w ) }
       }
 
-      OutlierPlan.default( "", 1.second, isQuorun, reduce, Set.empty[Symbol], grouping ).appliesTo
+      AnalysisPlan.default( "", 1.second, isQuorun, reduce, Set.empty[Symbol], grouping ).appliesTo
     }
 
     implicit val nowTimestamp: joda.DateTime = joda.DateTime.now

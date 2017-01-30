@@ -20,7 +20,7 @@ import shapeless.Lens
 import spotlight.analysis.AnalysisPlanModule.AggregateRoot.PlanActor
 import spotlight.analysis.AnalysisPlanModule.AggregateRoot.PlanActor.{FlowConfigurationProvider, WorkerProvider}
 import spotlight.analysis.algorithm.statistical.SimpleMovingAverageAlgorithm
-import spotlight.model.outlier.{IsQuorum, OutlierPlan, ReduceOutliers}
+import spotlight.model.outlier.{IsQuorum, AnalysisPlan, ReduceOutliers}
 import spotlight.testkit.EntityModuleSpec
 import spotlight.analysis.{AnalysisPlanProtocol => P}
 
@@ -28,11 +28,11 @@ import spotlight.analysis.{AnalysisPlanProtocol => P}
 /**
   * Created by rolfsd on 6/15/16.
   */
-class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[OutlierPlan] { outer =>
+class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[AnalysisPlan] { outer =>
 
   val trace = Trace[AnalysisPlanModulePassivationSpec]
 
-  override type ID = OutlierPlan#ID
+  override type ID = AnalysisPlan#ID
   override type Protocol = AnalysisPlanProtocol.type
   override val protocol: Protocol = AnalysisPlanProtocol
 
@@ -46,14 +46,14 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[OutlierPlan] { 
   }
 
   class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends EntityFixture( _config, _system, _slug ) {
-    class Module extends EntityAggregateModule[OutlierPlan] { testModule =>
+    class Module extends EntityAggregateModule[AnalysisPlan] { testModule =>
       private val trace: Trace[_] = Trace[Module]
 
       override def passivateTimeout: Duration = Duration( 2, SECONDS )
       override def snapshotPeriod: Option[FiniteDuration] = Some( 1.second )
 
-      override val idLens: Lens[OutlierPlan, TaggedID[ShortUUID]] = OutlierPlan.idLens
-      override val nameLens: Lens[OutlierPlan, String] = OutlierPlan.nameLens
+      override val idLens: Lens[AnalysisPlan, TaggedID[ShortUUID]] = AnalysisPlan.idLens
+      override val nameLens: Lens[AnalysisPlan, String] = AnalysisPlan.nameLens
       override def aggregateRootPropsOp: AggregateRootProps = testProps( _, _ )
       override type Protocol = outer.Protocol
       override val protocol: Protocol = outer.protocol
@@ -78,13 +78,13 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[OutlierPlan] { 
     }
 
 
-    override val identifying: EntityIdentifying[OutlierPlan] = AnalysisPlanModule.identifying
+    override val identifying: EntityIdentifying[AnalysisPlan] = AnalysisPlanModule.identifying
     override def nextId(): module.TID = identifying.safeNextId
 
     val algo: Symbol = SimpleMovingAverageAlgorithm.algorithm.label
 
-    def makePlan( name: String, g: Option[OutlierPlan.Grouping] ): OutlierPlan = {
-      OutlierPlan.default(
+    def makePlan( name: String, g: Option[AnalysisPlan.Grouping] ): AnalysisPlan = {
+      AnalysisPlan.default(
         name = name,
         algorithms = Set( algo ),
         grouping = g,
@@ -100,7 +100,7 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[OutlierPlan] { 
       )
     }
 
-    def stateFrom( ar: ActorRef, tid: module.TID ): OutlierPlan = trace.block( s"stateFrom($ar)" ) {
+    def stateFrom( ar: ActorRef, tid: module.TID ): AnalysisPlan = trace.block( s"stateFrom($ar)" ) {
       import scala.concurrent.ExecutionContext.Implicits.global
       import akka.pattern.ask
       Await.result(
@@ -112,7 +112,7 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[OutlierPlan] { 
 
 
   "AnalysisPlanModule" should {
-    "add OutlierPlan" in { f: Fixture =>
+    "add AnalysisPlan" in { f: Fixture =>
       import f._
 
       val planInfo = makePlan("TestPlan", None)
@@ -122,8 +122,8 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[OutlierPlan] { 
           logger.info( "ADD PLAN: p.sourceId[{}]=[{}]   id[{}]=[{}]", p.sourceId.getClass.getCanonicalName, p.sourceId, tid.getClass.getCanonicalName, tid)
           p.sourceId mustBe planInfo.id
           assert( p.info.isDefined )
-          p.info.get mustBe an [OutlierPlan]
-          val actual = p.info.get.asInstanceOf[OutlierPlan]
+          p.info.get mustBe an [AnalysisPlan]
+          val actual = p.info.get.asInstanceOf[AnalysisPlan]
           actual.name mustBe "TestPlan"
           actual.algorithms mustBe Set( algo )
         }

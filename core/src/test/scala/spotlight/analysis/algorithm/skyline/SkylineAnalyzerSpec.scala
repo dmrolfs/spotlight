@@ -27,7 +27,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
   }
 
   class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends SkylineFixture( _config, _system, _slug ) {
-    val plan = mock[OutlierPlan]
+    val plan = mock[AnalysisPlan]
     when( plan.id ).thenReturn( TaggedID( 'plan, ShortUUID() ) )
     when( plan.name ).thenReturn( "mock-plan" )
     when( plan.appliesTo ).thenReturn( SkylineFixture.appliesToAll )

@@ -20,7 +20,7 @@ import peds.commons.util._
 import spotlight.analysis.algorithm._
 import spotlight.analysis.shard._
 import spotlight.analysis.algorithm.statistical._
-import spotlight.model.outlier.OutlierPlan
+import spotlight.model.outlier.AnalysisPlan
 
 
 /**
@@ -63,7 +63,7 @@ object DetectionAlgorithmRouter extends LazyLogging {
   }
 
 
-  def props( plan: OutlierPlan.Summary, routingTable: Map[Symbol, AlgorithmProxy] ): Props = {
+  def props( plan: AnalysisPlan.Summary, routingTable: Map[Symbol, AlgorithmProxy] ): Props = {
     Props( new Default( plan, routingTable ) )
   }
 
@@ -74,11 +74,11 @@ object DetectionAlgorithmRouter extends LazyLogging {
 
   trait Provider {
     def initialRoutingTable: Map[Symbol, AlgorithmProxy]
-    def plan: OutlierPlan.Summary
+    def plan: AnalysisPlan.Summary
   }
 
   private class Default(
-    override val plan: OutlierPlan.Summary,
+    override val plan: AnalysisPlan.Summary,
     override val initialRoutingTable: Map[Symbol, AlgorithmProxy]
   ) extends DetectionAlgorithmRouter with Provider
 
@@ -229,7 +229,7 @@ object DetectionAlgorithmRouter extends LazyLogging {
 
   object AlgorithmProxy {
     def proxyFor(
-      plan: OutlierPlan.Summary,
+      plan: AnalysisPlan.Summary,
       algorithmRootType: AggregateRootType
     )(
       implicit model: DomainModel
@@ -277,7 +277,7 @@ object DetectionAlgorithmRouter extends LazyLogging {
   }
 
   case class ShardedRootTypeProxy(
-    plan: OutlierPlan.Summary,
+    plan: AnalysisPlan.Summary,
     algorithmRootType: AggregateRootType,
     strategy: ShardingStrategy,
     implicit val model: DomainModel
