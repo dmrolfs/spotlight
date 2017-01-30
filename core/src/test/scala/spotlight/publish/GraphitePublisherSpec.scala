@@ -10,7 +10,7 @@ import akka.actor.{ActorSystem, Props}
 import akka.testkit.{TestActorRef, TestProbe}
 import akka.util.ByteString
 import com.typesafe.config.{Config, ConfigFactory}
-import spotlight.model.outlier.{NoOutliers, OutlierPlan, SeriesOutliers}
+import spotlight.model.outlier.{NoOutliers, AnalysisPlan, SeriesOutliers}
 import spotlight.model.timeseries.{DataPoint, ThresholdBoundary, TimeSeries, Topic}
 import spotlight.protocol.PythonPickleProtocol
 import spotlight.testkit.ParallelAkkaSpec
@@ -72,7 +72,7 @@ with MockitoSugar {
     val output: ByteArrayOutputStream = spy( new ByteArrayOutputStream )
     val socketFactory: SocketFactory = mock[SocketFactory]
 
-    val plan = mock[OutlierPlan]
+    val plan = mock[AnalysisPlan]
     when( plan.name ) thenReturn "plan"
 //    when( plan.algorithmConfig ) thenReturn ConfigFactory.parseString( "" )
 
@@ -125,7 +125,7 @@ with MockitoSugar {
           openCount.incrementAndGet()
           outer.socket
         }
-        override def publishingTopic( p: OutlierPlan, t: Topic ): Topic = t
+        override def publishingTopic( p: AnalysisPlan, t: Topic ): Topic = t
       }
     )
     val graphite = TestActorRef[GraphitePublisher]( publisherProps )
@@ -240,7 +240,7 @@ with MockitoSugar {
               openCount.incrementAndGet()
               f.socket
             }
-            override def publishingTopic( p: OutlierPlan, t: Topic ): Topic = "spotlight.outlier." + super.publishingTopic( p, t )
+            override def publishingTopic( p: AnalysisPlan, t: Topic ): Topic = "spotlight.outlier." + super.publishingTopic( p, t )
           }
         )
       )
@@ -318,7 +318,7 @@ with MockitoSugar {
               openCount.incrementAndGet()
               f.socket
             }
-            override def publishingTopic( p: OutlierPlan, t: Topic ): Topic = "spotlight.outlier." + super.publishingTopic( p, t )
+            override def publishingTopic( p: AnalysisPlan, t: Topic ): Topic = "spotlight.outlier." + super.publishingTopic( p, t )
           }
         )
       )

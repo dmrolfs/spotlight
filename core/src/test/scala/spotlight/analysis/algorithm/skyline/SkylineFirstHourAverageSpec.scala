@@ -14,7 +14,7 @@ import peds.akka.envelope.WorkId
 import peds.commons.identifier.{ShortUUID, TaggedID}
 import spotlight.analysis.algorithm.CommonAnalyzer
 import spotlight.analysis.{DetectOutliersInSeries, DetectUsing, DetectionAlgorithmRouter}
-import spotlight.model.outlier.{OutlierPlan, SeriesOutliers}
+import spotlight.model.outlier.{AnalysisPlan, SeriesOutliers}
 import spotlight.model.timeseries.{DataPoint, ThresholdBoundary}
 import spotlight.testkit.TestCorrelatedSeries
 
@@ -33,7 +33,7 @@ class SkylineFirstHourAverageSpec extends SkylineBaseSpec {
     val algoS = FirstHourAverageAnalyzer.Algorithm
     val algProps = ConfigFactory.parseString( s"""${algoS.name}.tolerance: 3""" )
 
-    val plan = mock[OutlierPlan]
+    val plan = mock[AnalysisPlan]
     when( plan.id ).thenReturn( TaggedID( 'plan, ShortUUID() ) )
     when( plan.name ).thenReturn( "mock-plan" )
     when( plan.appliesTo ).thenReturn( SkylineFixture.appliesToAll )

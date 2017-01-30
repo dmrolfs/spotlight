@@ -16,28 +16,28 @@ import spotlight.model.timeseries.{TimeSeriesBase, Topic}
 /**
  * Created by rolfsd on 10/4/15.
  */
-sealed trait OutlierPlan extends Entity with Equals {
+sealed trait AnalysisPlan extends Entity with Equals {
   override type ID = ShortUUID
   override val evID: ClassTag[ID] = classTag[ShortUUID]
   override val evTID: ClassTag[TID] = classTag[TaggedID[ShortUUID]]
 
   override def slug: String = name
-  def appliesTo: OutlierPlan.AppliesTo
+  def appliesTo: AnalysisPlan.AppliesTo
   def algorithms: Set[Symbol]
-  def grouping: Option[OutlierPlan.Grouping]
+  def grouping: Option[AnalysisPlan.Grouping]
   def timeout: Duration
   def isQuorum: IsQuorum
   def reduce: ReduceOutliers
   def algorithmConfig: Config
   def summary: String
   def isActive: Boolean
-  def toSummary: OutlierPlan.Summary = OutlierPlan summarize this
+  def toSummary: AnalysisPlan.Summary = AnalysisPlan summarize this
 
   override def hashCode: Int = 41 + id.##
 
   override def equals( rhs: Any ): Boolean = {
     rhs match {
-      case that: OutlierPlan => {
+      case that: AnalysisPlan => {
         if ( this eq that ) true
         else {
           ( that.## == this.## ) &&
@@ -54,13 +54,13 @@ sealed trait OutlierPlan extends Entity with Equals {
   private[outlier] def originLineNumber: Int
 }
 
-object OutlierPlan extends EntityLensProvider[OutlierPlan] {
-  implicit def summarize( p: OutlierPlan ): Summary = Summary( p )
+object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
+  implicit def summarize( p: AnalysisPlan ): Summary = Summary( p )
 
-  case class Summary( id: OutlierPlan#TID, name: String, slug: String, appliesTo: OutlierPlan.AppliesTo )
+  case class Summary( id: AnalysisPlan#TID, name: String, slug: String, appliesTo: AnalysisPlan.AppliesTo )
 
   object Summary {
-    def apply( info: OutlierPlan ): Summary = {
+    def apply( info: AnalysisPlan ): Summary = {
       Summary( id = info.id, name = info.name, slug = info.slug, appliesTo = info.appliesTo )
     }
   }
@@ -72,8 +72,8 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
   }
 
   object Scope {
-    def apply( plan: OutlierPlan, topic: Topic ): Scope = Scope( plan = plan.name, topic = topic /*, planId = plan.id*/ )
-    def apply( plan: OutlierPlan, ts: TimeSeriesBase ): Scope = apply( plan, ts.topic )
+    def apply( plan: AnalysisPlan, topic: Topic ): Scope = Scope( plan = plan.name, topic = topic /*, planId = plan.id*/ )
+    def apply( plan: AnalysisPlan, ts: TimeSeriesBase ): Scope = apply( plan, ts.topic )
 
     trait ScopeIdentifying[T] { self: Identifying[T] =>
       override type ID = Scope
@@ -88,19 +88,19 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
   }
 
 
-  implicit val outlierPlanIdentifying: EntityIdentifying[OutlierPlan] = {
-    new EntityIdentifying[OutlierPlan] with ShortUUID.ShortUuidIdentifying[OutlierPlan] {
-      override val evEntity: ClassTag[OutlierPlan] = classTag[OutlierPlan]
+  implicit val analysisPlanIdentifying: EntityIdentifying[AnalysisPlan] = {
+    new EntityIdentifying[AnalysisPlan] with ShortUUID.ShortUuidIdentifying[AnalysisPlan] {
+      override val evEntity: ClassTag[AnalysisPlan] = classTag[AnalysisPlan]
     }
   }
 
 
   import shapeless._
 
-  override val idLens: Lens[OutlierPlan, OutlierPlan#TID] = new Lens[OutlierPlan, OutlierPlan#TID] {
-    override def get( p: OutlierPlan ): OutlierPlan#TID = p.id
-    override def set( p: OutlierPlan )( id: OutlierPlan#TID ): OutlierPlan = {
-      SimpleOutlierPlan(
+  override val idLens: Lens[AnalysisPlan, AnalysisPlan#TID] = new Lens[AnalysisPlan, AnalysisPlan#TID] {
+    override def get( p: AnalysisPlan ): AnalysisPlan#TID = p.id
+    override def set( p: AnalysisPlan )( id: AnalysisPlan#TID ): AnalysisPlan = {
+      SimpleAnalysisPlan(
         id = id,
         name = p.name,
         appliesTo = p.appliesTo,
@@ -117,10 +117,10 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
     }
   }
 
-  override val nameLens: Lens[OutlierPlan, String] = new Lens[OutlierPlan, String] {
-    override def get( p: OutlierPlan ): String = p.name
-    override def set( p: OutlierPlan )( name: String ): OutlierPlan = {
-      SimpleOutlierPlan(
+  override val nameLens: Lens[AnalysisPlan, String] = new Lens[AnalysisPlan, String] {
+    override def get( p: AnalysisPlan ): String = p.name
+    override def set( p: AnalysisPlan )( name: String ): AnalysisPlan = {
+      SimpleAnalysisPlan(
         id = p.id,
         name = name,
         appliesTo = p.appliesTo,
@@ -137,10 +137,10 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
     }
   }
 
-  override val slugLens: Lens[OutlierPlan, String] = new Lens[OutlierPlan, String] {
-    override def get( p: OutlierPlan ): String = p.slug
-    override def set( p: OutlierPlan )( slug: String ): OutlierPlan = {
-      SimpleOutlierPlan(
+  override val slugLens: Lens[AnalysisPlan, String] = new Lens[AnalysisPlan, String] {
+    override def get( p: AnalysisPlan ): String = p.slug
+    override def set( p: AnalysisPlan )( slug: String ): AnalysisPlan = {
+      SimpleAnalysisPlan(
         id = p.id,
         name = slug,  // for outlier plan slug == name
         appliesTo = p.appliesTo,
@@ -157,10 +157,10 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
     }
   }
 
-  val isActiveLens: Lens[OutlierPlan, Boolean] = new Lens[OutlierPlan, Boolean] {
-    override def get( p: OutlierPlan ): Boolean = p.isActive
-    override def set( p: OutlierPlan )( a: Boolean ): OutlierPlan = {
-      SimpleOutlierPlan(
+  val isActiveLens: Lens[AnalysisPlan, Boolean] = new Lens[AnalysisPlan, Boolean] {
+    override def get( p: AnalysisPlan ): Boolean = p.isActive
+    override def set( p: AnalysisPlan )( a: Boolean ): AnalysisPlan = {
+      SimpleAnalysisPlan(
         id = p.id,
         name = p.name,
         appliesTo = p.appliesTo,
@@ -177,10 +177,10 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
     }
   }
 
-  val algorithmsLens: Lens[OutlierPlan, Set[Symbol]] = new Lens[OutlierPlan, Set[Symbol]] {
-    override def get( p: OutlierPlan ): Set[Symbol] = p.algorithms
-    override def set( p: OutlierPlan )( algos: Set[Symbol] ): OutlierPlan = {
-      SimpleOutlierPlan(
+  val algorithmsLens: Lens[AnalysisPlan, Set[Symbol]] = new Lens[AnalysisPlan, Set[Symbol]] {
+    override def get( p: AnalysisPlan ): Set[Symbol] = p.algorithms
+    override def set( p: AnalysisPlan )( algos: Set[Symbol] ): AnalysisPlan = {
+      SimpleAnalysisPlan(
         id = p.id,
         name = p.name,
         appliesTo = p.appliesTo,
@@ -201,7 +201,7 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
 
   type ExtractTopic = PartialFunction[Any, Option[Topic]]
 
-  type Creator = () => V[Set[OutlierPlan]]
+  type Creator = () => V[Set[AnalysisPlan]]
 
   final case class Grouping( limit: Int, window: FiniteDuration )
 
@@ -211,13 +211,13 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
     isQuorum: IsQuorum,
     reduce: ReduceOutliers,
     algorithms: Set[Symbol],
-    grouping: Option[OutlierPlan.Grouping],
+    grouping: Option[AnalysisPlan.Grouping],
     planSpecification: Config
   )(
     appliesTo: (Any) => Boolean
-  ): OutlierPlan = {
-    SimpleOutlierPlan(
-      id = outlierPlanIdentifying.safeNextId,
+  ): AnalysisPlan = {
+    SimpleAnalysisPlan(
+      id = analysisPlanIdentifying.safeNextId,
       name = name,
       appliesTo = AppliesTo.function( appliesTo ),
       algorithms = algorithms ++ getAlgorithms( planSpecification ),
@@ -237,13 +237,13 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
     isQuorum: IsQuorum,
     reduce: ReduceOutliers,
     algorithms: Set[Symbol],
-    grouping: Option[OutlierPlan.Grouping],
+    grouping: Option[AnalysisPlan.Grouping],
     planSpecification: Config
   )(
     appliesTo: PartialFunction[Any, Boolean]
-  ): OutlierPlan = {
-    SimpleOutlierPlan(
-      id = outlierPlanIdentifying.safeNextId,
+  ): AnalysisPlan = {
+    SimpleAnalysisPlan(
+      id = analysisPlanIdentifying.safeNextId,
       name = name,
       appliesTo = AppliesTo.partialFunction( appliesTo ),
       algorithms = algorithms ++ getAlgorithms( planSpecification ),
@@ -263,13 +263,13 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
     isQuorum: IsQuorum,
     reduce: ReduceOutliers,
     algorithms: Set[Symbol],
-    grouping: Option[OutlierPlan.Grouping],
+    grouping: Option[AnalysisPlan.Grouping],
     planSpecification: Config,
     extractTopic: ExtractTopic,
     topics: Set[Topic]
-  ): OutlierPlan = {
-    SimpleOutlierPlan(
-      id = outlierPlanIdentifying.safeNextId,
+  ): AnalysisPlan = {
+    SimpleAnalysisPlan(
+      id = analysisPlanIdentifying.safeNextId,
       name = name,
       appliesTo = AppliesTo.topics( topics, extractTopic ),
       algorithms = algorithms ++ getAlgorithms( planSpecification ),
@@ -289,13 +289,13 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
     isQuorum: IsQuorum,
     reduce: ReduceOutliers,
     algorithms: Set[Symbol],
-    grouping: Option[OutlierPlan.Grouping],
+    grouping: Option[AnalysisPlan.Grouping],
     planSpecification: Config,
     extractTopic: ExtractTopic,
     topics: String*
-  ): OutlierPlan = {
-    SimpleOutlierPlan(
-      id = outlierPlanIdentifying.safeNextId,
+  ): AnalysisPlan = {
+    SimpleAnalysisPlan(
+      id = analysisPlanIdentifying.safeNextId,
       name = name,
       appliesTo = AppliesTo.topics( topics.map{ Topic(_) }.toSet, extractTopic ),
       algorithms = algorithms ++ getAlgorithms( planSpecification ),
@@ -315,13 +315,13 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
     isQuorum: IsQuorum,
     reduce: ReduceOutliers,
     algorithms: Set[Symbol],
-    grouping: Option[OutlierPlan.Grouping],
+    grouping: Option[AnalysisPlan.Grouping],
     planSpecification: Config,
     extractTopic: ExtractTopic,
     regex: Regex
-  ): OutlierPlan = {
-    SimpleOutlierPlan(
-      id = outlierPlanIdentifying.safeNextId,
+  ): AnalysisPlan = {
+    SimpleAnalysisPlan(
+      id = analysisPlanIdentifying.safeNextId,
       name = name,
       appliesTo = AppliesTo.regex( regex, extractTopic ),
       algorithms = algorithms ++ getAlgorithms( planSpecification ),
@@ -341,11 +341,11 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
     isQuorum: IsQuorum,
     reduce: ReduceOutliers,
     algorithms: Set[Symbol],
-    grouping: Option[OutlierPlan.Grouping],
+    grouping: Option[AnalysisPlan.Grouping],
     planSpecification: Config = ConfigFactory.empty
-  ): OutlierPlan = {
-    SimpleOutlierPlan(
-      id = outlierPlanIdentifying.safeNextId,
+  ): AnalysisPlan = {
+    SimpleAnalysisPlan(
+      id = analysisPlanIdentifying.safeNextId,
       name = name,
       appliesTo = AppliesTo.all,
       algorithms = algorithms ++ getAlgorithms( planSpecification ),
@@ -371,12 +371,12 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
   }
 
 
-  final case class SimpleOutlierPlan private[outlier] (
-    override val id: OutlierPlan#TID,
+  final case class SimpleAnalysisPlan private[outlier] (
+    override val id: AnalysisPlan#TID,
     override val name: String,
-    override val appliesTo: OutlierPlan.AppliesTo,
+    override val appliesTo: AnalysisPlan.AppliesTo,
     override val algorithms: Set[Symbol],
-    override val grouping: Option[OutlierPlan.Grouping],
+    override val grouping: Option[AnalysisPlan.Grouping],
     override val timeout: Duration,
     override val isQuorum: IsQuorum,
     override val reduce: ReduceOutliers,
@@ -384,10 +384,10 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
     override private[outlier] val typeOrder: Int,
     override private[outlier] val originLineNumber: Int,
     override val isActive: Boolean = true
-  ) extends OutlierPlan {
+  ) extends AnalysisPlan {
     override val summary: String = getClass.safeSimpleName + s"""(${name} ${appliesTo.toString})"""
 
-    override def canEqual( rhs: Any ): Boolean = rhs.isInstanceOf[SimpleOutlierPlan]
+    override def canEqual( rhs: Any ): Boolean = rhs.isInstanceOf[SimpleAnalysisPlan]
 
     override val toString: String = {
       getClass.safeSimpleName + s"[${id}](" +
@@ -440,8 +440,8 @@ object OutlierPlan extends EntityLensProvider[OutlierPlan] {
   }
 
 
-  implicit val outlierPlanOrdering = new Ordering[OutlierPlan] {
-    override def compare( lhs: OutlierPlan, rhs: OutlierPlan ): Int = {
+  implicit val analysisPlanOrdering = new Ordering[AnalysisPlan] {
+    override def compare( lhs: AnalysisPlan, rhs: AnalysisPlan ): Int = {
       val typeOrdering = Ordering[Int].compare( lhs.typeOrder, rhs.typeOrder )
       if ( typeOrdering != 0 ) typeOrdering
       else Ordering[Int].compare( lhs.originLineNumber, rhs.originLineNumber )

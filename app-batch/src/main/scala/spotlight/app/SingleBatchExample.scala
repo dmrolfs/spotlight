@@ -19,6 +19,7 @@ import demesne.BoundedContext
 import peds.akka.stream.StreamMonitor
 import spotlight.{Spotlight, SpotlightContext, Settings}
 import spotlight.analysis.DetectFlow
+import spotlight.infrastructure.SharedLeveldbStore
 import spotlight.model.outlier.{Outliers, SeriesOutliers}
 import spotlight.model.timeseries.{DataPoint, ThresholdBoundary, TimeSeries}
 import spotlight.protocol.GraphiteSerializationProtocol

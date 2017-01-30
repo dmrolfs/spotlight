@@ -30,7 +30,9 @@ libraryDependencies ++=
     facility.fastutil,
     facility.hadoopClient,
     facility.pyrolite,
-    facility.msgpack
+    facility.msgpack,
+    persistence.leveldb,
+    persistence.leveldbjni
   ) ++ Dependencies.Scope.test(
     akka.streamsTestkit,
     demesne.testkit,

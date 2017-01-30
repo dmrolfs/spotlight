@@ -16,7 +16,7 @@
 //import peds.commons.log.Trace
 //import demesne.DomainModel
 //import peds.akka.stream.StreamIngress
-//import spotlight.model.outlier.{CorrelatedData, CorrelatedSeries, OutlierPlan, Outliers}
+//import spotlight.model.outlier.{CorrelatedData, CorrelatedSeries, AnalysisPlan, Outliers}
 //import spotlight.model.timeseries.TimeSeriesBase.Merging
 //import spotlight.model.timeseries._
 //
@@ -29,25 +29,25 @@
 //
 //  def props(
 //    model: DomainModel,
-//    plan: OutlierPlan,
+//    plan: AnalysisPlan,
 //    highWatermark: Int,
 //    bufferSize: Int
 //  ): Props = Props( new Default(model, plan, highWatermark = highWatermark, bufferSize = bufferSize) )
 //
-//  def name( plan: OutlierPlan ): String = s"AnalysisProxy-${plan.name}"
+//  def name( plan: AnalysisPlan ): String = s"AnalysisProxy-${plan.name}"
 //
 //
 //  private class Default(
 //    override val model: DomainModel,
-//    override var plan: OutlierPlan,
+//    override var plan: AnalysisPlan,
 //    override val highWatermark: Int,
 //    override val bufferSize: Int
 //  ) extends AnalysisProxy with Provider
 //
 //  trait Provider { provider: Actor with ActorLogging =>
 //    def model: DomainModel
-//    def plan: OutlierPlan
-//    def plan_=( p: OutlierPlan ): Unit
+//    def plan: AnalysisPlan
+//    def plan_=( p: AnalysisPlan ): Unit
 //    def highWatermark: Int
 //    def bufferSize: Int
 //
@@ -140,7 +140,7 @@
 //    //todo need to update plans
 //    log.warning( "#TODO #DMR: NEED TO UPDATE PLAN ON ALGORITHMS_CHANGED -- MORE TO DO HERE WRT DOWNSTREAM")
 //    log.info( "updating plan with algorithms for {} plan", outer.plan.name )
-//    outer.plan = OutlierPlan.algorithmsLens.set( outer.plan )( algorithms )
+//    outer.plan = AnalysisPlan.algorithmsLens.set( outer.plan )( algorithms )
 //  }
 //
 //
@@ -263,7 +263,7 @@
 //  }
 //
 //  def batchSeries(
-//    grouping: OutlierPlan.Grouping
+//    grouping: AnalysisPlan.Grouping
 //  )(
 //    implicit tsMerging: Merging[TimeSeries]
 //  ): Flow[CorrelatedSeries, CorrelatedSeries, NotUsed] = {
@@ -287,7 +287,7 @@
 //  }
 //
 //  def detectionFlow(
-//    p: OutlierPlan,
+//    p: AnalysisPlan,
 //    subscriber: ActorRef,
 //    w: Workers
 //  )(

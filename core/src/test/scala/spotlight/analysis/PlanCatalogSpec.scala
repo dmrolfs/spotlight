@@ -18,7 +18,7 @@ import spotlight.analysis.PlanCatalogProtocol.CatalogedPlans
 import spotlight.analysis.{AnalysisPlanProtocol => AP}
 import spotlight.testkit.ParallelAkkaSpec
 import spotlight.analysis.{PlanCatalogProtocol => P}
-import spotlight.model.outlier.OutlierPlan
+import spotlight.model.outlier.AnalysisPlan
 import spotlight.model.timeseries.Topic
 
 
@@ -62,7 +62,7 @@ class PlanCatalogSpec extends ParallelAkkaSpec with ScalaFutures with StrictLogg
     system.eventStream.subscribe( bus.ref, classOf[AP.Event] )
 
     lazy val index = trace.block( "index" ) {
-      model.aggregateIndexFor[String, AnalysisPlanModule.module.TID, OutlierPlan.Summary](
+      model.aggregateIndexFor[String, AnalysisPlanModule.module.TID, AnalysisPlan.Summary](
         AnalysisPlanModule.module.rootType, AnalysisPlanModule.namedPlanIndex
       ).toOption.get
     }
@@ -114,7 +114,7 @@ class PlanCatalogSpec extends ParallelAkkaSpec with ScalaFutures with StrictLogg
 //      with StackableStreamPublisher
 //      with StackableRegisterBusPublisher {
 //        override def detectionBudget: FiniteDuration = testModule.detectionBudget
-//        override def specifiedPlans: Set[OutlierPlan] = testModule.specifiedPlans
+//        override def specifiedPlans: Set[AnalysisPlan] = testModule.specifiedPlans
 //
 //        override def preActivate(): Unit = {
 //          log.info( "TEST: PASSIVATION CATALOG MODULE -- BEFORE ACTIVATION")

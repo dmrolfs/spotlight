@@ -24,7 +24,7 @@ with TryValues {
     val now = joda.DateTime.now
     val points = Seq( DataPoint(now, 1.01), DataPoint(now+1.second, 2.02), DataPoint(now+2.seconds, 3.02) )
     val series = TimeSeries( "foo", points )
-    val plan = mock[OutlierPlan]
+    val plan = mock[AnalysisPlan]
     val noOutliers = NoOutliers( Set('algo), source = series, plan = plan )
     val oneOutlier = SeriesOutliers( Set('algo), source = series, outliers = IndexedSeq(points(0)), plan = plan )
     val twoOutliers = SeriesOutliers( Set('algo), source = series, outliers = IndexedSeq( points(0), points(1) ), plan = plan )

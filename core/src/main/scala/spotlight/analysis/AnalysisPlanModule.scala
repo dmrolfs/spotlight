@@ -29,12 +29,12 @@ import peds.akka.supervision.{IsolatedDefaultSupervisor, IsolatedLifeCycleSuperv
 import spotlight.analysis.AnalysisPlanProtocol.{AnalysisFlow, MakeFlow}
 import spotlight.analysis.OutlierDetection.{DetectionResult, DetectionTimedOut}
 import spotlight.model.outlier._
-import spotlight.model.outlier.OutlierPlan.Scope
+import spotlight.model.outlier.AnalysisPlan.Scope
 import spotlight.model.timeseries._
 import spotlight.model.timeseries.TimeSeriesBase.Merging
 
 
-object AnalysisPlanProtocol extends EntityProtocol[OutlierPlan#ID] {
+object AnalysisPlanProtocol extends EntityProtocol[AnalysisPlan#ID] {
   case class MakeFlow(
     override val targetId: MakeFlow#TID,
     parallelism: Int,
@@ -50,7 +50,7 @@ object AnalysisPlanProtocol extends EntityProtocol[OutlierPlan#ID] {
     override val targetId: AcceptTimeSeries#TID,
     override val correlationIds: Set[WorkId],
     override val data: TimeSeries,
-    override val scope: Option[OutlierPlan.Scope] = None
+    override val scope: Option[AnalysisPlan.Scope] = None
   ) extends Command with CorrelatedSeries {
     override def withData( newData: TimeSeries ): CorrelatedData[TimeSeries] = this.copy( data = newData )
     override def withCorrelationIds( newIds: Set[WorkId] ): CorrelatedData[TimeSeries] = this.copy( correlationIds = newIds )
@@ -59,8 +59,8 @@ object AnalysisPlanProtocol extends EntityProtocol[OutlierPlan#ID] {
 
   //todo add info change commands
   //todo reify algorithm
-  //      case class AddAlgorithm( override val targetId: OutlierPlan#TID, algorithm: Symbol ) extends Command with AnalysisPlanMessage
-  case class ApplyTo( override val targetId: ApplyTo#TID, appliesTo: OutlierPlan.AppliesTo ) extends Command
+  //      case class AddAlgorithm( override val targetId: AnalysisPlan#TID, algorithm: Symbol ) extends Command with AnalysisPlanMessage
+  case class ApplyTo( override val targetId: ApplyTo#TID, appliesTo: AnalysisPlan.AppliesTo ) extends Command
 
   case class UseAlgorithms(
     override val targetId: UseAlgorithms#TID,
@@ -75,7 +75,7 @@ object AnalysisPlanProtocol extends EntityProtocol[OutlierPlan#ID] {
   ) extends Command
 
 
-  case class ScopeChanged( override val sourceId: ScopeChanged#TID, appliesTo: OutlierPlan.AppliesTo ) extends Event
+  case class ScopeChanged( override val sourceId: ScopeChanged#TID, appliesTo: AnalysisPlan.AppliesTo ) extends Event
 
   case class AlgorithmsChanged(
     override val sourceId: AlgorithmsChanged#TID,
@@ -90,9 +90,9 @@ object AnalysisPlanProtocol extends EntityProtocol[OutlierPlan#ID] {
   ) extends Event
 
   case class GetPlan( override val targetId: GetPlan#TID ) extends Command
-  case class PlanInfo( override val sourceId: PlanInfo#TID, info: OutlierPlan ) extends Event {
-    def toSummary: OutlierPlan.Summary = {
-      OutlierPlan.Summary( id = sourceId, name = info.name, slug = info.slug, appliesTo = info.appliesTo )
+  case class PlanInfo( override val sourceId: PlanInfo#TID, info: AnalysisPlan ) extends Event {
+    def toSummary: AnalysisPlan.Summary = {
+      AnalysisPlan.Summary( id = sourceId, name = info.name, slug = info.slug, appliesTo = info.appliesTo )
     }
   }
 }
@@ -101,7 +101,7 @@ object AnalysisPlanProtocol extends EntityProtocol[OutlierPlan#ID] {
 /**
   * Created by rolfsd on 5/26/16.
   */
-object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumented with LazyLogging {
+object AnalysisPlanModule extends EntityLensProvider[AnalysisPlan] with Instrumented with LazyLogging {
   override lazy val metricBaseName: MetricName = {
     MetricName( spotlight.BaseMetricName, spotlight.analysis.BaseMetricName )
   }
@@ -123,16 +123,16 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
 
 
 
-  implicit val identifying: EntityIdentifying[OutlierPlan] = {
-    new EntityIdentifying[OutlierPlan] with ShortUUID.ShortUuidIdentifying[OutlierPlan] {
-      override val evEntity: ClassTag[OutlierPlan] = classTag[OutlierPlan]
+  implicit val identifying: EntityIdentifying[AnalysisPlan] = {
+    new EntityIdentifying[AnalysisPlan] with ShortUUID.ShortUuidIdentifying[AnalysisPlan] {
+      override val evEntity: ClassTag[AnalysisPlan] = classTag[AnalysisPlan]
     }
   }
 
 
-  override def idLens: Lens[OutlierPlan, OutlierPlan#TID] = OutlierPlan.idLens
-  override def nameLens: Lens[OutlierPlan, String] = OutlierPlan.nameLens
-  override def slugLens: Lens[OutlierPlan, String] = OutlierPlan.slugLens
+  override def idLens: Lens[AnalysisPlan, AnalysisPlan#TID] = AnalysisPlan.idLens
+  override def nameLens: Lens[AnalysisPlan, String] = AnalysisPlan.nameLens
+  override def slugLens: Lens[AnalysisPlan, String] = AnalysisPlan.slugLens
 
   val namedPlanIndex: Symbol = 'NamedPlan
 
@@ -141,10 +141,10 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
 
     () => {
       Seq(
-        IndexLocalAgent.spec[String, module.TID, OutlierPlan.Summary]( specName = namedPlanIndex, IndexBusSubscription ) {
-          case AP.Added( sid, Some( p: OutlierPlan ) ) => Directive.Record( p.name, sid, p.toSummary )
+        IndexLocalAgent.spec[String, module.TID, AnalysisPlan.Summary]( specName = namedPlanIndex, IndexBusSubscription ) {
+          case AP.Added( sid, Some( p: AnalysisPlan ) ) => Directive.Record( p.name, sid, p.toSummary )
           case AP.Added( sid, info ) => {
-            logger.error( "AnalysisPlanModule: IGNORING ADDED event since info was not Some OutlierPlan: [{}]", info )
+            logger.error( "AnalysisPlanModule: IGNORING ADDED event since info was not Some AnalysisPlan: [{}]", info )
             Directive.Ignore
           }
           case AP.Disabled( sid, _ ) => Directive.Withdraw( sid )
@@ -155,8 +155,8 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
     }
   }
 
-  val module: EntityAggregateModule[OutlierPlan] = {
-    val b = EntityAggregateModule.builderFor[OutlierPlan, AnalysisPlanProtocol.type].make
+  val module: EntityAggregateModule[AnalysisPlan] = {
+    val b = EntityAggregateModule.builderFor[AnalysisPlan, AnalysisPlanProtocol.type].make
     import b.P.{ Tag => BTag, Props => BProps, _ }
 
     b
@@ -167,9 +167,9 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
     .set( PassivateTimeout, 5.minutes )
     .set( Protocol, AnalysisPlanProtocol )
     .set( Indexes, indexes )
-    .set( IdLens, OutlierPlan.idLens )
-    .set( NameLens, OutlierPlan.nameLens )
-    .set( IsActiveLens, Some(OutlierPlan.isActiveLens) )
+    .set( IdLens, AnalysisPlan.idLens )
+    .set( NameLens, AnalysisPlan.nameLens )
+    .set( IsActiveLens, Some(AnalysisPlan.isActiveLens) )
     .build()
   }
 
@@ -205,7 +205,7 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
         provider: Actor with ActorLogging =>
         def model: DomainModel
 
-        def plan: OutlierPlan
+        def plan: AnalysisPlan
 
         def routerName: String = DetectionAlgorithmRouter.name( provider.plan.name )
         def detectorName: String = OutlierDetection.name( provider.plan.name )
@@ -286,30 +286,30 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
       override lazy val metricBaseName: MetricName = MetricName( classOf[PlanActor] )
       val failuresMeter: Meter = metrics.meter( "failures" )
 
-      override var state: OutlierPlan = _
+      override var state: AnalysisPlan = _
 
-      override def plan: OutlierPlan = state
+      override def plan: AnalysisPlan = state
 
-      override val evState: ClassTag[OutlierPlan] = ClassTag( classOf[OutlierPlan] )
+      override val evState: ClassTag[AnalysisPlan] = ClassTag( classOf[AnalysisPlan] )
 
       var detector: ActorRef = _
 
       override def acceptance: Acceptance = entityAcceptance orElse {
         case (e: P.ScopeChanged, s) => {
-          //todo: cast for expediency. my ideal is to define a Lens in the OutlierPlan trait; minor solace is this module is in the same package
-          val r = s.asInstanceOf[OutlierPlan.SimpleOutlierPlan].copy( appliesTo = e.appliesTo )
+          //todo: cast for expediency. my ideal is to define a Lens in the AnalysisPlan trait; minor solace is this module is in the same package
+          val r = s.asInstanceOf[AnalysisPlan.SimpleAnalysisPlan].copy( appliesTo = e.appliesTo )
           log.debug( "#TEST acceptance... e:[{}] s-before:[{}] s-after:[{}]", e, s, r)
           r
         }
 
         case (e: P.AlgorithmsChanged, s) => {
-          //todo: cast for expediency. my ideal is to define a Lens in the OutlierPlan trait; minor solace is this module is in the same package
-          s.asInstanceOf[OutlierPlan.SimpleOutlierPlan].copy( algorithms = e.algorithms, algorithmConfig = e.algorithmConfig )
+          //todo: cast for expediency. my ideal is to define a Lens in the AnalysisPlan trait; minor solace is this module is in the same package
+          s.asInstanceOf[AnalysisPlan.SimpleAnalysisPlan].copy( algorithms = e.algorithms, algorithmConfig = e.algorithmConfig )
         }
 
         case (e: P.AnalysisResolutionChanged, s) => {
-          //todo: cast for expediency. my ideal is to define a Lens in the OutlierPlan trait; minor solace is this module is in the same package
-          s.asInstanceOf[OutlierPlan.SimpleOutlierPlan].copy( isQuorum = e.isQuorum, reduce = e.reduce )
+          //todo: cast for expediency. my ideal is to define a Lens in the AnalysisPlan trait; minor solace is this module is in the same package
+          s.asInstanceOf[AnalysisPlan.SimpleAnalysisPlan].copy( isQuorum = e.isQuorum, reduce = e.reduce )
         }
       }
 
@@ -398,7 +398,7 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
       }
 
       def batchSeries(
-        grouping: OutlierPlan.Grouping
+        grouping: AnalysisPlan.Grouping
       )(
         implicit tsMerging: Merging[TimeSeries]
       ): Flow[TimeSeries, TimeSeries, NotUsed] = {
@@ -415,7 +415,7 @@ object AnalysisPlanModule extends EntityLensProvider[OutlierPlan] with Instrumen
         .mapConcat {identity}
       }
 
-      def detectionFlow( p: OutlierPlan, parallelism: Int )( implicit system: ActorSystem, timeout: Timeout ): DetectFlow = {
+      def detectionFlow( p: AnalysisPlan, parallelism: Int )( implicit system: ActorSystem, timeout: Timeout ): DetectFlow = {
         import peds.akka.envelope.pattern.ask
 
         implicit val ec = system.dispatcher

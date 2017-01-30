@@ -12,7 +12,7 @@
 //import shapeless._
 //import spotlight.analysis._
 //import spotlight.analysis.algorithm.AlgorithmActor
-//import spotlight.model.outlier.{CohortOutliers, NoOutliers, OutlierPlan}
+//import spotlight.model.outlier.{CohortOutliers, NoOutliers, AnalysisPlan}
 //import spotlight.model.timeseries._
 //import spotlight.testkit.ParallelAkkaSpec
 //
@@ -32,7 +32,7 @@
 //  class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends AkkaFixture( _config, _system, _slug ) {
 //    val algoS = SeriesDensityAnalyzer.Algorithm
 //    val algoC = CohortDensityAnalyzer.Algorithm
-//    val plan = mock[OutlierPlan]
+//    val plan = mock[AnalysisPlan]
 //    val router = TestProbe()
 //    val subscriber = TestProbe()
 //    val aggregator = TestProbe()

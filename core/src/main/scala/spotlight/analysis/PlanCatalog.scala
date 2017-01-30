@@ -25,7 +25,7 @@ import demesne.{BoundedContext, DomainModel}
 import spotlight.Settings
 import spotlight.analysis.OutlierDetection.DetectionResult
 import spotlight.analysis.PlanCatalog.WatchPoints
-import spotlight.model.outlier.{IsQuorum, OutlierPlan, Outliers, ReduceOutliers}
+import spotlight.model.outlier.{IsQuorum, AnalysisPlan, Outliers, ReduceOutliers}
 import spotlight.model.timeseries.{TimeSeries, Topic}
 import sun.security.pkcs11.Secmod.Module
 
@@ -55,7 +55,7 @@ object PlanCatalogProtocol {
   }
 
   case class GetPlansForTopic( topic: Topic ) extends CatalogMessage
-  case class CatalogedPlans( plans: Set[OutlierPlan.Summary], request: GetPlansForTopic ) extends CatalogMessage
+  case class CatalogedPlans( plans: Set[AnalysisPlan.Summary], request: GetPlansForTopic ) extends CatalogMessage
 }
 
 
@@ -64,7 +64,7 @@ object PlanCatalog extends LazyLogging {
     configuration: Config,
     maxInFlightCpuFactor: Double = 8.0,
     applicationDetectionBudget: Option[Duration] = None,
-    applicationPlans: Set[OutlierPlan] = Set.empty[OutlierPlan]
+    applicationPlans: Set[AnalysisPlan] = Set.empty[AnalysisPlan]
   )(
     implicit boundedContext: BoundedContext
   ): Props = {
@@ -104,7 +104,7 @@ object PlanCatalog extends LazyLogging {
 
 
   trait PlanProvider {
-    def specifiedPlans: Set[OutlierPlan]
+    def specifiedPlans: Set[AnalysisPlan]
   }
 
   trait ExecutionProvider {
@@ -142,15 +142,15 @@ object PlanCatalog extends LazyLogging {
   final class Default private[PlanCatalog](
     boundedContext: BoundedContext,
     override val configuration: Config,
-    override val specifiedPlans: Set[OutlierPlan],
+    override val specifiedPlans: Set[AnalysisPlan],
     override val maxInFlightCpuFactor: Double = 8.0,
     override val applicationDetectionBudget: Option[Duration] = None
   ) extends PlanCatalog( boundedContext ) with DefaultExecutionProvider with PlanProvider {
     log.debug( "#TEST specifiedPlans = {}", specifiedPlans )
     //todo also load from plan index?
-//    override lazy val specifiedPlans: Set[OutlierPlan] = applicationPlans // ++ loadPlans( configuration ) //todo: loadPlans is duplicative since Settings provides to props()
+//    override lazy val specifiedPlans: Set[AnalysisPlan] = applicationPlans // ++ loadPlans( configuration ) //todo: loadPlans is duplicative since Settings provides to props()
 
-//    private def loadPlans( specification: Config ): Set[OutlierPlan] = {
+//    private def loadPlans( specification: Config ): Set[AnalysisPlan] = {
 //      val planSpecs = Settings detectionPlansConfigFrom specification
 //      if ( planSpecs.nonEmpty ) {
 //        log.debug( "specification = [{}]", planSpecs.root().render() )
@@ -164,11 +164,11 @@ object PlanCatalog extends LazyLogging {
 //        .flatten
 //      } else {
 //        log.warning( "[{}]: no plan specifications found in settings", self.path )
-//        Set.empty[OutlierPlan]
+//        Set.empty[AnalysisPlan]
 //      }
 //    }
 
-//    private def makePlan( name: String, planSpecification: Config )( budget: Duration ): Option[OutlierPlan] = {
+//    private def makePlan( name: String, planSpecification: Config )( budget: Duration ): Option[AnalysisPlan] = {
 //      logger.info(
 //        "PlanCatalog[{}] making plan from specification[origin:{} @ {}]: [{}]",
 //        self.path.name, planSpecification.origin(), planSpecification.origin().lineNumber().toString, planSpecification
@@ -178,7 +178,7 @@ object PlanCatalog extends LazyLogging {
 //      val utilization = 0.9
 //      val timeout = budget * utilization
 //
-//      val grouping: Option[OutlierPlan.Grouping] = {
+//      val grouping: Option[AnalysisPlan.Grouping] = {
 //        val GROUP_LIMIT = "group.limit"
 //        val GROUP_WITHIN = "group.within"
 //        val limit = if ( planSpecification hasPath GROUP_LIMIT ) planSpecification getInt GROUP_LIMIT else 10000
@@ -188,7 +188,7 @@ object PlanCatalog extends LazyLogging {
 //          None
 //        }
 //
-//        window map { w => OutlierPlan.Grouping( limit, w ) }
+//        window map { w => AnalysisPlan.Grouping( limit, w ) }
 //      }
 //
 //      //todo: add configuration for at-least and majority
@@ -207,7 +207,7 @@ object PlanCatalog extends LazyLogging {
 //        )
 //
 //        Some(
-//          OutlierPlan.default(
+//          AnalysisPlan.default(
 //            name = name,
 //            timeout = timeout,
 //            isQuorum = makeIsQuorum( planSpecification, algorithms.size ),
@@ -227,7 +227,7 @@ object PlanCatalog extends LazyLogging {
 //        )
 //
 //        Some(
-//          OutlierPlan.forTopics(
+//          AnalysisPlan.forTopics(
 //            name = name,
 //            timeout = timeout,
 //            isQuorum = makeIsQuorum( planSpecification, algorithms.size ),
@@ -248,7 +248,7 @@ object PlanCatalog extends LazyLogging {
 //        )
 //
 //        Some(
-//          OutlierPlan.forRegex(
+//          AnalysisPlan.forRegex(
 //            name = name,
 //            timeout = timeout,
 //            isQuorum = makeIsQuorum( planSpecification, algorithms.size ),
@@ -314,16 +314,16 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
   override def preStart(): Unit = self ! Initialize
 
 
-  val fallbackIndex: Agent[Map[String, OutlierPlan.Summary]] = {
-    Agent( Map.empty[String, OutlierPlan.Summary] )( scala.concurrent.ExecutionContext.global )
+  val fallbackIndex: Agent[Map[String, AnalysisPlan.Summary]] = {
+    Agent( Map.empty[String, AnalysisPlan.Summary] )( scala.concurrent.ExecutionContext.global )
   }
 
 
-  type PlanIndex = DomainModel.AggregateIndex[String, AnalysisPlanModule.module.TID, OutlierPlan.Summary]
+  type PlanIndex = DomainModel.AggregateIndex[String, AnalysisPlanModule.module.TID, AnalysisPlan.Summary]
   lazy val planIndex: PlanIndex = {
     implicit val dispatcher = context.dispatcher
     val index = boundedContext.futureModel map { model =>
-      model.aggregateIndexFor[String, AnalysisPlanModule.module.TID, OutlierPlan.Summary](
+      model.aggregateIndexFor[String, AnalysisPlanModule.module.TID, AnalysisPlan.Summary](
         AnalysisPlanModule.module.rootType,
         AnalysisPlanModule.namedPlanIndex
       ) match {
@@ -338,7 +338,7 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
     scala.concurrent.Await.result( index, 30.seconds )
   }
 
-  def collectPlans()( implicit ec: ExecutionContext ): Future[Set[OutlierPlan.Summary]] = {
+  def collectPlans()( implicit ec: ExecutionContext ): Future[Set[AnalysisPlan.Summary]] = {
     for {
       fromIndex <- planIndex.futureEntries.map{ _.values.toSet }
       _ = log.debug( "PlanCatalog fromIndex: [{}]", fromIndex )
@@ -499,7 +499,7 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
     import peds.akka.stream.StreamMonitor._
 
     implicit val ec = context.dispatcher
-    def collectPlanFlows( model: DomainModel, plans: Set[OutlierPlan.Summary] ): Future[Set[DetectFlow]] = {
+    def collectPlanFlows( model: DomainModel, plans: Set[AnalysisPlan.Summary] ): Future[Set[DetectFlow]] = {
       Future sequence {
         plans map { p =>
           val ref = model( AnalysisPlanModule.module.rootType, p.id )
@@ -625,12 +625,12 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
   }
 
   def makeMissingSpecifiedPlans(
-     missing: Set[OutlierPlan]
+     missing: Set[AnalysisPlan]
   )(
     implicit ec: ExecutionContext,
     to: Timeout
-  ): Future[Map[String, OutlierPlan.Summary]] = {
-    def loadSpecifiedPlans( model: DomainModel ): Seq[Future[(String, OutlierPlan.Summary)]] = {
+  ): Future[Map[String, AnalysisPlan.Summary]] = {
+    def loadSpecifiedPlans( model: DomainModel ): Seq[Future[(String, AnalysisPlan.Summary)]] = {
       missing.toSeq.map { p =>
         log.info( "PlanCatalog[{}]: making plan entity for: [{}]", self.path, p )
         val planRef =  model( AnalysisPlanModule.module.rootType, p.id )
@@ -650,7 +650,7 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
     } yield Map( loaded:_* )
   }
 
-  def loadPlan( planId: OutlierPlan#TID )( implicit ec: ExecutionContext, to: Timeout ): Future[(String, OutlierPlan.Summary)] = {
+  def loadPlan( planId: AnalysisPlan#TID )( implicit ec: ExecutionContext, to: Timeout ): Future[(String, AnalysisPlan.Summary)] = {
     fetchPlanInfo( planId ) map { summary => ( summary.info.name, summary.info.toSummary  ) }
   }
 

@@ -21,7 +21,7 @@
 //import spotlight.analysis.AnalysisPlanProtocol.AcceptTimeSeries
 //import spotlight.analysis.OutlierDetection.DetectionResult
 //import spotlight.model.outlier._
-//import spotlight.model.outlier.OutlierPlan.Scope
+//import spotlight.model.outlier.AnalysisPlan.Scope
 //import spotlight.model.timeseries._
 //import spotlight.testkit.{ParallelAkkaSpec, TestCorrelatedSeries}
 //
@@ -56,9 +56,9 @@
 //
 //    val subscriber = TestProbe()
 //
-//    val pid = OutlierPlan.outlierPlanIdentifying.safeNextId
-//    val scope = OutlierPlan.Scope( "TestPlan", "TestTopic" )
-//    val plan = mock[OutlierPlan]
+//    val pid = AnalysisPlan.AnalysisPlanIdentifying.safeNextId
+//    val scope = AnalysisPlan.Scope( "TestPlan", "TestTopic" )
+//    val plan = mock[AnalysisPlan]
 //    when( plan.algorithms ).thenReturn( Set(algo) )
 //    when( plan.name ).thenReturn( scope.plan )
 //    when( plan.appliesTo ).thenReturn( appliesToAll )
@@ -75,7 +75,7 @@
 //
 //    val workId = WorkId()
 //
-//    abstract class TestProxy( override var plan: OutlierPlan = fixture.plan )
+//    abstract class TestProxy( override var plan: AnalysisPlan = fixture.plan )
 //    extends AnalysisScopeProxy
 //    with AnalysisScopeProxy.Provider {
 //      provider: Actor with ActorLogging =>
@@ -126,28 +126,28 @@
 //      )
 //    }
 //
-//    lazy val appliesToAll: OutlierPlan.AppliesTo = {
+//    lazy val appliesToAll: AnalysisPlan.AppliesTo = {
 //      val isQuorun: IsQuorum = IsQuorum.AtLeastQuorumSpecification(0, 0)
 //      val reduce: ReduceOutliers = new ReduceOutliers {
 //        import scalaz._
 //        override def apply(
 //          results: OutlierAlgorithmResults,
 //          source: TimeSeriesBase,
-//          plan: OutlierPlan
+//          plan: AnalysisPlan
 //        ): V[Outliers] = Validation.failureNel[Throwable, Outliers]( new IllegalStateException("should not use" ) ).disjunction
 //      }
 //
 //      import scala.concurrent.duration._
-//      val grouping: Option[OutlierPlan.Grouping] = {
+//      val grouping: Option[AnalysisPlan.Grouping] = {
 //        val window = None
-//        window map { w => OutlierPlan.Grouping( limit = 10000, w ) }
+//        window map { w => AnalysisPlan.Grouping( limit = 10000, w ) }
 //      }
 //
-//      OutlierPlan.default( "", 1.second, isQuorun, reduce, Set.empty[Symbol], grouping ).appliesTo
+//      AnalysisPlan.default( "", 1.second, isQuorun, reduce, Set.empty[Symbol], grouping ).appliesTo
 //    }
 //
-//    def makePlan( name: String, g: Option[OutlierPlan.Grouping] ): OutlierPlan = {
-//      OutlierPlan.default(
+//    def makePlan( name: String, g: Option[AnalysisPlan.Grouping] ): AnalysisPlan = {
+//      AnalysisPlan.default(
 //        name = name,
 //        algorithms = Set( algo ),
 //        grouping = g,
@@ -212,7 +212,7 @@
 //
 //    "batch series" in { f: Fixture =>
 //      import f._
-//      val testGrouping = OutlierPlan.Grouping( limit = 4, window = 1.second )
+//      val testGrouping = AnalysisPlan.Grouping( limit = 4, window = 1.second )
 //
 //      val now = joda.DateTime.now
 //
@@ -389,7 +389,7 @@
 //
 //      val now = joda.DateTime.now
 //
-//      val p1 = makePlan( "p1", Some( OutlierPlan.Grouping(10, 300.seconds) ) )
+//      val p1 = makePlan( "p1", Some( AnalysisPlan.Grouping(10, 300.seconds) ) )
 //      val p2 = makePlan( "p2", None )
 //
 //      //      val m1 = OutlierDetectionMessage( TimeSeries("dummy", Seq()), p1 ).toOption.get
@@ -401,7 +401,7 @@
 //
 //      val proxy1 = TestActorRef(
 //        new TestProxy( p1 ) {
-//          override def scope: Scope = OutlierPlan.Scope( p1, "dummy" )
+//          override def scope: Scope = AnalysisPlan.Scope( p1, "dummy" )
 //          override def makeDetector( routerRef: ActorRef )( implicit context: ActorContext ): ActorRef = detector.ref
 //        }
 //      )
@@ -409,7 +409,7 @@
 //
 //      val proxy2 = TestActorRef(
 //        new TestProxy( p2 ) {
-//          override def scope: Scope = OutlierPlan.Scope( p2, "dummy" )
+//          override def scope: Scope = AnalysisPlan.Scope( p2, "dummy" )
 //          override def makeDetector( routerRef: ActorRef )( implicit context: ActorContext ): ActorRef = detector.ref
 //        }
 //      )
@@ -435,14 +435,14 @@
 //
 //      // needing grouping time window to be safely less than expectMsg max, since demand isn't propagated until grouping window
 //      // expires
-//      val p1 = makePlan( "p1", Some( OutlierPlan.Grouping(10, 300.millis) ) )
+//      val p1 = makePlan( "p1", Some( AnalysisPlan.Grouping(10, 300.millis) ) )
 //      val p2 = makePlan( "p2", None )
 //
 //      addDetectorAutoPilot( detector )
 //
 //      val proxy1 = TestActorRef(
 //        new TestProxy( p1 ) {
-//          override def scope: Scope = OutlierPlan.Scope( p1, "dummy" )
+//          override def scope: Scope = AnalysisPlan.Scope( p1, "dummy" )
 //          override def makeDetector( routerRef: ActorRef )( implicit context: ActorContext ): ActorRef = detector.ref
 //        }
 //      )
@@ -451,8 +451,8 @@
 //      val points = makeDataPoints( values = Seq.fill( 9 )( 1.0 ) )
 //      val ts = spike( data = points, topic = "dummy" )( points.size - 1 )
 //
-//      val m1p = TestCorrelatedSeries(ts, scope = Some(OutlierPlan.Scope(p1, ts.topic)))
-//      val m2s = TestCorrelatedSeries(ts, scope = Some(OutlierPlan.Scope(p2, "dummy")))
+//      val m1p = TestCorrelatedSeries(ts, scope = Some(AnalysisPlan.Scope(p1, ts.topic)))
+//      val m2s = TestCorrelatedSeries(ts, scope = Some(AnalysisPlan.Scope(p2, "dummy")))
 //
 //      proxy1.receive( m1p, subscriber.ref )
 //      detector.expectMsgClass( 5.seconds.dilated, classOf[DetectOutliersInSeries] )
@@ -464,7 +464,7 @@
 //
 //      val proxy2 = TestActorRef(
 //        new TestProxy( p2 ) {
-//          override def scope: Scope = OutlierPlan.Scope( p2, "dummy" )
+//          override def scope: Scope = AnalysisPlan.Scope( p2, "dummy" )
 //          override def makeDetector( routerRef: ActorRef )( implicit context: ActorContext ): ActorRef = detector.ref
 //        }
 //      )
@@ -484,14 +484,14 @@
 //
 //      // needing grouping time window to be safely less than expectMsg max, since demand isn't propagated until grouping window
 //      // expires
-//      val p1 = makePlan( "p1", Some( OutlierPlan.Grouping(10, 300.millis) ) )
+//      val p1 = makePlan( "p1", Some( AnalysisPlan.Grouping(10, 300.millis) ) )
 //      val p2 = makePlan( "p2", None )
 //
 //      addDetectorAutoPilot( detector )
 //
 //      val proxyProps = Props(
 //        new TestProxy( p1 ) {
-//          override def scope: Scope = OutlierPlan.Scope( p1, "dummy" )
+//          override def scope: Scope = AnalysisPlan.Scope( p1, "dummy" )
 //          override def makeDetector( routerRef: ActorRef )( implicit context: ActorContext ): ActorRef = detector.ref
 //        }
 //      )
@@ -501,8 +501,8 @@
 //      val points = makeDataPoints( values = Seq.fill( 9 )( 1.0 ) )
 //      val ts = spike( data = points, topic = "dummy" )( points.size - 1 )
 //
-//      val m1p = TestCorrelatedSeries(ts, scope = Some(OutlierPlan.Scope(p1, ts.topic)))
-//      val m2s = TestCorrelatedSeries(ts, scope = Some(OutlierPlan.Scope(p2, "dummy")))
+//      val m1p = TestCorrelatedSeries(ts, scope = Some(AnalysisPlan.Scope(p1, ts.topic)))
+//      val m2s = TestCorrelatedSeries(ts, scope = Some(AnalysisPlan.Scope(p2, "dummy")))
 //
 //      proxy.tell( m1p, subscriber.ref )
 //      detector.expectMsgClass( 5.seconds.dilated, classOf[DetectOutliersInSeries] )

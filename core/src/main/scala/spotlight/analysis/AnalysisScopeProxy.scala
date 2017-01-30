@@ -20,8 +20,8 @@
 //import peds.commons.log.Trace
 //import demesne.{AggregateRootType, DomainModel}
 //import spotlight.analysis.algorithm.{AlgorithmModule, AlgorithmProtocol}
-//import spotlight.model.outlier.OutlierPlan.Scope
-//import spotlight.model.outlier.{CorrelatedData, CorrelatedSeries, OutlierPlan}
+//import spotlight.model.outlier.AnalysisPlan.Scope
+//import spotlight.model.outlier.{CorrelatedData, CorrelatedSeries, AnalysisPlan}
 //import spotlight.model.timeseries.TimeSeriesBase.Merging
 //import spotlight.model.timeseries.{TimeSeries, Topic}
 //
@@ -33,8 +33,8 @@
 //  private val trace = Trace[AnalysisScopeProxy.type]
 //
 //  def props(
-//    scope: OutlierPlan.Scope,
-//    plan: OutlierPlan,
+//    scope: AnalysisPlan.Scope,
+//    plan: AnalysisPlan,
 //    model: DomainModel,
 //    highWatermark: Int,
 //    bufferSize: Int
@@ -42,7 +42,7 @@
 //
 //  private class Default(
 //    override val scope: Scope,
-//    override var plan: OutlierPlan,
+//    override var plan: AnalysisPlan,
 //    override val model: DomainModel,
 //    override val highWatermark: Int,
 //    override val bufferSize: Int
@@ -57,12 +57,12 @@
 //    }
 //  }
 //
-//  def name( scope: OutlierPlan.Scope ): String = "Proxy-" + scope.toString
+//  def name( scope: AnalysisPlan.Scope ): String = "Proxy-" + scope.toString
 //
 //  trait Provider { provider: Actor with ActorLogging =>
-//    def scope: OutlierPlan.Scope
-//    def plan: OutlierPlan
-//    def plan_=( p: OutlierPlan ): Unit
+//    def scope: AnalysisPlan.Scope
+//    def plan: AnalysisPlan
+//    def plan_=( p: AnalysisPlan ): Unit
 //    def model: DomainModel
 //    def highWatermark: Int
 //    def bufferSize: Int
@@ -179,7 +179,7 @@
 //    //todo need to update plans
 //    log.warning( "#TODO #DMR: NEED TO UPDATE PLAN ON ALGORITHMS_CHANGED -- MORE TO DO HERE WRT DOWNSTREAM")
 //    log.info( "updating plan with algorithms for {} scope", outer.scope )
-//    outer.plan = OutlierPlan.algorithmsLens.set( outer.plan )( algorithms )
+//    outer.plan = AnalysisPlan.algorithmsLens.set( outer.plan )( algorithms )
 //  }
 //
 //  def updateAlgorithmConfigurations( configuration: Config ): Unit = trace.block( "updateAlgorithmConfigurations" ) {
@@ -255,7 +255,7 @@
 //  }
 //
 //  def batchSeries(
-//    grouping: OutlierPlan.Grouping
+//    grouping: AnalysisPlan.Grouping
 //  )(
 //    implicit tsMerging: Merging[TimeSeries]
 //  ): Flow[CorrelatedSeries, CorrelatedSeries, NotUsed] = {
@@ -278,7 +278,7 @@
 //  }
 //
 //  def detectionFlow(
-//    p: OutlierPlan,
+//    p: AnalysisPlan,
 //    subscriber: ActorRef,
 //    w: Workers
 //  )(

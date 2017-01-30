@@ -98,12 +98,12 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
     val algoRef = TestProbe()
     val routingTable = Map( algo -> algoRef.ref )
 
-    val grouping: Option[OutlierPlan.Grouping] = {
+    val grouping: Option[AnalysisPlan.Grouping] = {
       val window = None
-      window map { w => OutlierPlan.Grouping( limit = 10000, w ) }
+      window map { w => AnalysisPlan.Grouping( limit = 10000, w ) }
     }
 
-    val plan = OutlierPlan.default(
+    val plan = AnalysisPlan.default(
       name = "DEFAULT_PLAN",
       algorithms = Set( algo ),
       grouping = grouping,
@@ -139,8 +139,8 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
 
     implicit lazy val model: DomainModel = trace.block( "model" ) { Await.result( boundedContext.futureModel, 5.seconds ) }
 
-    def makePlan( name: String, g: Option[OutlierPlan.Grouping] ): OutlierPlan = {
-      OutlierPlan.default(
+    def makePlan( name: String, g: Option[AnalysisPlan.Grouping] ): AnalysisPlan = {
+      AnalysisPlan.default(
         name = name,
         algorithms = Set( algo ),
         grouping = g,
@@ -278,7 +278,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
         .map { ts =>
           myPlans collect { case p if p appliesTo ts =>
             logger.debug( "plan [{}] applies to ts [{}]", p.name, ts.topic )
-//            (ts, OutlierPlan.Scope(p, ts.topic))
+//            (ts, AnalysisPlan.Scope(p, ts.topic))
             ts
           }
         }
@@ -330,7 +330,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
         .map { ts =>
           myPlans collect { case p if p appliesTo ts =>
             logger.debug( "plan [{}] applies to ts [{}]", p.name, ts.topic )
-//            (ts, OutlierPlan.Scope(p, ts.topic))
+//            (ts, AnalysisPlan.Scope(p, ts.topic))
             ts
           }
         }
@@ -374,12 +374,12 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
       import peds.akka.envelope._
 
       val algos = Set( algo )
-      val grouping: Option[OutlierPlan.Grouping] = {
+      val grouping: Option[AnalysisPlan.Grouping] = {
         val window = None
-        window map { w => OutlierPlan.Grouping( limit = 10000, w ) }
+        window map { w => AnalysisPlan.Grouping( limit = 10000, w ) }
       }
 
-      val defaultPlan = OutlierPlan.default(
+      val defaultPlan = AnalysisPlan.default(
         name = "DEFAULT_PLAN",
         algorithms = algos,
         grouping = grouping,
@@ -412,8 +412,8 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
 //          logger.info( "ADD PLAN: p.sourceId[{}]=[{}]   id[{}]=[{}]", p.sourceId.getClass.getCanonicalName, p.sourceId, tid.getClass.getCanonicalName, tid)
 //          p.sourceId mustBe plan.id
 //          assert( p.info.isDefined )
-//          p.info.get mustBe an [OutlierPlan]
-//          val actual = p.info.get.asInstanceOf[OutlierPlan]
+//          p.info.get mustBe an [AnalysisPlan]
+//          val actual = p.info.get.asInstanceOf[AnalysisPlan]
 //          actual.name mustBe "TestPlan"
 //          actual.algorithms mustBe Set( algo )
 //        }
@@ -457,12 +457,12 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
 
 ////      val graphiteFlow = OutlierScoringModel.batchSeriesByPlan( max = 1000 )
 //      val graphiteFlow = OutlierScoringModel.regulateByTopic( max = 1000 )
-////      val detectFlow = OutlierPlanDetectionRouter.flow( planRouter )
+////      val detectFlow = AnalysisPlanDetectionRouter.flow( planRouter )
 //      val detectFlow = PlanCatalog.flow2( catalogRef )
 
 //      val flowUnderTest = {
 //        Flow[TimeSeries]
-////        .map{ ts => (ts, OutlierPlan.Scope(defaultPlan, ts.topic)) }
+////        .map{ ts => (ts, AnalysisPlan.Scope(defaultPlan, ts.topic)) }
 //        .via( graphiteFlow )
 //        .via( detectFlow )
 //      }

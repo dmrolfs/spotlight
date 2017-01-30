@@ -29,7 +29,7 @@ trait Settings extends LazyLogging {
   def graphiteAddress: Option[InetSocketAddress]
   def detectionBudget: Duration
   def parallelismFactor: Double
-  def plans: Set[OutlierPlan]
+  def plans: Set[AnalysisPlan]
   def planOrigin: ConfigOrigin
   def tcpInboundBufferSize: Int
   def workflowBufferSize: Int
@@ -329,7 +329,7 @@ object Settings extends LazyLogging {
       if ( config hasPath path ) config.getDouble( path ) else 1.0
     }
 
-    override val plans: Set[OutlierPlan] = PlanFactory.makePlans( detectionPlansConfigFrom( config ), detectionBudget ) //todo support plan reloading
+    override val plans: Set[AnalysisPlan] = PlanFactory.makePlans( detectionPlansConfigFrom( config ), detectionBudget ) //todo support plan reloading
     override def planOrigin: ConfigOrigin = detectionPlansConfigFrom( config ).origin()
     override def workflowBufferSize: Int = config.getInt( Directory.WORKFLOW_BUFFER_SIZE )
     override def tcpInboundBufferSize: Int = config.getInt( Directory.TCP_INBOUND_BUFFER_SIZE )
@@ -396,7 +396,7 @@ object Settings extends LazyLogging {
 
 
   object PlanFactory {
-    def makePlans( planSpecifications: Config, detectionBudget: Duration ): Set[OutlierPlan] = {
+    def makePlans( planSpecifications: Config, detectionBudget: Duration ): Set[AnalysisPlan] = {
       import scala.collection.JavaConversions._
 
       logger.debug( "#TEST settings.makePlans with budget:[{}] specs:[\n{}\n]", detectionBudget, planSpecifications )
@@ -416,7 +416,7 @@ object Settings extends LazyLogging {
             val TOPICS = "topics"
             val REGEX = "regex"
 
-            val grouping: Option[OutlierPlan.Grouping] = {
+            val grouping: Option[AnalysisPlan.Grouping] = {
               val GROUP_LIMIT = "group.limit"
               val GROUP_WITHIN = "group.within"
               val limit = if ( spec hasPath GROUP_LIMIT ) spec getInt GROUP_LIMIT else 10000
@@ -427,7 +427,7 @@ object Settings extends LazyLogging {
                 None
               }
 
-              window map { w => OutlierPlan.Grouping( limit, w ) }
+              window map { w => AnalysisPlan.Grouping( limit, w ) }
             }
 
             //todo: add configuration for at-least and majority
@@ -436,7 +436,7 @@ object Settings extends LazyLogging {
             if ( spec.hasPath(IS_DEFAULT) && spec.getBoolean(IS_DEFAULT) ) {
               logger info s"topic[$name] default plan origin: ${spec.origin} line:${spec.origin.lineNumber}"
               Some(
-                OutlierPlan.default(
+                AnalysisPlan.default(
                   name = name,
                   timeout = timeout,
                   isQuorum = makeIsQuorum( spec, algorithms.size ),
@@ -451,7 +451,7 @@ object Settings extends LazyLogging {
               logger info s"topic[$name] topic plan origin: ${spec.origin} line:${spec.origin.lineNumber}"
 
               Some(
-                OutlierPlan.forTopics(
+                AnalysisPlan.forTopics(
                   name = name,
                   timeout = timeout,
                   isQuorum = makeIsQuorum( spec, algorithms.size ),
@@ -466,7 +466,7 @@ object Settings extends LazyLogging {
             } else if ( spec hasPath REGEX ) {
               logger info s"topic[$name] regex plan origin: ${spec.origin} line:${spec.origin.lineNumber}"
               Some(
-                OutlierPlan.forRegex(
+                AnalysisPlan.forRegex(
                   name = name,
                   timeout = timeout,
                   isQuorum = makeIsQuorum( spec, algorithms.size ),

@@ -89,7 +89,7 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
 
   def logMetric(
     destination: Logger,
-    plans: Set[OutlierPlan]
+    plans: Set[AnalysisPlan]
   ): GraphStage[FlowShape[TimeSeries, TimeSeries]] = {
     new GraphStage[FlowShape[TimeSeries, TimeSeries]] {
       val count = new AtomicInteger( 0 )
@@ -140,7 +140,7 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
   }
 
   def notReportedBySpotlight(ts: TimeSeriesBase ): Boolean = ts.topic.name.startsWith( OutlierMetricPrefix ) == false
-  def isPlanned( ts: TimeSeriesBase, plans: Set[OutlierPlan] ): Boolean = plans exists { _ appliesTo ts }
+  def isPlanned( ts: TimeSeriesBase, plans: Set[AnalysisPlan] ): Boolean = plans exists { _ appliesTo ts }
 
   val debugLogger = Logger( LoggerFactory getLogger "Debug" )
 
@@ -215,19 +215,19 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
 //    implicit system: ActorSystem,
 //    materializer: Materializer,
 //    tsMerging: Merging[TimeSeries]
-//  ): Flow[(TimeSeries, OutlierPlan.Scope), (TimeSeries, OutlierPlan.Scope), NotUsed] = {
-//    type PlanSeriesAccumulator = Map[OutlierPlan.Scope, TimeSeries]
-//    val seed: ((TimeSeries, OutlierPlan.Scope)) => (PlanSeriesAccumulator, Int) = (tsp: (TimeSeries, OutlierPlan.Scope)) => {
+//  ): Flow[(TimeSeries, AnalysisPlan.Scope), (TimeSeries, AnalysisPlan.Scope), NotUsed] = {
+//    type PlanSeriesAccumulator = Map[AnalysisPlan.Scope, TimeSeries]
+//    val seed: ((TimeSeries, AnalysisPlan.Scope)) => (PlanSeriesAccumulator, Int) = (tsp: (TimeSeries, AnalysisPlan.Scope)) => {
 //      val (ts, p) = tsp
 //      val key = p
 //      ( Map( key -> ts ), 0 )
 //    }
 //
-//    Flow[(TimeSeries, OutlierPlan.Scope)]
+//    Flow[(TimeSeries, AnalysisPlan.Scope)]
 //    .batch( max, seed ){ case ((acc, count), (ts, p)) =>
 //      import scalaz._, Scalaz._
 //
-//      val key: OutlierPlan.Scope = p
+//      val key: AnalysisPlan.Scope = p
 //      val existing: Option[TimeSeries]  = acc get key
 //
 //      val newAcc: V[PlanSeriesAccumulator] = for {
@@ -258,7 +258,7 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
 //    }
 //    .map { ec: (PlanSeriesAccumulator, Int) =>
 ////      val (elems, count) = ec
-////      val recs: Seq[((Topic, OutlierPlan), TimeSeries)] = elems.toSeq
+////      val recs: Seq[((Topic, AnalysisPlan), TimeSeries)] = elems.toSeq
 ////      debugLogger.info(
 ////        "batchSeriesByPlan pushing combos downstream topic:plans combos:[{}] total points:[{}]",
 ////        recs.size.toString,
@@ -267,7 +267,7 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
 //      ec
 //    }
 //    .mapConcat { case (ps, _) => ps.toSeq.to[scala.collection.immutable.Seq].map { case (scope, ts) => ( ts, scope ) } }
-//    .map { tsp: (TimeSeries, OutlierPlan.Scope) =>
+//    .map { tsp: (TimeSeries, AnalysisPlan.Scope) =>
 ////      val (ts, p) = tsp
 ////      debugLogger.info( "batchSeriesByPlan pushing downstream topic:plan=[{}:{}]\t# points:[{}]", ts.topic, p.name, ts.points.size.toString )
 //      tsp

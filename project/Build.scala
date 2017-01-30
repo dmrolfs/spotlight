@@ -9,7 +9,7 @@ object SpotlightBuild extends Build {
   lazy val root = {
     ( project in file(".") )
     .settings( defaultBuildSettings:_* )
-    .aggregate( core, publisher, graphite )
+    .aggregate( core, publisher, graphite, batch )
   }
 
   lazy val publisher = {
@@ -29,10 +29,16 @@ object SpotlightBuild extends Build {
   }
 
   lazy val graphite = {
-    ( project in file("graphite") )
+    ( project in file("app-graphite") )
     .settings( defaultBuildSettings ++ publishSettings )
     .dependsOn( core )
     .enablePlugins( DockerPlugin )
+  }
+
+  lazy val batch = {
+    ( project in file("app-batch") )
+    .settings( defaultBuildSettings ++ doNotPublishSettings )
+    .dependsOn( core )
   }
 
   //  lazy val root = Project(

@@ -11,7 +11,7 @@ import org.mockito.Mockito._
 import peds.akka.envelope.{Envelope, WorkId}
 import spotlight.analysis.DetectionAlgorithmRouter.ShardedRootTypeProxy
 import spotlight.analysis.shard._
-import spotlight.model.outlier.{IsQuorum, OutlierPlan, ReduceOutliers}
+import spotlight.model.outlier.{IsQuorum, AnalysisPlan, ReduceOutliers}
 import spotlight.model.timeseries.{DataPoint, TimeSeries}
 import spotlight.testkit.ParallelAkkaSpec
 
@@ -39,8 +39,8 @@ class DetectionAlgorithmRouterSpec extends ParallelAkkaSpec with MockitoSugar {
     when( model.configuration ).thenReturn( _config )
 
     lazy val plan = makePlan( "TestPlan", None )
-    def makePlan( name: String, g: Option[OutlierPlan.Grouping] ): OutlierPlan = {
-      OutlierPlan.default(
+    def makePlan( name: String, g: Option[AnalysisPlan.Grouping] ): AnalysisPlan = {
+      AnalysisPlan.default(
         name = name,
         algorithms = Set( algo ),
         grouping = g,

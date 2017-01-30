@@ -9,9 +9,9 @@ import peds.commons.Valid
 import peds.commons.identifier.TaggedID
 import demesne.CommandLike
 import peds.akka.envelope.WorkId
-import spotlight.model.outlier.{CorrelatedSeries, OutlierPlan}
+import spotlight.model.outlier.{CorrelatedSeries, AnalysisPlan}
 import spotlight.model.timeseries.{TimeSeries, TimeSeriesBase, Topic}
-import spotlight.model.outlier.OutlierPlan.Scope
+import spotlight.model.outlier.AnalysisPlan.Scope
 
 
 /**
@@ -26,26 +26,26 @@ sealed trait OutlierDetectionMessage extends CommandLike {
   type Source <: TimeSeriesBase
   def evSource: ClassTag[Source]
   def source: Source
-  def plan: OutlierPlan
+  def plan: AnalysisPlan
   def subscriber: Option[ActorRef] = None
   def correlationIds: Set[WorkId]
-  lazy val scope: OutlierPlan.Scope = OutlierPlan.Scope( plan, topic )
+  lazy val scope: AnalysisPlan.Scope = AnalysisPlan.Scope( plan, topic )
 //  def message: CorrelatedSeries
 }
 
 object OutlierDetectionMessage {
   def apply(
     ts: TimeSeries,
-    plan: OutlierPlan,
+    plan: AnalysisPlan,
     subscriber: Option[ActorRef] = None,
     correlationIds: Set[WorkId] = Set.empty[WorkId]
   ): Valid[OutlierDetectionMessage] = {
     checkPlan( plan, ts ) map { p => DetectOutliersInSeries( ts, p, subscriber, correlationIds ) }
   }
 
-  def unapply( m: OutlierDetectionMessage ): Option[(OutlierPlan, Topic, m.Source)] = Some( (m.plan, m.topic, m.source) )
+  def unapply( m: OutlierDetectionMessage ): Option[(AnalysisPlan, Topic, m.Source)] = Some( (m.plan, m.topic, m.source) )
 
-  def checkPlan( plan: OutlierPlan, ts: TimeSeriesBase ): Valid[OutlierPlan] = {
+  def checkPlan( plan: AnalysisPlan, ts: TimeSeriesBase ): Valid[AnalysisPlan] = {
     if ( plan appliesTo ts ) plan.successNel else Validation.failureNel( PlanMismatchError( plan, ts ) )
   }
 }
@@ -53,7 +53,7 @@ object OutlierDetectionMessage {
 
 final case class DetectOutliersInSeries private[analysis](
   override val source: TimeSeries,
-  override val plan: OutlierPlan,
+  override val plan: AnalysisPlan,
   override val subscriber: Option[ActorRef],
   override val correlationIds: Set[WorkId]
 ) extends OutlierDetectionMessage {
@@ -77,7 +77,7 @@ final case class DetectUsing private[analysis](
 
   def recent: RecentHistory = RecentHistory( history.lastPoints )
   override def source: Source = payload.source
-  override def plan: OutlierPlan = payload.plan
+  override def plan: AnalysisPlan = payload.plan
   override def subscriber: Option[ActorRef] = payload.subscriber
   override def correlationIds: Set[WorkId] = payload.correlationIds
 
@@ -94,7 +94,7 @@ final case class UnrecognizedPayload private[analysis](
   override type Source = request.Source
   override def evSource: ClassTag[Source] = request.evSource
   override def source: Source = request.source
-  override def plan: OutlierPlan = request.plan
+  override def plan: AnalysisPlan = request.plan
   override def subscriber: Option[ActorRef] = request.subscriber
   override def correlationIds: Set[WorkId] = request.correlationIds
 }
