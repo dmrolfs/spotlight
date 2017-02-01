@@ -57,11 +57,11 @@ sealed trait AnalysisPlan extends Entity with Equals {
 object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
   implicit def summarize( p: AnalysisPlan ): Summary = Summary( p )
 
-  case class Summary( id: AnalysisPlan#TID, name: String, slug: String, appliesTo: AnalysisPlan.AppliesTo )
+  case class Summary( id: AnalysisPlan#TID, name: String, slug: String, appliesTo: Option[AnalysisPlan.AppliesTo] = None )
 
   object Summary {
     def apply( info: AnalysisPlan ): Summary = {
-      Summary( id = info.id, name = info.name, slug = info.slug, appliesTo = info.appliesTo )
+      Summary( id = info.id, name = info.name, slug = info.slug, appliesTo = Option(info.appliesTo) )
     }
   }
 

@@ -5,38 +5,50 @@ import scala.concurrent.duration._
 import scala.concurrent.{Await, TimeoutException}
 import akka.NotUsed
 import akka.actor._
-import akka.pattern.AskTimeoutException
+import akka.actor.SupervisorStrategy.{Resume, Stop}
+import akka.event.LoggingReceive
 import akka.stream.Supervision.Decider
 import akka.stream.{ActorAttributes, Materializer}
 import akka.stream.scaladsl.Flow
+import akka.stream.Supervision
 import akka.util.Timeout
-import com.typesafe.scalalogging.LazyLogging
 import com.persist.logging.{ ActorLogging => PersistActorLogging, _ }
 import shapeless.{Lens, lens}
 import com.typesafe.config.Config
-import com.typesafe.scalalogging.LazyLogging
 import nl.grons.metrics.scala.{Meter, MetricName}
 import peds.akka.envelope._
 import peds.akka.metrics.{Instrumented, InstrumentedActor}
 import peds.akka.publish.{EventPublisher, StackableStreamPublisher}
-import peds.archetype.domain.model.core.{EntityIdentifying, EntityLensProvider}
+import peds.archetype.domain.model.core.{Entity, EntityIdentifying, EntityLensProvider}
 import peds.commons.identifier.ShortUUID
+import peds.akka.supervision.{IsolatedDefaultSupervisor, OneForOneStrategyFactory}
 import demesne._
 import demesne.index.local.IndexLocalAgent
 import demesne.index.{Directive, IndexBusSubscription, StackableIndexBusPublisher}
 import demesne.module.LocalAggregate
 import demesne.module.entity.{EntityAggregateModule, EntityProtocol}
 import demesne.module.entity.EntityAggregateModule.MakeIndexSpec
-import peds.akka.supervision.{IsolatedDefaultSupervisor, IsolatedLifeCycleSupervisor, OneForOneStrategyFactory}
-import spotlight.analysis.AnalysisPlanProtocol.{AnalysisFlow, MakeFlow}
-import spotlight.analysis.OutlierDetection.{DetectionResult, DetectionTimedOut}
 import spotlight.model.outlier._
 import spotlight.model.outlier.AnalysisPlan.Scope
 import spotlight.model.timeseries._
 import spotlight.model.timeseries.TimeSeriesBase.Merging
+import spotlight.analysis.AnalysisPlanProtocol.{AnalysisFlow, MakeFlow}
+import spotlight.analysis.OutlierDetection.{DetectionResult, DetectionTimedOut}
+import spotlight.analysis.{AnalysisPlanProtocol => P}
 
 
-object AnalysisPlanProtocol extends EntityProtocol[AnalysisPlan#ID] {
+case class AnalysisPlanState( plan: AnalysisPlan, routes: Map[Symbol, AlgorithmRoute] ) extends Entity {
+  override type ID = AnalysisPlan#ID
+  override type TID = peds.commons.identifier.TaggedID[ID]
+  override def id: TID = plan.id
+  override val evID: ClassTag[ID] = classTag[ID]
+  override val evTID: ClassTag[TID] = classTag[TID]
+  override def name: String = plan.name
+  override def canEqual( that: Any ): Boolean = that.isInstanceOf[AnalysisPlanState]
+}
+
+
+object AnalysisPlanProtocol extends EntityProtocol[AnalysisPlanState#ID] {
   case class MakeFlow(
     override val targetId: MakeFlow#TID,
     parallelism: Int,
@@ -82,7 +94,9 @@ object AnalysisPlanProtocol extends EntityProtocol[AnalysisPlan#ID] {
   case class AlgorithmsChanged(
     override val sourceId: AlgorithmsChanged#TID,
     algorithms: Set[Symbol],
-    algorithmConfig: Config
+    algorithmConfig: Config,
+    added: Set[Symbol],
+    dropped: Set[Symbol]
   ) extends Event
 
   case class AnalysisResolutionChanged(
@@ -103,7 +117,7 @@ object AnalysisPlanProtocol extends EntityProtocol[AnalysisPlan#ID] {
 /**
   * Created by rolfsd on 5/26/16.
   */
-object AnalysisPlanModule extends EntityLensProvider[AnalysisPlan] with Instrumented with ClassLogging {
+object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Instrumented with ClassLogging { moduleOuter =>
   override lazy val metricBaseName: MetricName = {
     MetricName( spotlight.BaseMetricName, spotlight.analysis.BaseMetricName )
   }
@@ -125,40 +139,41 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlan] with Instrume
 
 
 
-  implicit val identifying: EntityIdentifying[AnalysisPlan] = {
-    new EntityIdentifying[AnalysisPlan] with ShortUUID.ShortUuidIdentifying[AnalysisPlan] {
-      override val evEntity: ClassTag[AnalysisPlan] = classTag[AnalysisPlan]
+  implicit val identifying: EntityIdentifying[AnalysisPlanState] = {
+    new EntityIdentifying[AnalysisPlanState] with ShortUUID.ShortUuidIdentifying[AnalysisPlanState] {
+      override val evEntity: ClassTag[AnalysisPlanState] = classTag[AnalysisPlanState]
     }
   }
 
-
-  override def idLens: Lens[AnalysisPlan, AnalysisPlan#TID] = AnalysisPlan.idLens
-  override def nameLens: Lens[AnalysisPlan, String] = AnalysisPlan.nameLens
-  override def slugLens: Lens[AnalysisPlan, String] = AnalysisPlan.slugLens
+  val planLens: Lens[AnalysisPlanState, AnalysisPlan] = lens[AnalysisPlanState] >> 'plan
+  override def idLens: Lens[AnalysisPlanState, AnalysisPlanState#TID] = AnalysisPlan.idLens compose planLens
+  override def nameLens: Lens[AnalysisPlanState, String] = AnalysisPlan.nameLens compose planLens
+  override def slugLens: Lens[AnalysisPlanState, String] = AnalysisPlan.slugLens compose planLens
+  val isActiveLens: Lens[AnalysisPlanState, Boolean] = AnalysisPlan.isActiveLens compose planLens
 
   val namedPlanIndex: Symbol = 'NamedPlan
 
   val indexes: MakeIndexSpec = {
-    import spotlight.analysis.{ AnalysisPlanProtocol => AP }
-
     () => {
       Seq(
         IndexLocalAgent.spec[String, module.TID, AnalysisPlan.Summary]( specName = namedPlanIndex, IndexBusSubscription ) {
-          case AP.Added( sid, Some( p: AnalysisPlan ) ) => Directive.Record( p.name, sid, p.toSummary )
-          case AP.Added( sid, info ) => {
+          case P.Added( sid, Some(AnalysisPlanState(p: AnalysisPlan, _)) ) => Directive.Record( p, sid, p.toSummary )
+          case P.Added( sid, Some( p: AnalysisPlan ) ) => Directive.Record( p.name, sid, p.toSummary )
+          case P.Added( sid, info ) => {
+//            logger.error( "ignoring added event since info was not an AnalysisPlan: [{}]", info )
             log.error( Map("@msg" -> "ignoring added event since info was not some AnalysisPlan", "info" -> info.toString) )
             Directive.Ignore
           }
-          case AP.Disabled( sid, _ ) => Directive.Withdraw( sid )
-          case AP.Renamed( sid, oldName, newName ) => Directive.ReviseKey( oldName, newName )
-          case _: AP.ProtocolMessage => Directive.Ignore
+          case P.Disabled( sid, _ ) => Directive.Withdraw( sid )
+          case P.Renamed( sid, oldName, newName ) => Directive.ReviseKey( oldName, newName )
+          case _: P.ProtocolMessage => Directive.Ignore
         }
       )
     }
   }
 
-  val module: EntityAggregateModule[AnalysisPlan] = {
-    val b = EntityAggregateModule.builderFor[AnalysisPlan, AnalysisPlanProtocol.type].make
+  val module: EntityAggregateModule[AnalysisPlanState] = {
+    val b = EntityAggregateModule.builderFor[AnalysisPlanState, AnalysisPlanProtocol.type].make
     import b.P.{ Tag => BTag, Props => BProps, _ }
 
     b
@@ -169,9 +184,9 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlan] with Instrume
     .set( PassivateTimeout, 5.minutes )
     .set( Protocol, AnalysisPlanProtocol )
     .set( Indexes, indexes )
-    .set( IdLens, AnalysisPlan.idLens )
-    .set( NameLens, AnalysisPlan.nameLens )
-    .set( IsActiveLens, Some(AnalysisPlan.isActiveLens) )
+    .set( IdLens, moduleOuter.idLens )
+    .set( NameLens, moduleOuter.nameLens )
+    .set( IsActiveLens, Some(moduleOuter.isActiveLens) )
     .build()
   }
 
@@ -218,6 +233,7 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlan] with Instrume
         def model: DomainModel
 
         def plan: AnalysisPlan
+        def routes: Map[Symbol, AlgorithmRoute]
 
         def routerName: String = DetectionAlgorithmRouter.name( provider.plan.name )
         def detectorName: String = OutlierDetection.name( provider.plan.name )
@@ -226,8 +242,8 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlan] with Instrume
           import peds.akka.supervision.IsolatedLifeCycleSupervisor.{ WaitForStart, GetChildren, Children, Started }
           import akka.pattern.ask
 
-          implicit val ec = context.dispatcher
-          implicit val timeout = Timeout( 1.second )
+          implicit val ec: scala.concurrent.ExecutionContext = context.dispatcher
+          implicit val timeout: Timeout = Timeout( 1.second )
 
           val foreman = context.system.actorOf(
             Props(
@@ -263,17 +279,15 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlan] with Instrume
         }
 
         def makeRouter()( implicit context: ActorContext ): ActorRef = {
-          val algorithmRefs = for {
-            name <- plan.algorithms.toSeq
-            rt <- DetectionAlgorithmRouter.Registry.rootTypeFor( name )( context.dispatcher ).toSeq
-          } yield {
-            (
-              name,
-              AlgorithmRoute.routeFor( plan, rt )( model )
-            )
-          }
-
-          val routerProps = DetectionAlgorithmRouter.props( plan, Map( algorithmRefs:_* ) )
+//          val algorithmRefs = for {
+//            name <- plan.algorithms.toSeq
+//            rt <- DetectionAlgorithmRouter.rootTypeFor( name )( context.dispatcher ).toSeq
+//          } yield {
+//            ( name, AlgorithmRoute.routeFor(plan, rt)(model) )
+//          }
+//
+//          val routerProps = DetectionAlgorithmRouter.props( plan, Map( algorithmRefs:_* ) )
+          val routerProps = DetectionAlgorithmRouter.props( plan, routes )
           context.actorOf( routerProps.withDispatcher( DetectionAlgorithmRouter.DispatcherPath ), provider.routerName )
         }
 
@@ -292,52 +306,81 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlan] with Instrume
 //    with AltActorLogging
     with InstrumentedActor
     with demesne.AggregateRoot.Provider {
-      outer: PlanActor.FlowConfigurationProvider with PlanActor.WorkerProvider with EventPublisher =>
-
-      import akka.stream.Supervision
-      import spotlight.analysis.{AnalysisPlanProtocol => P}
+      actorOuter: PlanActor.FlowConfigurationProvider with PlanActor.WorkerProvider with EventPublisher =>
 
       override lazy val metricBaseName: MetricName = MetricName( classOf[PlanActor] )
       val failuresMeter: Meter = metrics.meter( "failures" )
 
-      override var state: AnalysisPlan = _
+      override var state: AnalysisPlanState = _
+      override val evState: ClassTag[AnalysisPlanState] = classTag[AnalysisPlanState]
+      override def plan: AnalysisPlan = state.plan
+      override def routes: Map[Symbol, AlgorithmRoute] = state.routes
 
-      override def plan: AnalysisPlan = state
-
-      override val evState: ClassTag[AnalysisPlan] = ClassTag( classOf[AnalysisPlan] )
 
       var detector: ActorRef = _
 
-      override def acceptance: Acceptance = entityAcceptance orElse {
+      override def acceptance: Acceptance = myAcceptance orElse entityAcceptance
+
+      val myAcceptance: Acceptance = {
+        case (P.Added(_, info), s) => {
+          preActivate()
+          context become LoggingReceive { around( active ) }
+          info match {
+            case Some( ps: AnalysisPlanState ) => ps
+            case Some( p: AnalysisPlan ) => AnalysisPlanState( plan = p, routes = makeRoutes(p)() )
+            case i => log.error( "ignoring Added command with unrecognized info:[{}]", info );  s
+//            case i => altLog.error( Map("@msg" -> "ignoring Added command with unrecognized info", "info" -> i.toString) ); s
+          }
+        }
+
         case (e: P.ScopeChanged, s) => {
           //todo: cast for expediency. my ideal is to define a Lens in the AnalysisPlan trait; minor solace is this module is in the same package
-          val r = s.asInstanceOf[AnalysisPlan.SimpleAnalysisPlan].copy( appliesTo = e.appliesTo )
-          log.debug( "#TEST acceptance... e:[{}] s-before:[{}] s-after:[{}]", e, s, r)
-          r
+          s.copy( plan = s.plan.asInstanceOf[AnalysisPlan.SimpleAnalysisPlan].copy(appliesTo = e.appliesTo) )
         }
 
         case (e: P.AlgorithmsChanged, s) => {
+          implicit val ec: scala.concurrent.ExecutionContext = context.dispatcher
+          val addedRoutes = makeRoutes( plan )( e.added )
+
           //todo: cast for expediency. my ideal is to define a Lens in the AnalysisPlan trait; minor solace is this module is in the same package
-          s.asInstanceOf[AnalysisPlan.SimpleAnalysisPlan].copy( algorithms = e.algorithms, algorithmConfig = e.algorithmConfig )
+          s.copy(
+            plan = s.plan.asInstanceOf[AnalysisPlan.SimpleAnalysisPlan].copy(
+              algorithms = e.algorithms,
+              algorithmConfig = e.algorithmConfig
+            ),
+            routes = s.routes -- e.dropped ++ addedRoutes
+          )
         }
 
         case (e: P.AnalysisResolutionChanged, s) => {
           //todo: cast for expediency. my ideal is to define a Lens in the AnalysisPlan trait; minor solace is this module is in the same package
-          s.asInstanceOf[AnalysisPlan.SimpleAnalysisPlan].copy( isQuorum = e.isQuorum, reduce = e.reduce )
+          s.copy( plan = s.plan.asInstanceOf[AnalysisPlan.SimpleAnalysisPlan].copy(isQuorum = e.isQuorum, reduce = e.reduce) )
         }
+      }
+
+      private def makeRoutes(
+        plan: AnalysisPlan
+      )(
+        algorithms: Set[Symbol] = allAlgorithms(plan.algorithms, plan.algorithmConfig)
+      ): Map[Symbol, AlgorithmRoute] = {
+        implicit val ec: scala.concurrent.ExecutionContext = context.dispatcher
+
+        def makeRoute( plan: AnalysisPlan )( algorithm: Symbol ): Option[AlgorithmRoute] = {
+          DetectionAlgorithmRouter.Registry.rootTypeFor( algorithm ).map{ rt => AlgorithmRoute.routeFor( plan, rt )( model ) }
+        }
+
+        val routes = algorithms.toSeq.map{ a => (a, makeRoute(plan)(a) ) }.collect{ case (a, Some(r)) => ( a, r ) }
+        Map( routes:_* )
       }
 
       val IdType = identifying.evTID
 
       override def quiescent: Receive = {
-        case P.Add( IdType( targetId ), info ) if targetId == aggregateId => {
+        case P.Add( IdType(targetId), info ) if targetId == aggregateId => {
           persist( P.Added( targetId, info ) ) { e =>
-            log.debug( "AnalysisPlanModule: Added.info:[{}]", info )
             acceptAndPublish( e )
             val (_, d, _) = startWorkers()
-            outer.detector = d
-
-            log.debug( "AnalysisPlanModule[{}]: notifying [{}] of {}", state.name, sender().path.name, e )
+            actorOuter.detector = d
             sender() !+ e // per akka docs: safe to use sender() here
           }
         }
@@ -374,22 +417,36 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlan] with Instrume
       }
 
       val planEntity: Receive = {
-        case _: P.GetPlan => sender() !+ P.PlanInfo( state.id, state )
+        case _: P.GetPlan => sender() !+ P.PlanInfo( state.id, state.plan )
 
-        case P.ApplyTo( id, appliesTo ) => {
-          log.debug( s"#TEST received ApplyTo.. stats:\ntype:[${myComponentType}]\npath:[${myComponentPath}\nworkId:[${workId}]\nmessageNumber:[${messageNumber}]\nrequestId:[${requestId}]\nheader:[${envelopeHeader}]" )
-          persist( P.ScopeChanged( id, appliesTo ) ) { acceptAndPublish }
-        }
+        case P.ApplyTo( id, appliesTo ) => persist( P.ScopeChanged( id, appliesTo ) ) { acceptAndPublish }
 
-        case P.UseAlgorithms( id, algorithms, config ) => {
-          persist( P.AlgorithmsChanged( id, algorithms, config ) ) { e =>
-            acceptAndPublish( e )
-          }
-        }
+        case P.UseAlgorithms( id, algorithms, config ) => persist( changeAlgorithms(algorithms, config) ) { acceptAndPublish }
 
         case P.ResolveVia( id, isQuorum, reduce ) => {
           persist( P.AnalysisResolutionChanged( id, isQuorum, reduce ) ) { acceptAndPublish }
         }
+      }
+
+      def changeAlgorithms( algorithms: Set[Symbol], algorithmSpec: Config ): P.AlgorithmsChanged = {
+        val newAlgorithms = allAlgorithms( algorithms, algorithmSpec )
+        val myRoutes = state.routes
+        val dropped = myRoutes.keySet -- newAlgorithms
+        val added = newAlgorithms -- myRoutes.keySet
+        P.AlgorithmsChanged(
+          sourceId = aggregateId,
+          algorithms = newAlgorithms,
+          algorithmConfig = algorithmSpec,
+          added = added,
+          dropped = dropped
+        )
+      }
+
+      private def allAlgorithms( algorithms: Set[Symbol], algorithmSpec: Config ): Set[Symbol] = {
+        import scala.collection.immutable
+        import scala.collection.JavaConversions._
+        val inSpec = algorithmSpec.root.entrySet.to[immutable.Set] map { e => Symbol(e.getKey) }
+        algorithms ++ inSpec
       }
 
       override def unhandled( message: Any ): Unit = {
@@ -406,12 +463,12 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlan] with Instrume
         timeout: Timeout,
         materializer: Materializer
       ): DetectFlow = {
-        val entry = Flow[TimeSeries] filter { state.appliesTo }
+        val entry = Flow[TimeSeries] filter { state.plan.appliesTo }
 
-        val withGrouping = state.grouping map { g => entry.via( batchSeries( g ) ) } getOrElse entry
+        val withGrouping = state.plan.grouping map { g => entry.via( batchSeries( g ) ) } getOrElse entry
         withGrouping
-//        .buffer( outer.bufferSize, OverflowStrategy.backpressure )
-        .via( detectionFlow( state, parallelism ) )
+//        .buffer( actorOuter.bufferSize, OverflowStrategy.backpressure )
+        .via( detectionFlow( state.plan, parallelism ) )
       }
 
       def batchSeries(
@@ -434,7 +491,7 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlan] with Instrume
       def detectionFlow( p: AnalysisPlan, parallelism: Int )( implicit system: ActorSystem, timeout: Timeout ): DetectFlow = {
         import peds.akka.envelope.pattern.ask
 
-        implicit val ec = system.dispatcher
+        implicit val ec: scala.concurrent.ExecutionContext = system.dispatcher
 
         Flow[TimeSeries]
         .map { ts => OutlierDetectionMessage( ts, p ).disjunction }
@@ -506,8 +563,6 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlan] with Instrume
           Supervision.Resume
         }
       }
-
-      import SupervisorStrategy.{ Stop, Resume }
 
       override def supervisorStrategy: SupervisorStrategy = OneForOneStrategy(){
         case _: ActorInitializationException => Stop

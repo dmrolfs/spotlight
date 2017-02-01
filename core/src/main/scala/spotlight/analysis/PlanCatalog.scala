@@ -381,13 +381,17 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
     }
   }
 
+  private def doesPlanApply( o: Any )( p: AnalysisPlan.Summary ): Boolean = {
+    p.appliesTo map { _.apply(o) } getOrElse true
+  }
+
   def unsafeApplicablePlanExists( ts: TimeSeries ): Boolean = {
     log.debug(
       "PlanCatalog: unsafe look at {} plans for one that applies to topic:[{}] -- [{}]",
       planIndex.entries.size, ts.topic, planIndex.entries.values.mkString(", ")
     )
-
-    planIndex.entries.values exists { _ appliesTo ts }
+    val applyTest = doesPlanApply( ts )( _: AnalysisPlan.Summary )
+    planIndex.entries.values exists { applyTest }
   }
 
   def futureApplicablePlanExists( ts: TimeSeries )( implicit ec: ExecutionContext ): Future[Boolean] = {
@@ -397,7 +401,8 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
         entries.size, ts.topic, entries.values.mkString(", ")
       )
 
-      entries.values exists { _ appliesTo ts }
+      val applyTest = doesPlanApply( ts )( _: AnalysisPlan.Summary )
+      entries.values exists { applyTest }
     }
   }
 
@@ -479,7 +484,7 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
 
       planIndex.futureEntries
       .map { entries =>
-        val ps = entries collect { case (_, p) if p appliesTo topic => p }
+        val ps = entries collect { case (_, p) if doesPlanApply(topic)(p) => p }
         log.debug( "PlanCatalog[{}]: for topic:[{}] returning plans:[{}]", self.path.name, topic, ps.mkString(", ") )
         P.CatalogedPlans( plans = ps.toSet, request = req )
       }
@@ -569,7 +574,8 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
       model <- boundedContext.futureModel
       entries <- planIndex.futureEntries
     } {
-      entries.values withFilter { _ appliesTo route.timeSeries } foreach { plan =>
+      val applyTest = doesPlanApply(route.timeSeries)( _: AnalysisPlan.Summary )
+      entries.values withFilter { applyTest } foreach { plan =>
         val planRef = model( AnalysisPlanModule.module.rootType, plan.id )
         log.debug(
           "PlanCatalog:DISPATCH[{}]: sending topic[{}] to plan-module[{}] with sender:[{}]",

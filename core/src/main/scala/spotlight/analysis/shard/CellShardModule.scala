@@ -190,7 +190,7 @@ object CellShardModule extends LazyLogging {
 
     override def parseId( idrep: String ): TID = identifying.safeParseTid[TID]( idrep )( classTag[TID] )
 
-    override var state: CellShardCatalog= _
+    override var state: CellShardCatalog = _
     override val evState: ClassTag[CellShardCatalog] = classTag[CellShardCatalog]
 
     override def acceptance: Acceptance = {
