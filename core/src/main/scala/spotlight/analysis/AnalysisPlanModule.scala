@@ -37,16 +37,39 @@ import spotlight.analysis.OutlierDetection.{DetectionResult, DetectionTimedOut}
 import spotlight.analysis.{AnalysisPlanProtocol => P}
 
 
-case class AnalysisPlanState( plan: AnalysisPlan, routes: Map[Symbol, AlgorithmRoute] ) extends Entity {
-  override type ID = AnalysisPlan#ID
-  override type TID = peds.commons.identifier.TaggedID[ID]
+case class AnalysisPlanState( plan: AnalysisPlan ) extends Entity {
+  override type ID = plan.ID
+  override type TID = plan.TID
   override def id: TID = plan.id
   override val evID: ClassTag[ID] = classTag[ID]
   override val evTID: ClassTag[TID] = classTag[TID]
   override def name: String = plan.name
   override def canEqual( that: Any ): Boolean = that.isInstanceOf[AnalysisPlanState]
+
+  def algorithms: Set[Symbol] = AnalysisPlanState.allAlgorithms( plan.algorithms, plan.algorithmConfig )
+
+  def routes( implicit model: DomainModel ): Map[Symbol, AlgorithmRoute] = {
+//    implicit val ec: scala.concurrent.ExecutionContext = context.dispatcher
+    implicit val ec = model.system.dispatcher
+
+    def makeRoute( plan: AnalysisPlan )( algorithm: Symbol ): Option[AlgorithmRoute] = {
+      DetectionAlgorithmRouter.Registry.rootTypeFor( algorithm ).map{ rt => AlgorithmRoute.routeFor( plan, rt )( model ) }
+    }
+
+    val routes = algorithms.toSeq.map{ a => (a, makeRoute(plan)(a) ) }.collect{ case (a, Some(r)) => ( a, r ) }
+    Map( routes:_* )
+  }
+
 }
 
+object AnalysisPlanState {
+  def allAlgorithms( algorithms: Set[Symbol], algorithmSpec: Config ): Set[Symbol] = {
+    import scala.collection.immutable
+    import scala.collection.JavaConversions._
+    val inSpec = algorithmSpec.root.entrySet.to[immutable.Set] map { e => Symbol(e.getKey) }
+    algorithms ++ inSpec
+  }
+}
 
 object AnalysisPlanProtocol extends EntityProtocol[AnalysisPlanState#ID] {
   case class MakeFlow(
@@ -158,7 +181,7 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
     () => {
       Seq(
         IndexLocalAgent.spec[String, module.TID, AnalysisPlan.Summary]( specName = namedPlanIndex, IndexBusSubscription ) {
-          case P.Added( sid, Some(AnalysisPlanState(p: AnalysisPlan, _)) ) => Directive.Record( p, sid, p.toSummary )
+          case P.Added( sid, Some(AnalysisPlanState(p: AnalysisPlan)) ) => Directive.Record( p, sid, p.toSummary )
           case P.Added( sid, Some( p: AnalysisPlan ) ) => Directive.Record( p.name, sid, p.toSummary )
           case P.Added( sid, info ) => {
 //            logger.error( "ignoring added event since info was not an AnalysisPlan: [{}]", info )
@@ -315,7 +338,7 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
       override var state: AnalysisPlanState = _
       override val evState: ClassTag[AnalysisPlanState] = classTag[AnalysisPlanState]
       override def plan: AnalysisPlan = state.plan
-      override def routes: Map[Symbol, AlgorithmRoute] = state.routes
+      override def routes: Map[Symbol, AlgorithmRoute] = state.routes( model )
 
 
       var detector: ActorRef = _
@@ -328,7 +351,7 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
           context become LoggingReceive { around( active ) }
           info match {
             case Some( ps: AnalysisPlanState ) => ps
-            case Some( p: AnalysisPlan ) => AnalysisPlanState( plan = p, routes = makeRoutes(p)() )
+            case Some( p: AnalysisPlan ) => AnalysisPlanState( p )
             case i => log.error( "ignoring Added command with unrecognized info:[{}]", info );  s
 //            case i => altLog.error( Map("@msg" -> "ignoring Added command with unrecognized info", "info" -> i.toString) ); s
           }
@@ -340,16 +363,12 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
         }
 
         case (e: P.AlgorithmsChanged, s) => {
-          implicit val ec: scala.concurrent.ExecutionContext = context.dispatcher
-          val addedRoutes = makeRoutes( plan )( e.added )
-
           //todo: cast for expediency. my ideal is to define a Lens in the AnalysisPlan trait; minor solace is this module is in the same package
           s.copy(
             plan = s.plan.asInstanceOf[AnalysisPlan.SimpleAnalysisPlan].copy(
               algorithms = e.algorithms,
               algorithmConfig = e.algorithmConfig
-            ),
-            routes = s.routes -- e.dropped ++ addedRoutes
+            )
           )
         }
 
@@ -359,20 +378,20 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
         }
       }
 
-      private def makeRoutes(
-        plan: AnalysisPlan
-      )(
-        algorithms: Set[Symbol] = allAlgorithms(plan.algorithms, plan.algorithmConfig)
-      ): Map[Symbol, AlgorithmRoute] = {
-        implicit val ec: scala.concurrent.ExecutionContext = context.dispatcher
-
-        def makeRoute( plan: AnalysisPlan )( algorithm: Symbol ): Option[AlgorithmRoute] = {
-          DetectionAlgorithmRouter.Registry.rootTypeFor( algorithm ).map{ rt => AlgorithmRoute.routeFor( plan, rt )( model ) }
-        }
-
-        val routes = algorithms.toSeq.map{ a => (a, makeRoute(plan)(a) ) }.collect{ case (a, Some(r)) => ( a, r ) }
-        Map( routes:_* )
-      }
+//      private def makeRoutes(
+//        plan: AnalysisPlan
+//      )(
+//        algorithms: Set[Symbol] = allAlgorithms(plan.algorithms, plan.algorithmConfig)
+//      ): Map[Symbol, AlgorithmRoute] = {
+//        implicit val ec: scala.concurrent.ExecutionContext = context.dispatcher
+//
+//        def makeRoute( plan: AnalysisPlan )( algorithm: Symbol ): Option[AlgorithmRoute] = {
+//          DetectionAlgorithmRouter.Registry.rootTypeFor( algorithm ).map{ rt => AlgorithmRoute.routeFor( plan, rt )( model ) }
+//        }
+//
+//        val routes = algorithms.toSeq.map{ a => (a, makeRoute(plan)(a) ) }.collect{ case (a, Some(r)) => ( a, r ) }
+//        Map( routes:_* )
+//      }
 
       val IdType = identifying.evTID
 
@@ -405,7 +424,7 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
 //          )
         }
 
-        case m => log.error( "ignoring unrecognized message[{}]", m )
+        case m => log.error( "[quiescent] ignoring unrecognized message[{}]", m )
 //        case m => altLog.error( Map("@msg" -> "ignoring unrecognized message", "message" -> m.toString) )
       }
 
@@ -430,24 +449,16 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
       }
 
       def changeAlgorithms( algorithms: Set[Symbol], algorithmSpec: Config ): P.AlgorithmsChanged = {
-        val newAlgorithms = allAlgorithms( algorithms, algorithmSpec )
-        val myRoutes = state.routes
-        val dropped = myRoutes.keySet -- newAlgorithms
-        val added = newAlgorithms -- myRoutes.keySet
+        val myAlgorithms = state.algorithms
+        val newAlgorithms = AnalysisPlanState.allAlgorithms( algorithms, algorithmSpec )
+
         P.AlgorithmsChanged(
           sourceId = aggregateId,
           algorithms = newAlgorithms,
           algorithmConfig = algorithmSpec,
-          added = added,
-          dropped = dropped
+          added = newAlgorithms -- myAlgorithms,
+          dropped = myAlgorithms -- newAlgorithms
         )
-      }
-
-      private def allAlgorithms( algorithms: Set[Symbol], algorithmSpec: Config ): Set[Symbol] = {
-        import scala.collection.immutable
-        import scala.collection.JavaConversions._
-        val inSpec = algorithmSpec.root.entrySet.to[immutable.Set] map { e => Symbol(e.getKey) }
-        algorithms ++ inSpec
       }
 
       override def unhandled( message: Any ): Unit = {

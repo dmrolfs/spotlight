@@ -338,7 +338,7 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[AnalysisPlanState] with Op
       actual.appliesTo must be theSameInstanceAs testApplies
     }
 
-    "change algorithms" taggedAs WIP in { f: Fixture =>
+    "change algorithms" in { f: Fixture =>
       import f._
 
       entity !+ protocol.Add( tid, Some(plan) )

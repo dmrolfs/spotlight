@@ -42,7 +42,8 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
 
   type Module <: AlgorithmModule
   val defaultModule: Module
-  lazy val identifying: EntityIdentifying[AlgorithmModule.AnalysisState] = defaultModule.identifying
+  type State = AlgorithmState[defaultModule.Shape]
+  lazy val identifying: EntityIdentifying[State] = defaultModule.identifying
 
 
   override def testSlug( test: OneArgTest ): String = {
@@ -141,9 +142,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
 
     def expectedUpdatedShape( shape: TestShape, event: P.Advanced): TestShape
 
-    import AlgorithmModule.AnalysisState
-
-    def actualVsExpectedState(actual: Option[AnalysisState], expected: Option[AnalysisState]): Unit = {
+    def actualVsExpectedState(actual: Option[State], expected: Option[State]): Unit = {
       actual.isDefined mustBe expected.isDefined
       for {
         a <- actual
@@ -152,7 +151,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
         logger.debug( "TEST: actualVsExpected STATE:\n  Actual:[{}]\nExpected:[{}]", a, e )
         a.id.id mustBe e.id.id
         a.name mustBe e.name
-        a.algorithm.name mustBe e.algorithm.name
+        a.name mustBe e.name
         //        a.thresholds mustBe e.thresholds
         a.## mustBe e.##
       }

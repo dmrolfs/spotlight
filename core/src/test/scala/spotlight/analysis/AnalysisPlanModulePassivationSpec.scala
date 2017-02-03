@@ -7,6 +7,7 @@ import com.typesafe.config.{Config, ConfigFactory}
 import peds.akka.envelope._
 import peds.akka.envelope.pattern.ask
 import akka.actor.{ActorRef, ActorSystem, Props}
+import com.typesafe.scalalogging.StrictLogging
 import demesne.index.StackableIndexBusPublisher
 import demesne.{AggregateRootType, DomainModel}
 import demesne.module.{AggregateEnvironment, LocalAggregate}
@@ -20,7 +21,7 @@ import shapeless.Lens
 import spotlight.analysis.AnalysisPlanModule.AggregateRoot.PlanActor
 import spotlight.analysis.AnalysisPlanModule.AggregateRoot.PlanActor.{FlowConfigurationProvider, WorkerProvider}
 import spotlight.analysis.algorithm.statistical.SimpleMovingAverageAlgorithm
-import spotlight.model.outlier.{IsQuorum, AnalysisPlan, ReduceOutliers}
+import spotlight.model.outlier.{AnalysisPlan, IsQuorum, ReduceOutliers}
 import spotlight.testkit.EntityModuleSpec
 import spotlight.analysis.{AnalysisPlanProtocol => P}
 
@@ -131,7 +132,7 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[AnalysisPlanSta
       }
     }
 
-    "must not respond before add" in { f: Fixture =>
+    "must not respond before add" taggedAs WIP in { f: Fixture =>
       import f._
       val info = ( entity ?+ P.UseAlgorithms( tid, Set( 'foo, 'bar ), ConfigFactory.empty() ) ).mapTo[P.PlanInfo]
       bus.expectNoMsg()
@@ -166,7 +167,7 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[AnalysisPlanSta
       }
     }
 
-    "take and recover from snapshots" taggedAs WIP in { f: Fixture =>
+    "take and recover from snapshots" in { f: Fixture =>
       import f._
 
       val p1 = makePlan( "TestPlan", None )
@@ -201,7 +202,7 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[AnalysisPlanSta
   }
 }
 
-object AnalysisPlanModulePassivationSpec {
+object AnalysisPlanModulePassivationSpec extends StrictLogging {
   def config( systemName: String ): Config = {
     val planConfig: Config = ConfigFactory.parseString(
       """
@@ -224,6 +225,8 @@ object AnalysisPlanModulePassivationSpec {
       """.stripMargin
     )
 
-    planConfig withFallback spotlight.testkit.config( "core", systemName )
+    val c = planConfig withFallback spotlight.testkit.config( "core", systemName )
+    logger.warn( "#TEST making config... akka.actor.kryo[{}]:[\n{}\n]", c.hasPath("akka.actor.kryo").toString, c.getConfig("akka.actor.kryo").root.render() )
+    c
   }
 }
