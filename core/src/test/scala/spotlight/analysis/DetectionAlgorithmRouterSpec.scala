@@ -9,7 +9,6 @@ import org.joda.{time => joda}
 import org.scalatest.mockito.MockitoSugar
 import org.mockito.Mockito._
 import peds.akka.envelope.{Envelope, WorkId}
-import spotlight.analysis.DetectionAlgorithmRouter.ShardedRootTypeProxy
 import spotlight.analysis.shard._
 import spotlight.model.outlier.{IsQuorum, AnalysisPlan, ReduceOutliers}
 import spotlight.model.timeseries.{DataPoint, TimeSeries}
@@ -80,11 +79,11 @@ class DetectionAlgorithmRouterSpec extends ParallelAkkaSpec with MockitoSugar {
       model must not be (null)
       val testConfig = ConfigFactory.parseString(
         s"""
-           | spotlight.detection-plans.${plan.name}.shard: ${CellShardingStrategy.key}
+           | spotlight.detection-plans.${plan.name}.shard: ${AlgorithmRoute.ShardedRoute.CellStrategy.key}
          """.stripMargin
       )
       when( model.configuration ).thenReturn( testConfig.withFallback( config ) )
-      model.configuration.getString( s"spotlight.detection-plans.${plan.name}.shard" ) mustBe CellShardingStrategy.key
+      model.configuration.getString( s"spotlight.detection-plans.${plan.name}.shard" ) mustBe AlgorithmRoute.ShardedRoute.CellStrategy.key
 
       algorithmRootType must not be (null)
       catalogId must not be (null)

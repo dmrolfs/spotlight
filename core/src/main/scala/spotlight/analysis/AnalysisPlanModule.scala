@@ -141,6 +141,7 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
 
   implicit val identifying: EntityIdentifying[AnalysisPlanState] = {
     new EntityIdentifying[AnalysisPlanState] with ShortUUID.ShortUuidIdentifying[AnalysisPlanState] {
+      override lazy val idTag: Symbol = AnalysisPlan.analysisPlanIdentifying.idTag
       override val evEntity: ClassTag[AnalysisPlanState] = classTag[AnalysisPlanState]
     }
   }
@@ -391,7 +392,7 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
             "targetId:[{}] targetId-class:[{}] " +
             "aggregateId:[{}] aggregateId-class:[{}]",
             targetId, targetId.id.getClass.getName,
-            aggregateId, aggregateId.getClass.getName
+            aggregateId, aggregateId.id.getClass.getName
           )
 //          altLog.error(
 //            Map(

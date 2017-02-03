@@ -18,7 +18,7 @@ import spotlight.model.outlier.AnalysisPlan.Scope
   * Created by rolfsd on 9/21/16.
   */
 sealed trait OutlierDetectionMessage extends CommandLike {
-  override type ID = AnalysisPlanModule.module.ID
+  override type ID = Any // AnalysisPlanModule.module.ID
   //todo: detect message is routed to many algorithms, each with own tag. This targetId is set to a dummy tag knowing that
   // aggregate routing uses id portion only and ignores tag.
 //  override def targetId: TID = plan.id

@@ -98,7 +98,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
 
     val scope = AnalysisPlan.Scope( plan = "TestPlan", topic = "test.topic" )
     val plan = mock[AnalysisPlan]
-    when( plan.id ).thenReturn( fixture.id )
+    when( plan.id ).thenReturn( AnalysisPlan.analysisPlanIdentifying.nextId.toOption.get )
     when( plan.name ).thenReturn( scope.plan )
     when( plan.appliesTo ).thenReturn( fixture.appliesToAll )
     when( plan.algorithms ).thenReturn( Set( module.algorithm.label ) )
@@ -109,7 +109,15 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
       r
     }
 
-    override def nextId(): module.TID = identifying.tag( ShortUUID() )
+//    override def nextId(): module.TID = identifying.tag( ShortUUID() )
+    override def nextId(): module.TID = identifying.tag(
+      AlgorithmIdentifier.nextId(
+        planName = plan.name,
+        planId = plan.id.id.toString,
+        spanType = AlgorithmIdentifier.TopicSpan,
+        spanHint = scope.topic.toString
+      )
+    )
 
     override def before(test: OneArgTest): Unit = {
       super.before( test )

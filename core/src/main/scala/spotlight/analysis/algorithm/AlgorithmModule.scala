@@ -21,23 +21,24 @@ import Scalaz._
 import scalaz.Kleisli.{ask, kleisli}
 import com.typesafe.config.Config
 import com.typesafe.config.ConfigException.BadValue
-import com.typesafe.scalalogging.{LazyLogging, StrictLogging}
 import org.apache.commons.math3.ml.clustering.DoublePoint
 import com.codahale.metrics.{Metric, MetricFilter}
 import nl.grons.metrics.scala.{Meter, MetricName, Timer}
 import squants.information.{Bytes, Information}
+import com.persist.logging.{ActorLogging => PersistActorLogging, _}
 import peds.akka.envelope._
 import peds.akka.metrics.{Instrumented, InstrumentedActor}
 import peds.akka.persistence.{Passivating, SnapshotLimiter}
 import peds.akka.publish.{EventPublisher, StackableStreamPublisher}
 import peds.archetype.domain.model.core.{Entity, EntityIdentifying}
-import peds.commons.{KOp, TryV}
+import peds.commons.{KOp, TryV, Valid}
 import peds.commons.identifier.{Identifying, ShortUUID, TaggedID}
 import demesne._
-import demesne.repository.{AggregateRootRepository, CommonLocalRepository, EnvelopingAggregateRootRepository}
+import demesne.repository.{AggregateRootRepository, EnvelopingAggregateRootRepository}
 import demesne.repository.AggregateRootRepository.{ClusteredAggregateContext, LocalAggregateContext}
 import spotlight.analysis._
-import spotlight.model.outlier.{NoOutliers, AnalysisPlan, Outliers}
+import spotlight.analysis.algorithm.AlgorithmModule.ID
+import spotlight.model.outlier.{AnalysisPlan, NoOutliers, Outliers}
 import spotlight.model.timeseries._
 
 
@@ -99,14 +100,14 @@ object AlgorithmProtocol extends AggregateProtocol[AlgorithmModule.ID] {
 /**
   * Created by rolfsd on 6/5/16.
   */
-object AlgorithmModule extends Instrumented with StrictLogging {
+object AlgorithmModule extends Instrumented with ClassLogging {
   // useful for with* methods to maintain concrete typing
   // idea pick up from: http://stackoverflow.com/questions/14729996/scala-implementing-method-with-return-type-of-concrete-instance
   trait StrictSelf[T <: StrictSelf[T]] { self: T =>
     type Self >: self.type <: T
   }
 
-  type ID = ShortUUID
+  type ID = AlgorithmIdentifier
   type TID = TaggedID[ID]
 
 
@@ -154,6 +155,7 @@ object AlgorithmModule extends Instrumented with StrictLogging {
       }
     }
   }
+
 
 
   trait ShapeCompanion[S] {
@@ -223,18 +225,28 @@ object AlgorithmModule extends Instrumented with StrictLogging {
   val passivationTimer: Timer = metrics.timer( "passivation" )
 }
 
-abstract class AlgorithmModule extends AggregateRootModule with Instrumented { module: AlgorithmModule.ModuleConfiguration =>
+abstract class AlgorithmModule extends AggregateRootModule with Instrumented with ClassLogging {
+  module: AlgorithmModule.ModuleConfiguration =>
+
   import AlgorithmModule.{ AnalysisState, ShapeCompanion, StrictSelf }
   import AlgorithmProtocol.Advanced
 
-  implicit val identifying: EntityIdentifying[AnalysisState] = {
-    val i = new EntityIdentifying[AnalysisState] with ShortUUID.ShortUuidIdentifying[AnalysisState] {
-      override lazy val idTag: Symbol = algorithm.label
-      override val evEntity: ClassTag[AnalysisState] = classTag[AnalysisState]
-    }
+  implicit val identifying: EntityIdentifying[AnalysisState] = new EntityIdentifying[AnalysisState] {
+    override lazy val idTag: Symbol = algorithm.label
+    override val evID: ClassTag[ID] = classTag[ID]
+    override val evTID: ClassTag[TID] =  classTag[TID]
+    override val evEntity: ClassTag[AnalysisState] = classTag[AnalysisState]
 
-    logger.warn( "ALGO_MODULE identifying = [{}]", i)
-    i
+    override def nextId: TryV[TID] = -\/( new IllegalStateException("AlgorithmModule TIDs are created via AlgorithmRoutes") )
+    override def fromString( idstr: String ): ID = {
+      AlgorithmIdentifier.from( idstr ).disjunction match {
+        case \/-( id ) => log.warn(Map("@msg"->"ALGO_MODULE identifying", "id"->id) ); id
+        case -\/( exs ) => {
+          exs foreach { ex => log.error( Map("@msg" -> "failed to parse algorithm id from string", "rep" -> idstr), ex ) }
+          throw exs.head
+        }
+      }
+    }
   }
 
 
@@ -358,7 +370,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
   type Context <: AlgorithmContext
   def makeContext( message: DetectUsing, state: Option[State] ): Context
 
-  trait AlgorithmContext extends LazyLogging {
+  trait AlgorithmContext {
     def message: DetectUsing
     def topic: Topic = message.topic
     def data: Seq[DoublePoint]
@@ -454,7 +466,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
 
         Some(
           new SnapshotSpecification {
-            override val snapshotInterval: FiniteDuration = 3.minutes // 2.minutes // 5.minutes okay
+            override val snapshotInterval: FiniteDuration = 30.seconds // 2.minutes // 5.minutes okay
             override val snapshotInitialDelay: FiniteDuration = {
               val delay = snapshotInterval + snapshotInterval * AlgorithmModule.snapshotFactorizer.nextDouble()
               FiniteDuration( delay.toMillis, MILLISECONDS )

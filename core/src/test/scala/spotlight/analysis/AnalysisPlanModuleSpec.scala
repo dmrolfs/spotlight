@@ -30,16 +30,17 @@ import spotlight.model.timeseries._
 /**
   * Created by rolfsd on 6/15/16.
   */
-class AnalysisPlanModuleSpec extends EntityModuleSpec[AnalysisPlan] with OptionValues { outer =>
+class AnalysisPlanModuleSpec extends EntityModuleSpec[AnalysisPlanState] with OptionValues { outer =>
   override type ID = AnalysisPlanModule.module.ID
   override type Protocol = AnalysisPlanProtocol.type
   override val protocol: Protocol = AnalysisPlanProtocol
 
+  implicit val moduleIdentifying = AnalysisPlanModule.identifying
 
-  abstract class FixtureModule extends EntityAggregateModule[AnalysisPlan] { testModule =>
+  abstract class FixtureModule extends EntityAggregateModule[AnalysisPlanState] { testModule =>
     private val trace: Trace[_] = Trace[FixtureModule]
-    override val idLens: Lens[AnalysisPlan, TaggedID[ShortUUID]] = AnalysisPlan.idLens
-    override val nameLens: Lens[AnalysisPlan, String] = AnalysisPlan.nameLens
+    override val idLens: Lens[AnalysisPlanState, AnalysisPlanState#TID] = AnalysisPlanModule.idLens
+    override val nameLens: Lens[AnalysisPlanState, String] = AnalysisPlanModule.nameLens
     //      override def aggregateRootPropsOp: AggregateRootProps = testProps( _, _ )( proxy )
     override def environment: AggregateEnvironment = LocalAggregate
   }
@@ -313,7 +314,7 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[AnalysisPlan] with OptionV
       bus.expectNoMsg()
     }
 
-    "change appliesTo" taggedAs WIP in { f: Fixture =>
+    "change appliesTo" in { f: Fixture =>
       import f._
 
       entity !+ protocol.Add( tid, Some(plan) )
@@ -337,7 +338,7 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[AnalysisPlan] with OptionV
       actual.appliesTo must be theSameInstanceAs testApplies
     }
 
-    "change algorithms" in { f: Fixture =>
+    "change algorithms" taggedAs WIP in { f: Fixture =>
       import f._
 
       entity !+ protocol.Add( tid, Some(plan) )
@@ -352,9 +353,11 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[AnalysisPlan] with OptionV
 
       entity !+ AnalysisPlanProtocol.UseAlgorithms( tid, Set('foo, 'bar, 'zed), testConfig )
       bus.expectMsgPF( max = 3.seconds.dilated, hint = "use algorithms" ) {
-        case AnalysisPlanProtocol.AlgorithmsChanged(id, algos, config) => {
+        case AnalysisPlanProtocol.AlgorithmsChanged(id, algos, config, added, dropped) => {
           id mustBe tid
           algos mustBe Set('foo, 'bar, 'zed)
+          dropped mustBe Set( SimpleMovingAverageAlgorithm.algorithm.label )
+          added mustBe Set( 'foo, 'bar, 'zed )
           config mustBe testConfig
         }
       }
