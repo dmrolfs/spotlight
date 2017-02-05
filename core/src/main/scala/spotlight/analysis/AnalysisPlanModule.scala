@@ -231,14 +231,14 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
         override protected def onPersistRejected( cause: Throwable, event: Any, seqNr: Long ): Unit = {
           log.error(
             cause,
-            "persist rejected for event:[{}] persistenceId:[{}] sequenceNr:[{}]",
+            "persist rejected for event:[{}] aggregateId:[{}] sequenceNr:[{}]",
             event.getClass.getName, persistenceId, seqNr
           )
 //          altLog.error(
 //            msg = Map(
 //              "@msg" -> "persist event rejected",
 //              "event-type" -> event.getClass.getName,
-//              "persistence-id" -> persistenceId,
+//              "persistence-id" -> aggregateId,
 //              "sequence-nr" -> seqNr
 //            ),
 //            ex = cause

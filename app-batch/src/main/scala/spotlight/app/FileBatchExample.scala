@@ -138,7 +138,6 @@ object FileBatchExample extends Instrumented with StrictLogging {
     val context = {
       SpotlightContext
       .builder
-      .set( SpotlightContext.Name, "DetectionFlow" )
       //      .set( SpotlightContext.StartTasks, Set( /*SharedLeveldbStore.start(true), Spotlight.kamonStartTask*/ ) )
       .set( SpotlightContext.System, Some( system ) )
       .build()

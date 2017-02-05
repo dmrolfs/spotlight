@@ -43,7 +43,7 @@ case class AlgorithmIdentifier( planName: String, planId: String, spanType: Span
     }
   }
 
-  override def toString: String = AlgorithmIdentifier toPersistenceId this
+  override def toString: String = AlgorithmIdentifier toAggregateId this
 }
 
 object AlgorithmIdentifier extends ClassLogging {
@@ -75,18 +75,18 @@ object AlgorithmIdentifier extends ClassLogging {
 
   private lazy val IdFormat = s"""(.*)@(.*):(${AlgorithmIdentifier.SpanType.options.map{ _.label }.mkString("|")}):(.*)""".r
 
-  def toPersistenceId( id: AlgorithmIdentifier ): String = id.planName + "@" + id.planId + ":" + id.spanType.label + ":" + id.span
+  def toAggregateId(id: AlgorithmIdentifier ): String = id.planName + "@" + id.planId + ":" + id.spanType.label + ":" + id.span
 
-  def fromPersistenceId( persistenceId: String ): Valid[AlgorithmIdentifier] = {
-    persistenceId match {
+  def fromAggregateId( aggregateId: String ): Valid[AlgorithmIdentifier] = {
+    aggregateId match {
       case IdFormat( planName, planId, stype, span ) => {
         SpanType.from( stype )
         .map { spanType => AlgorithmIdentifier( planName = planName, planId = planId, spanType = spanType, span = span ) }
         .leftMap { exs =>
           log.error(
             Map(
-              "@msg" -> "failed to parse span type from algorithm persistenceId",
-              "persistenceId" -> persistenceId,
+              "@msg" -> "failed to parse span type from algorithm aggregateId",
+              "aggregateId" -> aggregateId,
               "parsed" -> Map(
                 "plan-name" -> planName,
                 "plan-id" -> planId,
@@ -102,7 +102,7 @@ object AlgorithmIdentifier extends ClassLogging {
       case _ => {
         Validation.failureNel(
           new IllegalStateException(
-            s"failed to parse algorithm persistenceId[${persistenceId}], which does not match expected format."
+            s"failed to parse algorithm aggregateId[${aggregateId}], which does not match expected format."
           )
         )
       }

@@ -292,7 +292,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented wit
 
     override def nextId: TryV[TID] = -\/( new IllegalStateException("AlgorithmModule TIDs are created via AlgorithmRoutes") )
     override def fromString( idstr: String ): ID = {
-      AlgorithmIdentifier.fromPersistenceId( idstr ).disjunction match {
+      AlgorithmIdentifier.fromAggregateId( idstr ).disjunction match {
         case \/-( id ) => id
         case -\/( exs ) => {
           exs foreach { ex => log.error( Map("@msg" -> "failed to parse algorithm id from string", "rep" -> idstr), ex ) }
@@ -571,9 +571,18 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented wit
         log.warning( "AggregateRootType[{}] does not recognize command[{}]", rootType.name, command )
       }
       val (id, _) = rootType aggregateIdFor command
-      val options = backoffOptionsFor( id )
-      val name = "backoff-"+id
-      context.child( name ) getOrElse { context.actorOf( BackoffSupervisor.props(options), "backoff-"+id ) }
+      AlgorithmIdentifier.fromAggregateId( id ).disjunction match {
+        case \/-( aid ) => {
+          val options = backoffOptionsFor( id )
+          val name = "backoff:"+aid.span
+          context.child( name ) getOrElse { context.actorOf( BackoffSupervisor.props(options), name ) }
+        }
+
+        case -\/( exs ) => {
+          exs foreach { ex => log.error( ex, "failed to parse aggregateId:[{}] from rootType:[{}]", id, rootType.name ) }
+          throw exs.head
+        }
+      }
     }
   }
 
@@ -1101,8 +1110,8 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented wit
       startSnapshotSweepTimer()
       deleteSnapshots( SnapshotSelectionCriteria( maxSequenceNr = snapshotSequenceNr - 1 ) )
 
-      startJournalSweepTimer()
-      deleteMessages( snapshotSequenceNr )
+//      startJournalSweepTimer()
+//      deleteMessages( snapshotSequenceNr )
     }
 
     override protected def onPersistFailure( cause: Throwable, event: Any, seqNr: Long ): Unit = {

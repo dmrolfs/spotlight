@@ -87,7 +87,7 @@ object AlgorithmRoute extends ClassLogging {
           import scalaz.{ \/-, -\/ }
 
           val (aid, _) = algorithmRootType.aggregateIdFor( m )
-          AlgorithmIdentifier.fromPersistenceId( aid ).disjunction match {
+          AlgorithmIdentifier.fromAggregateId( aid ).disjunction match {
             case \/-( pid ) => algorithmIdentifying.tag( pid.asInstanceOf[algorithmIdentifying.ID] )
             case -\/( exs ) => {
               exs foreach { ex =>

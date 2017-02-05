@@ -42,7 +42,7 @@ final case class SpotlightContext(
 )
 
 object SpotlightContext extends HasBuilder[SpotlightContext] {
-  object Name extends Param[String]
+  object Name extends OptParam[String]( "Spotlight" )
   object RootTypes extends OptParam[Set[AggregateRootType]]( Set.empty[AggregateRootType] )
   object System extends OptParam[Option[ActorSystem]]( None )
   object Resources extends OptParam[Map[Symbol, Any]]( Map.empty[Symbol, Any] )
@@ -246,7 +246,7 @@ object Spotlight extends Instrumented with StrictLogging {
 
     Flow
     .fromGraph( graph )
-    .named( "DetectionFlow" )
+    .named( "Spotlight" )
     .withAttributes( ActorAttributes supervisionStrategy supervisionDecider )
   }
 
