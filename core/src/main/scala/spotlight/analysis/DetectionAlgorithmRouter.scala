@@ -275,7 +275,7 @@ class DetectionAlgorithmRouter extends Actor with EnvelopingActor with Instrumen
     }
 
     case RegisterAlgorithmRootType( algorithm, algorithmRootType, model, _ ) => {
-      addRoute( algorithm, AlgorithmRoute.RootTypeRoute( algorithmRootType, model ) )
+      addRoute( algorithm, AlgorithmRoute.RootTypeRoute(plan, algorithmRootType, model) )
       sender() !+ AlgorithmRegistered( algorithm )
     }
   }

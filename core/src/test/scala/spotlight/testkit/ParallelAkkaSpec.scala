@@ -9,7 +9,7 @@ import akka.dispatch.Dispatchers
 import akka.event.{Logging, LoggingAdapter}
 import akka.testkit.TestEvent.Mute
 import akka.testkit.{DeadLettersFilter, TestKit}
-
+import com.persist.logging._
 import scalaz.{-\/, \/, \/-}
 import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.{LazyLogging, StrictLogging}
@@ -28,6 +28,8 @@ object ParallelAkkaSpec extends LazyLogging {
     ConfigFactory.load.withFallback(
       ConfigFactory.parseString(
         s"""
+          |include "logging.conf"
+          |
           |akka {
           |  persistence {
           |    journal.plugin = "inmemory-journal"
@@ -131,7 +133,12 @@ with StrictLogging {
 
 
   class AkkaFixture( val config: Config, _system: ActorSystem, val slug: String ) extends TestKit( _system ) {
-    def before( test: OneArgTest ): Unit = { }
+    var loggingSystem: LoggingSystem = _
+
+    def before( test: OneArgTest ): Unit = {
+      loggingSystem = LoggingSystem( _system, s"Test:${getClass.getName}", "1", "localhost" )
+    }
+
     def after( test: OneArgTest ): Unit = { }
 
     val log: LoggingAdapter = Logging( system, outer.getClass )

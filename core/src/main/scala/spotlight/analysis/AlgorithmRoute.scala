@@ -2,6 +2,7 @@ package spotlight.analysis
 
 import scala.reflect._
 import akka.actor.{ActorContext, ActorRef}
+import scalaz.\/
 import com.persist.logging._
 import com.typesafe.config.{Config, ConfigFactory, ConfigObject, ConfigValueType}
 import demesne.{AggregateRootType, DomainModel}
@@ -9,12 +10,10 @@ import peds.akka.envelope._
 import peds.commons.identifier.{Identifying, ShortUUID, TaggedID}
 import peds.commons.util._
 import spotlight.Settings
+import spotlight.analysis.algorithm.{AlgorithmIdentifier, AlgorithmModule, AlgorithmProtocol}
 import spotlight.analysis.shard._
 import spotlight.model.outlier.AnalysisPlan
-import spotlight.model.outlier.AnalysisPlan.Summary
 import squants.information.{Bytes, Information, Megabytes}
-
-import scalaz.\/
 
 
 sealed abstract class AlgorithmRoute {
@@ -39,7 +38,7 @@ object AlgorithmRoute extends ClassLogging {
     val route = {
       strategy
       .map { strategy => ShardedRoute( plan, algorithmRootType, strategy, model ) }
-      .getOrElse { RootTypeRoute( algorithmRootType, model ) }
+      .getOrElse { RootTypeRoute( plan, algorithmRootType, model ) }
     }
 
     log.debug(
@@ -60,18 +59,72 @@ object AlgorithmRoute extends ClassLogging {
     override def referenceFor( message: Any )( implicit context: ActorContext ): ActorRef = reference
   }
 
-  case class RootTypeRoute( algorithmRootType: AggregateRootType, model: DomainModel ) extends AlgorithmRoute with ClassLogging {
-    def algorithmIdFor( m: Any ): Any = {
-      if ( algorithmRootType.aggregateIdFor isDefinedAt m ) algorithmRootType.aggregateIdFor( m )._1
-      else {
-        log.error(
-          Map(
-            "@msg" -> "failed to extract algorithm aggregate id from message",
-            "algorithm" -> algorithmRootType.name,
-            "message-class" -> m.getClass.getName
+  case class RootTypeRoute(
+    plan: AnalysisPlan.Summary,
+    algorithmRootType: AggregateRootType,
+    model: DomainModel
+  ) extends AlgorithmRoute with ClassLogging with com.typesafe.scalalogging.StrictLogging {
+    implicit lazy val algorithmIdentifying: Identifying[_] = algorithmRootType.identifying
+
+    override def forward( message: Any )( implicit sender: ActorRef, context: ActorContext ): Unit = {
+      referenceFor( message ) forwardEnvelope AlgorithmProtocol.RouteMessage( targetId = algorithmIdFor( message ), message )
+    }
+
+    def algorithmIdFor( message: Any ): AlgorithmModule.TID = {
+      val result = message match {
+        case m: DetectUsing => {
+          algorithmIdentifying.tag(
+            AlgorithmIdentifier(
+              planName = plan.name,
+              planId = plan.id.id.toString,
+              spanType = AlgorithmIdentifier.TopicSpan,
+              span = m.topic.toString
+            ).asInstanceOf[algorithmIdentifying.ID]
           )
-        )
+        }
+
+        case m if algorithmRootType.aggregateIdFor isDefinedAt m => {
+          import scalaz.{ \/-, -\/ }
+
+          val (aid, _) = algorithmRootType.aggregateIdFor( m )
+          AlgorithmIdentifier.fromPersistenceId( aid ).disjunction match {
+            case \/-( pid ) => algorithmIdentifying.tag( pid.asInstanceOf[algorithmIdentifying.ID] )
+            case -\/( exs ) => {
+              exs foreach { ex =>
+                log.error(
+                  Map(
+                    "@msg" -> "failed to parse algorithm identifier from aggregate id",
+                    "aggregateId" -> aid,
+                    "message" -> m.toString
+                  ),
+                  ex
+                )
+              }
+
+              throw exs.head
+            }
+          }
+        }
+
+        case m => {
+          val ex = new IllegalStateException(
+            s"failed to extract algorithm[${algorithmRootType.name}] aggregate id from message:[${m}]"
+          )
+
+          log.error(
+            Map(
+              "@msg" -> "failed to extract algorithm aggregate id from message",
+              "algorithm" -> algorithmRootType.name,
+              "message-class" -> m.getClass.getName
+            ),
+            ex
+          )
+
+          throw ex
+        }
       }
+
+      result.asInstanceOf[AlgorithmModule.TID]
     }
 
     override def referenceFor( message: Any )( implicit context: ActorContext ): ActorRef = {
@@ -84,8 +137,8 @@ object AlgorithmRoute extends ClassLogging {
             "model" -> model.toString,
             "algorithm-id" -> algorithmIdFor( message ),
             "message-class" -> message.getClass.getName
-            )
           )
+        )
         model.system.deadLetters
       }
     }
@@ -134,6 +187,17 @@ object AlgorithmRoute extends ClassLogging {
         val add = makeAddCommand( plan, algorithmRootType )
         add foreach { ref !+ _ }
         ref
+      }
+
+      def nextAlgorithmId( plan: AnalysisPlan.Summary, algorithmRootType: AggregateRootType ): () => AlgorithmModule.TID = { () =>
+        algorithmRootType.identifying.tag(
+          AlgorithmIdentifier(
+            planName = plan.name,
+            planId = plan.id.id.toString(),
+            spanType = AlgorithmIdentifier.GroupSpan,
+            span = ShortUUID().toString()
+          ).asInstanceOf[algorithmRootType.identifying.ID]
+        ).asInstanceOf[AlgorithmModule.TID]
       }
 
       def idFor(
@@ -244,8 +308,16 @@ object AlgorithmRoute extends ClassLogging {
       override def key: String = CellStrategy.key
       override val rootType: AggregateRootType = CellShardModule.module.rootType
 
-      override def makeAddCommand( plan: Summary, algorithmRootType: AggregateRootType ): Option[Any] = {
-        Some( CellShardProtocol.Add(targetId = idFor(plan, algorithmRootType.name), plan, algorithmRootType, nrCells = nrCells) )
+      override def makeAddCommand( plan: AnalysisPlan.Summary, algorithmRootType: AggregateRootType ): Option[Any] = {
+        Some(
+          CellShardProtocol.Add(
+            targetId = idFor(plan, algorithmRootType.name),
+            plan,
+            algorithmRootType,
+            nrCells = nrCells,
+            nextAlgorithmId(plan, algorithmRootType)
+          )
+        )
       }
     }
 
@@ -269,14 +341,15 @@ object AlgorithmRoute extends ClassLogging {
       override def key: String = LookupStrategy.key
       override val rootType: AggregateRootType = LookupShardModule.rootType
 
-      override def makeAddCommand( plan: Summary, algorithmRootType: AggregateRootType ): Option[Any] = {
+      override def makeAddCommand( plan: AnalysisPlan.Summary, algorithmRootType: AggregateRootType ): Option[Any] = {
         Some(
           LookupShardProtocol.Add(
             targetId = idFor(plan, algorithmRootType.name),
             plan,
             algorithmRootType,
             expectedNrTopics,
-            bySize
+            bySize,
+            nextAlgorithmId( plan, algorithmRootType )
           )
         )
       }

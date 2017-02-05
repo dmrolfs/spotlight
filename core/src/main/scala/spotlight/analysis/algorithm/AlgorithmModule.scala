@@ -39,12 +39,15 @@ import demesne.repository.AggregateRootRepository.{ClusteredAggregateContext, Lo
 import shapeless.the
 import spotlight.analysis._
 import spotlight.analysis.algorithm.AlgorithmModule.ID
+import spotlight.analysis.algorithm.AlgorithmProtocol.RouteMessage
 import spotlight.model.outlier.{AnalysisPlan, NoOutliers, Outliers}
 import spotlight.model.timeseries._
 
 
 object AlgorithmProtocol extends AggregateProtocol[AlgorithmModule.ID] {
-//  import AlgorithmModule.AnalysisState
+  case class RouteMessage( override val targetId: RouteMessage#TID, payload: Any ) extends MessageLike {
+    override type ID = AlgorithmModule.ID
+  }
 
   case class EstimateSize( override val targetId: EstimateSize#TID ) extends Message with NotInfluenceReceiveTimeout
   case class EstimatedSize( val sourceId: AlgorithmModule.TID, nrShapes: Int, size: Information ) extends ProtocolMessage {
@@ -289,8 +292,8 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented wit
 
     override def nextId: TryV[TID] = -\/( new IllegalStateException("AlgorithmModule TIDs are created via AlgorithmRoutes") )
     override def fromString( idstr: String ): ID = {
-      AlgorithmIdentifier.from( idstr ).disjunction match {
-        case \/-( id ) => log.warn(Map("@msg"->"ALGO_MODULE identifying", "id"->id) ); id
+      AlgorithmIdentifier.fromPersistenceId( idstr ).disjunction match {
+        case \/-( id ) => id
         case -\/( exs ) => {
           exs foreach { ex => log.error( Map("@msg" -> "failed to parse algorithm id from string", "rep" -> idstr), ex ) }
           throw exs.head
@@ -724,6 +727,8 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented wit
         }
       }
 
+      case RouteMessage( id, m ) if id == aggregateId && active.isDefinedAt( m ) => active( m )
+
       case AdvancedType( adv ) => persist( adv ) { accept }
 //      case AdvancedType( adv ) => accept( adv )
     }
@@ -1085,7 +1090,6 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented wit
 
 
     override def saveSnapshot( snapshot: Any ): Unit = {
-      // log.warning( "#TEST [{}] saveSnapshot", self.path.name )
       startSnapshotTimer()
       super.saveSnapshot( snapshot )
     }

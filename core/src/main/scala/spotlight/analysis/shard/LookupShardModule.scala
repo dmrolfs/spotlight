@@ -35,7 +35,8 @@ object LookupShardProtocol extends AggregateProtocol[LookupShardCatalog#ID] {
     plan: AnalysisPlan.Summary,
     algorithmRootType: AggregateRootType,
     expectedNrTopics: Int,
-    controlBySize: Information
+    controlBySize: Information,
+    nextAlgorithmId: () => AlgorithmModule.TID
 //    control: Option[Control] = None
   ) extends Command
 
@@ -44,7 +45,8 @@ object LookupShardProtocol extends AggregateProtocol[LookupShardCatalog#ID] {
     plan: AnalysisPlan.Summary,
     algorithmRootType: AggregateRootType,
     expectedNrTopics: Int,
-    controlBySize: Information
+    controlBySize: Information,
+    nextAlgorithmId: () => AlgorithmModule.TID
 //    control: LookupShardCatalog.Control
   ) extends Event
 
@@ -65,8 +67,8 @@ case class LookupShardCatalog(
   plan: AnalysisPlan.Summary,
   algorithmRootType: AggregateRootType,
   control: LookupShardCatalog.Control,
+  override val nextAlgorithmId: () => AlgorithmModule.TID,
   shards: Object2ObjectOpenHashMap[Topic, AlgoTID]
-//    shards: mutable.Map[Topic, AlgoTID] = mutable.Map.empty[Topic, AlgoTID]
 ) extends ShardCatalog with Equals {
   import LookupShardCatalog.identifying
 
@@ -298,7 +300,7 @@ object LookupShardModule extends AggregateRootModule { module =>
       var availability: Availability = _
 
       override def acceptance: Acceptance = {
-        case ( LookupShardProtocol.Added(tid, p, rt, nrTopics, bySize ), s ) if Option( s ).isEmpty => {
+        case ( LookupShardProtocol.Added(tid, p, rt, nrTopics, bySize, nextAlgorithmId ), s ) if Option( s ).isEmpty => {
           if ( shardMetrics.isEmpty ) {
             shardMetrics = Some( new ShardMetrics(plan = p, id = tid.id.asInstanceOf[ShardCatalog.ID] ) )
           }
@@ -307,6 +309,7 @@ object LookupShardModule extends AggregateRootModule { module =>
             plan = p,
             algorithmRootType = rt,
             control = LookupShardCatalog.Control.BySize( bySize ),
+            nextAlgorithmId = nextAlgorithmId,
             shards = LookupShardCatalog.makeShardMap( nrTopics )
           )
 
@@ -369,8 +372,8 @@ object LookupShardModule extends AggregateRootModule { module =>
       }
 
       val admin: Receive = {
-        case LookupShardProtocol.Add( id, p, art, nrTopics, bySize ) if id == aggregateId && Option( state ).isEmpty => {
-          persist( P.Added(id, p, art, nrTopics, bySize) ) { acceptAndPublish }
+        case LookupShardProtocol.Add( id, p, art, nrTopics, bySize, next ) if id == aggregateId && Option( state ).isEmpty => {
+          persist( P.Added(id, p, art, nrTopics, bySize, next) ) { acceptAndPublish }
         }
 
         case e: LookupShardProtocol.Add if e.targetId == aggregateId && Option( state ).nonEmpty => { }
@@ -411,30 +414,36 @@ object LookupShardModule extends AggregateRootModule { module =>
         case m: DetectUsing if Option(state).isDefined => {
           import scalaz.Scalaz.{ state => _, _ }
 
-          availability
-          .mostAvailable
-          .map { _.right[Throwable] }
-          .getOrElse {
-            val nid = state.algorithmRootType.identifying.nextIdAs[AlgoTID]
-            nid foreach { n => context become active( availability withNewShardId n ) }
-            log.info( "ShardCatalog[{}]: creating new shard id: NID[{}]  root-type:[{}] tag:[{}]", self.path.name, nid, state.algorithmRootType, state.algorithmRootType.identifying.idTag.name )
-            nid
-          }
-          .foreach { aid =>
-            log.debug( "ShardCatalog[{}]: unknown topic:[{}] routed to algorithm shard:[{}]", self.path.name, m.topic, aid )
-            persistAsync( P.ShardAssigned(aggregateId, m.topic, aid) ) { e =>
-//val e = P.ShardAssigned(aggregateId, m.topic, aid)
-              accept( e )
-
-              shardMetrics foreach { sm =>
-                sm.assignmentsMeter.mark()
-                sm.routingMeter.mark()
-              }
-
-              log.debug( "ShardCatalog[{}]: topic [{}] assigned and routed to algorithm shard:[{}]", self.path.name, m.topic, e.algorithmId )
-              //todo should message be reworked for shard's aid? since that's different than router and shard-catalog or should router use routeMessage and forward
-              referenceFor( e.algorithmId ) forwardEnvelope m.copy( targetId = aid ) //okay to close over sender in persist handler
+          val aid = {
+            availability
+            .mostAvailable
+            .getOrElse {
+              val nid = state.nextAlgorithmId()
+              context become active( availability withNewShardId nid )
+              log.info(
+                "ShardCatalog[{}]: creating new shard id: NID[{}]  root-type:[{}] tag:[{}]",
+                self.path.name,
+                nid,
+                state.algorithmRootType,
+                state.algorithmRootType.identifying.idTag.name
+              )
+              nid
             }
+          }
+
+          log.debug( "ShardCatalog[{}]: unknown topic:[{}] routed to algorithm shard:[{}]", self.path.name, m.topic, aid )
+          persistAsync( P.ShardAssigned(aggregateId, m.topic, aid) ) { e =>
+//val e = P.ShardAssigned(aggregateId, m.topic, aid)
+            accept( e )
+
+            shardMetrics foreach { sm =>
+              sm.assignmentsMeter.mark()
+              sm.routingMeter.mark()
+            }
+
+            log.debug( "ShardCatalog[{}]: topic [{}] assigned and routed to algorithm shard:[{}]", self.path.name, m.topic, e.algorithmId )
+            //todo should message be reworked for shard's aid? since that's different than router and shard-catalog or should router use routeMessage and forward
+            referenceFor( e.algorithmId ) forwardEnvelope m.copy( targetId = aid ) //okay to close over sender in persist handler
           }
         }
       }

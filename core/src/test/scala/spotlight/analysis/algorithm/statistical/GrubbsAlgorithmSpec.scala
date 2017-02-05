@@ -257,6 +257,7 @@ with DisjunctionValues {
       val (e1, r1) = makeExpected( 0.05 )( points = s1.points, outliers = Seq.fill( s1.size - 1 ){ false } :+ true )
       evaluate(
         hint = "first",
+        algorithmAggregateId = id,
         series = s1,
         history = h1,
         expectedResults = e1,
@@ -277,6 +278,7 @@ with DisjunctionValues {
       )
       evaluate(
         hint = "second",
+        algorithmAggregateId = id,
         series = s2,
         history = h2,
         expectedResults = e2,

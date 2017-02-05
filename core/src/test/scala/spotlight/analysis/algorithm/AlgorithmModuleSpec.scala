@@ -5,6 +5,7 @@ import scala.reflect.ClassTag
 import akka.actor.{ActorRef, ActorSystem}
 import akka.pattern.ask
 import akka.testkit._
+import com.persist.logging._
 import com.typesafe.config.Config
 import org.scalatest.concurrent.ScalaFutures
 import org.joda.{time => joda}
@@ -67,6 +68,25 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
     val sender = TestProbe()
     val subscriber = TestProbe()
 
+    var loggingSystem: LoggingSystem = _
+
+    override def before( test: OneArgTest ): Unit = {
+      super.before( test )
+      loggingSystem = LoggingSystem( _system, s"Test:${defaultModule.algorithm.label.name}", "1", "localhost" )
+      logger.error( "#TEST #############  logging system: [{}]", loggingSystem )
+      logger.info( "Fixture: DomainModel=[{}]", model )
+    }
+
+    override def after( test: OneArgTest ): Unit = {
+      Option( loggingSystem ) foreach { ls =>
+        logger.warn( "#TEST stopping persist logger..." )
+//        Await.ready( ls.stop, 15.seconds )
+      }
+
+      logger.warn( "#TEST STOPPED PERSIST LOGGER" )
+      super.after( test )
+    }
+
     val appliesToAll: AnalysisPlan.AppliesTo = {
       val isQuorun: IsQuorum = IsQuorum.AtLeastQuorumSpecification( 0, 0 )
       val reduce: ReduceOutliers = new ReduceOutliers {
@@ -120,11 +140,6 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
       )
     )
 
-    override def before(test: OneArgTest): Unit = {
-      super.before( test )
-      logger.info( "Fixture: DomainModel=[{}]", model )
-    }
-
     type Module = outer.Module
     override lazy val module: Module = outer.defaultModule
     implicit val evShape: ClassTag[module.Shape] = module.evShape
@@ -174,9 +189,9 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
       assert( ordering.equiv( expected, actual ) )
     }
 
-
     def evaluate(
       hint: String,
+      algorithmAggregateId: module.TID,
       series: TimeSeries,
       history: HistoricalStatistics,
       expectedResults: Seq[Expected],
@@ -186,7 +201,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
       logger.info( "TEST: ShortUUID id:[{}] aggregate.path:[{}]", id, aggregate.path )
       aggregate.sendEnvelope(
         DetectUsing(
-          targetId = plan.id,
+          targetId = algorithmAggregateId,
           algorithm = module.algorithm.label,
           payload = DetectOutliersInSeries( series, plan, Option(subscriber.ref), Set.empty[WorkId] ),
           history = history

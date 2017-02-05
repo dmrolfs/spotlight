@@ -6,6 +6,7 @@ import peds.archetype.domain.model.core.Entity
 import peds.commons.{TryV, Valid}
 import peds.commons.identifier.{Identifying, ShortUUID}
 import peds.commons.util._
+import spotlight.analysis.algorithm.AlgorithmModule
 import spotlight.model.outlier.AnalysisPlan
 
 
@@ -16,6 +17,7 @@ trait ShardCatalog extends Entity {
   override type ID = ShardCatalog.ID
   override val evID: ClassTag[ID] = classTag[ShardCatalog.ID]
   override val evTID: ClassTag[TID] = classTag[TID]
+  val nextAlgorithmId: () => AlgorithmModule.TID
 }
 
 object ShardCatalog {

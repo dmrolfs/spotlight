@@ -5,7 +5,6 @@ import scala.reflect._
 import akka.actor.{ActorRef, Cancellable, Props}
 import akka.event.LoggingReceive
 import akka.persistence.RecoveryCompleted
-
 import com.typesafe.scalalogging.LazyLogging
 import nl.grons.metrics.scala.{Histogram, Meter, MetricName}
 import peds.akka.envelope._
@@ -16,7 +15,7 @@ import peds.commons.util._
 import demesne._
 import demesne.module.{LocalAggregate, SimpleAggregateModule}
 import spotlight.analysis.DetectUsing
-import spotlight.analysis.algorithm.{AlgorithmProtocol => AP}
+import spotlight.analysis.algorithm.{AlgorithmModule, AlgorithmProtocol => AP}
 import spotlight.model.outlier.AnalysisPlan
 import spotlight.model.timeseries._
 
@@ -29,13 +28,15 @@ object CellShardProtocol extends AggregateProtocol[CellShardCatalog#ID] {
     override val targetId: Add#TID,
     plan: AnalysisPlan.Summary,
     algorithmRootType: AggregateRootType,
-    nrCells: Int
+    nrCells: Int,
+    nextAlgorithmId: () => AlgorithmModule.TID
   ) extends Command
 
   case class Added(
     override val sourceId: Added#TID,
     plan: AnalysisPlan.Summary,
     algorithmRootType: AggregateRootType,
+    nextAlgorithmId: () => AlgorithmModule.TID,
     cells: Vector[AlgoTID]
   ) extends Event
 
@@ -48,6 +49,7 @@ object CellShardProtocol extends AggregateProtocol[CellShardCatalog#ID] {
 case class CellShardCatalog(
   plan: AnalysisPlan.Summary,
   algorithmRootType: AggregateRootType,
+  override val nextAlgorithmId: () => AlgorithmModule.TID,
   cells: Vector[AlgoTID]
 ) extends ShardCatalog with Equals with LazyLogging {
   import CellShardCatalog.identifying
@@ -194,12 +196,12 @@ object CellShardModule extends LazyLogging {
     override val evState: ClassTag[CellShardCatalog] = classTag[CellShardCatalog]
 
     override def acceptance: Acceptance = {
-      case ( CellShardProtocol.Added(tid, p, rt, cells ), s ) if Option( s ).isEmpty => {
+      case ( CellShardProtocol.Added(tid, p, rt, next, cells ), s ) if Option( s ).isEmpty => {
         if ( shardMetrics.isEmpty ) {
           shardMetrics = Some( new ShardMetrics(plan = p, id = tid.id.asInstanceOf[ShardCatalog.ID] ) )
         }
 
-        CellShardCatalog( p, rt, cells )
+        CellShardCatalog( p, rt, next, cells )
       }
 
 //      case ( P.CellAdded(tid, cellId), s ) => s.copy( cells = s.cells :+ cellId )
@@ -248,17 +250,10 @@ object CellShardModule extends LazyLogging {
     import spotlight.analysis.algorithm.{AlgorithmProtocol => AP}
 
     val admin: Receive = {
-      case CellShardProtocol.Add( id, plan, algorithmRootType, nrCells ) if id == aggregateId && Option( state ).isEmpty => {
-        import scalaz._
-        import Scalaz.{id => _, _}
-
-log.warning( "algorithmRootType:[{}].identifying:[{}]", Option(algorithmRootType), Option(algorithmRootType).map(_.identifying) )
-        List.fill( nrCells ){ algorithmRootType.identifying.nextId map { _.asInstanceOf[AlgoTID] } }.sequenceU match {
-          case \/-( cells ) => persist( P.Added(id, plan, algorithmRootType, cells.toVector) ) { acceptAndPublish }
-          case -\/( ex ) => {
-            log.error( ex, "failed to gereate ids for algorithm:[{}]", algorithmRootType.name )
-          }
-        }
+      case e: CellShardProtocol.Add if e.targetId == aggregateId && Option( state ).isEmpty => {
+log.warning( "algorithmRootType:[{}].identifying:[{}]", Option(e.algorithmRootType), Option(e.algorithmRootType).map(_.identifying) )
+        val cells = List.fill( e.nrCells ){ e.nextAlgorithmId() }
+        persist( P.Added( e.targetId, e.plan, e.algorithmRootType, e.nextAlgorithmId, cells.toVector ) ){ acceptAndPublish }
       }
 
       case e: CellShardProtocol.Add if e.targetId == aggregateId && Option( state ).nonEmpty => { }

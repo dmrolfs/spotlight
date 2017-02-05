@@ -108,6 +108,7 @@ class ExponentialMovingAverageAlgorithmSpec extends AlgorithmModuleSpec[Exponent
       logger.info( "TEST: R1[{}]  E1:[{}]", r1, e1 )
       evaluate(
         hint = "first",
+        algorithmAggregateId = id,
         series = s1,
         history = h1,
         expectedResults = e1,
@@ -125,6 +126,7 @@ class ExponentialMovingAverageAlgorithmSpec extends AlgorithmModuleSpec[Exponent
       logger.info( "TEST: R2[{}]  E2:[{}]", r2, e2 )
       evaluate(
         hint = "second",
+        algorithmAggregateId = id,
         series = s2,
         history = h2,
         expectedResults = e2,
