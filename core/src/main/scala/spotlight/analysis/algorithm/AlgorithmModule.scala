@@ -520,7 +520,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented wit
 
         Some(
           new SnapshotSpecification {
-            override val snapshotInterval: FiniteDuration = 30.seconds // 2.minutes // 5.minutes okay
+            override val snapshotInterval: FiniteDuration = 2.minutes // 5.minutes okay
             override val snapshotInitialDelay: FiniteDuration = {
               val delay = snapshotInterval + snapshotInterval * AlgorithmModule.snapshotFactorizer.nextDouble()
               FiniteDuration( delay.toMillis, MILLISECONDS )
