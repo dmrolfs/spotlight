@@ -74,8 +74,8 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[AnalysisPlanState] with Op
         reduce = ReduceOutliers.byCorroborationPercentage(50),
         planSpecification = ConfigFactory.parseString(
           s"""
-             |algorithm-config.${algo.name}.seedEps: 5.0
-             |algorithm-config.${algo.name}.minDensityConnectedPoints: 3
+             |algorithm-config.${algo}.seedEps: 5.0
+             |algorithm-config.${algo}.minDensityConnectedPoints: 3
           """.stripMargin
         )
       )
@@ -85,7 +85,7 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[AnalysisPlanState] with Op
       super.rootTypes ++ Set( SimpleMovingAverageAlgorithm.rootType )
     }
 
-    lazy val algo: Symbol = SimpleMovingAverageAlgorithm.algorithm.label
+    lazy val algo: String = SimpleMovingAverageAlgorithm.algorithm.label
 
 
     def stateFrom( ar: ActorRef, tid: module.TID ): AnalysisPlan = {
@@ -310,7 +310,7 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[AnalysisPlanState] with Op
 
     "must not respond before add" in { f: Fixture =>
       import f._
-      val info = ( entity ?+ P.UseAlgorithms( tid, Set( 'foo, 'bar ), ConfigFactory.empty() ) ).mapTo[P.PlanInfo]
+      val info = ( entity ?+ P.UseAlgorithms( tid, Set( "foo", "bar" ), ConfigFactory.empty() ) ).mapTo[P.PlanInfo]
       bus.expectNoMsg()
     }
 
@@ -351,20 +351,20 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[AnalysisPlanState] with Op
         """.stripMargin
       )
 
-      entity !+ AnalysisPlanProtocol.UseAlgorithms( tid, Set('foo, 'bar, 'zed), testConfig )
+      entity !+ AnalysisPlanProtocol.UseAlgorithms( tid, Set("foo", "bar", "zed"), testConfig )
       bus.expectMsgPF( max = 3.seconds.dilated, hint = "use algorithms" ) {
         case AnalysisPlanProtocol.AlgorithmsChanged(id, algos, config, added, dropped) => {
           id mustBe tid
-          algos mustBe Set('foo, 'bar, 'zed)
+          algos mustBe Set("foo", "bar", "zed")
           dropped mustBe Set( SimpleMovingAverageAlgorithm.algorithm.label )
-          added mustBe Set( 'foo, 'bar, 'zed )
+          added mustBe Set( "foo", "bar", "zed" )
           config mustBe testConfig
         }
       }
 
       val actual = stateFrom( entity, tid )
       actual mustBe plan
-      actual.algorithms mustBe Set('foo, 'bar, 'zed)
+      actual.algorithms mustBe Set("foo", "bar", "zed")
       actual.algorithmConfig mustBe testConfig
     }
 

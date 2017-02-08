@@ -20,7 +20,7 @@ import spotlight.model.timeseries._
   * Created by rolfsd on 2/25/16.
   */
 object MedianAbsoluteDeviationAnalyzer {
-  val Algorithm = Symbol( "median-absolute-deviation" )
+  val Algorithm: String = "median-absolute-deviation"
 
   def props( router: ActorRef ): Props = Props { new MedianAbsoluteDeviationAnalyzer( router ) }
 
@@ -57,7 +57,7 @@ extends CommonAnalyzer[MedianAbsoluteDeviationAnalyzer.Context] {
 
   override implicit val contextClassTag: ClassTag[Context] = ClassTag( classOf[Context] )
 
-  override def algorithm: Symbol = MedianAbsoluteDeviationAnalyzer.Algorithm
+  override def algorithm: String = MedianAbsoluteDeviationAnalyzer.Algorithm
 
   override def wrapContext(c: AlgorithmContext ): Valid[WrappingContext] = {
     ( makeMovingStatistics(c) |@| makeDeviationStatistics(c) ) { (m, d) =>

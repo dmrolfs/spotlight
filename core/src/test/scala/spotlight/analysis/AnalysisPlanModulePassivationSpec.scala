@@ -83,7 +83,7 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[AnalysisPlanSta
     override val identifying: EntityIdentifying[AnalysisPlanState] = AnalysisPlanModule.identifying
     override def nextId(): module.TID = identifying.safeNextId
 
-    val algo: Symbol = SimpleMovingAverageAlgorithm.algorithm.label
+    val algo: String = SimpleMovingAverageAlgorithm.algorithm.label
 
     def makePlan( name: String, g: Option[AnalysisPlan.Grouping] ): AnalysisPlan = {
       AnalysisPlan.default(
@@ -95,8 +95,8 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[AnalysisPlanSta
         reduce = ReduceOutliers.byCorroborationPercentage(50),
         planSpecification = ConfigFactory.parseString(
           s"""
-          |algorithm-config.${algo.name}.seedEps: 5.0
-          |algorithm-config.${algo.name}.minDensityConnectedPoints: 3
+          |algorithm-config.${algo}.seedEps: 5.0
+          |algorithm-config.${algo}.minDensityConnectedPoints: 3
           """.stripMargin
         )
       )
@@ -134,7 +134,7 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[AnalysisPlanSta
 
     "must not respond before add" taggedAs WIP in { f: Fixture =>
       import f._
-      val info = ( entity ?+ P.UseAlgorithms( tid, Set( 'foo, 'bar ), ConfigFactory.empty() ) ).mapTo[P.PlanInfo]
+      val info = ( entity ?+ P.UseAlgorithms( tid, Set( "foo", "bar" ), ConfigFactory.empty() ) ).mapTo[P.PlanInfo]
       bus.expectNoMsg()
     }
 
@@ -155,12 +155,12 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[AnalysisPlanSta
 
       stateFrom( entity, planTid ) mustBe p1
 
-      entity !+ P.UseAlgorithms( planTid, Set( 'stella, 'otis, 'apollo ), ConfigFactory.empty() )
+      entity !+ P.UseAlgorithms( planTid, Set( "stella", "otis", "apollo" ), ConfigFactory.empty() )
       bus.expectMsgPF( 1.second.dilated, "change algos" ) {
         case P.AlgorithmsChanged(pid, algos, c, added, dropped) => {
           pid mustBe planTid
-          algos mustBe Set( 'stella, 'otis, 'apollo )
-          added mustBe Set( 'stella, 'otis, 'apollo )
+          algos mustBe Set( "stella", "otis", "apollo" )
+          added mustBe Set( "stella", "otis", "apollo" )
           dropped mustBe Set( SimpleMovingAverageAlgorithm.algorithm.label )
           assert( c.isEmpty )
         }
@@ -181,12 +181,12 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[AnalysisPlanSta
         module.rootType.snapshot foreach { ss => entity !+ ss.saveSnapshotCommand(p1.id) }
       }
 
-      entity !+ P.UseAlgorithms( p1.id, Set( 'stella, 'otis, 'apollo ), ConfigFactory.empty() )
+      entity !+ P.UseAlgorithms( p1.id, Set( "stella", "otis", "apollo" ), ConfigFactory.empty() )
       bus.expectMsgPF( 1.second.dilated, "change algos" ) {
         case P.AlgorithmsChanged(pid, algos, c, added, dropped) => {
           pid mustBe p1.id
-          algos mustBe Set( 'stella, 'otis, 'apollo )
-          added mustBe Set( 'stella, 'otis, 'apollo )
+          algos mustBe Set( "stella", "otis", "apollo" )
+          added mustBe Set( "stella", "otis", "apollo" )
           dropped mustBe Set( SimpleMovingAverageAlgorithm.algorithm.label )
           assert( c.isEmpty )
         }

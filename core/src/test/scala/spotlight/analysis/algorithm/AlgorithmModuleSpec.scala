@@ -48,7 +48,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
 
 
   override def testSlug( test: OneArgTest ): String = {
-    s"Test-${defaultModule.algorithm.label.name}-${testPosition.incrementAndGet()}"
+    s"Test-${defaultModule.algorithm.label}-${testPosition.incrementAndGet()}"
   }
 
   override def testConfiguration( test: OneArgTest, slug: String ): Config = {
@@ -72,7 +72,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
 
     override def before( test: OneArgTest ): Unit = {
       super.before( test )
-      loggingSystem = LoggingSystem( _system, s"Test:${defaultModule.algorithm.label.name}", "1", "localhost" )
+      loggingSystem = LoggingSystem( _system, s"Test:${defaultModule.algorithm.label}", "1", "localhost" )
       logger.error( "#TEST #############  logging system: [{}]", loggingSystem )
       logger.info( "Fixture: DomainModel=[{}]", model )
     }
@@ -108,7 +108,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
         window map { w => AnalysisPlan.Grouping( limit = 10000, w ) }
       }
 
-      AnalysisPlan.default( "", 1.second, isQuorun, reduce, Set.empty[Symbol], grouping ).appliesTo
+      AnalysisPlan.default( "", 1.second, isQuorun, reduce, Set.empty[String], grouping ).appliesTo
     }
 
     implicit val nowTimestamp: joda.DateTime = joda.DateTime.now
@@ -270,7 +270,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
         as.value mustBe an[TestShape]
         val sas = as.value.asInstanceOf[TestShape]
         a.sourceId.id mustBe id.id
-        a.algorithm.name mustBe module.algorithm.label.name
+        a.algorithm mustBe module.algorithm.label
         logger.info( "asserting shape: {}", sas )
         assertShapeFn( sas )
       }
@@ -456,7 +456,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
 
 
   def bootstrapSuite(): Unit = {
-    s"${defaultModule.algorithm.label.name} entity" should {
+    s"${defaultModule.algorithm.label} entity" should {
       "have zero shape before advance" in { f: Fixture =>
         import f._
 
@@ -492,7 +492,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
 
 
   def analysisStateSuite(): Unit = {
-    s"${defaultModule.algorithm.label.name}" should {
+    s"${defaultModule.algorithm.label}" should {
 //      "advance state" in { f: Fixture =>
 //        import f._
 //        val zero = module.shapeCompanion.zero( None )

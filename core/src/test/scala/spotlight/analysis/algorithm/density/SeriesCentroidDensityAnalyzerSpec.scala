@@ -73,8 +73,8 @@ class SeriesCentroidDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSug
           HistoricalStatistics(2, false ),
           ConfigFactory.parseString(
             s"""
-               |${algoS.name}.seedEps: 5.0
-               |${algoS.name}.minDensityConnectedPoints: 3
+               |${algoS}.seedEps: 5.0
+               |${algoS}.minDensityConnectedPoints: 3
              """.stripMargin
           )
         )
@@ -90,10 +90,10 @@ class SeriesCentroidDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSug
 
       val algProps = ConfigFactory.parseString(
         s"""
-           |${algoS.name}.tolerance: 0.01
-           |${algoS.name}.seedEps: 5
-           |${algoS.name}.minDensityConnectedPoints: 3
-           |${algoS.name}.distance: Euclidean
+           |${algoS}.tolerance: 0.01
+           |${algoS}.seedEps: 5
+           |${algoS}.minDensityConnectedPoints: 3
+           |${algoS}.distance: Euclidean
         """.stripMargin
       )
 
@@ -127,10 +127,10 @@ class SeriesCentroidDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSug
 
       val algProps = ConfigFactory.parseString(
         s"""
-           |${algoS.name}.tolerance: -1.063505513 // eps:5.0
-           |${algoS.name}.seedEps: 0.0
-           |${algoS.name}.minDensityConnectedPoints: 3
-           |${algoS.name}.distance: Euclidean
+           |${algoS}.tolerance: -1.063505513 // eps:5.0
+           |${algoS}.seedEps: 0.0
+           |${algoS}.minDensityConnectedPoints: 3
+           |${algoS}.distance: Euclidean
         """.stripMargin
       )
 
@@ -187,8 +187,8 @@ class SeriesCentroidDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSug
 
       val algProps = ConfigFactory.parseString(
         s"""
-           |${algoS.name}.seedEps: 5.0
-           |${algoS.name}.minDensityConnectedPoints: 3
+           |${algoS}.seedEps: 5.0
+           |${algoS}.minDensityConnectedPoints: 3
         """.stripMargin
       )
 
@@ -246,7 +246,7 @@ class SeriesCentroidDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSug
 //      analyzer ! expected
 //      aggregator.expectMsgPF( 2.seconds.dilated, "detect" ) {
 //        case UnrecognizedPayload( alg, actual ) => {
-//          alg.name mustBe algoS.name
+//          alg.name mustBe algoS
 //          actual mustBe expected
 //        }
 //      }

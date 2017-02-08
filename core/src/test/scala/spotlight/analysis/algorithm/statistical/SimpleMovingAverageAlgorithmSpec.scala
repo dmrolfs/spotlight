@@ -94,7 +94,7 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmModuleSpec[SimpleMovingA
   analysisStateSuite()
 
 
-  s"${defaultModule.algorithm.label.name} algorithm" should {
+  s"${defaultModule.algorithm.label} algorithm" should {
     "step to find anomalies from flat signal" in { f: Fixture =>
       import f._
 

@@ -71,7 +71,7 @@ object AlgorithmProtocol extends AggregateProtocol[AlgorithmModule.ID] {
 
   case class TopicShapeSnapshot(
     override val sourceId: TopicShapeSnapshot#TID,
-    algorithm: Symbol,
+    algorithm: String,
     topic: Topic,
     snapshot: Option[AlgorithmModule#Shape]
   ) extends Event
@@ -94,10 +94,10 @@ object AlgorithmProtocol extends AggregateProtocol[AlgorithmModule.ID] {
 
   case class AlgorithmUsedBeforeRegistrationError(
     sourceId: TID,
-    algorithm: Symbol,
+    algorithm: String,
     path: ActorPath
   ) extends IllegalStateException(
-    s"actor [${path}] not registered algorithm [${algorithm.name}] with scope [${sourceId}] before use"
+    s"actor [${path}] not registered algorithm [${algorithm}] with scope [${sourceId}] before use"
   ) with OutlierAlgorithmError
 }
 
@@ -238,11 +238,11 @@ object AlgorithmModule extends Instrumented with ClassLogging {
 
 
   case class InsufficientDataSize(
-    algorithm: Symbol,
+    algorithm: String,
     size: Long,
     required: Long
   ) extends IllegalArgumentException(
-    s"${size} data points is insufficient to perform ${algorithm.name} test, which requires at least ${required} points"
+    s"${size} data points is insufficient to perform ${algorithm} test, which requires at least ${required} points"
   )
 
 
@@ -253,10 +253,10 @@ object AlgorithmModule extends Instrumented with ClassLogging {
   ) extends RuntimeException( s"For algorithm ${aggregateId}: ${path}:${value} is redundant" )
 
   case class InvalidAlgorithmConfiguration(
-    algorithm: Symbol,
+    algorithm: String,
     path: String,
     requirement: String
-  ) extends BadValue( path, s"For algorithm, ${algorithm.name}, ${path} must: ${requirement}" )
+  ) extends BadValue( path, s"For algorithm, ${algorithm}, ${path} must: ${requirement}" )
 
 
   val snapshotFactorizer: Random = new Random()
@@ -285,7 +285,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented wit
   import AlgorithmProtocol.Advanced
 
   implicit val identifying: EntityIdentifying[AlgorithmState[Shape]] = new EntityIdentifying[AlgorithmState[Shape]] {
-    override lazy val idTag: Symbol = algorithm.label
+    override lazy val idTag: Symbol = Symbol( algorithm.label )
     override val evID: ClassTag[ID] = classTag[ID]
     override val evTID: ClassTag[TID] =  classTag[TID]
     override val evEntity: ClassTag[AlgorithmState[Shape]] = classTag[AlgorithmState[Shape]]
@@ -410,12 +410,12 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented wit
 
 
   def algorithm: Algorithm
-  override lazy val aggregateIdTag: Symbol = algorithm.label
-  override lazy val shardName: String = algorithm.label.name
+  override lazy val aggregateIdTag: Symbol = Symbol( algorithm.label )
+  override lazy val shardName: String = algorithm.label
 
 
   trait Algorithm {
-    val label: Symbol
+    val label: String
     def prepareData( c: Context ): Seq[DoublePoint] = c.data
     def step( point: PointT, shape: Shape )( implicit s: State, c: Context ): Option[(Boolean, ThresholdBoundary)]
   }
@@ -659,7 +659,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented wit
     override lazy val metricBaseName: MetricName = module.metricBaseName
     lazy val executionTimer: Timer = metrics.timer( "execution" )
 
-    override var state: State = AlgorithmState[Shape]( aggregateId, algorithm.label.name )
+    override var state: State = AlgorithmState[Shape]( aggregateId, algorithm.label )
     override lazy val evState: ClassTag[State] = ClassTag( classOf[State] )
 
     var algorithmContext: Context = _
@@ -706,7 +706,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented wit
             stopTimer( start )
             log.info(
               "[{}] skipped [{}] analysis on [{}] @ [{}] due to insufficient data - no outliers marked for interval",
-              workId, algo.name, payload.plan.name + "][" + payload.topic, payload.source.interval
+              workId, algo, payload.plan.name + "][" + payload.topic, payload.source.interval
             )
 
             // don't let aggregator time out just due to error in algorithm
@@ -714,7 +714,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented wit
               algorithms = Set(algorithm.label),
               source = payload.source,
               plan = payload.plan,
-              thresholdBoundaries = Map.empty[Symbol, Seq[ThresholdBoundary]]
+              thresholdBoundaries = Map.empty[String, Seq[ThresholdBoundary]]
             )
           }
 
@@ -723,14 +723,14 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented wit
             log.error(
               ex,
               "[{}] failed [{}] analysis on [{}] @ [{}] - no outliers marked for interval",
-              workId, algo.name, payload.plan.name + "][" + payload.topic, payload.source.interval
+              workId, algo, payload.plan.name + "][" + payload.topic, payload.source.interval
             )
             // don't let aggregator time out just due to error in algorithm
             aggregator !+ NoOutliers(
               algorithms = Set(algorithm.label),
               source = payload.source,
               plan = payload.plan,
-              thresholdBoundaries = Map.empty[Symbol, Seq[ThresholdBoundary]]
+              thresholdBoundaries = Map.empty[String, Seq[ThresholdBoundary]]
             )
           }
         }

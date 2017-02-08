@@ -24,12 +24,12 @@ class DetectionAlgorithmRouterSpec extends ParallelAkkaSpec with MockitoSugar {
   }
 
   class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends AkkaFixture( _config, _system, _slug ) {
-    val algo = 'foo
+    val algo = "foo"
     val algorithm = TestProbe()
     val algorithmRootType = mock[AggregateRootType]
-    when( algorithmRootType.name ).thenReturn { algo.name }
+    when( algorithmRootType.name ).thenReturn { algo }
     implicit val shardIdentifying = CellShardModule.identifying
-    val catalogId = ShardCatalog.idFor( plan, algo.name )
+    val catalogId = ShardCatalog.idFor( plan, algo )
     val catalog = TestProbe()
     val catalogRootType = CellShardModule.module.rootType
     val model = mock[DomainModel]
@@ -48,8 +48,8 @@ class DetectionAlgorithmRouterSpec extends ParallelAkkaSpec with MockitoSugar {
         reduce = ReduceOutliers.byCorroborationPercentage(50),
         planSpecification = ConfigFactory.parseString(
           s"""
-             |algorithm-config.${algo.name}.seedEps: 5.0
-             |algorithm-config.${algo.name}.minDensityConnectedPoints: 3
+             |algorithm-config.${algo}.seedEps: 5.0
+             |algorithm-config.${algo}.minDensityConnectedPoints: 3
           """.stripMargin
         )
       )
@@ -68,9 +68,9 @@ class DetectionAlgorithmRouterSpec extends ParallelAkkaSpec with MockitoSugar {
       import f._
       val probe = TestProbe()
       val router = TestActorRef[DetectionAlgorithmRouter]( DetectionAlgorithmRouter.props( plan, Map() ) )
-      router.receive( RegisterAlgorithmReference('foo, probe.ref), probe.ref )
+      router.receive( RegisterAlgorithmReference("foo", probe.ref), probe.ref )
       probe.expectMsgPF( hint = "register", max = 200.millis.dilated ) {
-        case Envelope( AlgorithmRegistered(actual), _ ) => actual.name mustBe Symbol("foo").name
+        case Envelope( AlgorithmRegistered(actual), _ ) => actual mustBe "foo"
       }
     }
 
@@ -143,7 +143,7 @@ class DetectionAlgorithmRouterSpec extends ParallelAkkaSpec with MockitoSugar {
       val aggregator = TestProbe()
       val msg = DetectUsing(
         plan.id,
-        'foo,
+        "foo",
         DetectOutliersInSeries(series, plan, Option(subscriber.ref), Set.empty[WorkId]),
         HistoricalStatistics(2, false)
       )

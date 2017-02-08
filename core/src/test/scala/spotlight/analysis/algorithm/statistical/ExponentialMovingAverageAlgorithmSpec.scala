@@ -97,7 +97,7 @@ class ExponentialMovingAverageAlgorithmSpec extends AlgorithmModuleSpec[Exponent
   bootstrapSuite()
   analysisStateSuite()
 
-  s"${defaultModule.algorithm.label.name} algorithm" should {
+  s"${defaultModule.algorithm.label} algorithm" should {
     "find outliers across two batches" taggedAs WIP in { f: Fixture =>
       import f._
       val dp1 = makeDataPoints( values = Seq.fill( 5 )( 1.0 ), timeWiggle = (0.97, 1.03) )

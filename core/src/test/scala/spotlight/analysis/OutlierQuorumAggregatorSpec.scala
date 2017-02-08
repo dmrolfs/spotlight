@@ -34,13 +34,13 @@ class OutlierQuorumAggregatorSpec extends ParallelAkkaSpec with MockitoSugar {
     when( none.plan ) thenReturn defaultPlan
     when( none.topic ) thenReturn Topic( "metric.none" )
     when( none.algorithms ) thenReturn defaultPlan.algorithms.take(1)
-    when( none.thresholdBoundaries ) thenReturn Map.empty[Symbol, Seq[ThresholdBoundary]]
+    when( none.thresholdBoundaries ) thenReturn Map.empty[String, Seq[ThresholdBoundary]]
 
     val some = mock[SeriesOutliers]
     when( some.plan ) thenReturn defaultPlan
     when( some.topic ) thenReturn Topic( "metric.some" )
     when( some.algorithms ) thenReturn defaultPlan.algorithms.take(1)
-    when( some.thresholdBoundaries ) thenReturn Map.empty[Symbol, Seq[ThresholdBoundary]]
+    when( some.thresholdBoundaries ) thenReturn Map.empty[String, Seq[ThresholdBoundary]]
 
     val demoReduce = new ReduceOutliers {
       override def apply( results: OutlierAlgorithmResults, source: TimeSeriesBase, plan: AnalysisPlan ): V[ Outliers ] = {
@@ -62,7 +62,7 @@ class OutlierQuorumAggregatorSpec extends ParallelAkkaSpec with MockitoSugar {
         timeout = to,
         isQuorum = IsQuorum.AtLeastQuorumSpecification( 1, 1 ),
         reduce = demoReduce,
-        algorithms = Set( 'foobar ),
+        algorithms = Set( "foobar" ),
         grouping = grouping,
         planSpecification = ConfigFactory.empty
       )
@@ -101,7 +101,7 @@ class OutlierQuorumAggregatorSpec extends ParallelAkkaSpec with MockitoSugar {
         when( outliers.plan ) thenReturn p
         when( outliers.topic ) thenReturn Topic( "metric.specific" )
         when( outliers.algorithms ) thenReturn p.algorithms.take(1)
-        when( outliers.thresholdBoundaries ) thenReturn Map.empty[Symbol, Seq[ThresholdBoundary]]
+        when( outliers.thresholdBoundaries ) thenReturn Map.empty[String, Seq[ThresholdBoundary]]
 
       log.info( "outliers = [{}]", outliers )
       log.info( "outliers.plan = [{}]", outliers.plan )

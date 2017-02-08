@@ -23,7 +23,7 @@ sealed trait AnalysisPlan extends Entity with Equals {
 
   override def slug: String = name
   def appliesTo: AnalysisPlan.AppliesTo
-  def algorithms: Set[Symbol]
+  def algorithms: Set[String]
   def grouping: Option[AnalysisPlan.Grouping]
   def timeout: Duration
   def isQuorum: IsQuorum
@@ -206,9 +206,9 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
     }
   }
 
-  val algorithmsLens: Lens[AnalysisPlan, Set[Symbol]] = new Lens[AnalysisPlan, Set[Symbol]] {
-    override def get( p: AnalysisPlan ): Set[Symbol] = p.algorithms
-    override def set( p: AnalysisPlan )( algos: Set[Symbol] ): AnalysisPlan = {
+  val algorithmsLens: Lens[AnalysisPlan, Set[String]] = new Lens[AnalysisPlan, Set[String]] {
+    override def get( p: AnalysisPlan ): Set[String] = p.algorithms
+    override def set( p: AnalysisPlan )( algos: Set[String] ): AnalysisPlan = {
       SimpleAnalysisPlan(
         id = p.id,
         name = p.name,
@@ -239,7 +239,7 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
     timeout: Duration,
     isQuorum: IsQuorum,
     reduce: ReduceOutliers,
-    algorithms: Set[Symbol],
+    algorithms: Set[String],
     grouping: Option[AnalysisPlan.Grouping],
     planSpecification: Config
   )(
@@ -265,7 +265,7 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
     timeout: Duration,
     isQuorum: IsQuorum,
     reduce: ReduceOutliers,
-    algorithms: Set[Symbol],
+    algorithms: Set[String],
     grouping: Option[AnalysisPlan.Grouping],
     planSpecification: Config
   )(
@@ -291,7 +291,7 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
     timeout: Duration,
     isQuorum: IsQuorum,
     reduce: ReduceOutliers,
-    algorithms: Set[Symbol],
+    algorithms: Set[String],
     grouping: Option[AnalysisPlan.Grouping],
     planSpecification: Config,
     extractTopic: ExtractTopic,
@@ -317,7 +317,7 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
     timeout: Duration,
     isQuorum: IsQuorum,
     reduce: ReduceOutliers,
-    algorithms: Set[Symbol],
+    algorithms: Set[String],
     grouping: Option[AnalysisPlan.Grouping],
     planSpecification: Config,
     extractTopic: ExtractTopic,
@@ -343,7 +343,7 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
     timeout: Duration,
     isQuorum: IsQuorum,
     reduce: ReduceOutliers,
-    algorithms: Set[Symbol],
+    algorithms: Set[String],
     grouping: Option[AnalysisPlan.Grouping],
     planSpecification: Config,
     extractTopic: ExtractTopic,
@@ -369,7 +369,7 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
     timeout: Duration,
     isQuorum: IsQuorum,
     reduce: ReduceOutliers,
-    algorithms: Set[Symbol],
+    algorithms: Set[String],
     grouping: Option[AnalysisPlan.Grouping],
     planSpecification: Config = ConfigFactory.empty
   ): AnalysisPlan = {
@@ -388,10 +388,10 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
     )
   }
 
-  private def getAlgorithms( spec: Config ): Set[Symbol] = {
+  private def getAlgorithms( spec: Config ): Set[String] = {
     import scala.collection.JavaConverters._
-    if ( spec hasPath AlgorithmConfig ) spec.getConfig( AlgorithmConfig ).root.keySet.asScala.toSet.map{ a: String => Symbol(a) }
-    else Set.empty[Symbol]
+    if ( spec hasPath AlgorithmConfig ) spec.getConfig( AlgorithmConfig ).root.keySet.asScala.toSet
+    else Set.empty[String]
   }
 
   private def getAlgorithmConfig( spec: Config ): Config = {
@@ -404,7 +404,7 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
     override val id: AnalysisPlan#TID,
     override val name: String,
     override val appliesTo: AnalysisPlan.AppliesTo,
-    override val algorithms: Set[Symbol],
+    override val algorithms: Set[String],
     override val grouping: Option[AnalysisPlan.Grouping],
     override val timeout: Duration,
     override val isQuorum: IsQuorum,

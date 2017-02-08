@@ -115,7 +115,7 @@ object FileBatchExample extends Instrumented with ClassLogging {
 //  case class Threshold( timeStamp: DateTime, ceiling: Option[Double], expected: Option[Double], floor: Option[Double] )
 
   case class SimpleFlattenedOutlier(
-    algorithm: Symbol,
+    algorithm: String,
     outliers: Seq[OutlierTimeSeriesObject],
     threshold: Seq[ThresholdBoundary],
     topic: String

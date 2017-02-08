@@ -90,7 +90,7 @@ object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfig
 
   override def algorithm: Algorithm = AlgorithmImpl
   object AlgorithmImpl extends Algorithm {
-    override val label: Symbol = 'grubbs
+    override val label: String = "grubbs"
     val minimumDataPoints: Int = 7
 
     override def prepareData( c: Context ): Seq[DoublePoint] = c.tailAverage()( c.data )

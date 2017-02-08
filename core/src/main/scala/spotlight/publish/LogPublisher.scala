@@ -39,7 +39,7 @@ class LogPublisher extends OutlierPublisher {
         "\t\tcontrol-boundaries[{}]:[{}]:[{}]: [{}]",
         outliers.plan.name,
         outliers.topic,
-        algorithm.name,
+        algorithm,
         thresholds.mkString(",")
       )
     }

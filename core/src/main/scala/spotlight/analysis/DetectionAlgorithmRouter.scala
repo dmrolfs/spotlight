@@ -26,16 +26,16 @@ object DetectionAlgorithmRouter extends ClassLogging {
 
   sealed trait RouterProtocol
 
-  case class RegisterAlgorithmReference(algorithm: Symbol, handler: ActorRef) extends RouterProtocol
+  case class RegisterAlgorithmReference( algorithm: String, handler: ActorRef ) extends RouterProtocol
 
   case class RegisterAlgorithmRootType(
-    algorithm: Symbol,
+    algorithm: String,
     algorithmRootType: AggregateRootType,
     model: DomainModel,
     sharded: Boolean = true
   ) extends RouterProtocol
 
-  case class AlgorithmRegistered(algorithm: Symbol) extends RouterProtocol
+  case class AlgorithmRegistered( algorithm: String ) extends RouterProtocol
 
 
   val ContextKey = 'DetectionAlgorithmRouter
@@ -60,7 +60,7 @@ object DetectionAlgorithmRouter extends ClassLogging {
   }
 
 
-  def props( plan: AnalysisPlan.Summary, routingTable: Map[Symbol, AlgorithmRoute] ): Props = {
+  def props( plan: AnalysisPlan.Summary, routingTable: Map[String, AlgorithmRoute] ): Props = {
     Props( new Default( plan, routingTable ) )
   }
 
@@ -70,20 +70,20 @@ object DetectionAlgorithmRouter extends ClassLogging {
 
 
   trait Provider {
-    def initialRoutingTable: Map[Symbol, AlgorithmRoute]
+    def initialRoutingTable: Map[String, AlgorithmRoute]
 
     def plan: AnalysisPlan.Summary
   }
 
   private class Default(
     override val plan: AnalysisPlan.Summary,
-    override val initialRoutingTable: Map[Symbol, AlgorithmRoute]
+    override val initialRoutingTable: Map[String, AlgorithmRoute]
   ) extends DetectionAlgorithmRouter with Provider
 
 
 
   object Registry {
-    private lazy val algorithmRootTypes: Agent[Map[Symbol, AggregateRootType]] = {
+    private lazy val algorithmRootTypes: Agent[Map[String, AggregateRootType]] = {
       import scala.concurrent.ExecutionContext.Implicits.global
 
       Agent(
@@ -105,40 +105,40 @@ object DetectionAlgorithmRouter extends ClassLogging {
            )
     }
 
-    def registerWithRouter( algorithmRoots: List[(Symbol, AggregateRootType)] ): Future[Map[Symbol, AggregateRootType]] = {
+    def registerWithRouter( algorithmRoots: List[(String, AggregateRootType)] ): Future[Map[String, AggregateRootType]] = {
       algorithmRootTypes alter { _ ++ algorithmRoots }
     }
 
-    def rootTypeFor( algorithm: Symbol ) (implicit ec: ExecutionContext ): Option[AggregateRootType] = {
+    def rootTypeFor( algorithm: String )( implicit ec: ExecutionContext ): Option[AggregateRootType] = {
       import scala.concurrent.duration._
       unsafeRootTypeFor( algorithm ) orElse {scala.concurrent.Await.result( futureRootTypeFor( algorithm ), 30.seconds )}
     }
 
-    def unsafeRootTypeFor( algorithm: Symbol ): Option[AggregateRootType] = {
+    def unsafeRootTypeFor( algorithm: String ): Option[AggregateRootType] = {
       log.debug(
         Map("@msg" -> "unsafe algorithm root types", "root-types" -> algorithmRootTypes.get.keySet.mkString( "[", ", ", "]" ))
       )
       algorithmRootTypes.get() get algorithm
     }
 
-    def futureRootTypeFor( algorithm: Symbol )( implicit ec: ExecutionContext ): Future[Option[AggregateRootType]] = {
+    def futureRootTypeFor( algorithm: String )( implicit ec: ExecutionContext ): Future[Option[AggregateRootType]] = {
       algorithmRootTypes.future() map { rootTable =>
         log.debug( Map( "@msg" -> "safe algorithm root types", "root-types" -> rootTable.keySet.mkString( "[", ", ", "]" ) ) )
         rootTable get algorithm
       }
     }
 
-    def userAlgorithms( configuration: Config ): Valid[Map[Symbol, Class[_ <: AlgorithmModule]]] = {
-      def loadClass(algorithm: Symbol, fqcn: String): TryV[Class[_ <: AlgorithmModule]] = {
-        \/ fromTryCatchNonFatal {Class.forName( fqcn, true, getClass.getClassLoader ).asInstanceOf[Class[_ <: AlgorithmModule]]}
+    def userAlgorithms( configuration: Config ): Valid[Map[String, Class[_ <: AlgorithmModule]]] = {
+      def loadClass( algorithm: String, fqcn: String ): TryV[Class[_ <: AlgorithmModule]] = {
+        \/ fromTryCatchNonFatal { Class.forName( fqcn, true, getClass.getClassLoader ).asInstanceOf[Class[_ <: AlgorithmModule]] }
       }
 
-      def unwrapAlgorithmFQCN( entry: (String, ConfigValue) ): TryV[(Symbol, String)] = {
-        val algorithm = Symbol( entry._1 )
+      def unwrapAlgorithmFQCN( entry: (String, ConfigValue) ): TryV[(String, String)] = {
+        val algorithm = entry._1
         val value = entry._2.unwrapped()
 
         entry._2.valueType() match {
-          case ConfigValueType.STRING => (algorithm, value.asInstanceOf[String]).right
+          case ConfigValueType.STRING => ( algorithm, value.asInstanceOf[String] ).right
           case _ => InsufficientAlgorithmModuleError( algorithm, value.toString ).left
         }
       }
@@ -159,7 +159,7 @@ object DetectionAlgorithmRouter extends ClassLogging {
         }
         .map { algorithmClasses => Map( algorithmClasses: _* ) }
       } else {
-        Map.empty[Symbol, Class[_ <: AlgorithmModule]].successNel
+        Map.empty[String, Class[_ <: AlgorithmModule]].successNel
       }
     }
 
@@ -169,7 +169,7 @@ object DetectionAlgorithmRouter extends ClassLogging {
       configuration: Config
     )(
       implicit ec: ExecutionContext
-    ): Future[List[(Symbol, AggregateRootType)]] = {
+    ): Future[List[(String, AggregateRootType)]] = {
       def algorithmRootTypeFor(clazz: Class[_ <: AlgorithmModule]): TryV[AggregateRootType] = {
         \/ fromTryCatchNonFatal {
           import scala.reflect.runtime.{universe => ru}
@@ -182,27 +182,27 @@ object DetectionAlgorithmRouter extends ClassLogging {
         }
       }
 
-      def isKnownAlgorithm(rootType: AggregateRootType)(implicit model: DomainModel): Boolean = {
+      def isKnownAlgorithm( rootType: AggregateRootType )( implicit model: DomainModel ): Boolean = {
         model.rootTypes contains rootType
       }
 
-      val userAlgos: TryV[Map[Symbol, Class[_ <: AlgorithmModule]]] = userAlgorithms( configuration ).disjunction leftMap { exs =>
+      val userAlgos: TryV[Map[String, Class[_ <: AlgorithmModule]]] = userAlgorithms( configuration ).disjunction leftMap { exs =>
         exs foreach { ex => log.error( "loading user algorithm failed", ex ) }
         exs.head
       }
 
       def collectUnknowns(
-        algoClasses: Map[Symbol, Class[_ <: AlgorithmModule]]
+        algoClasses: Map[String, Class[_ <: AlgorithmModule]]
       )(
         implicit model: DomainModel
-      ): TryV[List[(Symbol, AggregateRootType)]] = {
+      ): TryV[List[(String, AggregateRootType)]] = {
         algoClasses
         .toList
         .traverseU { case (a, c) =>
           algorithmRootTypeFor( c ) map { rt =>
             if ( isKnownAlgorithm( rt ) ) None
             else {
-              log.info( Map( "@msg" -> "loaded algorithm root type", "algorithm" -> a.name, "root-type" -> rt.name ) )
+              log.info( Map( "@msg" -> "loaded algorithm root type", "algorithm" -> a, "root-type" -> rt.name ) )
               Some( (a, rt) )
             }
           }
@@ -236,18 +236,18 @@ class DetectionAlgorithmRouter extends Actor with EnvelopingActor with Instrumen
 
   import DetectionAlgorithmRouter._
 
-  var routingTable: Map[Symbol, AlgorithmRoute] = provider.initialRoutingTable
-  def addRoute( algorithm: Symbol, resolver: AlgorithmRoute ): Unit = { routingTable += ( algorithm -> resolver ) }
+  var routingTable: Map[String, AlgorithmRoute] = provider.initialRoutingTable
+  def addRoute( algorithm: String, resolver: AlgorithmRoute ): Unit = { routingTable += ( algorithm -> resolver ) }
   log.debug(Map("@msg"->"created routing-table", "self"->self.path.name, "routing-table"->routingTable.mkString("[", ", ", "]")))
 
-  def contains( algorithm: Symbol ): Boolean = {
+  def contains( algorithm: String ): Boolean = {
     val found = routingTable contains algorithm
 
     log.debug(
       Map(
         "@msg" -> "looking for",
         "self" -> self.path.name,
-        "algorithm" -> algorithm.name,
+        "algorithm" -> algorithm,
         "routing-table" -> routingTable.keys.mkString("[", ", ", "]"),
         "found" -> found
       )
@@ -266,7 +266,7 @@ class DetectionAlgorithmRouter extends Actor with EnvelopingActor with Instrumen
       log.debug(
         Map(
           "@msg" -> "received RegisterAlgorithmRootType with sharding",
-          "algorithm" -> algorithm.name,
+          "algorithm" -> algorithm,
           "algorithm-root-type" -> algorithmRootType.name,
           "model" -> model.toString
         )
@@ -293,7 +293,7 @@ class DetectionAlgorithmRouter extends Actor with EnvelopingActor with Instrumen
         log.error(
             Map(
             "@msg" -> "cannot route unregistered algorithm",
-            "algorithm" -> m.algorithm.name,
+            "algorithm" -> m.algorithm,
             "routing-keys" -> routingTable.keySet.mkString("[", ", ", "]"),
             "found" -> contains(m.algorithm)
           )

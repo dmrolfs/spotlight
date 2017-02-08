@@ -156,7 +156,7 @@ with DisjunctionValues {
   analysisStateSuite()
 
 
-  s"${defaultModule.algorithm.label.name} algorithm" should {
+  s"${defaultModule.algorithm.label} algorithm" should {
 //    "change configuration" taggedAs WIP in { f: Fixture =>
 //      import f._
 //      import akka.pattern.ask

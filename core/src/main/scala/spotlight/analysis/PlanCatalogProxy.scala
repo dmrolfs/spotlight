@@ -244,14 +244,14 @@ extends ActorSubscriber with EnvelopingActor with InstrumentedActor with ActorLo
     }
   }
 
-  def clearCompletedWork( correlationIds: Set[WorkId], topic: Topic, algorithms: Set[Symbol] ): Set[(WorkId, PlanRequest)] = {
+  def clearCompletedWork( correlationIds: Set[WorkId], topic: Topic, algorithms: Set[String] ): Set[(WorkId, PlanRequest)] = {
     val (known, unknown) = correlationIds partition isKnownWork
     if ( unknown.nonEmpty ) {
       log.warn(
         Map(
           "@msg" -> "ACTIVE received topic:[{}] algorithms:[{}] results for unrecognized workIds:[{}]",
           "topic" -> topic.toString,
-          "algorithms" -> algorithms.map{ _.name }.mkString("[", ", ", "]"),
+          "algorithms" -> algorithms.mkString("[", ", ", "]"),
           "unrecognized-work-ids" -> unknown.mkString("[", ", ", "]")
         )
       )

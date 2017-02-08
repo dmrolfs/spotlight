@@ -72,7 +72,7 @@ object AnalysisPlanProtocol extends EntityProtocol[AnalysisPlanState#ID] {
 
   case class UseAlgorithms(
     override val targetId: UseAlgorithms#TID,
-    algorithms: Set[Symbol],
+    algorithms: Set[String],
     algorithmConfig: Config
   ) extends Command
 
@@ -89,10 +89,10 @@ object AnalysisPlanProtocol extends EntityProtocol[AnalysisPlanState#ID] {
 
   case class AlgorithmsChanged(
     override val sourceId: AlgorithmsChanged#TID,
-    algorithms: Set[Symbol],
+    algorithms: Set[String],
     algorithmConfig: Config,
-    added: Set[Symbol],
-    dropped: Set[Symbol]
+    added: Set[String],
+    dropped: Set[String]
   ) extends TaggedEvent
 
   case class AnalysisResolutionChanged(
@@ -119,13 +119,13 @@ case class AnalysisPlanState( plan: AnalysisPlan ) extends Entity {
   override def name: String = plan.name
   override def canEqual( that: Any ): Boolean = that.isInstanceOf[AnalysisPlanState]
 
-  def algorithms: Set[Symbol] = AnalysisPlanState.allAlgorithms( plan.algorithms, plan.algorithmConfig )
+  def algorithms: Set[String] = AnalysisPlanState.allAlgorithms( plan.algorithms, plan.algorithmConfig )
 
-  def routes( implicit model: DomainModel ): Map[Symbol, AlgorithmRoute] = {
+  def routes( implicit model: DomainModel ): Map[String, AlgorithmRoute] = {
     //    implicit val ec: scala.concurrent.ExecutionContext = context.dispatcher
     implicit val ec = model.system.dispatcher
 
-    def makeRoute( plan: AnalysisPlan )( algorithm: Symbol ): Option[AlgorithmRoute] = {
+    def makeRoute( plan: AnalysisPlan )( algorithm: String ): Option[AlgorithmRoute] = {
       DetectionAlgorithmRouter.Registry.rootTypeFor( algorithm ).map{ rt => AlgorithmRoute.routeFor( plan, rt )( model ) }
     }
 
@@ -136,10 +136,10 @@ case class AnalysisPlanState( plan: AnalysisPlan ) extends Entity {
 }
 
 object AnalysisPlanState {
-  def allAlgorithms( algorithms: Set[Symbol], algorithmSpec: Config ): Set[Symbol] = {
+  def allAlgorithms( algorithms: Set[String], algorithmSpec: Config ): Set[String] = {
     import scala.collection.immutable
     import scala.collection.JavaConversions._
-    val inSpec = algorithmSpec.root.entrySet.to[immutable.Set] map { e => Symbol(e.getKey) }
+    val inSpec = algorithmSpec.root.entrySet.to[immutable.Set] map { _.getKey }
     algorithms ++ inSpec
   }
 }
@@ -384,13 +384,13 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
         def routerName( p: AnalysisPlan ): String = DetectionAlgorithmRouter.name( p.name )
         def detectorName( p: AnalysisPlan ): String = OutlierDetection.name( p.name )
 
-        def startWorkers( p: AnalysisPlan, routes: Map[Symbol, AlgorithmRoute] ): (ActorRef, ActorRef, ActorRef) = {
+        def startWorkers( p: AnalysisPlan, routes: Map[String, AlgorithmRoute] ): (ActorRef, ActorRef, ActorRef) = {
           import peds.akka.supervision.IsolatedLifeCycleSupervisor.{ WaitForStart, GetChildren, Children, Started }
           import akka.pattern.ask
 
           log.info(
             "starting analysis plan[{}] foreman and workers(router and detector) with routes:[{}]",
-            p.name, routes.map{ case (s,r) => s"${s.name}->${r}" }.mkString( ", " )
+            p.name, routes.map{ case (s,r) => s"${s}->${r}" }.mkString( ", " )
           )
 
           implicit val ec: scala.concurrent.ExecutionContext = context.dispatcher
@@ -433,7 +433,7 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
           r
         }
 
-        def makeRouter( p: AnalysisPlan, routes: Map[Symbol, AlgorithmRoute] )( implicit context: ActorContext ): ActorRef = {
+        def makeRouter( p: AnalysisPlan, routes: Map[String, AlgorithmRoute] )( implicit context: ActorContext ): ActorRef = {
 //          val algorithmRefs = for {
 //            name <- plan.algorithms.toSeq
 //            rt <- DetectionAlgorithmRouter.rootTypeFor( name )( context.dispatcher ).toSeq
@@ -582,7 +582,7 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
         }
       }
 
-      def changeAlgorithms( algorithms: Set[Symbol], algorithmSpec: Config ): P.AlgorithmsChanged = {
+      def changeAlgorithms( algorithms: Set[String], algorithmSpec: Config ): P.AlgorithmsChanged = {
         val myAlgorithms = state.algorithms
         val newAlgorithms = AnalysisPlanState.allAlgorithms( algorithms, algorithmSpec )
 
