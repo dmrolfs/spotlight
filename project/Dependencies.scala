@@ -32,6 +32,7 @@ object Dependencies {
     val clusterSharding = module( "cluster-sharding" )
     val contrib = module( "contrib" )
     val persistence = module( "persistence" )
+    val persistenceQuery = module( "persistence-query-experimental" )
     val remote = module( "remote" )
     val slf4j = module( "slf4j" )
     val testkit = module( "testkit" )
@@ -171,6 +172,11 @@ object Dependencies {
       akka.slf4j,
       akka.kryo,
       akka.kryoSerializers,
+      akka.persistence,
+      akka.persistenceQuery,
+      persistence.cassandra,
+persistence.leveldb,
+persistence.leveldbjni,
       log.logback.classic,
       facility.bloomFilter,
       facility.uuid,

@@ -10,9 +10,11 @@ import akka.event.{Logging, LoggingAdapter}
 import akka.testkit.TestEvent.Mute
 import akka.testkit.{DeadLettersFilter, TestKit}
 import com.persist.logging._
+
 import scalaz.{-\/, \/, \/-}
 import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.{LazyLogging, StrictLogging}
+import demesne.testkit.concurrent.CountDownFunction
 import org.scalatest.{MustMatchers, Outcome, ParallelTestExecution, Tag, fixture}
 import peds.commons.log.Trace
 import peds.commons.util._
@@ -137,6 +139,10 @@ with StrictLogging {
 
     def before( test: OneArgTest ): Unit = {
       loggingSystem = LoggingSystem( _system, s"Test:${getClass.getName}", "1", "localhost" )
+      logger.warn( "giving logging system time to initialize..." )
+      val countDown = new CountDownFunction[String]
+      countDown await 500.millis
+      logger.warn( "... done waiting for logging system " )
     }
 
     def after( test: OneArgTest ): Unit = { }

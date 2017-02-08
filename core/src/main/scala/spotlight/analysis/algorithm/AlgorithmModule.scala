@@ -1119,11 +1119,11 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented wit
       super.onPersistFailure( cause, event, seqNr )
     }
 
-    override def receiveRecover: Receive = {
-      case RecoveryCompleted => {
-        // log.debug( "#TEST AlgorithmModule[{}]: recovery completed", self.path.name )
-      }
-    }
+//    override def receiveRecover: Receive = {
+//      case RecoveryCompleted => {
+//        // log.debug( "#TEST AlgorithmModule[{}]: recovery completed", self.path.name )
+//      }
+//    }
 
     override protected def onRecoveryFailure( cause: Throwable, event: Option[Any] ): Unit = {
       log.error( "AlgorithmModule[{}] onRecoveryFailure cause:[{}] event:[{}]", self.path.name, cause, event )

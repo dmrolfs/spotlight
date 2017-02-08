@@ -10,11 +10,7 @@ description := "lorem ipsum."
 libraryDependencies ++=
   commonDependencies ++
   Seq(
-    persistence.cassandra,
-    persistence.leveldb,
-    persistence.leveldbjni,
-    facility.json4sJackson,
-    akka.persistence
+    facility.json4sJackson
   )
 
 testOptions in Test += Tests.Argument( "-oDF" )

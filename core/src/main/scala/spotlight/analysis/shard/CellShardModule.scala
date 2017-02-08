@@ -4,8 +4,8 @@ import scala.concurrent.duration._
 import scala.reflect._
 import akka.actor.{ActorRef, Cancellable, Props}
 import akka.event.LoggingReceive
-import akka.persistence.RecoveryCompleted
-import com.typesafe.scalalogging.LazyLogging
+import akka.persistence.{RecoveryCompleted, SnapshotOffer}
+import com.persist.logging._
 import nl.grons.metrics.scala.{Histogram, Meter, MetricName}
 import peds.akka.envelope._
 import peds.akka.metrics.{Instrumented, InstrumentedActor}
@@ -51,7 +51,7 @@ case class CellShardCatalog(
   algorithmRootType: AggregateRootType,
   override val nextAlgorithmId: () => AlgorithmModule.TID,
   cells: Vector[AlgoTID]
-) extends ShardCatalog with Equals with LazyLogging {
+) extends ShardCatalog with Equals with ClassLogging {
   import CellShardCatalog.identifying
 
   override def id: TID = identifying.tag( ShardCatalog.ID( plan.id, algorithmRootType.name ).asInstanceOf[identifying.ID] ).asInstanceOf[TID]
@@ -60,7 +60,14 @@ case class CellShardCatalog(
   val size: Int = cells.size
 
   def apply( t: Topic ): AlgoTID = {
-    logger.debug( "#TEST: CellShardCatalog.apply: topic:[{}] cells:[{}] t.##:[{}] tpos:[{}]", t, cells.size.toString, t.##.toString, (math.abs(t.##) % cells.size).toString )
+    log.debug(
+      Map(
+        "@msg" -> "#TEST: CellShardCatalog.apply",
+        "topic" -> Map( "name" -> t.toString, "hashcode" -> t.## ),
+        "cells" -> cells.size,
+        "cell-assignment" -> (math.abs(t.##) % cells.size)
+      )
+    )
     cells( math.abs(t.##) % size )
   }
 
@@ -95,7 +102,7 @@ object CellShardCatalog {
 }
 
 
-object CellShardModule extends LazyLogging {
+object CellShardModule extends ClassLogging {
   type ID = CellShardCatalog#ID
   type TID = CellShardCatalog#TID
 
@@ -225,9 +232,8 @@ object CellShardModule extends LazyLogging {
     case object UpdateAvailability extends CellShardProtocol.ProtocolMessage
     val AvailabilityCheckPeriod: FiniteDuration = 10.seconds
 
-    override def receiveRecover: Receive = {
+    val myReceiveRecover: Receive = {
       case RecoveryCompleted => {
-
         shardMetrics = Option( state ) map { s => new ShardMetrics( s.plan, s.id.id.asInstanceOf[ShardCatalog.ID] ) }
 
         dispatchEstimateRequests()
@@ -245,6 +251,8 @@ object CellShardModule extends LazyLogging {
       }
     }
 
+    override def receiveRecover: Receive = myReceiveRecover orElse super.receiveRecover
+
     override def receiveCommand: Receive = LoggingReceive { around( routing orElse admin ) }
 
     import spotlight.analysis.algorithm.{AlgorithmProtocol => AP}
@@ -259,6 +267,18 @@ log.warning( "algorithmRootType:[{}].identifying:[{}]", Option(e.algorithmRootTy
       case e: CellShardProtocol.Add if e.targetId == aggregateId && Option( state ).nonEmpty => { }
 
       case UpdateAvailability => dispatchEstimateRequests()
+
+      case estimate: AP.EstimatedSize => {
+        log.info(
+          "AlgorithmCellShardCatalog[{}] Received estimate from shard:[{}] with estimated shapes:[{}] and average shape size:[{}]",
+          self.path.name, estimate.sourceId, estimate.nrShapes, estimate.averageSizePerShape
+        )
+
+        shardMetrics foreach { m =>
+          m.memoryHistogram += estimate.size.toBytes.toLong
+          m.sizeHistogram += estimate.nrShapes
+        }
+      }
     }
 
     val routing: Receive = {
@@ -273,19 +293,6 @@ log.warning( "algorithmRootType:[{}].identifying:[{}]", Option(e.algorithmRootTy
         log.debug( "ShardCatalog[{}]: known RouteMessage received. extracting payload:[{}]", self.path.name, payload )
         routing( payload )
       }
-
-      case estimate: AP.EstimatedSize => {
-        log.info(
-          "AlgorithmTopicShardCatalog[{}] shard:[{}] shapes:[{}] estimated average shape size:[{}]",
-          self.path.name, estimate.sourceId, estimate.nrShapes, estimate.averageSizePerShape
-        )
-
-        shardMetrics foreach { m =>
-          m.memoryHistogram += estimate.size.toBytes.toLong
-          m.sizeHistogram += estimate.nrShapes
-        }
-      }
-
     }
   }
 }

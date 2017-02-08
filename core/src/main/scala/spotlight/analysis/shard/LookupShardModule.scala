@@ -343,9 +343,8 @@ object LookupShardModule extends AggregateRootModule { module =>
       case object UpdateAvailability extends LookupShardProtocol.ProtocolMessage
       val AvailabilityCheckPeriod: FiniteDuration = 10.seconds
 
-      override def receiveRecover: Receive = {
+      val myReceiveRecover: Receive = {
         case RecoveryCompleted => {
-
           shardMetrics = Option( state ) map { s => new ShardMetrics( s.plan, s.id.id.asInstanceOf[ShardCatalog.ID] ) }
 
           dispatchEstimateRequests( _ => true )
@@ -362,6 +361,8 @@ object LookupShardModule extends AggregateRootModule { module =>
           )
         }
       }
+
+      override def receiveRecover: Receive = myReceiveRecover orElse super.receiveRecover
 
       override def receiveCommand: Receive = active( Availability(control = LookupShardCatalog.Control.BySize(Megabytes(3))))
 

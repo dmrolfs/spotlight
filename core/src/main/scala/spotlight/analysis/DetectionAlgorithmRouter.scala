@@ -47,7 +47,7 @@ object DetectionAlgorithmRouter extends ClassLogging {
           algoRoots <- Registry.loadAlgorithms( bc, configuration )
           roots <- Registry.registerWithRouter( algoRoots )
           unknowns = algoRoots.map { case (_, rt) => rt }.toSet
-          _ = log.info( Map( "@msg" -> "#TEST unknown algorithm routes", "unkowns" -> unknowns.mkString( "[", ", ", "]" ) ) )
+          _ = log.info( Map( "@msg" -> "#TEST unknown algorithm routes", "unknowns" -> unknowns.mkString( "[", ", ", "]" ) ) )
         } yield {
           log
           .info( Map( "@msg" -> "DetectionAlgorithmRouter routing table", "routing-table" -> roots.mkString( "[", ", ", "]" ) ) )
@@ -66,7 +66,7 @@ object DetectionAlgorithmRouter extends ClassLogging {
 
   val DispatcherPath: String = OutlierDetection.DispatcherPath
 
-  def name( suffix: String ): String = "router-" + suffix
+  def name( suffix: String ): String = "router:" + suffix
 
 
   trait Provider {
@@ -241,20 +241,22 @@ class DetectionAlgorithmRouter extends Actor with EnvelopingActor with Instrumen
   log.debug(Map("@msg"->"created routing-table", "self"->self.path.name, "routing-table"->routingTable.mkString("[", ", ", "]")))
 
   def contains( algorithm: Symbol ): Boolean = {
+    val found = routingTable contains algorithm
+
     log.debug(
       Map(
         "@msg" -> "looking for",
         "self" -> self.path.name,
         "algorithm" -> algorithm.name,
-        "routing-table" -> routingTable.keys.mkString("[", ", ", "]")
+        "routing-table" -> routingTable.keys.mkString("[", ", ", "]"),
+        "found" -> found
       )
     )
 
-    routingTable contains algorithm
+    found
   }
 
   val registration: Receive = {
-//    case class RegisterAlgorithmRootType( algorithm: Symbol, handler: AggregateRootType ) extends RouterProtocol
     case RegisterAlgorithmReference( algorithm, handler ) => {
       addRoute( algorithm, AlgorithmRoute.DirectRoute( handler ) )
       sender() !+ AlgorithmRegistered( algorithm )
@@ -270,7 +272,6 @@ class DetectionAlgorithmRouter extends Actor with EnvelopingActor with Instrumen
         )
       )
       addRoute( algorithm, AlgorithmRoute.routeFor(plan, algorithmRootType)( model ) )
-//      addRoute( algorithm, ShardedRootTypeProxy( plan, algorithmRootType, model ) )
       sender() !+ AlgorithmRegistered( algorithm )
     }
 
@@ -284,7 +285,7 @@ class DetectionAlgorithmRouter extends Actor with EnvelopingActor with Instrumen
     case m: DetectUsing if contains( m.algorithm ) => routingTable( m.algorithm ) forward m
   }
 
-  override val receive: Receive = LoggingReceive{ around( registration orElse routing ) }
+  override val receive: Receive = LoggingReceive{ around( routing orElse registration ) }
 
   override def unhandled( message: Any ): Unit = {
     message match {
@@ -293,7 +294,8 @@ class DetectionAlgorithmRouter extends Actor with EnvelopingActor with Instrumen
             Map(
             "@msg" -> "cannot route unregistered algorithm",
             "algorithm" -> m.algorithm.name,
-            "routing-keys" -> routingTable.keySet.mkString( "[", ", ", "]" )
+            "routing-keys" -> routingTable.keySet.mkString("[", ", ", "]"),
+            "found" -> contains(m.algorithm)
           )
         )
       }

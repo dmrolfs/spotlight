@@ -57,11 +57,40 @@ sealed trait AnalysisPlan extends Entity with Equals {
 object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
   implicit def summarize( p: AnalysisPlan ): Summary = Summary( p )
 
-  case class Summary( id: AnalysisPlan#TID, name: String, slug: String, appliesTo: Option[AnalysisPlan.AppliesTo] = None )
+  case class Summary(
+    id: AnalysisPlan#TID,
+    name: String,
+    slug: String,
+    isActive: Boolean = true,
+    appliesTo: Option[AnalysisPlan.AppliesTo] = None
+  ) extends Equals {
+    override def canEqual( rhs: Any ): Boolean = rhs.isInstanceOf[Summary]
+
+    override def toString: String = {
+      s"AnalysisPlan(id:${id.id} name:${name} slug:${slug} isActive:${isActive} appliesTo:${appliesTo})"
+    }
+
+    override def hashCode(): Int = 41 + id.##
+
+    override def equals( rhs: Any ): Boolean = {
+      rhs match {
+        case that: Summary => {
+          if ( this eq that ) true
+          else {
+            ( that.## == this.## ) &&
+            ( that canEqual this ) &&
+            ( this.id == that.id )
+          }
+        }
+
+        case _ => false
+      }
+    }
+  }
 
   object Summary {
     def apply( info: AnalysisPlan ): Summary = {
-      Summary( id = info.id, name = info.name, slug = info.slug, appliesTo = Option(info.appliesTo) )
+      Summary( id = info.id, name = info.name, slug = info.slug, isActive = info.isActive, appliesTo = Option(info.appliesTo) )
     }
   }
 
