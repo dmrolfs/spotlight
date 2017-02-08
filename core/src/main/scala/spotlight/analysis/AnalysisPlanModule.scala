@@ -178,7 +178,7 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
 
         case ConfigValueType.OBJECT => {
           import scala.reflect._
-          import scala.collection.JavaConversions._
+//          import scala.collection.JavaConversions._
           val ConfigObjectType = classTag[ConfigObject]
           val jconfig = config.getConfig( JournalPluginPath )
           if ( jconfig.hasPath( "class" ) ) {
@@ -211,35 +211,33 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
   with CurrentEventsByTagQuery2
 
   object QueryJournal {
-    val empty = {
-      new ReadJournal
-      with AllPersistenceIdsQuery
-      with CurrentPersistenceIdsQuery
-      with EventsByPersistenceIdQuery
-      with CurrentEventsByPersistenceIdQuery
-      with EventsByTagQuery2
-      with CurrentEventsByTagQuery2 {
-        override def allPersistenceIds(): Source[String, NotUsed] = Source.empty[String]
+    object empty extends ReadJournal
+                         with AllPersistenceIdsQuery
+                         with CurrentPersistenceIdsQuery
+                         with EventsByPersistenceIdQuery
+                         with CurrentEventsByPersistenceIdQuery
+                         with EventsByTagQuery2
+                         with CurrentEventsByTagQuery2 {
+      override def allPersistenceIds(): Source[String, NotUsed] = Source.empty[String]
 
-        override def currentPersistenceIds(): Source[String, NotUsed] = Source.empty[String]
+      override def currentPersistenceIds(): Source[String, NotUsed] = Source.empty[String]
 
-        override def eventsByPersistenceId(
-          persistenceId: String,
-          fromSequenceNr: Long,
-          toSequenceNr: Long
-        ): Source[EventEnvelope, NotUsed] = Source.empty[EventEnvelope]
+      override def eventsByPersistenceId(
+        persistenceId: String,
+        fromSequenceNr: Long,
+        toSequenceNr: Long
+      ): Source[EventEnvelope, NotUsed] = Source.empty[EventEnvelope]
 
-        override def currentEventsByPersistenceId(
-          persistenceId: String,
-          fromSequenceNr: Long,
-          toSequenceNr: Long
-        ): Source[EventEnvelope, NotUsed] = Source.empty[EventEnvelope]
+      override def currentEventsByPersistenceId(
+        persistenceId: String,
+        fromSequenceNr: Long,
+        toSequenceNr: Long
+      ): Source[EventEnvelope, NotUsed] = Source.empty[EventEnvelope]
 
-        override def eventsByTag( tag: String, offset: Offset ): Source[EventEnvelope2, NotUsed] = Source.empty[EventEnvelope2]
+      override def eventsByTag( tag: String, offset: Offset ): Source[EventEnvelope2, NotUsed] = Source.empty[EventEnvelope2]
 
-        override def currentEventsByTag( tag: String, offset: Offset ): Source[EventEnvelope2, NotUsed] = {
-          Source.empty[EventEnvelope2]
-        }
+      override def currentEventsByTag( tag: String, offset: Offset ): Source[EventEnvelope2, NotUsed] = {
+        Source.empty[EventEnvelope2]
       }
     }
   }
@@ -306,7 +304,6 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
           case P.Added( sid, Some(AnalysisPlanState(p: AnalysisPlan)) ) => Directive.Record( p, sid, p.toSummary )
           case P.Added( sid, Some( p: AnalysisPlan ) ) => Directive.Record( p.name, sid, p.toSummary )
           case P.Added( sid, info ) => {
-//            logger.error( "ignoring added event since info was not an AnalysisPlan: [{}]", info )
             log.error( Map("@msg" -> "ignoring added event since info was not some AnalysisPlan", "info" -> info.toString) )
             Directive.Ignore
           }
@@ -378,9 +375,6 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
         provider: Actor with ActorLogging =>
         def model: DomainModel
 
-//        def plan: AnalysisPlan
-//        def routes: Map[Symbol, AlgorithmRoute]
-
         def routerName( p: AnalysisPlan ): String = DetectionAlgorithmRouter.name( p.name )
         def detectorName( p: AnalysisPlan ): String = OutlierDetection.name( p.name )
 
@@ -434,14 +428,6 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
         }
 
         def makeRouter( p: AnalysisPlan, routes: Map[String, AlgorithmRoute] )( implicit context: ActorContext ): ActorRef = {
-//          val algorithmRefs = for {
-//            name <- plan.algorithms.toSeq
-//            rt <- DetectionAlgorithmRouter.rootTypeFor( name )( context.dispatcher ).toSeq
-//          } yield {
-//            ( name, AlgorithmRoute.routeFor(plan, rt)(model) )
-//          }
-//
-//          val routerProps = DetectionAlgorithmRouter.props( plan, Map( algorithmRefs:_* ) )
           val routerProps = DetectionAlgorithmRouter.props( p, routes )
           context.actorOf( routerProps.withDispatcher( DetectionAlgorithmRouter.DispatcherPath ), provider.routerName(p) )
         }
@@ -512,21 +498,6 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
           s.copy( plan = s.plan.asInstanceOf[AnalysisPlan.SimpleAnalysisPlan].copy(isQuorum = e.isQuorum, reduce = e.reduce) )
         }
       }
-
-//      private def makeRoutes(
-//        plan: AnalysisPlan
-//      )(
-//        algorithms: Set[Symbol] = allAlgorithms(plan.algorithms, plan.algorithmConfig)
-//      ): Map[Symbol, AlgorithmRoute] = {
-//        implicit val ec: scala.concurrent.ExecutionContext = context.dispatcher
-//
-//        def makeRoute( plan: AnalysisPlan )( algorithm: Symbol ): Option[AlgorithmRoute] = {
-//          DetectionAlgorithmRouter.Registry.rootTypeFor( algorithm ).map{ rt => AlgorithmRoute.routeFor( plan, rt )( model ) }
-//        }
-//
-//        val routes = algorithms.toSeq.map{ a => (a, makeRoute(plan)(a) ) }.collect{ case (a, Some(r)) => ( a, r ) }
-//        Map( routes:_* )
-//      }
 
       val IdType = identifying.evTID
 
@@ -610,11 +581,8 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
         materializer: Materializer
       ): DetectFlow = {
         val entry = Flow[TimeSeries] filter { state.plan.appliesTo }
-
         val withGrouping = state.plan.grouping map { g => entry.via( batchSeries( g ) ) } getOrElse entry
-        withGrouping
-//        .buffer( actorOuter.bufferSize, OverflowStrategy.backpressure )
-        .via( detectionFlow( state.plan, parallelism ) )
+        withGrouping.via( detectionFlow( state.plan, parallelism ) )
       }
 
       def batchSeries(
