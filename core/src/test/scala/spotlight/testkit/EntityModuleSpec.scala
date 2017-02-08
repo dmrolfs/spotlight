@@ -7,11 +7,12 @@ import com.typesafe.config.Config
 import org.joda.{time => joda}
 import org.apache.commons.math3.random.RandomDataGenerator
 import org.scalatest.concurrent.ScalaFutures
+import com.persist.logging._
 import peds.archetype.domain.model.core.{Entity, EntityIdentifying}
 import peds.commons.V
 import peds.commons.log.Trace
 import demesne.AggregateRootType
-import demesne.module.entity.{EntityAggregateModule, EntityProtocol}
+import demesne.module.entity.{EntityAggregateModule}
 import demesne.testkit.AggregateRootSpec
 import spotlight.analysis.HistoricalStatistics
 import spotlight.analysis.shard.CellShardModule
@@ -35,6 +36,13 @@ abstract class EntityModuleSpec[E <: Entity : ClassTag] extends AggregateRootSpe
   abstract class EntityFixture( _config: Config, _system: ActorSystem, _slug: String )
   extends AggregateFixture( _config, _system, _slug ) { fixture =>
 
+    var loggingSystem: LoggingSystem = _
+
+    override def before( test: OneArgTest ): Unit = {
+      super.before( test )
+      loggingSystem = LoggingSystem( _system, s"Test:${getClass.getName}", "1", "localhost" )
+    }
+
     type Module <: EntityAggregateModule[E]
     val module: Module
 
@@ -57,7 +65,7 @@ abstract class EntityModuleSpec[E <: Entity : ClassTag] extends AggregateRootSpe
         window map { w => AnalysisPlan.Grouping( limit = 10000, w ) }
       }
 
-      AnalysisPlan.default( "", 1.second, isQuorun, reduce, Set.empty[Symbol], grouping ).appliesTo
+      AnalysisPlan.default( "", 1.second, isQuorun, reduce, Set.empty[String], grouping ).appliesTo
     }
 
     implicit val nowTimestamp: joda.DateTime = joda.DateTime.now

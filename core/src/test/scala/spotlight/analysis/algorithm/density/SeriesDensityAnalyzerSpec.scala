@@ -55,7 +55,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
         window map { w => AnalysisPlan.Grouping( limit = 10000, w ) }
       }
 
-      AnalysisPlan.default( "", 1.second, isQuorun, reduce, Set.empty[Symbol], grouping ).appliesTo
+      AnalysisPlan.default( "", 1.second, isQuorun, reduce, Set.empty[String], grouping ).appliesTo
     }
   }
 
@@ -184,8 +184,8 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
           HistoricalStatistics(2, false),
           ConfigFactory.parseString(
             s"""
-               |${algoS.name}.seedEps: 5.0
-               |${algoS.name}.minDensityConnectedPoints: 3
+               |${algoS}.seedEps: 5.0
+               |${algoS}.minDensityConnectedPoints: 3
              """.stripMargin
           )
         )
@@ -200,10 +200,10 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       val expected = points filter { expectedValues contains _.value } sortBy { _.timestamp }
       val algProps = ConfigFactory.parseString(
         s"""
-           |${algoS.name}.tolerance: 0.756574715  // to bring effective eps to 5.0
-           |${algoS.name}.seedEps: 1.0
-           |${algoS.name}.minDensityConnectedPoints: 3
-           |${algoS.name}.distance: Euclidean
+           |${algoS}.tolerance: 0.756574715  // to bring effective eps to 5.0
+           |${algoS}.seedEps: 1.0
+           |${algoS}.minDensityConnectedPoints: 3
+           |${algoS}.distance: Euclidean
         """.stripMargin
       )
 
@@ -258,7 +258,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
 
       val algProps = ConfigFactory.parseString(
         s"""
-           |${algoS.name} {
+           |${algoS} {
            |  tolerance: 3
            |  seedEps: 5.0
            |  minDensityConnectedPoints: 3
@@ -297,9 +297,9 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
           history = history,
           properties = ConfigFactory.parseString(
             s"""
-               |${algoS.name}.seedEps: 5.0
-               |${algoS.name}.tolerance: 2.0
-               |${algoS.name}.minDensityConnectedPoints: 3
+               |${algoS}.seedEps: 5.0
+               |${algoS}.tolerance: 2.0
+               |${algoS}.minDensityConnectedPoints: 3
             """.stripMargin
           )
         )
@@ -400,7 +400,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
 //
 //      val algProps = ConfigFactory.parseString(
 //        s"""
-//           |${algoS.name}.tolerance: 3.0
+//           |${algoS}.tolerance: 3.0
 //           |${algoC.name}.seedEps: 5.0
 //           |${algoC.name}.minDensityConnectedPoints: 2
 //        """.stripMargin
@@ -416,7 +416,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
 //      analyzer ! expected
 //      aggregator.expectMsgPF( 2.seconds.dilated, "detect" ) {
 //        case UnrecognizedPayload( alg, actual ) => {
-//          alg.name mustBe algoS.name
+//          alg.name mustBe algoS
 //          actual mustBe expected
 //        }
 //      }
@@ -429,10 +429,10 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       def detectUsing( message: OutlierDetectionMessage, history: HistoricalStatistics ): DetectUsing = {
         val config = ConfigFactory.parseString(
           s"""
-             |${algoS.name}.tolerance: 1.785898778
-             |${algoS.name}.seedEps: 1.0
-             |${algoS.name}.minDensityConnectedPoints: 3
-             |${algoS.name}.distance: Euclidean
+             |${algoS}.tolerance: 1.785898778
+             |${algoS}.seedEps: 1.0
+             |${algoS}.minDensityConnectedPoints: 3
+             |${algoS}.distance: Euclidean
            """.stripMargin
         )
 
@@ -589,11 +589,11 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       val expected = points filter { expectedValues contains _.value } sortBy { _.timestamp }
       val algProps = ConfigFactory.parseString(
         s"""
-           |${algoS.name}.tolerance: 0.756574715  // to bring effective eps to 5.0
-           |${algoS.name}.seedEps: 1.0
-           |${algoS.name}.minDensityConnectedPoints: 3
-           |${algoS.name}.distance: Euclidean
-           |${algoS.name}.publish-threshold: yes
+           |${algoS}.tolerance: 0.756574715  // to bring effective eps to 5.0
+           |${algoS}.seedEps: 1.0
+           |${algoS}.minDensityConnectedPoints: 3
+           |${algoS}.distance: Euclidean
+           |${algoS}.publish-threshold: yes
         """.stripMargin
       )
 

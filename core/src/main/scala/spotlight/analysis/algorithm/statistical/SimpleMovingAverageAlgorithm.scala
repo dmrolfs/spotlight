@@ -34,7 +34,7 @@ object SimpleMovingAverageAlgorithm extends AlgorithmModule with AlgorithmModule
   override val shapeCompanion: ShapeCompanion[Shape] = Shape
 
   override def algorithm: Algorithm = new Algorithm {
-    override val label: Symbol = Symbol( "simple-moving-average" )
+    override val label: String = "simple-moving-average"
 
     override def prepareData( c: Context ): Seq[DoublePoint] = { c.tailAverage()( c.data ) }
 

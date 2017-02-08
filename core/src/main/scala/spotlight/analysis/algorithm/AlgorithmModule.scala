@@ -21,28 +21,33 @@ import Scalaz._
 import scalaz.Kleisli.{ask, kleisli}
 import com.typesafe.config.Config
 import com.typesafe.config.ConfigException.BadValue
-import com.typesafe.scalalogging.{LazyLogging, StrictLogging}
 import org.apache.commons.math3.ml.clustering.DoublePoint
 import com.codahale.metrics.{Metric, MetricFilter}
 import nl.grons.metrics.scala.{Meter, MetricName, Timer}
 import squants.information.{Bytes, Information}
+import com.persist.logging.{ActorLogging => PersistActorLogging, _}
 import peds.akka.envelope._
 import peds.akka.metrics.{Instrumented, InstrumentedActor}
 import peds.akka.persistence.{Passivating, SnapshotLimiter}
 import peds.akka.publish.{EventPublisher, StackableStreamPublisher}
 import peds.archetype.domain.model.core.{Entity, EntityIdentifying}
-import peds.commons.{KOp, TryV}
+import peds.commons.{KOp, TryV, Valid}
 import peds.commons.identifier.{Identifying, ShortUUID, TaggedID}
 import demesne._
-import demesne.repository.{AggregateRootRepository, CommonLocalRepository, EnvelopingAggregateRootRepository}
+import demesne.repository.{AggregateRootRepository, EnvelopingAggregateRootRepository}
 import demesne.repository.AggregateRootRepository.{ClusteredAggregateContext, LocalAggregateContext}
+import shapeless.the
 import spotlight.analysis._
-import spotlight.model.outlier.{NoOutliers, AnalysisPlan, Outliers}
+import spotlight.analysis.algorithm.AlgorithmModule.ID
+import spotlight.analysis.algorithm.AlgorithmProtocol.RouteMessage
+import spotlight.model.outlier.{AnalysisPlan, NoOutliers, Outliers}
 import spotlight.model.timeseries._
 
 
 object AlgorithmProtocol extends AggregateProtocol[AlgorithmModule.ID] {
-  import AlgorithmModule.AnalysisState
+  case class RouteMessage( override val targetId: RouteMessage#TID, payload: Any ) extends MessageLike {
+    override type ID = AlgorithmModule.ID
+  }
 
   case class EstimateSize( override val targetId: EstimateSize#TID ) extends Message with NotInfluenceReceiveTimeout
   case class EstimatedSize( val sourceId: AlgorithmModule.TID, nrShapes: Int, size: Information ) extends ProtocolMessage {
@@ -66,16 +71,17 @@ object AlgorithmProtocol extends AggregateProtocol[AlgorithmModule.ID] {
 
   case class TopicShapeSnapshot(
     override val sourceId: TopicShapeSnapshot#TID,
-    algorithm: Symbol,
+    algorithm: String,
     topic: Topic,
     snapshot: Option[AlgorithmModule#Shape]
   ) extends Event
 
   case class GetStateSnapshot( override val targetId: AlgorithmModule.TID ) extends Command with NotInfluenceReceiveTimeout
 
+  import scala.language.existentials
   case class StateSnapshot(
     override val sourceId: StateSnapshot#TID,
-    snapshot: AnalysisState
+    snapshot: AlgorithmState[_]
   ) extends Event with NotInfluenceReceiveTimeout
 
   case class Advanced(
@@ -87,73 +93,122 @@ object AlgorithmProtocol extends AggregateProtocol[AlgorithmModule.ID] {
   ) extends Event
 
   case class AlgorithmUsedBeforeRegistrationError(
-    sourceId: AnalysisState#TID,
-    algorithm: Symbol,
+    sourceId: TID,
+    algorithm: String,
     path: ActorPath
   ) extends IllegalStateException(
-    s"actor [${path}] not registered algorithm [${algorithm.name}] with scope [${sourceId}] before use"
+    s"actor [${path}] not registered algorithm [${algorithm}] with scope [${sourceId}] before use"
   ) with OutlierAlgorithmError
 }
+
+case class AlgorithmState[S: ClassTag](
+  override val id: AlgorithmModule.TID,
+  override val name: String,
+  shapes: Map[Topic, S] = Map.empty[Topic, S]
+) extends Entity with Equals {
+  override type ID = AlgorithmModule.ID
+  override val evID: ClassTag[ID] = classTag[ID]
+  override val evTID: ClassTag[TID] = classTag[TID]
+
+  type Shape = S
+  val evShape: ClassTag[Shape] = the[ClassTag[S]]
+
+//  override def algorithm: Symbol = module.algorithm.label
+
+  def withTopicShape( topic: Topic, shape: Shape ): AlgorithmState[S] = copy( shapes = shapes + (topic -> shape) )
+
+  override def hashCode: Int = {
+    41 * (
+      41 * (
+        41 + id.id.##
+      ) + name.##
+    ) + shapes.##
+  }
+
+
+  override def canEqual( rhs: Any ): Boolean = rhs.isInstanceOf[AlgorithmState[S]]
+
+  override def equals( rhs: Any ): Boolean = {
+    rhs match {
+      case that: AlgorithmState[S] => {
+        if ( this eq that ) true
+        else {
+          ( that.## == this.## ) &&
+          ( that canEqual this ) &&
+          ( this.id.id == that.id.id ) &&
+          ( this.name == that.name) &&
+          ( this.shapes == that.shapes )
+        }
+      }
+
+      case _ => false
+    }
+  }
+
+  override def toString: String = s"""State( algorithm:${name} id:[${id}] shapesNr:[${shapes.size}] )"""
+}
+
 
 
 /**
   * Created by rolfsd on 6/5/16.
   */
-object AlgorithmModule extends Instrumented with StrictLogging {
+object AlgorithmModule extends Instrumented with ClassLogging {
   // useful for with* methods to maintain concrete typing
   // idea pick up from: http://stackoverflow.com/questions/14729996/scala-implementing-method-with-return-type-of-concrete-instance
   trait StrictSelf[T <: StrictSelf[T]] { self: T =>
     type Self >: self.type <: T
   }
 
-  type ID = ShortUUID
+  type ID = AlgorithmIdentifier
   type TID = TaggedID[ID]
 
 
-  trait AnalysisState extends Entity with Equals { self: StrictSelf[_] =>
-    type Shape <: Serializable
-    def evShape: ClassTag[Shape]
+//  trait AnalysisState extends Entity with Equals { self: StrictSelf[_] =>
+//    type Shape <: Serializable
+//    def evShape: ClassTag[Shape]
+//
+//    override type ID = AlgorithmModule.ID
+//
+//    override val evID: ClassTag[ID] = classTag[AlgorithmModule.ID]
+//    override val evTID: ClassTag[TID] = classTag[TaggedID[AlgorithmModule.ID]]
+//
+//    def algorithm: Symbol
+//    def shapes: Map[Topic, Shape] = Map.empty[Topic, Shape]
+//    def withTopicShape( topic: Topic, shape: Shape ): Self
+//
+////    def thresholds: Seq[ThresholdBoundary]
+////    def addThreshold( threshold: ThresholdBoundary ): Self
+//
+//    override def hashCode: Int = {
+//      41 * (
+//        41 * (
+//          41 * (
+//            41 + id.id.##
+//          ) + name.##
+//        ) + algorithm.##
+//      ) + shapes.##
+//    }
+//
+//    override def equals( rhs: Any ): Boolean = {
+//      rhs match {
+//        case that: AnalysisState => {
+//          if ( this eq that ) true
+//          else {
+//            ( that.## == this.## ) &&
+//            ( that canEqual this ) &&
+//            ( this.id.id == that.id.id ) &&
+//            ( this.name == that.name) &&
+//            ( this.algorithm.name == that.algorithm.name) &&
+//            ( this.shapes == that.shapes )
+//          }
+//        }
+//
+//        case _ => false
+//      }
+//    }
+//  }
 
-    override type ID = AlgorithmModule.ID
-
-    override val evID: ClassTag[ID] = classTag[AlgorithmModule.ID]
-    override val evTID: ClassTag[TID] = classTag[TaggedID[AlgorithmModule.ID]]
-
-    def algorithm: Symbol
-    def shapes: Map[Topic, Shape] = Map.empty[Topic, Shape]
-    def withTopicShape( topic: Topic, shape: Shape ): Self
-
-//    def thresholds: Seq[ThresholdBoundary]
-//    def addThreshold( threshold: ThresholdBoundary ): Self
-
-    override def hashCode: Int = {
-      41 * (
-        41 * (
-          41 * (
-            41 + id.id.##
-          ) + name.##
-        ) + algorithm.##
-      ) + shapes.##
-    }
-
-    override def equals( rhs: Any ): Boolean = {
-      rhs match {
-        case that: AnalysisState => {
-          if ( this eq that ) true
-          else {
-            ( that.## == this.## ) &&
-            ( that canEqual this ) &&
-            ( this.id.id == that.id.id ) &&
-            ( this.name == that.name) &&
-            ( this.algorithm.name == that.algorithm.name) &&
-            ( this.shapes == that.shapes )
-          }
-        }
-
-        case _ => false
-      }
-    }
-  }
 
 
   trait ShapeCompanion[S] {
@@ -183,11 +238,11 @@ object AlgorithmModule extends Instrumented with StrictLogging {
 
 
   case class InsufficientDataSize(
-    algorithm: Symbol,
+    algorithm: String,
     size: Long,
     required: Long
   ) extends IllegalArgumentException(
-    s"${size} data points is insufficient to perform ${algorithm.name} test, which requires at least ${required} points"
+    s"${size} data points is insufficient to perform ${algorithm} test, which requires at least ${required} points"
   )
 
 
@@ -198,10 +253,10 @@ object AlgorithmModule extends Instrumented with StrictLogging {
   ) extends RuntimeException( s"For algorithm ${aggregateId}: ${path}:${value} is redundant" )
 
   case class InvalidAlgorithmConfiguration(
-    algorithm: Symbol,
+    algorithm: String,
     path: String,
     requirement: String
-  ) extends BadValue( path, s"For algorithm, ${algorithm.name}, ${path} must: ${requirement}" )
+  ) extends BadValue( path, s"For algorithm, ${algorithm}, ${path} must: ${requirement}" )
 
 
   val snapshotFactorizer: Random = new Random()
@@ -223,18 +278,28 @@ object AlgorithmModule extends Instrumented with StrictLogging {
   val passivationTimer: Timer = metrics.timer( "passivation" )
 }
 
-abstract class AlgorithmModule extends AggregateRootModule with Instrumented { module: AlgorithmModule.ModuleConfiguration =>
-  import AlgorithmModule.{ AnalysisState, ShapeCompanion, StrictSelf }
+abstract class AlgorithmModule extends AggregateRootModule with Instrumented with ClassLogging {
+  module: AlgorithmModule.ModuleConfiguration =>
+
+  import AlgorithmModule.{ ShapeCompanion, StrictSelf }
   import AlgorithmProtocol.Advanced
 
-  implicit val identifying: EntityIdentifying[AnalysisState] = {
-    val i = new EntityIdentifying[AnalysisState] with ShortUUID.ShortUuidIdentifying[AnalysisState] {
-      override lazy val idTag: Symbol = algorithm.label
-      override val evEntity: ClassTag[AnalysisState] = classTag[AnalysisState]
-    }
+  implicit val identifying: EntityIdentifying[AlgorithmState[Shape]] = new EntityIdentifying[AlgorithmState[Shape]] {
+    override lazy val idTag: Symbol = Symbol( algorithm.label )
+    override val evID: ClassTag[ID] = classTag[ID]
+    override val evTID: ClassTag[TID] =  classTag[TID]
+    override val evEntity: ClassTag[AlgorithmState[Shape]] = classTag[AlgorithmState[Shape]]
 
-    logger.warn( "ALGO_MODULE identifying = [{}]", i)
-    i
+    override def nextId: TryV[TID] = -\/( new IllegalStateException("AlgorithmModule TIDs are created via AlgorithmRoutes") )
+    override def fromString( idstr: String ): ID = {
+      AlgorithmIdentifier.fromAggregateId( idstr ).disjunction match {
+        case \/-( id ) => id
+        case -\/( exs ) => {
+          exs foreach { ex => log.error( Map("@msg" -> "failed to parse algorithm id from string", "rep" -> idstr), ex ) }
+          throw exs.head
+        }
+      }
+    }
   }
 
 
@@ -322,34 +387,35 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
     * Shape represents the culminated value of applying the algorithm over the time series data for this ID.
     */
   type Shape <: Serializable
-  def evShape: ClassTag[Shape]
+  implicit def evShape: ClassTag[Shape]
 
   val shapeCompanion: ShapeCompanion[Shape]
 
-  case class State(
-    override val id: AlgorithmModule.TID,
-    override val shapes: Map[Topic, module.Shape] = Map.empty[Topic, module.Shape]
-  ) extends AnalysisState with StrictSelf[State] {
-    override type Self = State
-    override type Shape = module.Shape
-    override def evShape: ClassTag[Shape] = module.evShape
-
-    override def algorithm: Symbol = module.algorithm.label
-    override def name: String = algorithm.name
-
-    override def withTopicShape( topic: Topic, shape: Shape ): Self = copy( shapes = shapes + (topic -> shape) )
-
-    override def toString: String = s"""State( algorithm:${algorithm.name} id:[${id}] shapes:[${shapes.size}] )"""
-  }
+  type State = AlgorithmState[Shape]
+//  case class State(
+//    override val id: AlgorithmModule.TID,
+//    override val shapes: Map[Topic, module.Shape] = Map.empty[Topic, module.Shape]
+//  ) extends AnalysisState with StrictSelf[State] {
+//    override type Self = State
+//    override type Shape = module.Shape
+//    override def evShape: ClassTag[Shape] = module.evShape
+//
+//    override def algorithm: Symbol = module.algorithm.label
+//    override def name: String = algorithm.name
+//
+//    override def withTopicShape( topic: Topic, shape: Shape ): Self = copy( shapes = shapes + (topic -> shape) )
+//
+//    override def toString: String = s"""State( algorithm:${algorithm.name} id:[${id}] shapes:[${shapes.size}] )"""
+//  }
 
 
   def algorithm: Algorithm
-  override lazy val aggregateIdTag: Symbol = algorithm.label
-  override lazy val shardName: String = algorithm.label.name
+  override lazy val aggregateIdTag: Symbol = Symbol( algorithm.label )
+  override lazy val shardName: String = algorithm.label
 
 
   trait Algorithm {
-    val label: Symbol
+    val label: String
     def prepareData( c: Context ): Seq[DoublePoint] = c.data
     def step( point: PointT, shape: Shape )( implicit s: State, c: Context ): Option[(Boolean, ThresholdBoundary)]
   }
@@ -358,7 +424,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
   type Context <: AlgorithmContext
   def makeContext( message: DetectUsing, state: Option[State] ): Context
 
-  trait AlgorithmContext extends LazyLogging {
+  trait AlgorithmContext {
     def message: DetectUsing
     def topic: Topic = message.topic
     def data: Seq[DoublePoint]
@@ -454,7 +520,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
 
         Some(
           new SnapshotSpecification {
-            override val snapshotInterval: FiniteDuration = 3.minutes // 2.minutes // 5.minutes okay
+            override val snapshotInterval: FiniteDuration = 2.minutes // 5.minutes okay
             override val snapshotInitialDelay: FiniteDuration = {
               val delay = snapshotInterval + snapshotInterval * AlgorithmModule.snapshotFactorizer.nextDouble()
               FiniteDuration( delay.toMillis, MILLISECONDS )
@@ -505,9 +571,18 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
         log.warning( "AggregateRootType[{}] does not recognize command[{}]", rootType.name, command )
       }
       val (id, _) = rootType aggregateIdFor command
-      val options = backoffOptionsFor( id )
-      val name = "backoff-"+id
-      context.child( name ) getOrElse { context.actorOf( BackoffSupervisor.props(options), "backoff-"+id ) }
+      AlgorithmIdentifier.fromAggregateId( id ).disjunction match {
+        case \/-( aid ) => {
+          val options = backoffOptionsFor( id )
+          val name = "backoff:"+aid.span
+          context.child( name ) getOrElse { context.actorOf( BackoffSupervisor.props(options), name ) }
+        }
+
+        case -\/( exs ) => {
+          exs foreach { ex => log.error( ex, "failed to parse aggregateId:[{}] from rootType:[{}]", id, rootType.name ) }
+          throw exs.head
+        }
+      }
     }
   }
 
@@ -584,7 +659,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
     override lazy val metricBaseName: MetricName = module.metricBaseName
     lazy val executionTimer: Timer = metrics.timer( "execution" )
 
-    override var state: State = State( aggregateId )
+    override var state: State = AlgorithmState[Shape]( aggregateId, algorithm.label )
     override lazy val evState: ClassTag[State] = ClassTag( classOf[State] )
 
     var algorithmContext: Context = _
@@ -631,7 +706,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
             stopTimer( start )
             log.info(
               "[{}] skipped [{}] analysis on [{}] @ [{}] due to insufficient data - no outliers marked for interval",
-              workId, algo.name, payload.plan.name + "][" + payload.topic, payload.source.interval
+              workId, algo, payload.plan.name + "][" + payload.topic, payload.source.interval
             )
 
             // don't let aggregator time out just due to error in algorithm
@@ -639,7 +714,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
               algorithms = Set(algorithm.label),
               source = payload.source,
               plan = payload.plan,
-              thresholdBoundaries = Map.empty[Symbol, Seq[ThresholdBoundary]]
+              thresholdBoundaries = Map.empty[String, Seq[ThresholdBoundary]]
             )
           }
 
@@ -648,18 +723,20 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
             log.error(
               ex,
               "[{}] failed [{}] analysis on [{}] @ [{}] - no outliers marked for interval",
-              workId, algo.name, payload.plan.name + "][" + payload.topic, payload.source.interval
+              workId, algo, payload.plan.name + "][" + payload.topic, payload.source.interval
             )
             // don't let aggregator time out just due to error in algorithm
             aggregator !+ NoOutliers(
               algorithms = Set(algorithm.label),
               source = payload.source,
               plan = payload.plan,
-              thresholdBoundaries = Map.empty[Symbol, Seq[ThresholdBoundary]]
+              thresholdBoundaries = Map.empty[String, Seq[ThresholdBoundary]]
             )
           }
         }
       }
+
+      case RouteMessage( id, m ) if id == aggregateId && active.isDefinedAt( m ) => active( m )
 
       case AdvancedType( adv ) => persist( adv ) { accept }
 //      case AdvancedType( adv ) => accept( adv )
@@ -1022,7 +1099,6 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
 
 
     override def saveSnapshot( snapshot: Any ): Unit = {
-      // log.warning( "#TEST [{}] saveSnapshot", self.path.name )
       startSnapshotTimer()
       super.saveSnapshot( snapshot )
     }
@@ -1034,8 +1110,8 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
       startSnapshotSweepTimer()
       deleteSnapshots( SnapshotSelectionCriteria( maxSequenceNr = snapshotSequenceNr - 1 ) )
 
-      startJournalSweepTimer()
-      deleteMessages( snapshotSequenceNr )
+//      startJournalSweepTimer()
+//      deleteMessages( snapshotSequenceNr )
     }
 
     override protected def onPersistFailure( cause: Throwable, event: Any, seqNr: Long ): Unit = {
@@ -1043,11 +1119,11 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented { m
       super.onPersistFailure( cause, event, seqNr )
     }
 
-    override def receiveRecover: Receive = {
-      case RecoveryCompleted => {
-        // log.debug( "#TEST AlgorithmModule[{}]: recovery completed", self.path.name )
-      }
-    }
+//    override def receiveRecover: Receive = {
+//      case RecoveryCompleted => {
+//        // log.debug( "#TEST AlgorithmModule[{}]: recovery completed", self.path.name )
+//      }
+//    }
 
     override protected def onRecoveryFailure( cause: Throwable, event: Option[Any] ): Unit = {
       log.error( "AlgorithmModule[{}] onRecoveryFailure cause:[{}] event:[{}]", self.path.name, cause, event )

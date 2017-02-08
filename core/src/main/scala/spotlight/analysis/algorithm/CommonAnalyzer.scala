@@ -30,7 +30,7 @@ object CommonAnalyzer {
 
     override def message: DetectUsing = underlying.message
     override def data: Seq[DoublePoint] = underlying.data
-    override def algorithm: Symbol = underlying.algorithm
+    override def algorithm: String = underlying.algorithm
     override def topic: Topic = underlying.topic
     override def plan: AnalysisPlan = underlying.plan
     override def historyKey: AnalysisPlan.Scope = underlying.historyKey
@@ -108,7 +108,7 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
           log.error(
             ex,
             "failed [{}] analysis on [{}] @ [{}]",
-            algo.name,
+            algo,
             payload.plan.name + "][" + payload.topic,
             payload.source.interval
           )
@@ -117,7 +117,7 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
             algorithms = Set(algorithm),
             source = payload.source,
             plan = payload.plan,
-                                   thresholdBoundaries = Map.empty[Symbol, Seq[ThresholdBoundary]]
+            thresholdBoundaries = Map.empty[String, Seq[ThresholdBoundary]]
           )
         }
       }
@@ -288,7 +288,7 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
           |    OUTLIER Thresholds:[{}]
         """.stripMargin,
         o.plan.name + ":" + WatchedTopic, o.source.points.size.toString, o.hasAnomalies.toString,
-        o.thresholdBoundaries.map{ case (a, t) => a.name + ":" + t.mkString("[",", ","]") }.mkString( "\n\tOUTLIER: {", "\n", "\n\tOUTLIER: }" )
+        o.thresholdBoundaries.map{ case (a, t) => a + ":" + t.mkString("[",", ","]") }.mkString( "\n\tOUTLIER: {", "\n", "\n\tOUTLIER: }" )
       )
     }
   }

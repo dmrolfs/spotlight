@@ -3,7 +3,7 @@ import sbt._
 
 object Dependencies {
   object peds {
-    val version = "0.4.6"
+    val version = "0.4.7-SNAPSHOT"
     def module( id: String ) = "com.github.dmrolfs" %% s"peds-$id" % version withSources() withJavadoc()
     def all = Seq( commons, akka, archetype )
 
@@ -14,7 +14,7 @@ object Dependencies {
   }
 
   object demesne {
-    val version = "2.1.2"
+    val version = "2.1.3-SNAPSHOT"
     def module( id: String ) = "com.github.dmrolfs" %% s"demesne-$id" % version withSources() withJavadoc()
     val core = module( "core" )
     val testkit = module( "testkit" )
@@ -32,6 +32,7 @@ object Dependencies {
     val clusterSharding = module( "cluster-sharding" )
     val contrib = module( "contrib" )
     val persistence = module( "persistence" )
+    val persistenceQuery = module( "persistence-query-experimental" )
     val remote = module( "remote" )
     val slf4j = module( "slf4j" )
     val testkit = module( "testkit" )
@@ -171,6 +172,11 @@ object Dependencies {
       akka.slf4j,
       akka.kryo,
       akka.kryoSerializers,
+      akka.persistence,
+      akka.persistenceQuery,
+      persistence.cassandra,
+persistence.leveldb,
+persistence.leveldbjni,
       log.logback.classic,
       facility.bloomFilter,
       facility.uuid,

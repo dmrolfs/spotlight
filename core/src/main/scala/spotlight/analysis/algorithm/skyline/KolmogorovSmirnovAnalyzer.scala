@@ -25,7 +25,7 @@ import spotlight.model.timeseries._
   * Created by rolfsd on 2/25/16.
   */
 object KolmogorovSmirnovAnalyzer {
-  val Algorithm = Symbol( "ks-test" )
+  val Algorithm: String = "ks-test"
 
   def props( router: ActorRef ): Props = Props { new KolmogorovSmirnovAnalyzer( router ) }
 
@@ -75,7 +75,7 @@ class KolmogorovSmirnovAnalyzer( override val router: ActorRef ) extends CommonA
 
   override implicit val contextClassTag: ClassTag[Context] = ClassTag( classOf[Context] )
 
-  override def algorithm: Symbol = KolmogorovSmirnovAnalyzer.Algorithm
+  override def algorithm: String = KolmogorovSmirnovAnalyzer.Algorithm
 
   override def wrapContext(c: AlgorithmContext ): Valid[WrappingContext] = {
     referenceOffset( c ) map { offset =>
@@ -86,7 +86,7 @@ class KolmogorovSmirnovAnalyzer( override val router: ActorRef ) extends CommonA
 
   def referenceOffset( c: AlgorithmContext ): Valid[joda.Duration] = {
     import java.util.concurrent.TimeUnit.MILLISECONDS
-    val ReferenceOffset = algorithm.name + ".reference-offset"
+    val ReferenceOffset = algorithm + ".reference-offset"
 
     val result = {
       if ( c.messageConfig.hasPath( ReferenceOffset ) ) {

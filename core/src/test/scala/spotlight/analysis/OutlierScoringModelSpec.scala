@@ -112,16 +112,16 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
       reduce = ReduceOutliers.byCorroborationPercentage(50),
       planSpecification = ConfigFactory.parseString(
         s"""
-          |algorithm-config.${algo.name}.seedEps: 5.0
-          |algorithm-config.${algo.name}.minDensityConnectedPoints: 3
+          |algorithm-config.${algo}.seedEps: 5.0
+          |algorithm-config.${algo}.minDensityConnectedPoints: 3
         """.stripMargin
       )
     )
 
     def rootTypes: Set[AggregateRootType] = Set(
       AnalysisPlanModule.module.rootType,
-                                                 LookupShardModule.rootType,
-                                                 CellShardModule.module.rootType,
+      LookupShardModule.rootType,
+      CellShardModule.module.rootType,
       SimpleMovingAverageAlgorithm.rootType
     )
 
@@ -149,8 +149,8 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
         reduce = ReduceOutliers.byCorroborationPercentage(50),
         planSpecification = ConfigFactory.parseString(
           s"""
-             |algorithm-config.${algo.name}.seedEps: 5.0
-             |algorithm-config.${algo.name}.minDensityConnectedPoints: 3
+             |algorithm-config.${algo}.seedEps: 5.0
+             |algorithm-config.${algo}.minDensityConnectedPoints: 3
           """.stripMargin
         )
       )
@@ -390,7 +390,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
           algos
           .map { a =>
             s"""
-               |algorithm-config.${a.name} {
+               |algorithm-config.${a} {
                |  tolerance: 1.043822701 // eps:0.75
                |  seedEps: 0.75
                |  minDensityConnectedPoints: 3

@@ -56,8 +56,8 @@ object GraphitePublisher extends LazyLogging {
     def batchSize: Int
     def batchInterval: FiniteDuration = 5.seconds
     def publishingTopic( p: AnalysisPlan, t: Topic ): Topic = s"${p.name}.${t}"
-    def publishThresholdBoundaries(p: AnalysisPlan, algorithm: Symbol ): Boolean = {
-      val publishKey = algorithm.name + ".publish-threshold"
+    def publishThresholdBoundaries( p: AnalysisPlan, algorithm: String ): Boolean = {
+      val publishKey = algorithm + ".publish-threshold"
       if ( p.algorithmConfig hasPath publishKey ) p.algorithmConfig getBoolean publishKey else false
     }
   }
@@ -345,15 +345,15 @@ class GraphitePublisher extends DenseOutlierPublisher { outer: GraphitePublisher
 
 
   object ControlLabeling {
-    type ControlLabel = Symbol => String
-    val FloorLabel: ControlLabel = (algorithm: Symbol) => algorithm.name + ".floor."
-    val ExpectedLabel: ControlLabel = (algorithm: Symbol) => algorithm.name + ".expected."
-    val CeilingLabel: ControlLabel = (algorithm: Symbol) => algorithm.name + ".ceiling."
+    type ControlLabel = String => String
+    val FloorLabel: ControlLabel = (algorithm: String) => algorithm + ".floor."
+    val ExpectedLabel: ControlLabel = (algorithm: String) => algorithm + ".expected."
+    val CeilingLabel: ControlLabel = (algorithm: String) => algorithm + ".ceiling."
   }
 
   def flattenThresholds(o: Outliers ): Seq[TopicPoint] = {
     import ControlLabeling._
-    def thresholdTopic( algorithm: Symbol, labeling: ControlLabel ): Topic = {
+    def thresholdTopic( algorithm: String, labeling: ControlLabel ): Topic = {
       outer.publishingTopic( o.plan, labeling(algorithm) + o.topic )
     }
 

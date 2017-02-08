@@ -107,7 +107,7 @@ object ReduceOutliers extends LazyLogging {
       results: OutlierAlgorithmResults,
       source: TimeSeriesBase,
       plan: AnalysisPlan,
-      tally: Map[joda.DateTime, Set[Symbol]],
+      tally: Map[joda.DateTime, Set[String]],
       corroboratedTimestamps: Set[joda.DateTime],
       corroboratedOutliers: Seq[DataPoint]
     ): Unit = {

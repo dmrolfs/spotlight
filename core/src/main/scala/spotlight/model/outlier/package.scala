@@ -9,27 +9,27 @@ import spotlight.model.timeseries.TimeSeries
  */
 package object outlier {
   type CorrelatedSeries = CorrelatedData[TimeSeries]
-  type OutlierAlgorithmResults = Map[Symbol, Outliers]
+  type OutlierAlgorithmResults = Map[String, Outliers]
 
   object OutlierAlgorithmResults {
-    val empty: OutlierAlgorithmResults = Map.empty[Symbol, Outliers]
+    val empty: OutlierAlgorithmResults = Map.empty[String, Outliers]
 
     def tallyMax( results: OutlierAlgorithmResults ): Int = {
       val t = tally( results ).toSeq.map{ _._2.size }
       if ( t.nonEmpty ) t.max else 0
     }
 
-    def tally( results: OutlierAlgorithmResults ): Map[joda.DateTime, Set[Symbol]] = {
+    def tally( results: OutlierAlgorithmResults ): Map[joda.DateTime, Set[String]] = {
       results
       .toSeq
       .flatMap { case (algorithm, outliers) =>
         outliers match {
-          case _: NoOutliers => Seq.empty[(joda.DateTime, Option[Symbol])]
+          case _: NoOutliers => Seq.empty[(joda.DateTime, Option[String])]
           case s: SeriesOutliers => s.outliers map { dp => ( dp.timestamp, Some(algorithm) ) }
         }
       }
       .groupBy { case (ts, c) => ts }
-      .mapValues { v: Seq[(joda.DateTime, Option[Symbol])] => v.foldLeft( Set.empty[Option[Symbol]] ){ _ + _._2 }.flatten }
+      .mapValues { v: Seq[(joda.DateTime, Option[String])] => v.foldLeft( Set.empty[Option[String]] ){ _ + _._2 }.flatten }
     }
   }
 

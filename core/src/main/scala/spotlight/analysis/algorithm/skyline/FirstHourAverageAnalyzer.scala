@@ -22,7 +22,7 @@ import spotlight.model.timeseries._
   * Created by rolfsd on 2/25/16.
   */
 object FirstHourAverageAnalyzer {
-  val Algorithm = Symbol( "first-hour-average" )
+  val Algorithm: String = "first-hour-average"
 
   def props( router: ActorRef ): Props = Props { new FirstHourAverageAnalyzer( router ) }
 
@@ -77,7 +77,7 @@ class FirstHourAverageAnalyzer( override val router: ActorRef ) extends CommonAn
 
   override implicit val contextClassTag: ClassTag[Context] = ClassTag( classOf[Context] )
 
-  override def algorithm: Symbol = FirstHourAverageAnalyzer.Algorithm
+  override def algorithm: String = FirstHourAverageAnalyzer.Algorithm
 
   override def wrapContext(c: AlgorithmContext ): Valid[WrappingContext] = {
 //todo: bad recreating summary statistics for each pt!!!  need to retain and build incrementally (is this the case in other algos?)
@@ -127,7 +127,7 @@ class FirstHourAverageAnalyzer( override val router: ActorRef ) extends CommonAn
             )
             log.info(
               "find: first hour[{}] [{}] is-outlier:{} threshold = [{}]",
-              algorithm.name,
+              algorithm,
               p.value,
               threshold.isOutlier(p.value),
               threshold

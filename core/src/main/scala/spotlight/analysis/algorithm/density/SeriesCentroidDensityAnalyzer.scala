@@ -18,14 +18,14 @@ import spotlight.model.timeseries._
   * Created by rolfsd on 2/2/16.
   */
 object SeriesCentroidDensityAnalyzer {
-  val Algorithm: Symbol = 'dbscanSeriesCentroid
+  val Algorithm: String = "dbscanSeriesCentroid"
   def props( router: ActorRef ): Props = Props { new SeriesCentroidDensityAnalyzer( router ) }
 }
 
 class SeriesCentroidDensityAnalyzer( override val router: ActorRef ) extends DBSCANAnalyzer {
   import AlgorithmActor._
 
-  override def algorithm: Symbol = SeriesCentroidDensityAnalyzer.Algorithm
+  override def algorithm: String = SeriesCentroidDensityAnalyzer.Algorithm
 
   override val algorithmContext: KOp[DetectUsing, AlgorithmContext] = {
     def centroidDistances( points: Seq[DoublePoint], history: HistoricalStatistics ): Seq[DoublePoint] = {

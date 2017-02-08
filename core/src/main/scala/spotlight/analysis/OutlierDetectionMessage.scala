@@ -18,7 +18,7 @@ import spotlight.model.outlier.AnalysisPlan.Scope
   * Created by rolfsd on 9/21/16.
   */
 sealed trait OutlierDetectionMessage extends CommandLike {
-  override type ID = AnalysisPlanModule.module.ID
+  override type ID = Any // AnalysisPlanModule.module.ID
   //todo: detect message is routed to many algorithms, each with own tag. This targetId is set to a dummy tag knowing that
   // aggregate routing uses id portion only and ignores tag.
 //  override def targetId: TID = plan.id
@@ -66,7 +66,7 @@ final case class DetectOutliersInSeries private[analysis](
 
 final case class DetectUsing private[analysis](
   override val targetId: DetectUsing#TID,
-  algorithm: Symbol,
+  algorithm: String,
   payload: OutlierDetectionMessage,
   @deprecated("???replace with RecentHistory or remove or ???", "20161004") history: HistoricalStatistics,
   properties: Config = ConfigFactory.empty()
@@ -86,7 +86,7 @@ final case class DetectUsing private[analysis](
 
 
 final case class UnrecognizedPayload private[analysis](
-  algorithm: Symbol,
+  algorithm: String,
   request: DetectUsing
 ) extends OutlierDetectionMessage {
   override def targetId: TID = plan.id

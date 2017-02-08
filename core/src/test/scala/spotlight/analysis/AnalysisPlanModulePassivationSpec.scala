@@ -7,6 +7,7 @@ import com.typesafe.config.{Config, ConfigFactory}
 import peds.akka.envelope._
 import peds.akka.envelope.pattern.ask
 import akka.actor.{ActorRef, ActorSystem, Props}
+import com.typesafe.scalalogging.StrictLogging
 import demesne.index.StackableIndexBusPublisher
 import demesne.{AggregateRootType, DomainModel}
 import demesne.module.{AggregateEnvironment, LocalAggregate}
@@ -20,7 +21,7 @@ import shapeless.Lens
 import spotlight.analysis.AnalysisPlanModule.AggregateRoot.PlanActor
 import spotlight.analysis.AnalysisPlanModule.AggregateRoot.PlanActor.{FlowConfigurationProvider, WorkerProvider}
 import spotlight.analysis.algorithm.statistical.SimpleMovingAverageAlgorithm
-import spotlight.model.outlier.{IsQuorum, AnalysisPlan, ReduceOutliers}
+import spotlight.model.outlier.{AnalysisPlan, IsQuorum, ReduceOutliers}
 import spotlight.testkit.EntityModuleSpec
 import spotlight.analysis.{AnalysisPlanProtocol => P}
 
@@ -28,14 +29,15 @@ import spotlight.analysis.{AnalysisPlanProtocol => P}
 /**
   * Created by rolfsd on 6/15/16.
   */
-class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[AnalysisPlan] { outer =>
+class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[AnalysisPlanState] { outer =>
 
   val trace = Trace[AnalysisPlanModulePassivationSpec]
 
-  override type ID = AnalysisPlan#ID
+  override type ID = AnalysisPlanState#ID
   override type Protocol = AnalysisPlanProtocol.type
   override val protocol: Protocol = AnalysisPlanProtocol
 
+  implicit val moduleIdentifying = AnalysisPlanModule.identifying
 
   override def testConfiguration( test: OneArgTest, slug: String ): Config = {
     AnalysisPlanModulePassivationSpec.config( systemName = slug )
@@ -46,14 +48,14 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[AnalysisPlan] {
   }
 
   class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends EntityFixture( _config, _system, _slug ) {
-    class Module extends EntityAggregateModule[AnalysisPlan] { testModule =>
+    class Module extends EntityAggregateModule[AnalysisPlanState] { testModule =>
       private val trace: Trace[_] = Trace[Module]
 
       override def passivateTimeout: Duration = Duration( 2, SECONDS )
       override def snapshotPeriod: Option[FiniteDuration] = Some( 1.second )
 
-      override val idLens: Lens[AnalysisPlan, TaggedID[ShortUUID]] = AnalysisPlan.idLens
-      override val nameLens: Lens[AnalysisPlan, String] = AnalysisPlan.nameLens
+      override val idLens: Lens[AnalysisPlanState, AnalysisPlanState#TID] = AnalysisPlanModule.idLens
+      override val nameLens: Lens[AnalysisPlanState, String] = AnalysisPlanModule.nameLens
       override def aggregateRootPropsOp: AggregateRootProps = testProps( _, _ )
       override type Protocol = outer.Protocol
       override val protocol: Protocol = outer.protocol
@@ -78,10 +80,10 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[AnalysisPlan] {
     }
 
 
-    override val identifying: EntityIdentifying[AnalysisPlan] = AnalysisPlanModule.identifying
+    override val identifying: EntityIdentifying[AnalysisPlanState] = AnalysisPlanModule.identifying
     override def nextId(): module.TID = identifying.safeNextId
 
-    val algo: Symbol = SimpleMovingAverageAlgorithm.algorithm.label
+    val algo: String = SimpleMovingAverageAlgorithm.algorithm.label
 
     def makePlan( name: String, g: Option[AnalysisPlan.Grouping] ): AnalysisPlan = {
       AnalysisPlan.default(
@@ -93,8 +95,8 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[AnalysisPlan] {
         reduce = ReduceOutliers.byCorroborationPercentage(50),
         planSpecification = ConfigFactory.parseString(
           s"""
-          |algorithm-config.${algo.name}.seedEps: 5.0
-          |algorithm-config.${algo.name}.minDensityConnectedPoints: 3
+          |algorithm-config.${algo}.seedEps: 5.0
+          |algorithm-config.${algo}.minDensityConnectedPoints: 3
           """.stripMargin
         )
       )
@@ -130,9 +132,9 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[AnalysisPlan] {
       }
     }
 
-    "must not respond before add" in { f: Fixture =>
+    "must not respond before add" taggedAs WIP in { f: Fixture =>
       import f._
-      val info = ( entity ?+ P.UseAlgorithms( tid, Set( 'foo, 'bar ), ConfigFactory.empty() ) ).mapTo[P.PlanInfo]
+      val info = ( entity ?+ P.UseAlgorithms( tid, Set( "foo", "bar" ), ConfigFactory.empty() ) ).mapTo[P.PlanInfo]
       bus.expectNoMsg()
     }
 
@@ -153,17 +155,19 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[AnalysisPlan] {
 
       stateFrom( entity, planTid ) mustBe p1
 
-      entity !+ P.UseAlgorithms( planTid, Set( 'stella, 'otis, 'apollo ), ConfigFactory.empty() )
+      entity !+ P.UseAlgorithms( planTid, Set( "stella", "otis", "apollo" ), ConfigFactory.empty() )
       bus.expectMsgPF( 1.second.dilated, "change algos" ) {
-        case P.AlgorithmsChanged(pid, algos, c) => {
+        case P.AlgorithmsChanged(pid, algos, c, added, dropped) => {
           pid mustBe planTid
-          algos mustBe Set( 'stella, 'otis, 'apollo )
+          algos mustBe Set( "stella", "otis", "apollo" )
+          added mustBe Set( "stella", "otis", "apollo" )
+          dropped mustBe Set( SimpleMovingAverageAlgorithm.algorithm.label )
           assert( c.isEmpty )
         }
       }
     }
 
-    "take and recover from snapshots" taggedAs WIP in { f: Fixture =>
+    "take and recover from snapshots" in { f: Fixture =>
       import f._
 
       val p1 = makePlan( "TestPlan", None )
@@ -177,11 +181,13 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[AnalysisPlan] {
         module.rootType.snapshot foreach { ss => entity !+ ss.saveSnapshotCommand(p1.id) }
       }
 
-      entity !+ P.UseAlgorithms( p1.id, Set( 'stella, 'otis, 'apollo ), ConfigFactory.empty() )
+      entity !+ P.UseAlgorithms( p1.id, Set( "stella", "otis", "apollo" ), ConfigFactory.empty() )
       bus.expectMsgPF( 1.second.dilated, "change algos" ) {
-        case P.AlgorithmsChanged(pid, algos, c) => {
+        case P.AlgorithmsChanged(pid, algos, c, added, dropped) => {
           pid mustBe p1.id
-          algos mustBe Set( 'stella, 'otis, 'apollo )
+          algos mustBe Set( "stella", "otis", "apollo" )
+          added mustBe Set( "stella", "otis", "apollo" )
+          dropped mustBe Set( SimpleMovingAverageAlgorithm.algorithm.label )
           assert( c.isEmpty )
         }
       }
@@ -196,7 +202,7 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[AnalysisPlan] {
   }
 }
 
-object AnalysisPlanModulePassivationSpec {
+object AnalysisPlanModulePassivationSpec extends StrictLogging {
   def config( systemName: String ): Config = {
     val planConfig: Config = ConfigFactory.parseString(
       """
@@ -219,6 +225,8 @@ object AnalysisPlanModulePassivationSpec {
       """.stripMargin
     )
 
-    planConfig withFallback spotlight.testkit.config( "core", systemName )
+    val c = planConfig withFallback spotlight.testkit.config( "core", systemName )
+    logger.warn( "#TEST making config... akka.actor.kryo[{}]:[\n{}\n]", c.hasPath("akka.actor.kryo").toString, c.getConfig("akka.actor.kryo").root.render() )
+    c
   }
 }

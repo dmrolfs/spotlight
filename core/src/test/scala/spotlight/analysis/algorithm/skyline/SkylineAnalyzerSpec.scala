@@ -61,7 +61,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
       val series = spike( full )()
       trace( s"test series = $series" )
       val algoS = MedianAbsoluteDeviationAnalyzer.Algorithm
-      val algProps = ConfigFactory.parseString( s"${algoS.name}.tolerance: 3" )
+      val algProps = ConfigFactory.parseString( s"${algoS}.tolerance: 3" )
 
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
       val history1 = historyWith( None, series )
@@ -122,7 +122,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
       val series = spike( full )()
 
       val algoS = MeanSubtractionCumulationAnalyzer.Algorithm
-      val algProps = ConfigFactory.parseString( s"""${algoS.name}.tolerance: 3""" )
+      val algProps = ConfigFactory.parseString( s"""${algoS}.tolerance: 3""" )
 
       val analyzer = TestActorRef[MeanSubtractionCumulationAnalyzer]( MeanSubtractionCumulationAnalyzer.props(router.ref) )
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
@@ -186,7 +186,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
       val series = spike( full, 1000 )()
 
       val algoS = LeastSquaresAnalyzer.Algorithm
-      val algProps = ConfigFactory.parseString( s"""${algoS.name}.tolerance: 3""" )
+      val algProps = ConfigFactory.parseString( s"""${algoS}.tolerance: 3""" )
 
       val analyzer = TestActorRef[LeastSquaresAnalyzer]( LeastSquaresAnalyzer.props(router.ref) )
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
@@ -263,7 +263,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
       val series = spike( full, 1000 )()
 
       val algoS = HistogramBinsAnalyzer.Algorithm
-      val algProps = ConfigFactory.parseString( s"""${algoS.name}.minimum-bin-size: 5""" )
+      val algProps = ConfigFactory.parseString( s"""${algoS}.minimum-bin-size: 5""" )
 
       val analyzer = TestActorRef[HistogramBinsAnalyzer]( HistogramBinsAnalyzer.props(router.ref) )
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
@@ -333,7 +333,7 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
       val series = spike( reference, 1000 )()
 
       val algoS = KolmogorovSmirnovAnalyzer.Algorithm
-      val algProps = ConfigFactory.parseString( s"""${algoS.name}.reference-offset: 1 h""" )
+      val algProps = ConfigFactory.parseString( s"""${algoS}.reference-offset: 1 h""" )
 
       val analyzer = TestActorRef[KolmogorovSmirnovAnalyzer]( KolmogorovSmirnovAnalyzer.props(router.ref) )
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )

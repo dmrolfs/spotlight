@@ -31,15 +31,15 @@ object AlgorithmProtocolOLD extends {
 trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
   import AlgorithmActor._
 
-  def algorithm: Symbol
+  def algorithm: String
   def router: ActorRef
 
   override lazy val metricBaseName: MetricName = MetricName( "spotlight.analysis.outlier.algorithm" )
-  lazy val algorithmTimer: Timer = metrics timer algorithm.name
+  lazy val algorithmTimer: Timer = metrics timer algorithm
 
   override def preStart(): Unit = {
     context watch router
-    log.info( "attempting to register [{}] @ [{}] with {}", algorithm.name, self.path, sender().path )
+    log.info( "attempting to register [{}] @ [{}] with {}", algorithm, self.path, sender().path )
     router ! DetectionAlgorithmRouter.RegisterAlgorithmReference( algorithm, self )
   }
 
@@ -61,7 +61,7 @@ trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
     }
 
     case DetectionAlgorithmRouter.AlgorithmRegistered( a ) if a == algorithm => {
-      log.info( "registration confirmed for [{}] @ [{}] with {}", algorithm.name, self.path, sender().path )
+      log.info( "registration confirmed for [{}] @ [{}] with {}", algorithm, self.path, sender().path )
       context become LoggingReceive{ around( detect ) }
     }
 
@@ -120,7 +120,7 @@ object AlgorithmActor {
   trait AlgorithmContext {
     def message: DetectUsing
     def data: Seq[DoublePoint]
-    def algorithm: Symbol
+    def algorithm: String
     def topic: Topic
     def plan: AnalysisPlan
     def historyKey: AnalysisPlan.Scope
@@ -149,7 +149,7 @@ object AlgorithmActor {
       override val data: Seq[DoublePoint],
       override val thresholdBoundaries: Seq[ThresholdBoundary] = Seq.empty[ThresholdBoundary]
     ) extends AlgorithmContext {
-      override val algorithm: Symbol = message.algorithm
+      override val algorithm: String = message.algorithm
       override val topic: Topic = message.topic
       override def plan: AnalysisPlan = message.plan
       override val historyKey: AnalysisPlan.Scope = AnalysisPlan.Scope( plan, topic )
@@ -173,7 +173,7 @@ object AlgorithmActor {
           mahal.disjunction.leftMap{ _.head }
         }
 
-        val distancePath = algorithm.name + ".distance"
+        val distancePath = algorithm + ".distance"
         if ( message.properties hasPath distancePath ) {
           message.properties.getString( distancePath ).toLowerCase match {
             case "euclidean" | "euclid" => new EuclideanDistance().right[Throwable]
@@ -185,7 +185,7 @@ object AlgorithmActor {
       }
 
       override def tolerance: TryV[Option[Double]] = {
-        val path = algorithm.name+".tolerance"
+        val path = algorithm + ".tolerance"
         \/ fromTryCatchNonFatal {
           if ( messageConfig hasPath path ) Some( messageConfig getDouble path ) else None
         }
@@ -201,8 +201,8 @@ object AlgorithmActor {
 
 
   @deprecated( "replaced by AlgorithmModule and AlgorithmModule.AlgorithmProtocol", "v2" )
-  case class AlgorithmUsedBeforeRegistrationError( algorithm: Symbol, path: ActorPath )
-    extends IllegalStateException( s"actor [${path}] not registered algorithm [${algorithm.name}] before use" )
+  case class AlgorithmUsedBeforeRegistrationError( algorithm: String, path: ActorPath )
+    extends IllegalStateException( s"actor [${path}] not registered algorithm [${algorithm}] before use" )
     with OutlierAlgorithmError
 }
 

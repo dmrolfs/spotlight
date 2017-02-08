@@ -489,7 +489,7 @@ object Settings extends LazyLogging {
       result.flatten.toSet
     }
 
-    private def pullCommonPlanFacets( spec: Config, detectionBudget: Duration ): (Duration, Set[Symbol]) = {
+    private def pullCommonPlanFacets( spec: Config, detectionBudget: Duration ): (Duration, Set[String]) = {
       import scala.collection.JavaConversions._
 
       def effectiveBudget( budget: Duration, utilization: Double ): Duration = {
@@ -500,9 +500,8 @@ object Settings extends LazyLogging {
       }
 
       val AlgorithmsPath = "algorithms"
-      val algorithms = {
-        if ( spec hasPath AlgorithmsPath ) spec.getStringList( AlgorithmsPath ).toSet.map{ a: String => Symbol( a ) }
-        else Set.empty[Symbol]
+      val algorithms: Set[String] = {
+        if ( spec hasPath AlgorithmsPath ) spec.getStringList( AlgorithmsPath ).toSet else Set.empty[String]
       }
 
       ( effectiveBudget( detectionBudget, 0.8D ), algorithms )

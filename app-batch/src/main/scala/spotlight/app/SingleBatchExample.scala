@@ -72,7 +72,7 @@ object SingleBatchExample extends Instrumented with StrictLogging {
   case class Threshold( timeStamp: DateTime, ceiling: Option[Double], expected: Option[Double], floor: Option[Double] )
 
   case class SimpleFlattenedOutlier(
-    algorithm: Symbol,
+    algorithm: String,
     outliers: Seq[OutlierTimeSeriesObject],
     threshold: Seq[Threshold],
     topic: String,
@@ -117,7 +117,6 @@ object SingleBatchExample extends Instrumented with StrictLogging {
     val context = {
       SpotlightContext
       .builder
-      .set( SpotlightContext.Name, "DetectionFlow" )
       .set( SpotlightContext.StartTasks, Set( SharedLeveldbStore.start(true ) /*, Spotlight.kamonStartTask*/ ) )
       .set( SpotlightContext.System, Some( system ) )
       .build()

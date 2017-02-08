@@ -18,7 +18,7 @@ import spotlight.model.timeseries._
   */
 //todo use HdrHistogram!!!
 object HistogramBinsAnalyzer {
-  val Algorithm = Symbol( "histogram-bins" )
+  val Algorithm: String = "histogram-bins"
 
   def props( router: ActorRef ): Props = Props { new HistogramBinsAnalyzer( router ) }
 
@@ -45,7 +45,7 @@ class HistogramBinsAnalyzer( override val router: ActorRef ) extends CommonAnaly
 
   override implicit val contextClassTag: ClassTag[Context] = ClassTag( classOf[Context] )
 
-  override def algorithm: Symbol = HistogramBinsAnalyzer.Algorithm
+  override def algorithm: String = HistogramBinsAnalyzer.Algorithm
 
   override def wrapContext(c: AlgorithmContext ): Valid[WrappingContext] = {
     CommonAnalyzer.SimpleWrappingContext( underlying = c ).successNel

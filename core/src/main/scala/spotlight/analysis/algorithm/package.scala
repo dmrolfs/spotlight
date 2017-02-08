@@ -11,15 +11,15 @@ package object algorithm {
 
 
   case class InsufficientAlgorithmModuleError(
-    algorithm: Symbol,
+    algorithm: String,
     fqcn: String
   ) extends ServiceConfigurationError(
-    s"Insufficient class identified [${fqcn}] for ${algorithm.name} algorithm. " +
+    s"Insufficient class identified [${fqcn}] for ${algorithm} algorithm. " +
     "Algorithm implementations must extend from spotlight.analysis.outlier.algorithm.AlgorithmModule"
   ) with OutlierAlgorithmError
 
 
-  case class InsufficientAlgorithmConfigurationError( algorithm: Symbol, property: String )
-  extends ServiceConfigurationError( s"Algorithm [$algorithm] is not sufficiently configured for property [$property]" )
+  case class InsufficientAlgorithmConfigurationError( algorithm: String, property: String )
+  extends ServiceConfigurationError( s"Algorithm [${algorithm}] is not sufficiently configured for property [${property}]" )
   with OutlierAlgorithmError
 }

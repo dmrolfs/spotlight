@@ -197,7 +197,7 @@ with MockitoSugar {
     "write one-point batch" in { f: Fixture =>
       import f._
       val outliers = NoOutliers(
-        algorithms = Set('dbscan),
+        algorithms = Set("dbscan"),
         source = TimeSeries("foo", Seq(dp1)),
         plan = plan
       )
@@ -211,7 +211,7 @@ with MockitoSugar {
     "write full batch" in { f: Fixture =>
       import f._
       val outliers = SeriesOutliers(
-        algorithms = Set('dbscan),
+        algorithms = Set("dbscan"),
         source = TimeSeries("foo", Seq(dp1, dp2)),
         outliers = Seq(dp2),
         plan = plan
@@ -246,7 +246,7 @@ with MockitoSugar {
       )
 
       val outliers = SeriesOutliers(
-        algorithms = Set('dbscan),
+        algorithms = Set("dbscan"),
         source = TimeSeries("foo", Seq(dp1, dp2, dp3)),
         outliers = Seq(dp1),
         plan = plan
@@ -260,7 +260,7 @@ with MockitoSugar {
     "write full no-outlier batch" in { f: Fixture =>
       import f._
       val outliers = NoOutliers(
-        algorithms = Set('dbscan),
+        algorithms = Set("dbscan"),
         source = TimeSeries("foo", Seq(dp1, dp1b)),
         plan = plan
       )
@@ -274,7 +274,7 @@ with MockitoSugar {
     "write sanitize names" in { f: Fixture =>
       import f._
       val outliers = SeriesOutliers(
-        algorithms = Set('dbscan),
+        algorithms = Set("dbscan"),
         source = TimeSeries("foo bar", Seq(dp1, dp2, dp3)),
         outliers = Seq(dp1),
         plan = plan
@@ -297,11 +297,11 @@ with MockitoSugar {
     "write past full batch with threshold boundaries" taggedAs (WIP) in { f: Fixture =>
       import f._
 
-      val algos = Set( 'dbscan, 'x, 'y )
-      val algConfig = ConfigFactory.parseString( algos.map{ a => s"${a.name}.publish-threshold: yes" }.mkString("\n") )
+      val algos = Set( "dbscan", "x", "y" )
+      val algConfig = ConfigFactory.parseString( algos.map{ a => s"${a}.publish-threshold: yes" }.mkString("\n") )
       when( plan.algorithmConfig ) thenReturn algConfig
 
-      algos foreach { a => plan.algorithmConfig.getBoolean( s"${a.name}.publish-threshold" ) mustBe true }
+      algos foreach { a => plan.algorithmConfig.getBoolean( s"${a}.publish-threshold" ) mustBe true }
 
 
       val graphite2 = TestActorRef[GraphitePublisher](
@@ -324,12 +324,12 @@ with MockitoSugar {
       )
 
       val controlBoundaries = Map(
-        'x -> Seq(
+        "x" -> Seq(
                    ThresholdBoundary.fromExpectedAndDistance( dp1.timestamp, 1, 0.1 ),
                    ThresholdBoundary.fromExpectedAndDistance( dp2.timestamp, 1, 0.25 ),
                    ThresholdBoundary.fromExpectedAndDistance( dp3.timestamp, 1, 0.3 )
         ),
-        'y -> Seq(
+        "y" -> Seq(
                    ThresholdBoundary.fromExpectedAndDistance( dp1.timestamp, 3, 0.3 ),
                    ThresholdBoundary.fromExpectedAndDistance( dp2.timestamp, 3, 0.5 ),
                    ThresholdBoundary.fromExpectedAndDistance( dp3.timestamp, 3, 0.7 )
@@ -341,7 +341,7 @@ with MockitoSugar {
         source = TimeSeries("foo", Seq(dp1, dp2, dp3)),
         outliers = Seq(dp1),
         plan = plan,
-                                     thresholdBoundaries = controlBoundaries
+        thresholdBoundaries = controlBoundaries
       )
 
       graphite2.receive( Publish(outliers) )
