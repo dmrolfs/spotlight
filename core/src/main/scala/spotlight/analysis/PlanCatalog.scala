@@ -10,7 +10,7 @@ import akka.event.LoggingReceive
 import akka.pattern.{ask, pipe}
 import akka.persistence.cassandra.query.scaladsl.CassandraReadJournal
 import akka.persistence.query.scaladsl.{EventsByTagQuery, EventsByTagQuery2, ReadJournal}
-import akka.persistence.query.{EventEnvelope2, NoOffset, PersistenceQuery}
+import akka.persistence.query.{EventEnvelope2, NoOffset, Offset, PersistenceQuery}
 import akka.stream.{ActorMaterializer, ActorMaterializerSettings, FlowShape, Materializer}
 import akka.stream.scaladsl.{Broadcast, Flow, GraphDSL, Keep, Merge, Sink, Source}
 import akka.util.Timeout
@@ -41,6 +41,12 @@ object PlanCatalogProtocol {
 
   case object WaitForStart extends CatalogMessage
   case object Started extends CatalogMessage
+
+  sealed trait PlanDirective extends CatalogMessage
+  case class AddPlan( plan: AnalysisPlan ) extends PlanDirective
+  case class DisablePlan( pid: AnalysisPlan#TID ) extends PlanDirective
+  case class EnablePlan( pid: AnalysisPlan#TID ) extends PlanDirective
+  case class RenamePlan( pid: AnalysisPlan#TID, newName: String ) extends PlanDirective
 
   case class MakeFlow(
     parallelism: Int,
@@ -150,154 +156,6 @@ object PlanCatalog extends ClassLogging {
     override val applicationDetectionBudget: Option[Duration] = None
   ) extends PlanCatalog( boundedContext ) with DefaultExecutionProvider with PlanProvider {
     log.debug(Map( "@msg" -> "#TEST PlanCatalog init", "specified-plans" -> specifiedPlans.map(_.name).mkString("[", ", ", "]")))
-    //todo also load from plan index?
-//    override lazy val specifiedPlans: Set[AnalysisPlan] = applicationPlans // ++ loadPlans( configuration ) //todo: loadPlans is duplicative since Settings provides to props()
-
-//    private def loadPlans( specification: Config ): Set[AnalysisPlan] = {
-//      val planSpecs = Settings detectionPlansConfigFrom specification
-//      if ( planSpecs.nonEmpty ) {
-//        log.debug( "specification = [{}]", planSpecs.root().render() )
-//        import scala.collection.JavaConversions._
-//        // since config is java API needed for collect
-//
-//        planSpecs.root
-//        .collect { case (n, s: ConfigObject) => (n, s.toConfig) }
-//        .toSet[(String, Config)]
-//        .map { case (name, spec) => makePlan( name, spec )( detectionBudget ) }
-//        .flatten
-//      } else {
-//        log.warning( "[{}]: no plan specifications found in settings", self.path )
-//        Set.empty[AnalysisPlan]
-//      }
-//    }
-
-//    private def makePlan( name: String, planSpecification: Config )( budget: Duration ): Option[AnalysisPlan] = {
-//      logger.info(
-//        "PlanCatalog[{}] making plan from specification[origin:{} @ {}]: [{}]",
-//        self.path.name, planSpecification.origin(), planSpecification.origin().lineNumber().toString, planSpecification
-//      )
-//
-//      //todo: bring initialization of plans into module init and base config on init config?
-//      val utilization = 0.9
-//      val timeout = budget * utilization
-//
-//      val grouping: Option[AnalysisPlan.Grouping] = {
-//        val GROUP_LIMIT = "group.limit"
-//        val GROUP_WITHIN = "group.within"
-//        val limit = if ( planSpecification hasPath GROUP_LIMIT ) planSpecification getInt GROUP_LIMIT else 10000
-//        val window = if ( planSpecification hasPath GROUP_WITHIN ) {
-//          Some( FiniteDuration( planSpecification.getDuration( GROUP_WITHIN ).toNanos, NANOSECONDS ) )
-//        } else {
-//          None
-//        }
-//
-//        window map { w => AnalysisPlan.Grouping( limit, w ) }
-//      }
-//
-//      //todo: add configuration for at-least and majority
-//      val algorithms = planAlgorithms( planSpecification )
-//
-//      val IS_DEFAULT = "is-default"
-//      val TOPICS = "topics"
-//      val REGEX = "regex"
-//
-//      if ( planSpecification.hasPath(IS_DEFAULT) && planSpecification.getBoolean(IS_DEFAULT) ) {
-//        logger.info(
-//          "PlanCatalog: topic[{}] default-type plan specification origin:[{}] line:[{}]",
-//          name,
-//          planSpecification.origin,
-//          planSpecification.origin.lineNumber.toString
-//        )
-//
-//        Some(
-//          AnalysisPlan.default(
-//            name = name,
-//            timeout = timeout,
-//            isQuorum = makeIsQuorum( planSpecification, algorithms.size ),
-//            reduce = makeOutlierReducer( planSpecification),
-//            algorithms = algorithms,
-//            grouping = grouping,
-//            planSpecification = planSpecification
-//          )
-//        )
-//      } else if ( planSpecification hasPath TOPICS ) {
-//        import scala.collection.JavaConverters._
-//        logger.info(
-//          "PlanCatalog: topic:[{}] topic-based plan specification origin:[{}] line:[{}]",
-//          name,
-//          planSpecification.origin,
-//          planSpecification.origin.lineNumber.toString
-//        )
-//
-//        Some(
-//          AnalysisPlan.forTopics(
-//            name = name,
-//            timeout = timeout,
-//            isQuorum = makeIsQuorum( planSpecification, algorithms.size ),
-//            reduce = makeOutlierReducer( planSpecification ),
-//            algorithms = algorithms,
-//            grouping = grouping,
-//            planSpecification = planSpecification,
-//            extractTopic = OutlierDetection.extractOutlierDetectionTopic,
-//            topics = planSpecification.getStringList( TOPICS ).asScala.map{ Topic(_) }.toSet
-//          )
-//        )
-//      } else if ( planSpecification hasPath REGEX ) {
-//        logger.info(
-//          "PlanCatalog: topic:[{}] regex-based plan specification origin:[{}] line:[{}]",
-//          name,
-//          planSpecification.origin,
-//          planSpecification.origin.lineNumber.toString
-//        )
-//
-//        Some(
-//          AnalysisPlan.forRegex(
-//            name = name,
-//            timeout = timeout,
-//            isQuorum = makeIsQuorum( planSpecification, algorithms.size ),
-//            reduce = makeOutlierReducer( planSpecification ),
-//            algorithms = algorithms,
-//            grouping = grouping,
-//            planSpecification = planSpecification,
-//            extractTopic = OutlierDetection.extractOutlierDetectionTopic,
-//            regex = new Regex( planSpecification getString REGEX )
-//          )
-//        )
-//      } else {
-//        None
-//      }
-//    }
-
-//    private def planAlgorithms( spec: Config ): Set[Symbol] = {
-//      import scala.collection.JavaConversions._
-//      val AlgorithmsPath = "algorithms"
-//      if ( spec hasPath AlgorithmsPath ) spec.getStringList( AlgorithmsPath ).toSet.map{ a: String => Symbol( a ) }
-//      else Set.empty[Symbol]
-//    }
-//
-//    private def makeIsQuorum( spec: Config, algorithmSize: Int ): IsQuorum = {
-//      val MAJORITY = "majority"
-//      val AT_LEAST = "at-least"
-//      if ( spec hasPath AT_LEAST ) {
-//        val trigger = spec getInt AT_LEAST
-//        IsQuorum.AtLeastQuorumSpecification( totalIssued = algorithmSize, triggerPoint = trigger )
-//      } else {
-//        val trigger = if ( spec hasPath MAJORITY ) spec.getDouble( MAJORITY ) else 50D
-//        IsQuorum.MajorityQuorumSpecification( totalIssued = algorithmSize, triggerPoint = ( trigger / 100D) )
-//      }
-//    }
-//
-//    private def makeOutlierReducer( spec: Config ): ReduceOutliers = {
-//      val AT_LEAST = "at-least"
-//      if ( spec hasPath AT_LEAST ) {
-//        val threshold = spec getInt AT_LEAST
-//        ReduceOutliers.byCorroborationCount( threshold )
-//      } else {
-//        val MAJORITY = "majority"
-//        val threshold = if ( spec hasPath MAJORITY ) spec.getDouble( MAJORITY ) else 50D
-//        ReduceOutliers.byCorroborationPercentage( threshold )
-//      }
-//    }
   }
 
 
@@ -314,6 +172,7 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
 
   case object Initialize extends P.CatalogMessage
   case object InitializeCompleted extends P.CatalogMessage
+
   override def preStart(): Unit = self ! Initialize
 
 
@@ -322,67 +181,172 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
   }
 
 
-  def indexedPlans: Future[Set[AnalysisPlan.Summary]] = {
-    //    planIndex.futureEntries map { _.values.toSet }
+  var knownPlans: Set[AnalysisPlan.Summary] = Set.empty[AnalysisPlan.Summary]
+  private def renderKnownPlans(): String = {
+    knownPlans.map{ p => Map("name"->p.name, "id"->p.id.id.toString) }.mkString( "[", ", ", "]" )
+  }
 
-    import spotlight.analysis.{ AnalysisPlanProtocol => AP }
+  def updateKnownPlan( pid: AnalysisPlan#TID )( fn: AnalysisPlan.Summary => AnalysisPlan.Summary ): Unit = {
+    knownPlans
+    .find { _.id == pid }
+    .map { fn }
+    .foreach { knownPlans += _ }
+  }
 
+//  var lastPlanSequenceNr: Long = 0L
+//  def updateLastPlanSequenceNr( snr: Long ): Long = {
+//    lastPlanSequenceNr = math.max( lastPlanSequenceNr, snr )
+//    lastPlanSequenceNr
+//  }
+
+
+  def loadCurrentKnownPlans(): Future[Long] = {
     implicit val ec = context.dispatcher
     implicit val materializer = ActorMaterializer( ActorMaterializerSettings(context.system) )
 
-    //    planIndex.futureEntries map { _.values.toSet }
+    log.info( Map("@msg"->"#TEST query currently known plans...", "known"->renderKnownPlans() ) )
+
+    val lastSequenceNr = {
+      AnalysisPlanModule
+      .queryJournal( context.system )
+      .currentEventsByTag( AnalysisPlanModule.module.rootType.name, NoOffset )
+      .via( filterKnownPlansFlow )
+      .toMat( knownPlansSink )( Keep.right )
+      .run()
+    }
+
+    lastSequenceNr foreach { snr => log.info(Map("@msg"->"#TEST ... finished query currently known plans", "snr"->snr, "known"->renderKnownPlans())) }
+    lastSequenceNr
+  }
+
+  def startPlanProjectionFrom( sequenceId: Long ): Unit = {
+    implicit val ec = context.dispatcher
+    implicit val materializer = ActorMaterializer( ActorMaterializerSettings(context.system) )
+
+    log.info( "starting active plan projection source..." )
+
     AnalysisPlanModule
     .queryJournal( context.system )
-    .currentEventsByTag( AnalysisPlanModule.module.rootType.name, NoOffset )
-    .map { e => log.warn(Map("@msg" -> "#TEST tagged event", "event" -> e.toString)); e }
-    .collect {
-      case EventEnvelope2( offset, pid, snr, event: AP.Added ) => {
-        log.warn(Map("@msg"->"#TEST READ Plan Added", "offset"->offset.toString, "pid"->pid, "sequence-nr"->snr))
-        event
-      }
-      case EventEnvelope2( offset, pid, snr, event: AP.Disabled ) => {
-        log.warn(Map("@msg"->"#TEST READ Plan Disabled", "offset"->offset.toString, "pid"->pid, "sequence-nr"->snr))
-        event
-      }
-      case EventEnvelope2( offset, pid, snr, event: AP.Enabled ) => {
-        log.warn(Map("@msg"->"#TEST READ Plan Enabled", "offset"->offset.toString, "pid"->pid, "sequence-nr"->snr))
-        event
-      }
-      case EventEnvelope2( offset, pid, snr, event: AP.Renamed ) => {
-        log.warn(Map("@msg"->"#TEST READ Plan Renamed", "offset"->offset.toString, "pid"->pid, "sequence-nr"->snr))
-        event
-      }
-    }
-    .fold( Set.empty[AnalysisPlan.Summary] ) {
-      case (ps, AP.Added(_, Some(p: AnalysisPlan))) => {
-        val r = ps + p.toSummary
-        log.warn(Map("@msg"->"#TEST folding Added into set", "plan-name"->p.name, "plan-id"->p.id.toString))
-        r
-      }
-      case (ps, e: AP.Disabled) => {
-        val r = ps.find { _.id == e.sourceId } map { ps + _.copy( isActive = false ) } getOrElse { ps }
-        log.warn(Map("@msg"->"#TEST folding Disabled into set", "plan-id"->e.sourceId.toString))
-        r
-      }
-      case (ps, e: AP.Enabled) => {
-        val r = ps.find { _.id == e.sourceId } map { ps + _.copy( isActive = true ) } getOrElse { ps }
-        log.warn(Map("@msg"->"#TEST folding Enabled into set", "plan-id"->e.sourceId.toString))
-        r
-      }
-      case (ps, e: AP.Renamed) => {
-        val r = ps.find { _.id == e.sourceId } map { ps + _.copy( name = e.newName ) } getOrElse { ps }
-        log.warn(Map("@msg"->"#TEST folding Renamed into set", "plan-id"->e.sourceId.toString))
-        r
-      }
-    }
-    .map { _ filter { p => log.warn(Map("@msg"->"#TEST filtering for active plans", "plan"->Map("name"->p.name, "id"->p.id.id.toString, "is-active"->p.isActive))); p.isActive } }
-    .runFold( Set.empty[AnalysisPlan.Summary] ){ case (as, ps) =>
-      log.warn(Map("@msg"->"#TEST final sink", "plans"->ps.mkString("[", ", ", "]"), "result"->as.mkString("[", ", ", "]")))
-      as ++ ps
+    .eventsByTag( AnalysisPlanModule.module.rootType.name, Offset.sequence(sequenceId) )
+    .via( filterKnownPlansFlow )
+    .to( knownPlansSink )
+    .run()
+  }
+
+  def knownPlansSink(implicit ec: ExecutionContext ): Sink[(P.PlanDirective, Long), Future[Long]] = {
+    Sink.fold( 0L ){ case (lastSnr, (d, snr)) =>
+      log.warn(Map("@msg"->"#TEST sending catalog message to self", "self"->self.path.name, "directive"->d.toString))
+      self ! d
+      math.max( lastSnr, snr )
     }
   }
 
-//todo WHY ARENT PLAN BEING LOADED???
+  val planDirectiveForEvent: PartialFunction[AP.Event, P.PlanDirective] = {
+    case AP.Added( _, Some(p: AnalysisPlan) ) => {
+      log.warn(Map("@msg"->"#TEST directive from AP.Added", "plan"->Map("name"->p.name, "id"->p.id.id.toString)))
+      P.AddPlan( p )
+    }
+    case AP.Disabled( planId, _ ) => {
+      log.warn( Map( "@msg"->"#TEST READ Plan Disabled", "planId"->planId) )
+      P.DisablePlan( planId )
+    }
+    case AP.Enabled( planId, _ ) => {
+      log.warn( Map( "@msg"->"#TEST READ Plan Enabled", "planId"->planId) )
+      P.EnablePlan( planId )
+    }
+    case AP.Renamed( planId, _, newName ) => {
+      log.warn( Map( "@msg"->"#TEST READ Plan Renamed", "planId"->planId, "newName"->newName) )
+      P.RenamePlan( planId, newName )
+    }
+  }
+
+  val filterKnownPlansFlow: Flow[EventEnvelope2, (P.PlanDirective, Long), NotUsed] = {
+    Flow[EventEnvelope2]
+    .map { e => log.warn(Map("@msg" -> "#TEST loaded tagged event", "event" -> e.toString)); e }
+    .collect {
+      case EventEnvelope2( offset, pid, snr, event: AP.Event ) if planDirectiveForEvent isDefinedAt event => {
+        val directive = planDirectiveForEvent( event )
+        log.warn(Map("@msg"->"#TEST directive for event", "offset"->offset.toString, "pid"->pid, "sequence-nr"->snr, "event"->event.toString, "directive"->directive.toString))
+        ( directive, snr )
+      }
+    }
+  }
+
+  def indexedPlans: Future[Set[AnalysisPlan.Summary]] = Future successful { knownPlans }
+
+//  def startActivePlanProjection(): Unit = {
+//    import spotlight.analysis.{ AnalysisPlanProtocol => AP }
+//
+//    implicit val ec = context.dispatcher
+//    implicit val materializer = ActorMaterializer( ActorMaterializerSettings(context.system) )
+//
+//    log.info( "starting active plan projection stream..." )
+//
+//    AnalysisPlanModule
+//    .queryJournal( context.system )
+//    .eventsByTag( AnalysisPlanModule.module.rootType.name, NoOffset )
+//    .map { e => log.warn(Map("@msg" -> "#TEST tagged event", "event" -> e.toString)); e }
+//    .collect {
+//      case EventEnvelope2( offset, pid, snr, event: AP.Added ) => {
+//        log.warn(Map("@msg"->"#TEST READ Plan Added", "offset"->offset.toString, "pid"->pid, "sequence-nr"->snr))
+//        event
+//      }
+//      case EventEnvelope2( offset, pid, snr, event: AP.Disabled ) => {
+//        log.warn(Map("@msg"->"#TEST READ Plan Disabled", "offset"->offset.toString, "pid"->pid, "sequence-nr"->snr))
+//        event
+//      }
+//      case EventEnvelope2( offset, pid, snr, event: AP.Enabled ) => {
+//        log.warn(Map("@msg"->"#TEST READ Plan Enabled", "offset"->offset.toString, "pid"->pid, "sequence-nr"->snr))
+//        event
+//      }
+//      case EventEnvelope2( offset, pid, snr, event: AP.Renamed ) => {
+//        log.warn(Map("@msg"->"#TEST READ Plan Renamed", "offset"->offset.toString, "pid"->pid, "sequence-nr"->snr))
+//        event
+//      }
+//    }
+//    .fold( Set.empty[AnalysisPlan.Summary] ) {
+//      case (ps, AP.Added(_, Some(p: AnalysisPlan))) => {
+//        val r = ps + p.toSummary
+//        log.warn(Map("@msg"->"#TEST folding Added into set", "plan-name"->p.name, "plan-id"->p.id.toString))
+//        r
+//      }
+//      case (ps, e: AP.Disabled) => {
+//        val r = ps.find { _.id == e.sourceId } map { ps + _.copy( isActive = false ) } getOrElse { ps }
+//        log.warn(Map("@msg"->"#TEST folding Disabled into set", "plan-id"->e.sourceId.toString))
+//        r
+//      }
+//      case (ps, e: AP.Enabled) => {
+//        val r = ps.find { _.id == e.sourceId } map { ps + _.copy( isActive = true ) } getOrElse { ps }
+//        log.warn(Map("@msg"->"#TEST folding Enabled into set", "plan-id"->e.sourceId.toString))
+//        r
+//      }
+//      case (ps, e: AP.Renamed) => {
+//        val r = ps.find { _.id == e.sourceId } map { ps + _.copy( name = e.newName ) } getOrElse { ps }
+//        log.warn(Map("@msg"->"#TEST folding Renamed into set", "plan-id"->e.sourceId.toString))
+//        r
+//      }
+//    }
+//    .map { _ filter { p => log.warn(Map("@msg"->"#TEST filtering for active plans", "plan"->Map("name"->p.name, "id"->p.id.id.toString, "is-active"->p.isActive))); p.isActive } }
+//    .to(
+//      Sink.foreachParallel( Runtime.getRuntime.availableProcessors() ){ ps =>
+//        knownPlans send { aps =>
+//          log.warn(
+//            Map(
+//              "@msg" -> "adding active plans to PlanCatalog",
+//              "plans" -> ps.map(_.name).mkString("[", ", ", "]"),
+//              "others" -> aps.map(_.name).mkString("[", ", ", "]")
+//            )
+//          )
+//
+//          aps ++ ps
+//        }
+//      }
+//    )
+//    .run()
+//
+//    log.info( "...started active plan projection stream execution" )
+//  }
+
   type PlanIndex = DomainModel.AggregateIndex[String, AnalysisPlanModule.module.TID, AnalysisPlan.Summary]
 //  lazy val planIndex: PlanIndex = {
 //    implicit val dispatcher = context.dispatcher
@@ -483,12 +447,47 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
 
   override def receive: Receive = LoggingReceive { around( quiescent() ) }
 
-  def quiescent( waiting: Set[ActorRef] = Set.empty[ActorRef] ): Receive = {
+  val planDirectives: Receive = {
+    case P.AddPlan( p ) => {
+      log.warn(Map("@msg"->"#TEST adding known plan", "plan" -> Map("id"->p.id.id.toString, "name"->p.name), "known"->renderKnownPlans()))
+      knownPlans += p.toSummary
+    }
+
+    case P.EnablePlan( pid ) => {
+      log.warn(Map("@msg"->"#TEST enabling known plan", "pid"->pid.id.toString, "known"->renderKnownPlans()))
+      updateKnownPlan( pid ){ _.copy( isActive = true ) }
+    }
+
+    case P.DisablePlan( pid ) => {
+      log.warn(Map("@msg"->"#TEST disabling known plan", "pid"->pid.id.toString, "known"->renderKnownPlans()))
+      updateKnownPlan( pid ){ _.copy( isActive = false ) }
+    }
+
+    case P.RenamePlan( pid, newName ) => {
+      log.warn(Map("@msg"->"#TEST renaming known plan", "pid"->pid.id.toString, "known"->renderKnownPlans()))
+      updateKnownPlan( pid ){ _.copy( name = newName ) }
+    }
+  }
+
+
+  def quiescent( waiting: Set[ActorRef] = Set.empty[ActorRef] ): Receive = planDirectives orElse {
     case Initialize => {
       import akka.pattern.pipe
       implicit val ec = context.system.dispatcher //todo: consider moving off actor threadpool
       implicit val timeout = Timeout( 30.seconds )
-      initializePlans() map { _ => InitializeCompleted } pipeTo self
+
+      val init = {
+        for {
+          lastSequenceNr <- loadCurrentKnownPlans()
+          _ = log.info( Map("@msg"->"known current plan loaded", "last-sequence-nr"->lastSequenceNr, "known"->renderKnownPlans()) )
+          _ = startPlanProjectionFrom( lastSequenceNr )
+          _ = log.info( Map("@msg"->"ongoing plan projection started", "known"->renderKnownPlans()) )
+          _ <- initializePlans()
+          _ = log.info( Map("@msg"->"remaining specified plans are initialized", "known"->renderKnownPlans()) )
+        } yield InitializeCompleted
+      }
+
+      init pipeTo self
     }
 
     case Status.Failure( ex ) => {
@@ -497,9 +496,9 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
     }
 
     case InitializeCompleted => {
-      log.info( "initialization completed" )
+      log.info( Map("@msg"->"initialization completed - plan catalog activating", "known"->renderKnownPlans()) )
       waiting foreach { _ ! P.Started }
-      context become LoggingReceive { around( active orElse admin ) }
+      context become LoggingReceive { around( planDirectives orElse active orElse admin ) }
     }
 
     case P.WaitForStart => {
@@ -757,10 +756,13 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
 
         for {
           Envelope( added: AP.Added, _ ) <- ( planRef ?+ AP.Add( p.id, Some(p) ) ).mapTo[Envelope]
-          _ = log.debug(Map("@msg" -> "notified that plan is added", "added" -> added.info.toString))
+          _ = log.debug(Map("@msg" -> "confirmed that plan is added", "added" -> added.info.toString))
           loaded <- loadPlan( p.id )
           _ = log.debug(Map("@msg" -> "loaded plan", "plan" -> loaded._2.name))
-        } yield loaded
+        } yield {
+          if ( planDirectiveForEvent isDefinedAt added ) self ! planDirectiveForEvent( added )
+          loaded
+        }
       }
     }
 
