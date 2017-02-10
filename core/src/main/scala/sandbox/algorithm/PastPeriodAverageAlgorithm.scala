@@ -143,7 +143,7 @@ object PastPeriodAverageAlgorithm extends AlgorithmModule with AlgorithmModule.M
   override val shapeCompanion: ShapeCompanion[Shape] = Shape
 
   override def algorithm: Algorithm = new Algorithm {
-    override val label: Symbol = Symbol( "past-period" )
+    override val label: String = "past-period"
 
 
     override def prepareData( c: Context ): Seq[DoublePoint] = c.tailAverage()( c.data )

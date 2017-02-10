@@ -31,7 +31,7 @@ class SkylineFirstHourAverageSpec extends SkylineBaseSpec {
 
   class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends SkylineFixture( _config, _system, _slug ) {
     val algoS = FirstHourAverageAnalyzer.Algorithm
-    val algProps = ConfigFactory.parseString( s"""${algoS.name}.tolerance: 3""" )
+    val algProps = ConfigFactory.parseString( s"""${algoS}.tolerance: 3""" )
 
     val plan = mock[AnalysisPlan]
     when( plan.id ).thenReturn( TaggedID( 'plan, ShortUUID() ) )
@@ -119,7 +119,7 @@ class SkylineFirstHourAverageSpec extends SkylineBaseSpec {
       val series = spike( full )()
       trace( s"test series = $series" )
       val algoS = FirstHourAverageAnalyzer.Algorithm
-      val algProps = ConfigFactory.parseString( s"""${algoS.name}.tolerance: 4""" )
+      val algProps = ConfigFactory.parseString( s"""${algoS}.tolerance: 4""" )
 
       analyzer.receive( DetectionAlgorithmRouter.AlgorithmRegistered( algoS ) )
       val history1 = historyWith( None, series )
@@ -189,7 +189,7 @@ class SkylineFirstHourAverageSpec extends SkylineBaseSpec {
       val series = spike( full )()
       trace( s"test series = $series" )
       val algoS = FirstHourAverageAnalyzer.Algorithm
-      val algProps = ConfigFactory.parseString( s"""${algoS.name}.tolerance: 2""" )
+      val algProps = ConfigFactory.parseString( s"""${algoS}.tolerance: 2""" )
 
       analyzer ! DetectionAlgorithmRouter.AlgorithmRegistered(algoS)
       val history1 = historyWith( None, series )
@@ -261,7 +261,7 @@ class SkylineFirstHourAverageSpec extends SkylineBaseSpec {
       val series = spike( full, 10 )()
       trace( s"test series = $series" )
       val algoS = FirstHourAverageAnalyzer.Algorithm
-      val algProps = ConfigFactory.parseString( s"""${algoS.name}.tolerance: 3""" )
+      val algProps = ConfigFactory.parseString( s"""${algoS}.tolerance: 3""" )
 
       analyzer ! DetectionAlgorithmRouter.AlgorithmRegistered( algoS )
       val history1 = historyWith( None, series )

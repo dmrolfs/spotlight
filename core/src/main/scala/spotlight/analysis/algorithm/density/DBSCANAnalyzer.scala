@@ -45,7 +45,7 @@ trait DBSCANAnalyzer extends AlgorithmActor {
           log.error(
             ex,
             "failed [{}] analysis on [{}] : [{}]",
-            algorithm.name,
+            algorithm,
             payload.plan.name + "][" + payload.topic,
             payload.source.interval
           )
@@ -58,7 +58,7 @@ trait DBSCANAnalyzer extends AlgorithmActor {
 
 
   val minDensityConnectedPoints: KOp[Config, Int] = {
-    Kleisli[TryV, Config, Int] { c => \/ fromTryCatchNonFatal { c getInt algorithm.name+".minDensityConnectedPoints" } }
+    Kleisli[TryV, Config, Int] { c => \/ fromTryCatchNonFatal { c getInt algorithm+".minDensityConnectedPoints" } }
   }
 
   def historyMean: KOp[AlgorithmContext, Double] = kleisli[TryV, AlgorithmContext, Double] { context =>
@@ -100,8 +100,8 @@ trait DBSCANAnalyzer extends AlgorithmActor {
 
       \/ fromTryCatchNonFatal {
         calculatedEps getOrElse {
-          log.debug( "eps seed = {}", config getDouble algorithm.name+".seedEps" )
-          config getDouble algorithm.name+".seedEps"
+          log.debug( "eps seed = {}", config getDouble algorithm+".seedEps" )
+          config getDouble algorithm+".seedEps"
         }
       }
     }

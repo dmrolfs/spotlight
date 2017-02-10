@@ -3,17 +3,17 @@ package spotlight.analysis
 import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
 import akka.Done
-import akka.actor.{ActorLogging, ActorRef, Props}
+import akka.actor.{ActorRef, Props}
 import akka.agent.Agent
 import akka.event.LoggingReceive
 import akka.stream.actor.ActorSubscriberMessage.{OnComplete, OnError, OnNext}
 import akka.stream.actor.{ActorSubscriber, ActorSubscriberMessage, MaxInFlightRequestStrategy, RequestStrategy}
-import com.codahale.metrics.{Metric, MetricFilter}
 
 import scalaz._
 import Scalaz._
+import com.codahale.metrics.{Metric, MetricFilter}
 import com.typesafe.config.Config
-import com.typesafe.scalalogging.LazyLogging
+import com.persist.logging._
 import nl.grons.metrics.scala.{MetricName, Timer}
 import peds.akka.envelope._
 import peds.akka.metrics.{Instrumented, InstrumentedActor}
@@ -25,7 +25,7 @@ import spotlight.model.timeseries._
 /**
   * Created by rolfsd on 5/20/16.
   */
-object PlanCatalogProxy extends Instrumented with LazyLogging {
+object PlanCatalogProxy extends Instrumented with ClassLogging {
   def props(
     underlying: ActorRef,
     configuration: Config,
@@ -59,7 +59,7 @@ object PlanCatalogProxy extends Instrumented with LazyLogging {
       subs <- subscribers.future() if subs contains subscriber
       _ = subscriber ! ActorSubscriberMessage.OnComplete
       _ <- subscribers alter { oldSubs =>
-        logger.info( "PlanCatalogProxy: subscriber cleared: [{}]", subscriber.path.name )
+        log.info( "subscriber cleared" )
         oldSubs - subscriber
       }
     } yield Done
@@ -131,9 +131,9 @@ extends ActorSubscriber with EnvelopingActor with InstrumentedActor with ActorLo
   }
 
   def findOutstandingCorrelationIds( workIds: Set[WorkId] ): Set[WorkId] = {
-    log.debug( "outstanding work: [{}]", knownWork )
-    log.debug( "returning work: [{}]", workIds )
-    log.debug( "known intersect: [{}]", knownWork intersect workIds )
+    log.debug( Map("@msg" -> "outstanding work", "known"->knownWork.mkString("[", ", ", "]")) )
+    log.debug( Map("@msg" -> "returning work", "returning" -> workIds.mkString("[", ", ", "]")) )
+    log.debug( Map("@msg" -> "known intersect", "known" -> (knownWork intersect workIds).mkString("[", ", ", "]")) )
     knownWork intersect workIds
   }
 
@@ -145,22 +145,21 @@ extends ActorSubscriber with EnvelopingActor with InstrumentedActor with ActorLo
   private def stopIfFullyComplete()( implicit ec: ExecutionContext ): Unit = {
     if ( isWaitingToComplete ) {
       log.info(
-        "PlanCatalogProxy[{}] waiting to complete on [{}] outstanding work: [{}]",
-        self.path.name,
-        outstandingRequests,
-        knownWork.mkString( ", " )
+        Map(
+          "@msg" -> "waiting to complete on outstanding work",
+          "outstanding" -> outstandingRequests,
+          "known" -> knownWork.mkString("[", ", ", "]")
+        )
       )
 
       if ( outstandingRequests == 0 ) {
         log.info(
-          "PlanCatalogProxy[{}] is closing upon work completion...will notify {} subscribers",
-          self.path.name,
-          _subscribersSeen.size
+          Map( "@msg" -> "closing upon work completion...will notify subscribers", "nr-subscribers" -> _subscribersSeen.size )
         )
 
         if ( finishSubscriberOnComplete ) _subscribersSeen foreach { PlanCatalogProxy.clearSubscriber }
 
-        log.info( "PlanCatalogProxy[{}] closing with completion", self.path.name )
+        log.info( "closing with completion" )
         context stop self
       }
     }
@@ -186,7 +185,9 @@ extends ActorSubscriber with EnvelopingActor with InstrumentedActor with ActorLo
   val active: Receive = {
     case route @ P.Route( _, rcid ) => {
       val cid = correlationId
-      for { rid <- rcid if rid != cid } { log.warning( "PlanCatalogProxy: incoming cid[{}] != dispatching cid[{}]", rid, cid ) }
+      for { rid <- rcid if rid != cid } {
+        log.warn( Map("@msg" -> "incoming cid != dispatching cid", "incoming" -> rid.toString, "dispatching" -> cid.toString) )
+      }
 
       addWorkRequest( cid, sender() )
       log.debug( "PlanCatalogProxy:ACTIVE: forwarding StreamMessage to PlanCatalog" )
@@ -194,18 +195,25 @@ extends ActorSubscriber with EnvelopingActor with InstrumentedActor with ActorLo
     }
 
     case P.UnknownRoute( ts, cid ) => {
-      log.warning( "PlanCatalogProxy[{}]: unknown route for timeseries. Dropping series for:[{}]", cid, ts.topic )
+      log.warn(
+        Map(
+          "@msg" -> "unknown route for timeseries. Dropping series for topic",
+          "correlation-id" -> cid.toString,
+          "topic" -> ts.topic.toString
+        )
+      )
       cid foreach { id => removeWorkRequests( Set( id ) ) }
       stopIfFullyComplete()( context.dispatcher )
     }
 
     case result: DetectionResult if !hasWorkInProgress( result.correlationIds ) => {
       log.error(
-        "PlanCatalogProxy:ACTIVE[{}]: stashing received result for UNKNOWN workId:[{}] all-ids:[{}]: [{}]",
-        self.path.name,
-        workId,
-        knownWork.mkString(", "),
-        result
+        Map(
+          "@msg" -> "PlanCatalogProxy:ACTIVE[{}]: stashing received result for UNKNOWN workId:[{}] all-ids:[{}]: [{}]",
+          "unknown-work0id" -> workId.toString,
+          "known" -> knownWork.mkString("[", ", ", "]"),
+          "result" -> result.toString
+        )
       )
 
       stopIfFullyComplete()( context.dispatcher )
@@ -213,36 +221,39 @@ extends ActorSubscriber with EnvelopingActor with InstrumentedActor with ActorLo
 
     case result @ DetectionResult( outliers, correlationIds ) => {
       log.debug(
-        "PlanCatalogProxy:ACTIVE[{}]: received outlier result[{}] for workId:[{}] subscriber:[{}]",
-        self.path,
-        outliers.hasAnomalies,
-        workId,
-        _workRequests.get( workId ).map{ _.subscriber.path.name }
+        Map(
+          "@msg" -> "ACTIVE: received outlier result",
+          "has-anomalies" -> outliers.hasAnomalies,
+          "work-id" -> workId.toString,
+          "subscriber" -> _workRequests.get( workId ).map{ _.subscriber.path.name }
+        )
       )
       log.debug(
-        "PlanCatalogProxy:ACTIVE: received (workId:[{}] -> subscriber:[{}])  all:[{}]",
-        workId, _workRequests.get(workId), _workRequests.mkString(", ")
+        Map(
+          "@msg" -> "ACTIVE: received (workId:[{}] -> subscriber:[{}])  all:[{}]",
+          "work-id" -> workId.toString,
+          "subscriber" -> _workRequests.get(workId).map(_.subscriber.path.name),
+          "all" -> _workRequests.mkString("[", ", ", "]")
+        )
       )
 
       val outstanding = clearCompletedWork( correlationIds, outliers.topic, outliers.algorithms )
-      log.debug(
-        "PlanCatalogProxy:ACTIVE sending result to {} subscriber{}",
-        outstanding.size,
-        if ( outstanding.size == 1 ) "" else "s"
-      )
+      log.debug( Map("@msg" -> "ACTIVE sending result to subscriber", "nr-subscribers" -> outstanding.size) )
       outstanding foreach { case (_, r) => r.subscriber ! result }
       stopIfFullyComplete()( context.dispatcher )
     }
   }
 
-  def clearCompletedWork( correlationIds: Set[WorkId], topic: Topic, algorithms: Set[Symbol] ): Set[(WorkId, PlanRequest)] = {
+  def clearCompletedWork( correlationIds: Set[WorkId], topic: Topic, algorithms: Set[String] ): Set[(WorkId, PlanRequest)] = {
     val (known, unknown) = correlationIds partition isKnownWork
     if ( unknown.nonEmpty ) {
-      log.warning(
-        "PlanCatalogProxy:ACTIVE received topic:[{}] algorithms:[{}] results for unrecognized workIds:[{}]",
-        topic,
-        algorithms.map{ _.name }.mkString( ", " ),
-        unknown.mkString(", ")
+      log.warn(
+        Map(
+          "@msg" -> "ACTIVE received topic:[{}] algorithms:[{}] results for unrecognized workIds:[{}]",
+          "topic" -> topic.toString,
+          "algorithms" -> algorithms.mkString("[", ", ", "]"),
+          "unrecognized-work-ids" -> unknown.mkString("[", ", ", "]")
+        )
       )
     }
 
@@ -253,20 +264,19 @@ extends ActorSubscriber with EnvelopingActor with InstrumentedActor with ActorLo
 
   val stream: Receive = {
     case OnNext( message ) if active isDefinedAt message => {
-      log.debug( "PlanCatalogProxy:STREAM: evaluating OnNext( {} )", message )
+      log.debug(Map("@msg" -> "STREAM: evaluating OnNext", "message" -> message.toString))
       active( message )
     }
 
     case OnComplete => {
-      log.info( "PlanCatalogProxy:STREAM[{}] closing on completed stream", self.path.name )
+      log.info( "STREAM closing on completed stream" )
       isWaitingToComplete = true
       stopIfFullyComplete()( context.dispatcher )
     }
 
     case OnError( ex ) => {
-      log.error( ex, "PlanCatalogProxy:STREAM closing on errored stream" )
+      log.error( "PlanCatalogProxy:STREAM closing on errored stream", ex )
       context stop self
     }
   }
-
 }

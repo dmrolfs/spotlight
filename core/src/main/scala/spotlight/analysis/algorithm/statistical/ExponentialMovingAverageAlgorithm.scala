@@ -40,7 +40,7 @@ object ExponentialMovingAverageAlgorithm extends AlgorithmModule with AlgorithmM
   override val shapeCompanion: ShapeCompanion[Shape] = Shape
 
   override def algorithm: Algorithm = new Algorithm {
-    override val label: Symbol = 'ewma
+    override val label: String = "ewma"
     override def step( point: PointT, shape: Shape )( implicit s: State, c: Context ): Option[(Boolean, ThresholdBoundary)] = {
       shape.statistics map { stats =>
         logger.debug(

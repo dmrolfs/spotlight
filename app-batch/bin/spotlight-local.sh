@@ -29,7 +29,7 @@ java -classpath $CPATH \
   -Dspotlight.config=$SPOTLIGHT_CONFIG \
   -Dconfig.resource=$SPOTLIGHT_CONFIG \
   -Djava.library.path="$DIR/../../infr/native" \
-  -DSLF4J_LEVEL=WARN \
+  -DSLF4J_LEVEL=DEBUG \
   -Xms4g \
   -Xmx10g \
   -javaagent:"$DIR/../../infr/coreos/aspectjweaver-1.8.8.jar" \

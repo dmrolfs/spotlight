@@ -20,7 +20,7 @@ import spotlight.model.timeseries._
   * Created by rolfsd on 2/25/16.
   */
 object LeastSquaresAnalyzer {
-  val Algorithm = Symbol( "least-squares" )
+  val Algorithm: String = "least-squares"
 
   def props( router: ActorRef ): Props = Props { new LeastSquaresAnalyzer( router ) }
 
@@ -50,7 +50,7 @@ class LeastSquaresAnalyzer( override val router: ActorRef ) extends CommonAnalyz
 
   override implicit val contextClassTag: ClassTag[Context] = ClassTag( classOf[Context] )
 
-  override def algorithm: Symbol = LeastSquaresAnalyzer.Algorithm
+  override def algorithm: String = LeastSquaresAnalyzer.Algorithm
 
   override def wrapContext(c: AlgorithmContext ): Valid[WrappingContext] = {
     makeRegression( c ) map { rm => Context( underlying = c, regression = rm ) }

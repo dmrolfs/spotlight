@@ -94,7 +94,7 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmModuleSpec[SimpleMovingA
   analysisStateSuite()
 
 
-  s"${defaultModule.algorithm.label.name} algorithm" should {
+  s"${defaultModule.algorithm.label} algorithm" should {
     "step to find anomalies from flat signal" in { f: Fixture =>
       import f._
 
@@ -139,6 +139,7 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmModuleSpec[SimpleMovingA
       val (e1, r1) = makeExpected( NoHint )( points = s1.points, outliers = Seq(false, false, false, false, true) )
       evaluate(
         hint = "first",
+        algorithmAggregateId = id,
         series = s1,
         history = h1,
         expectedResults = e1,
@@ -159,6 +160,7 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmModuleSpec[SimpleMovingA
       )
       evaluate(
         hint = "second",
+        algorithmAggregateId = id,
         series = s2,
         history = h2,
         expectedResults = e2,

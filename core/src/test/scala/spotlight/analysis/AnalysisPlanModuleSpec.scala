@@ -30,16 +30,17 @@ import spotlight.model.timeseries._
 /**
   * Created by rolfsd on 6/15/16.
   */
-class AnalysisPlanModuleSpec extends EntityModuleSpec[AnalysisPlan] with OptionValues { outer =>
+class AnalysisPlanModuleSpec extends EntityModuleSpec[AnalysisPlanState] with OptionValues { outer =>
   override type ID = AnalysisPlanModule.module.ID
   override type Protocol = AnalysisPlanProtocol.type
   override val protocol: Protocol = AnalysisPlanProtocol
 
+  implicit val moduleIdentifying = AnalysisPlanModule.identifying
 
-  abstract class FixtureModule extends EntityAggregateModule[AnalysisPlan] { testModule =>
+  abstract class FixtureModule extends EntityAggregateModule[AnalysisPlanState] { testModule =>
     private val trace: Trace[_] = Trace[FixtureModule]
-    override val idLens: Lens[AnalysisPlan, TaggedID[ShortUUID]] = AnalysisPlan.idLens
-    override val nameLens: Lens[AnalysisPlan, String] = AnalysisPlan.nameLens
+    override val idLens: Lens[AnalysisPlanState, AnalysisPlanState#TID] = AnalysisPlanModule.idLens
+    override val nameLens: Lens[AnalysisPlanState, String] = AnalysisPlanModule.nameLens
     //      override def aggregateRootPropsOp: AggregateRootProps = testProps( _, _ )( proxy )
     override def environment: AggregateEnvironment = LocalAggregate
   }
@@ -73,8 +74,8 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[AnalysisPlan] with OptionV
         reduce = ReduceOutliers.byCorroborationPercentage(50),
         planSpecification = ConfigFactory.parseString(
           s"""
-             |algorithm-config.${algo.name}.seedEps: 5.0
-             |algorithm-config.${algo.name}.minDensityConnectedPoints: 3
+             |algorithm-config.${algo}.seedEps: 5.0
+             |algorithm-config.${algo}.minDensityConnectedPoints: 3
           """.stripMargin
         )
       )
@@ -84,7 +85,7 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[AnalysisPlan] with OptionV
       super.rootTypes ++ Set( SimpleMovingAverageAlgorithm.rootType )
     }
 
-    lazy val algo: Symbol = SimpleMovingAverageAlgorithm.algorithm.label
+    lazy val algo: String = SimpleMovingAverageAlgorithm.algorithm.label
 
 
     def stateFrom( ar: ActorRef, tid: module.TID ): AnalysisPlan = {
@@ -158,7 +159,7 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[AnalysisPlan] with OptionV
 
       override protected def onPersistRejected( cause: Throwable, event: Any, seqNr: Long ): Unit = {
         log.error(
-          "Rejected to persist event type [{}] with sequence number [{}] for persistenceId [{}] due to [{}].",
+          "Rejected to persist event type [{}] with sequence number [{}] for aggregateId [{}] due to [{}].",
           event.getClass.getName, seqNr, persistenceId, cause
         )
         throw cause
@@ -309,11 +310,11 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[AnalysisPlan] with OptionV
 
     "must not respond before add" in { f: Fixture =>
       import f._
-      val info = ( entity ?+ P.UseAlgorithms( tid, Set( 'foo, 'bar ), ConfigFactory.empty() ) ).mapTo[P.PlanInfo]
+      val info = ( entity ?+ P.UseAlgorithms( tid, Set( "foo", "bar" ), ConfigFactory.empty() ) ).mapTo[P.PlanInfo]
       bus.expectNoMsg()
     }
 
-    "change appliesTo" taggedAs WIP in { f: Fixture =>
+    "change appliesTo" in { f: Fixture =>
       import f._
 
       entity !+ protocol.Add( tid, Some(plan) )
@@ -350,18 +351,20 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[AnalysisPlan] with OptionV
         """.stripMargin
       )
 
-      entity !+ AnalysisPlanProtocol.UseAlgorithms( tid, Set('foo, 'bar, 'zed), testConfig )
+      entity !+ AnalysisPlanProtocol.UseAlgorithms( tid, Set("foo", "bar", "zed"), testConfig )
       bus.expectMsgPF( max = 3.seconds.dilated, hint = "use algorithms" ) {
-        case AnalysisPlanProtocol.AlgorithmsChanged(id, algos, config) => {
+        case AnalysisPlanProtocol.AlgorithmsChanged(id, algos, config, added, dropped) => {
           id mustBe tid
-          algos mustBe Set('foo, 'bar, 'zed)
+          algos mustBe Set("foo", "bar", "zed")
+          dropped mustBe Set( SimpleMovingAverageAlgorithm.algorithm.label )
+          added mustBe Set( "foo", "bar", "zed" )
           config mustBe testConfig
         }
       }
 
       val actual = stateFrom( entity, tid )
       actual mustBe plan
-      actual.algorithms mustBe Set('foo, 'bar, 'zed)
+      actual.algorithms mustBe Set("foo", "bar", "zed")
       actual.algorithmConfig mustBe testConfig
     }
 

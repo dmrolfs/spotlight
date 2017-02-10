@@ -17,7 +17,7 @@ import spotlight.model.timeseries._
   * Created by rolfsd on 2/25/16.
   */
 object MeanSubtractionCumulationAnalyzer {
-  val Algorithm = Symbol( "mean-subtraction-cumulation" )
+  val Algorithm: String = "mean-subtraction-cumulation"
 
   def props( router: ActorRef ): Props = Props { new MeanSubtractionCumulationAnalyzer( router ) }
 }
@@ -30,7 +30,7 @@ extends CommonAnalyzer[CommonAnalyzer.SimpleWrappingContext] {
 
   override implicit val contextClassTag: ClassTag[Context] = ClassTag( classOf[Context] )
 
-  override def algorithm: Symbol = MeanSubtractionCumulationAnalyzer.Algorithm
+  override def algorithm: String = MeanSubtractionCumulationAnalyzer.Algorithm
 
   override def wrapContext(c: AlgorithmContext ): Valid[WrappingContext] = SimpleWrappingContext( underlying = c ).successNel
 

@@ -23,9 +23,9 @@ with LazyLogging {
   override type FixtureParam = Fixture
 
   class Fixture { outer =>
-    val algo1 = 'algo1
-    val algo2 = 'algo2
-    val algo3 = 'algo3
+    val algo1 = "algo1"
+    val algo2 = "algo2"
+    val algo3 = "algo3"
     val now = joda.DateTime.now
     val points = Seq( DataPoint(now, 1.01), DataPoint(now+1.second, 2.02), DataPoint(now+2.seconds, 3.02) )
     val series = TimeSeries( "foo", points )
@@ -38,7 +38,7 @@ with LazyLogging {
     when( plan.appliesTo ).thenReturn( all )
 
 
-    def makeOutliers( algorithms: Set[Symbol], outlierIndexes: Seq[Int], controls: Map[Symbol, Seq[ThresholdBoundary]] ): Outliers = trace.block( s"""makeOutliers( ${outlierIndexes.mkString("," )} )""" ) {
+    def makeOutliers( algorithms: Set[String], outlierIndexes: Seq[Int], controls: Map[String, Seq[ThresholdBoundary]] ): Outliers = trace.block( s"""makeOutliers( ${outlierIndexes.mkString("," )} )""" ) {
       val noOutliers = NoOutliers( Set(algo1), source = series, plan = plan )
 
       val outliers = outlierIndexes map { i => points(i) }
@@ -58,7 +58,7 @@ with LazyLogging {
 //    val oneOutlier = SeriesOutliers( Set(algo1), source = series, outliers = IndexedSeq(points(0)), plan = plan )
 //    val twoOutliers = SeriesOutliers( Set(algo1), source = series, outliers = IndexedSeq( points(0), points(1) ), plan = plan )
 
-    def correspndingControlBoundaries( algorithms: Set[Symbol], source: TimeSeries ): Map[Symbol, Seq[ThresholdBoundary]] = {
+    def correspndingControlBoundaries( algorithms: Set[String], source: TimeSeries ): Map[String, Seq[ThresholdBoundary]] = {
       val expected = 5D
 
       val elems = algorithms.toSeq map { a =>
@@ -138,7 +138,7 @@ with LazyLogging {
         import f._
         import ReduceOutliers._
 
-        val noControls = Map.empty[Symbol, Seq[ThresholdBoundary]]
+        val noControls = Map.empty[String, Seq[ThresholdBoundary]]
         val noOutliers = makeOutliers( Set(algo1), Nil, noControls )
         val reduce = byCorroborationCount( 1 )
         val actual = reduce( results = Map( algo1 -> noOutliers ), series, plan )

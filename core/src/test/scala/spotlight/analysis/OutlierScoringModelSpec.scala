@@ -1,5 +1,6 @@
 package spotlight.analysis
 
+import java.net.InetSocketAddress
 import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -15,11 +16,13 @@ import akka.testkit._
 import akka.util.ByteString
 import akka.{NotUsed, pattern}
 import com.github.nscala_time.time.Imports.{richDateTime, richSDuration}
-import com.typesafe.config.{Config, ConfigFactory}
+import com.typesafe.config.{Config, ConfigFactory, ConfigOrigin}
 import demesne.{AggregateRootType, BoundedContext, DomainModel}
 import org.apache.commons.math3.random.RandomDataGenerator
 import org.joda.{time => joda}
 import org.scalatest.Tag
+import org.scalatest.mockito.MockitoSugar
+import org.mockito.Mockito._
 import peds.commons.log.Trace
 import spotlight.analysis.shard.{CellShardModule, LookupShardModule}
 import spotlight.analysis.{AnalysisPlanProtocol => AP}
@@ -27,7 +30,7 @@ import spotlight.analysis.algorithm.statistical.SimpleMovingAverageAlgorithm
 import spotlight.model.outlier._
 import spotlight.model.timeseries.TimeSeriesBase.Merging
 import spotlight.model.timeseries.{DataPoint, TimeSeries}
-import spotlight.protocol.PythonPickleProtocol
+import spotlight.protocol.{GraphiteSerializationProtocol, PythonPickleProtocol}
 import spotlight.testkit.ParallelAkkaSpec
 import spotlight.{Settings, Spotlight}
 
@@ -35,7 +38,7 @@ import spotlight.{Settings, Spotlight}
 /**
  * Created by rolfsd on 10/28/15.
  */
-class OutlierScoringModelSpec extends ParallelAkkaSpec {
+class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
   import OutlierScoringModelSpec._
 
 
@@ -66,6 +69,22 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
 
   override def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture = {
     new Fixture( config, system, slug )
+  }
+
+  class TestSettingsWithPlans( override val plans: Set[AnalysisPlan], underlying: Settings ) extends Settings {
+    override def sourceAddress: InetSocketAddress = underlying.sourceAddress
+    override def clusterPort: Int = underlying.clusterPort
+    override def maxFrameLength: Int = underlying.maxFrameLength
+    override def protocol: GraphiteSerializationProtocol = underlying.protocol
+    override def windowDuration: FiniteDuration = underlying.windowDuration
+    override def graphiteAddress: Option[InetSocketAddress] = underlying.graphiteAddress
+    override def detectionBudget: Duration = underlying.detectionBudget
+    override def parallelismFactor: Double = underlying.parallelismFactor
+    override def planOrigin: ConfigOrigin = underlying.planOrigin
+    override def tcpInboundBufferSize: Int = underlying.tcpInboundBufferSize
+    override def workflowBufferSize: Int = underlying.workflowBufferSize
+    override def args: Seq[String] = underlying.args
+    override def config: Config = underlying.config
   }
 
   class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends AkkaFixture( _config, _system, _slug ) {
@@ -112,16 +131,16 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
       reduce = ReduceOutliers.byCorroborationPercentage(50),
       planSpecification = ConfigFactory.parseString(
         s"""
-          |algorithm-config.${algo.name}.seedEps: 5.0
-          |algorithm-config.${algo.name}.minDensityConnectedPoints: 3
+          |algorithm-config.${algo}.seedEps: 5.0
+          |algorithm-config.${algo}.minDensityConnectedPoints: 3
         """.stripMargin
       )
     )
 
     def rootTypes: Set[AggregateRootType] = Set(
       AnalysisPlanModule.module.rootType,
-                                                 LookupShardModule.rootType,
-                                                 CellShardModule.module.rootType,
+      LookupShardModule.rootType,
+      CellShardModule.module.rootType,
       SimpleMovingAverageAlgorithm.rootType
     )
 
@@ -149,8 +168,8 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
         reduce = ReduceOutliers.byCorroborationPercentage(50),
         planSpecification = ConfigFactory.parseString(
           s"""
-             |algorithm-config.${algo.name}.seedEps: 5.0
-             |algorithm-config.${algo.name}.minDensityConnectedPoints: 3
+             |algorithm-config.${algo}.seedEps: 5.0
+             |algorithm-config.${algo}.minDensityConnectedPoints: 3
           """.stripMargin
         )
       )
@@ -390,7 +409,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
           algos
           .map { a =>
             s"""
-               |algorithm-config.${a.name} {
+               |algorithm-config.${a} {
                |  tolerance: 1.043822701 // eps:0.75
                |  seedEps: 0.75
                |  minDensityConnectedPoints: 3
@@ -402,30 +421,12 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec {
         )
       )
 
+      val testSettings = new TestSettingsWithPlans( Set(defaultPlan), settings )
+
       logger.debug( "default plan = [{}]", defaultPlan )
-      val addMsg = AP.Add( defaultPlan.id, Some(defaultPlan) )
-      logger.debug( "Add message: [{}]", addMsg )
-      model.aggregateOf( AnalysisPlanModule.module.rootType, defaultPlan.id ) !+ addMsg
-      bus.expectMsgClass( max = 5.seconds.dilated, classOf[AP.Added] )
-//      bus.expectMsgPF( max = 5.seconds.dilated, hint = "add plan" ) {
-//        case p: protocol.Added => {
-//          logger.info( "ADD PLAN: p.sourceId[{}]=[{}]   id[{}]=[{}]", p.sourceId.getClass.getCanonicalName, p.sourceId, tid.getClass.getCanonicalName, tid)
-//          p.sourceId mustBe plan.id
-//          assert( p.info.isDefined )
-//          p.info.get mustBe an [AnalysisPlan]
-//          val actual = p.info.get.asInstanceOf[AnalysisPlan]
-//          actual.name mustBe "TestPlan"
-//          actual.algorithms mustBe Set( algo )
-//        }
-//      }
-
-      Thread.sleep( 1000 ) // ugh let plan added
-
       implicit val timeout = akka.util.Timeout( 5.seconds )
       logger.info( "BOOTSTRAP:BEFORE BoundedContext roottypes = [{}]", boundedContext.unsafeModel.rootTypes )
-//      Thread.sleep( 10000 )
-//      logger.info( "BOOTSTRAP:AFTER BoundedContext roottypes = [{}]", boundedContext.unsafeModel.rootTypes )
-      val catalogRef = Await.result( Spotlight.makeCatalog( settings )( boundedContext ), 3.seconds )
+      val catalogRef = Await.result( Spotlight.makeCatalog( testSettings )( boundedContext ), 30.seconds )
       logger.info( "Catalog ref = [{}]", catalogRef )
 
       import PlanCatalogProtocol.{CatalogFlow, MakeFlow, WaitForStart}

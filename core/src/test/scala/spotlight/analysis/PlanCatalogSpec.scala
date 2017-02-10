@@ -133,8 +133,8 @@ class PlanCatalogSpec extends ParallelAkkaSpec with ScalaFutures with StrictLogg
 //
 //        override protected def onPersistRejected( cause: Throwable, event: Any, seqNr: Long ): Unit = {
 //          log.error(
-//            "Rejected to persist event type [{}] with sequence number [{}] for persistenceId [{}] due to [{}].",
-//            event.getClass.getName, seqNr, persistenceId, cause
+//            "Rejected to persist event type [{}] with sequence number [{}] for aggregateId [{}] due to [{}].",
+//            event.getClass.getName, seqNr, aggregateId, cause
 //          )
 //          throw cause
 //        }

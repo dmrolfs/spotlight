@@ -27,7 +27,7 @@ import spotlight.model.timeseries._
   * Created by rolfsd on 2/25/16.
   */
 object SeriesDensityAnalyzer {
-  val Algorithm = 'dbscanSeries
+  val Algorithm: String = "dbscanSeries"
 
   def props( router: ActorRef, alphaValue: Double = 0.05 ): Props = {
     Props {
@@ -68,15 +68,15 @@ object SeriesDensityAnalyzer {
 class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnalyzer[SeriesDensityAnalyzer.Context] {
   outer: SeriesDensityAnalyzer.HistoryProvider =>
 
-  lazy val clusterTimer: Timer = metrics.timer( algorithm.name, "cluster" )
-  lazy val sourceSizeHistogram: Histogram = metrics.histogram( algorithm.name, "source-size" )
-  lazy val filledSizeHistogram: Histogram = metrics.histogram( algorithm.name, "filled-size" )
+  lazy val clusterTimer: Timer = metrics.timer( algorithm, "cluster" )
+  lazy val sourceSizeHistogram: Histogram = metrics.histogram( algorithm, "source-size" )
+  lazy val filledSizeHistogram: Histogram = metrics.histogram( algorithm, "filled-size" )
 
   import SeriesDensityAnalyzer.Context
 
   override implicit val contextClassTag: ClassTag[Context] = ClassTag( classOf[Context] )
 
-  override val algorithm: Symbol = SeriesDensityAnalyzer.Algorithm
+  override val algorithm: String = SeriesDensityAnalyzer.Algorithm
 
   override def wrapContext(c: AlgorithmContext ): Valid[WrappingContext] = {
     makeMovingStatistics( c ) map { movingStats => Context( underlying = c, distanceStatistics = movingStats ) }
@@ -126,7 +126,7 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
 
   val minDensityPoints: KOp[AlgorithmContext, Int] = {
     kleisli[TryV, AlgorithmContext, Int] { ctx =>
-      \/ fromTryCatchNonFatal { ctx.messageConfig getInt algorithm.name + ".minDensityConnectedPoints" }
+      \/ fromTryCatchNonFatal { ctx.messageConfig getInt algorithm + ".minDensityConnectedPoints" }
     }
   }
 
@@ -186,8 +186,8 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
 
       calculatedEps getOrElse {
         \/ fromTryCatchNonFatal {
-          log.debug( "eps seed = {}", config getDouble algorithm.name+".seedEps" )
-          config getDouble algorithm.name+".seedEps"
+          log.debug( "eps seed = {}", config getDouble algorithm+".seedEps" )
+          config getDouble algorithm+".seedEps"
         }
       }
     }
@@ -289,7 +289,7 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
   }
 
   def shouldCreateThreshold(ctx: AlgorithmContext ): Boolean = {
-    val PublishThresholdPath = s"${algorithm.name}.publish-threshold"
+    val PublishThresholdPath = s"${algorithm}.publish-threshold"
     if ( ctx.messageConfig hasPath PublishThresholdPath ) ctx.messageConfig.getBoolean( PublishThresholdPath ) else false
   }
 

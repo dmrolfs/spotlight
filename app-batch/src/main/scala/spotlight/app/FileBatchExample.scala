@@ -12,10 +12,11 @@ import akka.event.LoggingReceive
 import akka.stream.scaladsl.{FileIO, Flow, Framing, GraphDSL, Keep, Sink, Source}
 import akka.stream._
 import akka.util.ByteString
-import com.persist.logging.LoggingSystem
+import com.persist.logging._
+import com.persist.logging.LoggingLevels.{DEBUG, Level, WARN}
+import spotlight.analysis.{AnalysisPlanModule, PlanCatalog}
 
 import scalaz.{-\/, \/, \/-}
-import com.typesafe.scalalogging.{Logger, StrictLogging}
 import nl.grons.metrics.scala.MetricName
 import org.joda.time.DateTime
 import org.slf4j.LoggerFactory
@@ -36,17 +37,17 @@ import spotlight.protocol.GraphiteSerializationProtocol
 /**
   * Created by rolfsd on 11/17/16.
   */
-object FileBatchExample extends Instrumented with StrictLogging {
+object FileBatchExample extends Instrumented with ClassLogging {
   def main( args: Array[String] ): Unit = {
     import scala.concurrent.ExecutionContext.Implicits.global
 
-    val logger = Logger( LoggerFactory.getLogger("Application") )
-    logger.info( "Starting Application Up" )
-    logger.info( "spotlight build info: {}", spotlight.BuildInfo )
-    logger.info( "demesne build info: {}", demesne.BuildInfo )
-
     implicit val actorSystem = ActorSystem( "Spotlight" )
-    val loggingSystem = LoggingSystem( actorSystem, spotlight.BuildInfo.name, spotlight.BuildInfo.version, java.net.InetAddress.getLocalHost.getHostName )
+    startLogging( actorSystem )
+    log.info( "Starting Application Up" )
+    log.info(Map("@msg" -> "spotlight build info", "build" -> spotlight.BuildInfo.toString))
+    log.info(Map("@msg" -> "demesne build info", "build" -> demesne.BuildInfo.toString))
+
+
     val deadListener = actorSystem.actorOf( DeadListenerActor.props, "dead-listener" )
     actorSystem.eventStream.subscribe( deadListener, classOf[DeadLetter] )
 
@@ -54,7 +55,14 @@ object FileBatchExample extends Instrumented with StrictLogging {
 
     start( args )
     .map { results =>
-      logger.info("APP: Example processed {} records successfully and found {} result(s)", count.get().toString, results.size.toString )
+      log.info(
+        Map(
+          "@msg" -> "APP: Example processed records successfully and found result(s)",
+          "nr-records" -> count.get().toString,
+          "nr-results" -> results.size.toString
+        )
+      )
+
       results
     }
     .onComplete {
@@ -77,6 +85,27 @@ object FileBatchExample extends Instrumented with StrictLogging {
     }
   }
 
+  def startLogging( system: ActorSystem ): Unit = {
+    val loggingSystem = LoggingSystem(
+      system,
+      spotlight.BuildInfo.name,
+      spotlight.BuildInfo.version,
+      java.net.InetAddress.getLocalHost.getHostName
+    )
+
+    val watched = Set( "PlanCatalog", "AnalysisPlan", "shard", "algorithm", "spotlight" )
+    def inWatched( fqn: String ): Boolean = watched exists { fqn.contains }
+
+    def filter( fields: Map[String, RichMsg], level: Level ): Boolean = {
+      fields
+      .get( "class" )
+      .collect { case fqn: String if inWatched( fqn ) => DEBUG <= level }
+      .getOrElse { WARN <= level }
+    }
+
+    loggingSystem.setFilter( Some(filter) )
+    loggingSystem.setLevel( DEBUG )
+  }
 
 //  case class OutlierInfo( metricName: String, metricWebId: String, metricSegment: String )
 
@@ -85,7 +114,7 @@ object FileBatchExample extends Instrumented with StrictLogging {
 //  case class Threshold( timeStamp: DateTime, ceiling: Option[Double], expected: Option[Double], floor: Option[Double] )
 
   case class SimpleFlattenedOutlier(
-    algorithm: Symbol,
+    algorithm: String,
     outliers: Seq[OutlierTimeSeriesObject],
     threshold: Seq[ThresholdBoundary],
     topic: String
@@ -96,14 +125,17 @@ object FileBatchExample extends Instrumented with StrictLogging {
     def props: Props = Props( new DeadListenerActor )
   }
 
-  class DeadListenerActor extends Actor  {
-
-    val logger = Logger(LoggerFactory.getLogger("DeadListenerActor"))
+  class DeadListenerActor extends Actor with ActorLogging {
     override def receive: Receive = LoggingReceive {
       case DeadLetter( m, s, r ) => {
-        logger.debug("sender: {}",s)
-        logger.debug("recipient: {}",r)
-        logger.debug("message: {}",m.toString)
+        log.debug(
+          Map(
+            "@msg" -> "dead letter received",
+            "sender" -> sender.path.name,
+            "recipient" -> r.path.name,
+            "message" -> m.toString
+          )
+        )
       }
     }
   }
@@ -113,8 +145,6 @@ object FileBatchExample extends Instrumented with StrictLogging {
     import peds.commons.util._
     MetricName( getClass.getPackage.getName, getClass.safeSimpleName )
   }
-
-  override protected val logger: Logger = Logger( LoggerFactory.getLogger("DetectionFlow") )
 
 
   object WatchPoints {
@@ -130,7 +160,7 @@ object FileBatchExample extends Instrumented with StrictLogging {
 
   def start( args: Array[String] )( implicit system: ActorSystem, materializer: Materializer ): Future[Seq[SimpleFlattenedOutlier]] = {
 
-    logger.debug("starting the detecting flow logic ")
+    log.debug("starting the detecting flow logic")
 
 
     import scala.concurrent.ExecutionContext.Implicits.global
@@ -138,7 +168,6 @@ object FileBatchExample extends Instrumented with StrictLogging {
     val context = {
       SpotlightContext
       .builder
-      .set( SpotlightContext.Name, "DetectionFlow" )
       //      .set( SpotlightContext.StartTasks, Set( /*SharedLeveldbStore.start(true), Spotlight.kamonStartTask*/ ) )
       .set( SpotlightContext.System, Some( system ) )
       .build()
@@ -146,9 +175,9 @@ object FileBatchExample extends Instrumented with StrictLogging {
 
     Spotlight( context )
     .run( args )
-    .map { e => logger.debug( "bootstrapping process..." ); e }
+    .map { e => log.debug( "bootstrapping process..." ); e }
     .flatMap { case ( boundedContext, settings, scoring ) =>
-      logger.debug("process bootstrapped. processing data...")
+      log.debug("process bootstrapped. processing data...")
 
       import StreamMonitor._
       import WatchPoints._
@@ -188,7 +217,7 @@ object FileBatchExample extends Instrumented with StrictLogging {
 
   def sourceData( settings: Settings ): Source[String, Future[IOResult]] = {
     val data = settings.args.lastOption getOrElse "source.txt"
-    logger.info( "using data file: {}", Paths.get(data) )
+    log.info(Map("@msg" -> "using data file", "file" -> Paths.get(data).toString))
 
     FileIO
     .fromPath( Paths.get( data ) )
@@ -226,7 +255,7 @@ object FileBatchExample extends Instrumented with StrictLogging {
       import GraphDSL.Implicits._
       import peds.akka.stream.StreamMonitor._
 
-      def watch[T]( label: String ): Flow[T, T, NotUsed] = Flow[T].map { e => logger.info( s"${label}: ${e}" ); e }
+      def watch[T]( label: String ): Flow[T, T, NotUsed] = Flow[T].map { e => log.info(Map(label -> e.toString)); e }
 
       val intakeBuffer = b.add(
         Flow[String]
@@ -261,7 +290,7 @@ object FileBatchExample extends Instrumented with StrictLogging {
           flattenObject( s ) match {
             case \/-( f ) => f
             case -\/( ex ) => {
-              logger.error( s"Failure: flatter.flattenObject[${s}]:", ex )
+              log.error(Map("@msg" -> "Failure: flatter.flattenObject", "series-outlier"->s.toString), ex )
               throw ex
             }
           }
@@ -284,7 +313,7 @@ object FileBatchExample extends Instrumented with StrictLogging {
 
   val workflowSupervision: Supervision.Decider = {
     case ex => {
-      logger.info("Error caught by Supervisor:", ex)
+      log.info("Error caught by Supervisor:", ex)
       Supervision.Restart
     }
   }
@@ -343,7 +372,7 @@ object FileBatchExample extends Instrumented with StrictLogging {
       toTimeSeries( s ) match {
         case \/-( tss ) => tss
         case -\/( ex ) => {
-          logger.error( s"Failure: unmarshalTimeSeries.toTimeSeries[${s}]:", ex )
+          log.error(Map("@msg" -> "Failure: unmarshalTimeSeries.toTimeSeries", "time-series" -> s.toString), ex )
           throw ex
         }
       }

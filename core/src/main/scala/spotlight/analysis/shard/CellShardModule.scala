@@ -4,9 +4,8 @@ import scala.concurrent.duration._
 import scala.reflect._
 import akka.actor.{ActorRef, Cancellable, Props}
 import akka.event.LoggingReceive
-import akka.persistence.RecoveryCompleted
-
-import com.typesafe.scalalogging.LazyLogging
+import akka.persistence.{RecoveryCompleted, SnapshotOffer}
+import com.persist.logging._
 import nl.grons.metrics.scala.{Histogram, Meter, MetricName}
 import peds.akka.envelope._
 import peds.akka.metrics.{Instrumented, InstrumentedActor}
@@ -16,7 +15,7 @@ import peds.commons.util._
 import demesne._
 import demesne.module.{LocalAggregate, SimpleAggregateModule}
 import spotlight.analysis.DetectUsing
-import spotlight.analysis.algorithm.{AlgorithmProtocol => AP}
+import spotlight.analysis.algorithm.{AlgorithmModule, AlgorithmProtocol => AP}
 import spotlight.model.outlier.AnalysisPlan
 import spotlight.model.timeseries._
 
@@ -29,27 +28,26 @@ object CellShardProtocol extends AggregateProtocol[CellShardCatalog#ID] {
     override val targetId: Add#TID,
     plan: AnalysisPlan.Summary,
     algorithmRootType: AggregateRootType,
-    nrCells: Int
+    nrCells: Int,
+    nextAlgorithmId: () => AlgorithmModule.TID
   ) extends Command
 
   case class Added(
     override val sourceId: Added#TID,
     plan: AnalysisPlan.Summary,
     algorithmRootType: AggregateRootType,
+    nextAlgorithmId: () => AlgorithmModule.TID,
     cells: Vector[AlgoTID]
   ) extends Event
-
-//  case class CellAdded( override val sourceId: CellAdded#TID, cellId: AlgorithmModule.TID ) extends Event
-
-//  case class RouteMessage( override val targetId: RouteMessage#TID, payload: Any ) extends Message
 }
 
 
 case class CellShardCatalog(
   plan: AnalysisPlan.Summary,
   algorithmRootType: AggregateRootType,
+  override val nextAlgorithmId: () => AlgorithmModule.TID,
   cells: Vector[AlgoTID]
-) extends ShardCatalog with Equals with LazyLogging {
+) extends ShardCatalog with Equals with ClassLogging {
   import CellShardCatalog.identifying
 
   override def id: TID = identifying.tag( ShardCatalog.ID( plan.id, algorithmRootType.name ).asInstanceOf[identifying.ID] ).asInstanceOf[TID]
@@ -58,7 +56,14 @@ case class CellShardCatalog(
   val size: Int = cells.size
 
   def apply( t: Topic ): AlgoTID = {
-    logger.debug( "#TEST: CellShardCatalog.apply: topic:[{}] cells:[{}] t.##:[{}] tpos:[{}]", t, cells.size.toString, t.##.toString, (math.abs(t.##) % cells.size).toString )
+    log.debug(
+      Map(
+        "@msg" -> "#TEST: CellShardCatalog.apply",
+        "topic" -> Map( "name" -> t.toString, "hashcode" -> t.## ),
+        "cells" -> cells.size,
+        "cell-assignment" -> (math.abs(t.##) % cells.size)
+      )
+    )
     cells( math.abs(t.##) % size )
   }
 
@@ -93,7 +98,7 @@ object CellShardCatalog {
 }
 
 
-object CellShardModule extends LazyLogging {
+object CellShardModule extends ClassLogging {
   type ID = CellShardCatalog#ID
   type TID = CellShardCatalog#TID
 
@@ -190,19 +195,17 @@ object CellShardModule extends LazyLogging {
 
     override def parseId( idrep: String ): TID = identifying.safeParseTid[TID]( idrep )( classTag[TID] )
 
-    override var state: CellShardCatalog= _
+    override var state: CellShardCatalog = _
     override val evState: ClassTag[CellShardCatalog] = classTag[CellShardCatalog]
 
     override def acceptance: Acceptance = {
-      case ( CellShardProtocol.Added(tid, p, rt, cells ), s ) if Option( s ).isEmpty => {
+      case ( CellShardProtocol.Added(tid, p, rt, next, cells ), s ) if Option( s ).isEmpty => {
         if ( shardMetrics.isEmpty ) {
           shardMetrics = Some( new ShardMetrics(plan = p, id = tid.id.asInstanceOf[ShardCatalog.ID] ) )
         }
 
-        CellShardCatalog( p, rt, cells )
+        CellShardCatalog( p, rt, next, cells )
       }
-
-//      case ( P.CellAdded(tid, cellId), s ) => s.copy( cells = s.cells :+ cellId )
     }
 
     def referenceFor( aid: AlgoTID ): ActorRef = model( state.algorithmRootType, aid )
@@ -223,9 +226,8 @@ object CellShardModule extends LazyLogging {
     case object UpdateAvailability extends CellShardProtocol.ProtocolMessage
     val AvailabilityCheckPeriod: FiniteDuration = 10.seconds
 
-    override def receiveRecover: Receive = {
+    val myReceiveRecover: Receive = {
       case RecoveryCompleted => {
-
         shardMetrics = Option( state ) map { s => new ShardMetrics( s.plan, s.id.id.asInstanceOf[ShardCatalog.ID] ) }
 
         dispatchEstimateRequests()
@@ -243,27 +245,33 @@ object CellShardModule extends LazyLogging {
       }
     }
 
+    override def receiveRecover: Receive = myReceiveRecover orElse super.receiveRecover
+
     override def receiveCommand: Receive = LoggingReceive { around( routing orElse admin ) }
 
     import spotlight.analysis.algorithm.{AlgorithmProtocol => AP}
 
     val admin: Receive = {
-      case CellShardProtocol.Add( id, plan, algorithmRootType, nrCells ) if id == aggregateId && Option( state ).isEmpty => {
-        import scalaz._
-        import Scalaz.{id => _, _}
-
-log.warning( "algorithmRootType:[{}].identifying:[{}]", Option(algorithmRootType), Option(algorithmRootType).map(_.identifying) )
-        List.fill( nrCells ){ algorithmRootType.identifying.nextId map { _.asInstanceOf[AlgoTID] } }.sequenceU match {
-          case \/-( cells ) => persist( P.Added(id, plan, algorithmRootType, cells.toVector) ) { acceptAndPublish }
-          case -\/( ex ) => {
-            log.error( ex, "failed to gereate ids for algorithm:[{}]", algorithmRootType.name )
-          }
-        }
+      case e: CellShardProtocol.Add if e.targetId == aggregateId && Option( state ).isEmpty => {
+        val cells = List.fill( e.nrCells ){ e.nextAlgorithmId() }
+        persist( P.Added( e.targetId, e.plan, e.algorithmRootType, e.nextAlgorithmId, cells.toVector ) ){ acceptAndPublish }
       }
 
       case e: CellShardProtocol.Add if e.targetId == aggregateId && Option( state ).nonEmpty => { }
 
       case UpdateAvailability => dispatchEstimateRequests()
+
+      case estimate: AP.EstimatedSize => {
+        log.info(
+          "AlgorithmCellShardCatalog[{}] Received estimate from shard:[{}] with estimated shapes:[{}] and average shape size:[{}]",
+          self.path.name, estimate.sourceId, estimate.nrShapes, estimate.averageSizePerShape
+        )
+
+        shardMetrics foreach { m =>
+          m.memoryHistogram += estimate.size.toBytes.toLong
+          m.sizeHistogram += estimate.nrShapes
+        }
+      }
     }
 
     val routing: Receive = {
@@ -278,19 +286,6 @@ log.warning( "algorithmRootType:[{}].identifying:[{}]", Option(algorithmRootType
         log.debug( "ShardCatalog[{}]: known RouteMessage received. extracting payload:[{}]", self.path.name, payload )
         routing( payload )
       }
-
-      case estimate: AP.EstimatedSize => {
-        log.info(
-          "AlgorithmTopicShardCatalog[{}] shard:[{}] shapes:[{}] estimated average shape size:[{}]",
-          self.path.name, estimate.sourceId, estimate.nrShapes, estimate.averageSizePerShape
-        )
-
-        shardMetrics foreach { m =>
-          m.memoryHistogram += estimate.size.toBytes.toLong
-          m.sizeHistogram += estimate.nrShapes
-        }
-      }
-
     }
   }
 }
