@@ -28,7 +28,7 @@ object OutlierDetection extends Instrumented with ClassLogging {
 
   def props( routerRef: ActorRef ): Props = Props( new Default(routerRef) )
 
-  def name( suffix: String ): String = "detector:" + suffix
+  def name( suffix: String ): String = "detector" //"detector:" + suffix //todo suffix is redundant given it's inclusion in foreman naming
 
   val DispatcherPath: String = "spotlight.dispatchers.outlier-detection-dispatcher"
 

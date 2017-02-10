@@ -50,8 +50,6 @@ object LookupShardProtocol extends AggregateProtocol[LookupShardCatalog#ID] {
 //    control: LookupShardCatalog.Control
   ) extends Event
 
-//  case class RouteMessage( override val targetId: RouteMessage#TID, payload: Any ) extends Message
-
 //  case class UseControl( override val targetId: UseControl#TID, control: Control ) extends AlgorithmShardCommand
 //  case class ControlSet( override val sourceId: ControlSet#TID, control: Control ) extends AlgorithmShardEvent
 

@@ -66,7 +66,7 @@ object DetectionAlgorithmRouter extends ClassLogging {
 
   val DispatcherPath: String = OutlierDetection.DispatcherPath
 
-  def name( suffix: String ): String = "router:" + suffix
+  def name( suffix: String ): String = "router" //"router:" + suffix  //todo suffix is redundant given it's inclusion in foreman naming
 
 
   trait Provider {

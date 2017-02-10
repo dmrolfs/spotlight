@@ -1,13 +1,12 @@
 package spotlight.analysis
 
-import scala.reflect._
 import akka.actor.{ActorContext, ActorRef}
 import scalaz.\/
 import com.persist.logging._
 import com.typesafe.config.{Config, ConfigFactory, ConfigObject, ConfigValueType}
 import demesne.{AggregateRootType, DomainModel}
 import peds.akka.envelope._
-import peds.commons.identifier.{Identifying, ShortUUID, TaggedID}
+import peds.commons.identifier.{Identifying, ShortUUID}
 import peds.commons.util._
 import spotlight.Settings
 import spotlight.analysis.algorithm.{AlgorithmIdentifier, AlgorithmModule, AlgorithmProtocol}

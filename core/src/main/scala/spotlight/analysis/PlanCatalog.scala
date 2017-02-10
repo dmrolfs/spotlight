@@ -2,35 +2,30 @@ package spotlight.analysis
 
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
-import scala.util.matching.Regex
 import akka.{Done, NotUsed}
 import akka.actor.{Actor, ActorRef, ActorSystem, Props, Stash, Status}
 import akka.agent.Agent
 import akka.event.LoggingReceive
 import akka.pattern.{ask, pipe}
-import akka.persistence.cassandra.query.scaladsl.CassandraReadJournal
-import akka.persistence.query.scaladsl.{EventsByTagQuery, EventsByTagQuery2, ReadJournal}
-import akka.persistence.query.{EventEnvelope2, NoOffset, Offset, PersistenceQuery}
+import akka.persistence.query.{EventEnvelope2, NoOffset, Offset}
 import akka.stream.{ActorMaterializer, ActorMaterializerSettings, FlowShape, Materializer}
-import akka.stream.scaladsl.{Broadcast, Flow, GraphDSL, Keep, Merge, Sink, Source}
+import akka.stream.scaladsl.{Broadcast, Flow, GraphDSL, Keep, Merge, Sink}
 import akka.util.Timeout
 
 import scalaz._
 import Scalaz._
-import com.typesafe.config.{Config, ConfigObject}
+import com.typesafe.config.Config
 import com.persist.logging._
 import nl.grons.metrics.scala.MetricName
 import peds.akka.envelope._
 import peds.akka.envelope.pattern.{ask => envAsk}
 import peds.akka.metrics.InstrumentedActor
-import peds.akka.stream.CommonActorPublisher
 import demesne.{BoundedContext, DomainModel}
 import spotlight.Settings
 import spotlight.analysis.OutlierDetection.DetectionResult
 import spotlight.analysis.PlanCatalog.WatchPoints
-import spotlight.model.outlier.{AnalysisPlan, IsQuorum, Outliers, ReduceOutliers}
+import spotlight.model.outlier.{AnalysisPlan, Outliers}
 import spotlight.model.timeseries.{TimeSeries, Topic}
-import sun.security.pkcs11.Secmod.Module
 
 
 /**
@@ -193,12 +188,6 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
     .foreach { knownPlans += _ }
   }
 
-//  var lastPlanSequenceNr: Long = 0L
-//  def updateLastPlanSequenceNr( snr: Long ): Long = {
-//    lastPlanSequenceNr = math.max( lastPlanSequenceNr, snr )
-//    lastPlanSequenceNr
-//  }
-
 
   def loadCurrentKnownPlans(): Future[Long] = {
     implicit val ec = context.dispatcher
@@ -219,6 +208,7 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
     lastSequenceNr
   }
 
+  //todo need to spend more time verifying this operationally updates knownPlans as they're created in the system after start
   def startPlanProjectionFrom( sequenceId: Long ): Unit = {
     implicit val ec = context.dispatcher
     implicit val materializer = ActorMaterializer( ActorMaterializerSettings(context.system) )
@@ -228,12 +218,13 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
     AnalysisPlanModule
     .queryJournal( context.system )
     .eventsByTag( AnalysisPlanModule.module.rootType.name, Offset.sequence(sequenceId) )
+    .map { e => log.error(Map("@msg"->"#TEST CATALOG NOTIFIED OF NEW PLAN EVENT", "event"->e.toString)); e }
     .via( filterKnownPlansFlow )
     .to( knownPlansSink )
     .run()
   }
 
-  def knownPlansSink(implicit ec: ExecutionContext ): Sink[(P.PlanDirective, Long), Future[Long]] = {
+  def knownPlansSink( implicit ec: ExecutionContext ): Sink[(P.PlanDirective, Long), Future[Long]] = {
     Sink.fold( 0L ){ case (lastSnr, (d, snr)) =>
       log.warn(Map("@msg"->"#TEST sending catalog message to self", "self"->self.path.name, "directive"->d.toString))
       self ! d
@@ -274,97 +265,8 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
 
   def indexedPlans: Future[Set[AnalysisPlan.Summary]] = Future successful { knownPlans }
 
-//  def startActivePlanProjection(): Unit = {
-//    import spotlight.analysis.{ AnalysisPlanProtocol => AP }
-//
-//    implicit val ec = context.dispatcher
-//    implicit val materializer = ActorMaterializer( ActorMaterializerSettings(context.system) )
-//
-//    log.info( "starting active plan projection stream..." )
-//
-//    AnalysisPlanModule
-//    .queryJournal( context.system )
-//    .eventsByTag( AnalysisPlanModule.module.rootType.name, NoOffset )
-//    .map { e => log.warn(Map("@msg" -> "#TEST tagged event", "event" -> e.toString)); e }
-//    .collect {
-//      case EventEnvelope2( offset, pid, snr, event: AP.Added ) => {
-//        log.warn(Map("@msg"->"#TEST READ Plan Added", "offset"->offset.toString, "pid"->pid, "sequence-nr"->snr))
-//        event
-//      }
-//      case EventEnvelope2( offset, pid, snr, event: AP.Disabled ) => {
-//        log.warn(Map("@msg"->"#TEST READ Plan Disabled", "offset"->offset.toString, "pid"->pid, "sequence-nr"->snr))
-//        event
-//      }
-//      case EventEnvelope2( offset, pid, snr, event: AP.Enabled ) => {
-//        log.warn(Map("@msg"->"#TEST READ Plan Enabled", "offset"->offset.toString, "pid"->pid, "sequence-nr"->snr))
-//        event
-//      }
-//      case EventEnvelope2( offset, pid, snr, event: AP.Renamed ) => {
-//        log.warn(Map("@msg"->"#TEST READ Plan Renamed", "offset"->offset.toString, "pid"->pid, "sequence-nr"->snr))
-//        event
-//      }
-//    }
-//    .fold( Set.empty[AnalysisPlan.Summary] ) {
-//      case (ps, AP.Added(_, Some(p: AnalysisPlan))) => {
-//        val r = ps + p.toSummary
-//        log.warn(Map("@msg"->"#TEST folding Added into set", "plan-name"->p.name, "plan-id"->p.id.toString))
-//        r
-//      }
-//      case (ps, e: AP.Disabled) => {
-//        val r = ps.find { _.id == e.sourceId } map { ps + _.copy( isActive = false ) } getOrElse { ps }
-//        log.warn(Map("@msg"->"#TEST folding Disabled into set", "plan-id"->e.sourceId.toString))
-//        r
-//      }
-//      case (ps, e: AP.Enabled) => {
-//        val r = ps.find { _.id == e.sourceId } map { ps + _.copy( isActive = true ) } getOrElse { ps }
-//        log.warn(Map("@msg"->"#TEST folding Enabled into set", "plan-id"->e.sourceId.toString))
-//        r
-//      }
-//      case (ps, e: AP.Renamed) => {
-//        val r = ps.find { _.id == e.sourceId } map { ps + _.copy( name = e.newName ) } getOrElse { ps }
-//        log.warn(Map("@msg"->"#TEST folding Renamed into set", "plan-id"->e.sourceId.toString))
-//        r
-//      }
-//    }
-//    .map { _ filter { p => log.warn(Map("@msg"->"#TEST filtering for active plans", "plan"->Map("name"->p.name, "id"->p.id.id.toString, "is-active"->p.isActive))); p.isActive } }
-//    .to(
-//      Sink.foreachParallel( Runtime.getRuntime.availableProcessors() ){ ps =>
-//        knownPlans send { aps =>
-//          log.warn(
-//            Map(
-//              "@msg" -> "adding active plans to PlanCatalog",
-//              "plans" -> ps.map(_.name).mkString("[", ", ", "]"),
-//              "others" -> aps.map(_.name).mkString("[", ", ", "]")
-//            )
-//          )
-//
-//          aps ++ ps
-//        }
-//      }
-//    )
-//    .run()
-//
-//    log.info( "...started active plan projection stream execution" )
-//  }
 
   type PlanIndex = DomainModel.AggregateIndex[String, AnalysisPlanModule.module.TID, AnalysisPlan.Summary]
-//  lazy val planIndex: PlanIndex = {
-//    implicit val dispatcher = context.dispatcher
-//    val index = boundedContext.futureModel map { model =>
-//      model.aggregateIndexFor[String, AnalysisPlanModule.module.TID, AnalysisPlan.Summary](
-//        AnalysisPlanModule.module.rootType,
-//        AnalysisPlanModule.namedPlanIndex
-//      ) match {
-//        case \/-( pi ) => pi
-//        case -\/( ex ) => {
-//          log.error( "failed to initialize catalog's plan index", ex )
-//          throw ex
-//        }
-//      }
-//    }
-//
-//    scala.concurrent.Await.result( index, 30.seconds )
-//  }
 
   def collectPlans()( implicit ec: ExecutionContext ): Future[Set[AnalysisPlan.Summary]] = {
     for {
@@ -515,6 +417,7 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
     }
 
 
+    //todo remove
     case route @ P.Route( ts: TimeSeries, _ ) if applicablePlanExists( ts )( context.dispatcher ) => {
       log.debug( 
         Map(
@@ -526,6 +429,7 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
       dispatch( route, sender() )( context.dispatcher )
     }
 
+    //todo remove
     case ts: TimeSeries if applicablePlanExists( ts )( context.dispatcher ) => {
       log.debug( 
         Map(
@@ -538,6 +442,7 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
       dispatch( P.Route(ts, Some(correlationId)), sender() )( context.dispatcher )
     }
 
+    //todo remove
     case r: P.Route => {
       //todo route unrecogonized ts
       log.warn(
@@ -546,6 +451,7 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
       sender() !+ P.UnknownRoute( r )
     }
 
+    //todo remove
     case ts: TimeSeries => {
       //todo route unrecogonized ts
       log.warn(
@@ -554,6 +460,7 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
       sender() !+ P.UnknownRoute( ts, Some(correlationId) )
     }
 
+    //todo remove
     case result @ DetectionResult( outliers, workIds ) => {
       if ( 1 < workIds.size ) {
         log.warn(
@@ -711,7 +618,7 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
         Map(
           "@msg" -> "created additional plans",
           "nr-created" -> created.size,
-          "created" -> created.map{ case (n, c) => s"${n}: ${c}" }.mkString("[", ", ", "]")
+          "created" -> created.map{ case (n, c) => (n, c.toString) }
         )
       )
 
@@ -723,12 +630,7 @@ extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorL
         )
       )
 
-      log.info(
-        Map(
-          "@msg" -> "index updated with additional plan(s)",
-          "plans" -> created.map{ case (k, p) => s"${k}: ${p}" }.mkString("[", ", ", "]")
-        )
-      )
+      log.info( Map("@msg" -> "index updated with additional plan(s)", "plans" -> created.map{ case (k, p) => (k, p.toString) }) )
 
       if ( remaining.nonEmpty ) {
         log.warn(
