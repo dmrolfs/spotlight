@@ -39,10 +39,6 @@ object CellShardProtocol extends AggregateProtocol[CellShardCatalog#ID] {
     nextAlgorithmId: () => AlgorithmModule.TID,
     cells: Vector[AlgoTID]
   ) extends Event
-
-//  case class CellAdded( override val sourceId: CellAdded#TID, cellId: AlgorithmModule.TID ) extends Event
-
-//  case class RouteMessage( override val targetId: RouteMessage#TID, payload: Any ) extends Message
 }
 
 
@@ -210,8 +206,6 @@ object CellShardModule extends ClassLogging {
 
         CellShardCatalog( p, rt, next, cells )
       }
-
-//      case ( P.CellAdded(tid, cellId), s ) => s.copy( cells = s.cells :+ cellId )
     }
 
     def referenceFor( aid: AlgoTID ): ActorRef = model( state.algorithmRootType, aid )
@@ -259,7 +253,6 @@ object CellShardModule extends ClassLogging {
 
     val admin: Receive = {
       case e: CellShardProtocol.Add if e.targetId == aggregateId && Option( state ).isEmpty => {
-log.warning( "algorithmRootType:[{}].identifying:[{}]", Option(e.algorithmRootType), Option(e.algorithmRootType).map(_.identifying) )
         val cells = List.fill( e.nrCells ){ e.nextAlgorithmId() }
         persist( P.Added( e.targetId, e.plan, e.algorithmRootType, e.nextAlgorithmId, cells.toVector ) ){ acceptAndPublish }
       }

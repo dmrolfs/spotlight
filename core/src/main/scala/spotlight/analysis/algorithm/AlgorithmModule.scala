@@ -164,53 +164,6 @@ object AlgorithmModule extends Instrumented with ClassLogging {
   type TID = TaggedID[ID]
 
 
-//  trait AnalysisState extends Entity with Equals { self: StrictSelf[_] =>
-//    type Shape <: Serializable
-//    def evShape: ClassTag[Shape]
-//
-//    override type ID = AlgorithmModule.ID
-//
-//    override val evID: ClassTag[ID] = classTag[AlgorithmModule.ID]
-//    override val evTID: ClassTag[TID] = classTag[TaggedID[AlgorithmModule.ID]]
-//
-//    def algorithm: Symbol
-//    def shapes: Map[Topic, Shape] = Map.empty[Topic, Shape]
-//    def withTopicShape( topic: Topic, shape: Shape ): Self
-//
-////    def thresholds: Seq[ThresholdBoundary]
-////    def addThreshold( threshold: ThresholdBoundary ): Self
-//
-//    override def hashCode: Int = {
-//      41 * (
-//        41 * (
-//          41 * (
-//            41 + id.id.##
-//          ) + name.##
-//        ) + algorithm.##
-//      ) + shapes.##
-//    }
-//
-//    override def equals( rhs: Any ): Boolean = {
-//      rhs match {
-//        case that: AnalysisState => {
-//          if ( this eq that ) true
-//          else {
-//            ( that.## == this.## ) &&
-//            ( that canEqual this ) &&
-//            ( this.id.id == that.id.id ) &&
-//            ( this.name == that.name) &&
-//            ( this.algorithm.name == that.algorithm.name) &&
-//            ( this.shapes == that.shapes )
-//          }
-//        }
-//
-//        case _ => false
-//      }
-//    }
-//  }
-
-
-
   trait ShapeCompanion[S] {
     def zero( configuration: Option[Config] ): S
     def advance( original: S, advanced: AlgorithmProtocol.Advanced ): S
@@ -259,7 +212,7 @@ object AlgorithmModule extends Instrumented with ClassLogging {
   ) extends BadValue( path, s"For algorithm, ${algorithm}, ${path} must: ${requirement}" )
 
 
-  val snapshotFactorizer: Random = new Random()
+  private[algorithm] val snapshotFactorizer: Random = new Random()
 
   override lazy val metricBaseName: MetricName = MetricName( classOf[AlgorithmModule] )
 
@@ -309,11 +262,12 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented wit
     }
 
     val ShardsMetricName = "shards"
+    // ( nrShards, shardFilter )
     val shards: Agent[(Long, BloomFilter[AlgorithmModule.ID])] = {
       Agent(
         (
           0L,
-          BloomFilter[AlgorithmModule.ID]( numberOfItems = 10000, falsePositiveRate = 0.1 )
+          BloomFilter[AlgorithmModule.ID]( numberOfItems = 10000, falsePositiveRate = 0.1 ) //todo make config driven
         )
       )(
         ExecutionContext.global
@@ -392,21 +346,6 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented wit
   val shapeCompanion: ShapeCompanion[Shape]
 
   type State = AlgorithmState[Shape]
-//  case class State(
-//    override val id: AlgorithmModule.TID,
-//    override val shapes: Map[Topic, module.Shape] = Map.empty[Topic, module.Shape]
-//  ) extends AnalysisState with StrictSelf[State] {
-//    override type Self = State
-//    override type Shape = module.Shape
-//    override def evShape: ClassTag[Shape] = module.evShape
-//
-//    override def algorithm: Symbol = module.algorithm.label
-//    override def name: String = algorithm.name
-//
-//    override def withTopicShape( topic: Topic, shape: Shape ): Self = copy( shapes = shapes + (topic -> shape) )
-//
-//    override def toString: String = s"""State( algorithm:${algorithm.name} id:[${id}] shapes:[${shapes.size}] )"""
-//  }
 
 
   def algorithm: Algorithm
@@ -520,7 +459,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented wit
 
         Some(
           new SnapshotSpecification {
-            override val snapshotInterval: FiniteDuration = 2.minutes // 5.minutes okay
+            override val snapshotInterval: FiniteDuration = 2.minutes // 5.minutes okay //todo make config driven
             override val snapshotInitialDelay: FiniteDuration = {
               val delay = snapshotInterval + snapshotInterval * AlgorithmModule.snapshotFactorizer.nextDouble()
               FiniteDuration( delay.toMillis, MILLISECONDS )
@@ -530,7 +469,7 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented wit
       }
     }
 
-    override val passivateTimeout: Duration = Duration( 1, MINUTES )
+    override val passivateTimeout: Duration = Duration( 1, MINUTES ) //todo make config driven
 
     override lazy val name: String = module.shardName
     override lazy val identifying: Identifying[_] = {
@@ -539,7 +478,6 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented wit
       mid
     }
     override def repositoryProps( implicit model: DomainModel ): Props = Repository localProps model //todo change to clustered with multi-jvm testing of cluster
-//    override def repositoryProps( implicit model: DomainModel ): Props = CommonLocalRepository.props( model, this, AlgorithmActor.props( _: DomainModel, _: AggregateRootType ) )
     override def maximumNrClusterNodes: Int = module.maximumNrClusterNodes
     override def aggregateIdFor: ShardRegion.ExtractEntityId = super.aggregateIdFor orElse {
       case AdvancedType( a ) => ( a.sourceId.id.toString, a )
@@ -739,7 +677,6 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented wit
       case RouteMessage( id, m ) if id == aggregateId && active.isDefinedAt( m ) => active( m )
 
       case AdvancedType( adv ) => persist( adv ) { accept }
-//      case AdvancedType( adv ) => accept( adv )
     }
 
     import spotlight.analysis.algorithm.{ AlgorithmProtocol => AP }
@@ -894,12 +831,6 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented wit
 
     override def unhandled( message: Any ): Unit = {
       message match {
-//        case m: DetectUsing if Option(state).isDefined && m.algorithm.name == state.algorithm.name && m.scope == state.id => {
-//        case m: DetectUsing if m.algorithm.name == state.algorithm.name => {
-//          val ex = AlgorithmProtocol.AlgorithmUsedBeforeRegistrationError( aggregateId, algorithm.label, self.path )
-//          log.error( ex, "algorithm actor [{}] not registered for scope:[{}]", algorithm.label, aggregateId )
-//        }
-
         case m: DetectUsing => {
           log.error( "[{}] algorithm [{}] does not recognize requested payload: [{}]", self.path.name, algorithm, m )
           sender() !+ UnrecognizedPayload( algorithm.label, m )
@@ -1002,7 +933,6 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented wit
         loop(
           points = points.toList,
           accumulation = Accumulation(
-//            state = state,
             topic = analysisContext.topic,
             shape = state.shapes.get(analysisContext.topic) getOrElse shapeCompanion.zero( Option(analysisContext.configuration) )
           ).right
@@ -1013,8 +943,6 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented wit
     private val recordAdvancements: KOp[Seq[Advanced], Seq[Advanced]] = {
       kleisli[TryV, Seq[Advanced], Seq[Advanced]] { advances =>
         persistAll( advances.to[scala.collection.immutable.Seq] ){ accept }
-//        advances foreach { evt => persist( evt ){ accept } }
-//        advances foreach { accept }
         advances.right
       }
     }
@@ -1110,20 +1038,14 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented wit
       startSnapshotSweepTimer()
       deleteSnapshots( SnapshotSelectionCriteria( maxSequenceNr = snapshotSequenceNr - 1 ) )
 
-//      startJournalSweepTimer()
-//      deleteMessages( snapshotSequenceNr )
+      startJournalSweepTimer()
+      deleteMessages( snapshotSequenceNr )
     }
 
     override protected def onPersistFailure( cause: Throwable, event: Any, seqNr: Long ): Unit = {
       log.error( "AlgorithmModule[{}] onPersistFailure cause:[{}] event:[{}] seqNr:[{}]", self.path.name, cause, event, seqNr )
       super.onPersistFailure( cause, event, seqNr )
     }
-
-//    override def receiveRecover: Receive = {
-//      case RecoveryCompleted => {
-//        // log.debug( "#TEST AlgorithmModule[{}]: recovery completed", self.path.name )
-//      }
-//    }
 
     override protected def onRecoveryFailure( cause: Throwable, event: Option[Any] ): Unit = {
       log.error( "AlgorithmModule[{}] onRecoveryFailure cause:[{}] event:[{}]", self.path.name, cause, event )

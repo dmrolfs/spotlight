@@ -1,7 +1,10 @@
 package spotlight
 
 import java.net.{InetAddress, InetSocketAddress}
-
+import scala.concurrent.duration._
+import scala.util.matching.Regex
+import scalaz.Scalaz._
+import scalaz._
 import com.typesafe.config._
 import com.typesafe.scalalogging.LazyLogging
 import peds.commons.{V, Valid}
@@ -10,10 +13,6 @@ import spotlight.model.outlier._
 import spotlight.model.timeseries.Topic
 import spotlight.protocol.{GraphiteSerializationProtocol, MessagePackProtocol, PythonPickleProtocol}
 
-import scala.concurrent.duration._
-import scala.util.matching.Regex
-import scalaz.Scalaz._
-import scalaz._
 
 
 //todo refactor into base required settings and allow for app-specific extension

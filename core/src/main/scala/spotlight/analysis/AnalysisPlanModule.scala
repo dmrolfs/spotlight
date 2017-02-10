@@ -164,7 +164,7 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
             .map { path =>
               if ( config.hasPath( path ) ) {
                 log.warn(Map("@msg" -> "#TEST looking for class in config path", "path" -> path))
-                config.getConfig(path).getString("class")
+                config.getConfig( path ).getString( "class" )
               } else {
                 log.warn(Map("@msg" -> "#TEST no configuration found for path - return empty FQN", "path" -> path))
                 ""
@@ -202,6 +202,7 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
     }
   }
 
+  //todo move
   type QueryJournal = ReadJournal
   with AllPersistenceIdsQuery
   with CurrentPersistenceIdsQuery
@@ -210,6 +211,7 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
   with EventsByTagQuery2
   with CurrentEventsByTagQuery2
 
+  //todo move
   object QueryJournal {
     object empty extends ReadJournal
                          with AllPersistenceIdsQuery

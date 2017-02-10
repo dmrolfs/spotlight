@@ -17,7 +17,6 @@ import com.persist.logging.LoggingLevels.{DEBUG, Level, WARN}
 import spotlight.analysis.{AnalysisPlanModule, PlanCatalog}
 
 import scalaz.{-\/, \/, \/-}
-//import com.typesafe.scalalogging.{Logger, StrictLogging}
 import nl.grons.metrics.scala.MetricName
 import org.joda.time.DateTime
 import org.slf4j.LoggerFactory

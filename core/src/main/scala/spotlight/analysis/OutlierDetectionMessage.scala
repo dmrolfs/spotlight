@@ -21,7 +21,6 @@ sealed trait OutlierDetectionMessage extends CommandLike {
   override type ID = Any // AnalysisPlanModule.module.ID
   //todo: detect message is routed to many algorithms, each with own tag. This targetId is set to a dummy tag knowing that
   // aggregate routing uses id portion only and ignores tag.
-//  override def targetId: TID = plan.id
   def topic: Topic
   type Source <: TimeSeriesBase
   def evSource: ClassTag[Source]
