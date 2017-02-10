@@ -102,9 +102,9 @@ class GraphitePublisher extends DenseOutlierPublisher { outer: GraphitePublisher
 
   val publishLogger: Logger = Logger( LoggerFactory getLogger "Publish" )
 
-  var lastQueueClearingNanos: Long = System.nanoTime()
-  def markClearing(): Unit = lastQueueClearingNanos = System.nanoTime()
-  def sinceLastClearing(): FiniteDuration = FiniteDuration( System.nanoTime() - lastQueueClearingNanos, NANOSECONDS )
+  var lastQueueClearingMillis: Long = System.currentTimeMillis()
+  def markClearing(): Unit = lastQueueClearingMillis = System.currentTimeMillis()
+  def sinceLastClearing(): FiniteDuration = FiniteDuration( System.currentTimeMillis() - lastQueueClearingMillis, MILLISECONDS )
 
 
   def initializeMetrics(): Unit = {

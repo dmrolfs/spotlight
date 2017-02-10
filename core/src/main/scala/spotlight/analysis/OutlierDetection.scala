@@ -64,7 +64,7 @@ object OutlierDetection extends Instrumented with ClassLogging {
   case class DetectionRequest private[OutlierDetection](
     subscriber: ActorRef,
     correlationIds: Set[WorkId],
-    startNanos: Long = System.nanoTime()
+    startMillis: Long = System.currentTimeMillis()
   )
 
   private[OutlierDetection] object DetectionRequest {
@@ -141,7 +141,7 @@ class OutlierDetection extends Actor with EnvelopingActor with InstrumentedActor
       )
       request.subscriber !+ DetectionResult( result, request.correlationIds )
       removeFromOutstanding( aggregator )
-      detectionTimer.update( System.nanoTime() - request.startNanos, scala.concurrent.duration.NANOSECONDS )
+      detectionTimer.update( System.currentTimeMillis() - request.startMillis, scala.concurrent.duration.MILLISECONDS )
 //todo: leave off until det. desried means to regulate:      updateScore( result )
       stopIfFullyComplete( isWaitingToComplete )
     }

@@ -628,9 +628,9 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented wit
       case msg @ DetectUsing( _, algo, payload: DetectOutliersInSeries, _, _ ) => {
         val aggregator = sender()
 
-        val start = System.nanoTime()
+        val start = System.currentTimeMillis()
         @inline def stopTimer( start: Long ): Unit = {
-          executionTimer.update( System.nanoTime() - start, scala.concurrent.duration.NANOSECONDS )
+          executionTimer.update( System.currentTimeMillis() - start, scala.concurrent.duration.MILLISECONDS )
         }
 
         ( makeAlgorithmContext >=> findOutliers >=> toOutliers ).run( msg ) match {
@@ -967,10 +967,10 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented wit
 
     // -- nonfunctional operations --
     var _snapshotStarted: Long = 0L
-    def startSnapshotTimer(): Unit = { _snapshotStarted = System.nanoTime() }
+    def startSnapshotTimer(): Unit = { _snapshotStarted = System.currentTimeMillis() }
     def stopSnapshotTimer( success: Boolean ): Unit = {
       if ( 0 < _snapshotStarted ) {
-        AlgorithmModule.snapshotTimer.update( System.nanoTime() - _snapshotStarted, NANOSECONDS )
+        AlgorithmModule.snapshotTimer.update( System.currentTimeMillis() - _snapshotStarted, MILLISECONDS )
         _snapshotStarted = 0L
       }
 
@@ -978,10 +978,10 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented wit
     }
 
     var _snapshotSweepStarted: Long = 0L
-    def startSnapshotSweepTimer(): Unit = { _snapshotSweepStarted = System.nanoTime() }
+    def startSnapshotSweepTimer(): Unit = { _snapshotSweepStarted = System.currentTimeMillis() }
     def stopSnapshotSweepTimer( event: Any ): Unit = {
       if ( 0 < _snapshotSweepStarted) {
-        AlgorithmModule.snapshotSweepTimer.update( System.nanoTime() - _snapshotSweepStarted, NANOSECONDS )
+        AlgorithmModule.snapshotSweepTimer.update( System.currentTimeMillis() - _snapshotSweepStarted, MILLISECONDS )
         _snapshotSweepStarted= 0L
       }
 
@@ -994,10 +994,10 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented wit
 
 
     var _journalSweepStarted: Long = 0L
-    def startJournalSweepTimer(): Unit = { _journalSweepStarted = System.nanoTime() }
+    def startJournalSweepTimer(): Unit = { _journalSweepStarted = System.currentTimeMillis() }
     def stopJournalSweepTimer( event: Any ): Unit = {
       if ( 0 < _journalSweepStarted ) {
-        AlgorithmModule.journalSweepTimer.update( System.nanoTime() - _journalSweepStarted, NANOSECONDS )
+        AlgorithmModule.journalSweepTimer.update( System.currentTimeMillis() - _journalSweepStarted, MILLISECONDS )
         _journalSweepStarted = 0L
       }
 
@@ -1009,10 +1009,10 @@ abstract class AlgorithmModule extends AggregateRootModule with Instrumented wit
     }
 
     var _passivationStarted: Long = 0L
-    def startPassivationTimer(): Unit = { _passivationStarted = System.nanoTime() }
+    def startPassivationTimer(): Unit = { _passivationStarted = System.currentTimeMillis() }
     def stopPassivationTimer( event: Any ): Unit = {
       if ( 0 < _passivationStarted ) {
-        AlgorithmModule.passivationTimer.update( System.nanoTime() - _passivationStarted, NANOSECONDS )
+        AlgorithmModule.passivationTimer.update( System.currentTimeMillis() - _passivationStarted, MILLISECONDS )
         _passivationStarted = 0L
       }
 

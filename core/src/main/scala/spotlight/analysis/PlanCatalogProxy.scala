@@ -114,7 +114,7 @@ extends ActorSubscriber with EnvelopingActor with InstrumentedActor with ActorLo
       cid <- correlationIds
       knownRequest <- _workRequests.get( cid ).toSet
     } {
-      catalogTimer.update( System.nanoTime() - knownRequest.startNanos, scala.concurrent.duration.NANOSECONDS )
+      catalogTimer.update( System.currentTimeMillis() - knownRequest.startMillis, scala.concurrent.duration.MILLISECONDS )
       _subscribersSeen -= knownRequest.subscriber
     }
 

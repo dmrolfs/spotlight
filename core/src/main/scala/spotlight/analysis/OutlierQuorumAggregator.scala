@@ -52,7 +52,7 @@ extends Actor with EnvelopingActor with InstrumentedActor with ActorLogging { ou
   lazy val timeoutsMeter: Meter = metrics meter "quorum.timeout"
 
   lazy val quorumTimer: Timer = metrics.timer( "quorum.plan", plan.name )
-  val originNanos: Long = System.nanoTime()
+  val originMillis: Long = System.currentTimeMillis()
 
   implicit val ec = context.system.dispatcher
 
@@ -132,7 +132,7 @@ extends Actor with EnvelopingActor with InstrumentedActor with ActorLogging { ou
 
 
   def publishAndStop( fulfilled: OutlierAlgorithmResults ): Unit = {
-    quorumTimer.update( System.nanoTime() - originNanos, scala.concurrent.duration.NANOSECONDS )
+    quorumTimer.update( System.currentTimeMillis() - originMillis, scala.concurrent.duration.MILLISECONDS )
     conclusionsMeter.mark()
 
     plan.reduce( fulfilled, source, plan ) match {

@@ -45,9 +45,9 @@ trait Settings extends LazyLogging {
          |   cluster-port: ${clusterPort}
          |   max-frame-length: ${maxFrameLength}
          |   protocol: ${protocol.getClass.getCanonicalName}
-         |   window-duration: ${windowDuration}
+         |   window-duration: ${windowDuration.toCoarsest}
          |   ${graphiteAddress.map{ ga => "graphite-address:\""+ga.toString+"\"" } getOrElse "" }
-         |   detection-budget: ${detectionBudget}
+         |   detection-budget: ${detectionBudget.toCoarsest}
          |   parallelism-factor: ${parallelismFactor}
          |   parallelism: ${parallelism}
          |   tcp-inbound-buffer-size: ${tcpInboundBufferSize}
@@ -70,7 +70,7 @@ trait Settings extends LazyLogging {
       |\tmax frame size  : ${maxFrameLength}
       |\tprotocol        : ${protocol}
       |\twindow          : ${windowDuration.toCoarsest}
-      |\tdetection budget: ${detectionBudget}
+      |\tdetection budget: ${detectionBudget.toCoarsest}
       |\tAvail Processors: ${Runtime.getRuntime.availableProcessors}
       |\tplans           : [${plans.zipWithIndex.map{ case (p,i) => f"${i}%2d: ${p}"}.mkString("\n","\n","\n")}]
     """.stripMargin

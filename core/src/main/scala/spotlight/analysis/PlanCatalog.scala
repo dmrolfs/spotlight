@@ -104,7 +104,7 @@ object PlanCatalog extends ClassLogging {
   }
 
 
-  private[analysis] case class PlanRequest( subscriber: ActorRef, startNanos: Long = System.nanoTime() )
+  private[analysis] case class PlanRequest( subscriber: ActorRef, startMillis: Long = System.currentTimeMillis() )
 
 
   trait PlanProvider {
