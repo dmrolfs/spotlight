@@ -1,12 +1,10 @@
 package spotlight.serialization.kryo
 
-import com.esotericsoftware.kryo.io.{Input, Output}
-import com.esotericsoftware.kryo.{Kryo, Serializer}
-import com.typesafe.config.{Config, ConfigFactory, ConfigRenderOptions}
+import com.esotericsoftware.kryo.io.{ Input, Output }
+import com.esotericsoftware.kryo.{ Kryo, Serializer }
+import com.typesafe.config.{ Config, ConfigFactory, ConfigRenderOptions }
 
-
-/**
-  * Created by rolfsd on 11/1/16.
+/** Created by rolfsd on 11/1/16.
   */
 class KryoConfigSerializer() extends Serializer[Config] {
   override val isImmutable: Boolean = true

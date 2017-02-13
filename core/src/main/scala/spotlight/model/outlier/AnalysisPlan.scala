@@ -3,19 +3,17 @@ package spotlight.model.outlier
 import scala.concurrent.duration._
 import scala.reflect._
 import scala.util.matching.Regex
-import scalaz.{Ordering => _, _}
+import scalaz.{ Ordering ⇒ _, _ }
 import Scalaz._
-import com.typesafe.config.{Config, ConfigFactory}
+import com.typesafe.config.{ Config, ConfigFactory }
 import peds.archetype.domain.model.core._
 import peds.commons._
 import peds.commons.identifier._
 import peds.commons.util._
-import spotlight.model.timeseries.{TimeSeriesBase, Topic}
+import spotlight.model.timeseries.{ TimeSeriesBase, Topic }
 
-
-/**
- * Created by rolfsd on 10/4/15.
- */
+/** Created by rolfsd on 10/4/15.
+  */
 sealed trait AnalysisPlan extends Entity with Equals {
   override type ID = ShortUUID
   override val evID: ClassTag[ID] = classTag[ShortUUID]
@@ -37,16 +35,16 @@ sealed trait AnalysisPlan extends Entity with Equals {
 
   override def equals( rhs: Any ): Boolean = {
     rhs match {
-      case that: AnalysisPlan => {
+      case that: AnalysisPlan ⇒ {
         if ( this eq that ) true
         else {
           ( that.## == this.## ) &&
-          ( that canEqual this ) &&
-          ( this.id == that.id )
+            ( that canEqual this ) &&
+            ( this.id == that.id )
         }
       }
 
-      case _ => false
+      case _ ⇒ false
     }
   }
 
@@ -58,11 +56,11 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
   implicit def summarize( p: AnalysisPlan ): Summary = Summary( p )
 
   case class Summary(
-    id: AnalysisPlan#TID,
-    name: String,
-    slug: String,
-    isActive: Boolean = true,
-    appliesTo: Option[AnalysisPlan.AppliesTo] = None
+      id: AnalysisPlan#TID,
+      name: String,
+      slug: String,
+      isActive: Boolean = true,
+      appliesTo: Option[AnalysisPlan.AppliesTo] = None
   ) extends Equals {
     override def canEqual( rhs: Any ): Boolean = rhs.isInstanceOf[Summary]
 
@@ -74,55 +72,52 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
 
     override def equals( rhs: Any ): Boolean = {
       rhs match {
-        case that: Summary => {
+        case that: Summary ⇒ {
           if ( this eq that ) true
           else {
             ( that.## == this.## ) &&
-            ( that canEqual this ) &&
-            ( this.id == that.id )
+              ( that canEqual this ) &&
+              ( this.id == that.id )
           }
         }
 
-        case _ => false
+        case _ ⇒ false
       }
     }
   }
 
   object Summary {
     def apply( info: AnalysisPlan ): Summary = {
-      Summary( id = info.id, name = info.name, slug = info.slug, isActive = info.isActive, appliesTo = Option(info.appliesTo) )
+      Summary( id = info.id, name = info.name, slug = info.slug, isActive = info.isActive, appliesTo = Option( info.appliesTo ) )
     }
   }
 
-
   case class Scope( plan: String, topic: Topic ) {
     def name: String = toString
-    override val toString: String = plan +":"+ topic
+    override val toString: String = plan + ":" + topic
   }
 
   object Scope {
     def apply( plan: AnalysisPlan, topic: Topic ): Scope = Scope( plan = plan.name, topic = topic /*, planId = plan.id*/ )
     def apply( plan: AnalysisPlan, ts: TimeSeriesBase ): Scope = apply( plan, ts.topic )
 
-    trait ScopeIdentifying[T] { self: Identifying[T] =>
+    trait ScopeIdentifying[T] { self: Identifying[T] ⇒
       override type ID = Scope
       override val evID: ClassTag[ID] = classTag[Scope]
       override val evTID: ClassTag[TID] = classTag[TaggedID[Scope]]
       override def nextId: TryV[TID] = new IllegalStateException( "scopes are fixed to plan:topic pairs so not generated" ).left
       override def fromString( idstr: String ): ID = {
-        val Array(p, t) = idstr split ':'
+        val Array( p, t ) = idstr split ':'
         Scope( plan = p, topic = t )
       }
     }
   }
-
 
   implicit val analysisPlanIdentifying: EntityIdentifying[AnalysisPlan] = {
     new EntityIdentifying[AnalysisPlan] with ShortUUID.ShortUuidIdentifying[AnalysisPlan] {
       override val evEntity: ClassTag[AnalysisPlan] = classTag[AnalysisPlan]
     }
   }
-
 
   import shapeless._
 
@@ -171,7 +166,7 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
     override def set( p: AnalysisPlan )( slug: String ): AnalysisPlan = {
       SimpleAnalysisPlan(
         id = p.id,
-        name = slug,  // for outlier plan slug == name
+        name = slug, // for outlier plan slug == name
         appliesTo = p.appliesTo,
         algorithms = p.algorithms,
         grouping = p.grouping,
@@ -230,7 +225,7 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
 
   type ExtractTopic = PartialFunction[Any, Option[Topic]]
 
-  type Creator = () => V[Set[AnalysisPlan]]
+  type Creator = () ⇒ V[Set[AnalysisPlan]]
 
   final case class Grouping( limit: Int, window: FiniteDuration )
 
@@ -243,7 +238,7 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
     grouping: Option[AnalysisPlan.Grouping],
     planSpecification: Config
   )(
-    appliesTo: (Any) => Boolean
+    appliesTo: ( Any ) ⇒ Boolean
   ): AnalysisPlan = {
     SimpleAnalysisPlan(
       id = analysisPlanIdentifying.safeNextId,
@@ -326,7 +321,7 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
     SimpleAnalysisPlan(
       id = analysisPlanIdentifying.safeNextId,
       name = name,
-      appliesTo = AppliesTo.topics( topics.map{ Topic(_) }.toSet, extractTopic ),
+      appliesTo = AppliesTo.topics( topics.map { Topic( _ ) }.toSet, extractTopic ),
       algorithms = algorithms ++ getAlgorithms( planSpecification ),
       grouping = grouping,
       timeout = timeout,
@@ -399,20 +394,19 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
     else ConfigFactory.empty( s"no algorithm-config at spec[${spec.origin}]" )
   }
 
-
   final case class SimpleAnalysisPlan private[outlier] (
-    override val id: AnalysisPlan#TID,
-    override val name: String,
-    override val appliesTo: AnalysisPlan.AppliesTo,
-    override val algorithms: Set[String],
-    override val grouping: Option[AnalysisPlan.Grouping],
-    override val timeout: Duration,
-    override val isQuorum: IsQuorum,
-    override val reduce: ReduceOutliers,
-    override val algorithmConfig: Config,
-    override private[outlier] val typeOrder: Int,
-    override private[outlier] val originLineNumber: Int,
-    override val isActive: Boolean = true
+      override val id: AnalysisPlan#TID,
+      override val name: String,
+      override val appliesTo: AnalysisPlan.AppliesTo,
+      override val algorithms: Set[String],
+      override val grouping: Option[AnalysisPlan.Grouping],
+      override val timeout: Duration,
+      override val isQuorum: IsQuorum,
+      override val reduce: ReduceOutliers,
+      override val algorithmConfig: Config,
+      override private[outlier] val typeOrder: Int,
+      override private[outlier] val originLineNumber: Int,
+      override val isActive: Boolean = true
   ) extends AnalysisPlan {
     override val summary: String = getClass.safeSimpleName + s"""(${name} ${appliesTo.toString})"""
 
@@ -421,17 +415,16 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
     override val toString: String = {
       getClass.safeSimpleName + s"[${id}](" +
         s"""name:[$name], ${appliesTo.toString}, quorum:[${isQuorum}], reduce:[${reduce}] """ +
-        s"""algorithms:[${algorithms.mkString(",")}], timeout:[${timeout.toCoarsest}], """ +
+        s"""algorithms:[${algorithms.mkString( "," )}], timeout:[${timeout.toCoarsest}], """ +
         s"""grouping:[${grouping}], algorithm-config:[${algorithmConfig.root}]""" +
         ")"
     }
   }
 
-
-  sealed trait AppliesTo extends ((Any) => Boolean) with Serializable
+  sealed trait AppliesTo extends ( ( Any ) ⇒ Boolean ) with Serializable
 
   object AppliesTo {
-    def function( f: (Any) => Boolean ): AppliesTo = new AppliesTo {
+    def function( f: ( Any ) ⇒ Boolean ): AppliesTo = new AppliesTo {
       override def apply( message: Any ): Boolean = f( message )
       override val toString: String = "AppliesTo.function"
     }
@@ -447,14 +440,14 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
         else false
       }
 
-      override val toString: String = s"""AppliesTo.topics[${topics.mkString(",")}]"""
+      override val toString: String = s"""AppliesTo.topics[${topics.mkString( "," )}]"""
     }
 
     def regex( regex: Regex, extractTopic: ExtractTopic ): AppliesTo = new AppliesTo {
       override def apply( message: Any ): Boolean = {
-        if ( !extractTopic.isDefinedAt(message) ) false
+        if ( !extractTopic.isDefinedAt( message ) ) false
         else {
-          val result = extractTopic( message ) flatMap { t => regex findFirstMatchIn t.toString }
+          val result = extractTopic( message ) flatMap { t ⇒ regex findFirstMatchIn t.toString }
           result.isDefined
         }
       }
@@ -467,7 +460,6 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
       override val toString: String = "AppliesTo.all"
     }
   }
-
 
   implicit val analysisPlanOrdering = new Ordering[AnalysisPlan] {
     override def compare( lhs: AnalysisPlan, rhs: AnalysisPlan ): Int = {

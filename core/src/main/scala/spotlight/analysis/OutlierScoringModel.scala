@@ -4,11 +4,11 @@ import java.util.concurrent.atomic.AtomicInteger
 import scala.concurrent.duration._
 import akka.NotUsed
 import akka.actor._
-import akka.stream.FanOutShape.{Init, Name}
+import akka.stream.FanOutShape.{ Init, Name }
 import akka.stream._
 import akka.stream.scaladsl._
 import akka.stream.stage._
-import com.typesafe.scalalogging.{Logger, StrictLogging}
+import com.typesafe.scalalogging.{ Logger, StrictLogging }
 import org.slf4j.LoggerFactory
 import bloomfilter.mutable.BloomFilter
 import peds.akka.metrics.Instrumented
@@ -18,9 +18,7 @@ import spotlight.model.outlier._
 import spotlight.model.timeseries.TimeSeriesBase.Merging
 import spotlight.model.timeseries._
 
-
-/**
-  * Created by rolfsd on 10/21/15.
+/** Created by rolfsd on 10/21/15.
   */
 object OutlierScoringModel extends Instrumented with StrictLogging {
   val OutlierMetricPrefix = "spotlight.outlier."
@@ -29,14 +27,14 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
     def apply[In, Out, Off]( init: Init[In] ): ScoringShape[In, Out, Off] = new ScoringShape( init )
   }
 
-  class ScoringShape[In, Out, Off]( _init: Init[In] = Name("ScoringStage") ) extends FanOutShape2[In, Out, Off]( _init ) {
+  class ScoringShape[In, Out, Off]( _init: Init[In] = Name( "ScoringStage" ) ) extends FanOutShape2[In, Out, Off]( _init ) {
     protected override def construct( init: Init[In] ): FanOutShape[In] = new ScoringShape( init )
   }
 
   object WatchPoints {
     val PlanBuffer = Symbol( "plan.buffer" )
-    val ScoringPlanned = Symbol("scoring.planned")
-    val ScoringUnrecognized = Symbol("scoring.unrecognized")
+    val ScoringPlanned = Symbol( "scoring.planned" )
+    val ScoringUnrecognized = Symbol( "scoring.unrecognized" )
     val Catalog = 'catalog
   }
 
@@ -44,7 +42,8 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
     catalogFlow: DetectFlow,
     settings: Settings
   )(
-    implicit system: ActorSystem,
+    implicit
+    system: ActorSystem,
     materializer: Materializer
   ): Graph[ScoringShape[TimeSeries, Outliers, TimeSeries], NotUsed] = {
     import GraphDSL.Implicits._
@@ -52,31 +51,31 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
 
     val parallelism = settings.parallelismFactor
 
-    GraphDSL.create() { implicit b =>
-      val logMetrics = b.add( logMetric( Logger(LoggerFactory getLogger "Metrics"), settings.plans ) )
+    GraphDSL.create() { implicit b ⇒
+      val logMetrics = b.add( logMetric( Logger( LoggerFactory getLogger "Metrics" ), settings.plans ) )
       val blockPriors = b.add( Flow[TimeSeries] filter { notReportedBySpotlight } )
       val zipWithInPlan = b.add(
         Flow[TimeSeries]
-        .map { ts => ( ts, isPlanned(ts, settings.plans) ) }
-        .buffer( 10, OverflowStrategy.backpressure )//.watchFlow( 'preBroadcast )
+          .map { ts ⇒ ( ts, isPlanned( ts, settings.plans ) ) }
+          .buffer( 10, OverflowStrategy.backpressure ) //.watchFlow( 'preBroadcast )
       )
 
-      val broadcast = b.add( Broadcast[(TimeSeries, Boolean)](outputPorts = 2, eagerCancel = false) )
+      val broadcast = b.add( Broadcast[( TimeSeries, Boolean )]( outputPorts = 2, eagerCancel = false ) )
 
-      val passPlanned = b.add( Flow[(TimeSeries, Boolean)].collect { case (ts, inPlan) if inPlan => ts } )
-      val passUnrecognized = b.add( Flow[(TimeSeries, Boolean)].collect { case (ts, inPlan) if !inPlan => ts } )
+      val passPlanned = b.add( Flow[( TimeSeries, Boolean )].collect { case ( ts, inPlan ) if inPlan ⇒ ts } )
+      val passUnrecognized = b.add( Flow[( TimeSeries, Boolean )].collect { case ( ts, inPlan ) if !inPlan ⇒ ts } )
 
       val regulator = b.add(
         Flow[TimeSeries]
-        .buffer( 10, OverflowStrategy.backpressure ).watchFlow( 'regulator )
-        .via( regulateByTopic(10000) )
+          .buffer( 10, OverflowStrategy.backpressure ).watchFlow( 'regulator )
+          .via( regulateByTopic( 10000 ) )
       )
 
-//      val buffer = b.add( Flow[TimeSeries].buffer( 10, OverflowStrategy.backpressure ).watchFlow( WatchPoints.PlanBuffer ) )
-      val detect = b.add( catalogFlow.watchFlow(WatchPoints.Catalog) )
+      //      val buffer = b.add( Flow[TimeSeries].buffer( 10, OverflowStrategy.backpressure ).watchFlow( WatchPoints.PlanBuffer ) )
+      val detect = b.add( catalogFlow.watchFlow( WatchPoints.Catalog ) )
 
-      logMetrics ~> blockPriors ~> zipWithInPlan ~> broadcast ~> passPlanned ~> regulator /*~> buffer */~> detect
-                                                    broadcast ~> passUnrecognized
+      logMetrics ~> blockPriors ~> zipWithInPlan ~> broadcast ~> passPlanned ~> regulator /*~> buffer */ ~> detect
+      broadcast ~> passUnrecognized
 
       ScoringShape(
         FanOutShape.Ports(
@@ -93,7 +92,7 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
   ): GraphStage[FlowShape[TimeSeries, TimeSeries]] = {
     new GraphStage[FlowShape[TimeSeries, TimeSeries]] {
       val count = new AtomicInteger( 0 )
-//      var bloom = BloomFilter[Topic]( maxFalsePosProbability = 0.1, 10000000 )
+      //      var bloom = BloomFilter[Topic]( maxFalsePosProbability = 0.1, 10000000 )
       val bloom = BloomFilter[Topic]( numberOfItems = 10000000, falsePositiveRate = 0.1 )
 
       val in = Inlet[TimeSeries]( "logMetric.in" )
@@ -101,7 +100,7 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
 
       override def shape: FlowShape[TimeSeries, TimeSeries] = FlowShape.of( in, out )
 
-      override def createLogic(inheritedAttributes: Attributes): GraphStageLogic = {
+      override def createLogic( inheritedAttributes: Attributes ): GraphStageLogic = {
         new GraphStageLogic( shape ) {
           setHandler(
             in,
@@ -109,14 +108,14 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
               override def onPush(): Unit = {
                 val e = grab( in )
 
-//                if ( !bloom.has_?( e.topic ) ) {
+                //                if ( !bloom.has_?( e.topic ) ) {
                 if ( !bloom.mightContain( e.topic ) ) {
                   bloom add e.topic
-//                  bloom += e.topic
+                  //                  bloom += e.topic
                   if ( !e.topic.name.startsWith( OutlierMetricPrefix ) ) {
                     destination.debug(
                       "[{}] Plan for {}: {}",
-                      count.incrementAndGet( ).toString,
+                      count.incrementAndGet().toString,
                       e.topic,
                       plans find { _ appliesTo e } getOrElse "NONE"
                     )
@@ -139,7 +138,7 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
     }
   }
 
-  def notReportedBySpotlight(ts: TimeSeriesBase ): Boolean = ts.topic.name.startsWith( OutlierMetricPrefix ) == false
+  def notReportedBySpotlight( ts: TimeSeriesBase ): Boolean = ts.topic.name.startsWith( OutlierMetricPrefix ) == false
   def isPlanned( ts: TimeSeriesBase, plans: Set[AnalysisPlan] ): Boolean = plans exists { _ appliesTo ts }
 
   val debugLogger = Logger( LoggerFactory getLogger "Debug" )
@@ -147,48 +146,49 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
   def regulateByTopic(
     max: Long
   )(
-    implicit system: ActorSystem,
+    implicit
+    system: ActorSystem,
     materializer: Materializer,
     tsMerging: Merging[TimeSeries]
   ): Flow[TimeSeries, TimeSeries, NotUsed] = {
-    import scalaz.{-\/, Scalaz, \/-}
+    import scalaz.{ -\/, Scalaz, \/- }
     import Scalaz._
 
     type TopicAccumulator = Map[Topic, TimeSeries]
-    val seedFn: (TimeSeries) => (TopicAccumulator, Long) = (ts: TimeSeries) => ( Map( ts.topic -> ts ), 0 )
+    val seedFn: ( TimeSeries ) ⇒ ( TopicAccumulator, Long ) = ( ts: TimeSeries ) ⇒ ( Map( ts.topic → ts ), 0 )
 
     Flow[TimeSeries]
-    .batch( max, seedFn ){ case ((acc, count), ts) =>
-      val existing = acc get ts.topic
-      val updatedAcc = {
-        for {
-          updated <- existing map { e => tsMerging.merge( e, ts ).disjunction } getOrElse ts.right
-        } yield {
-          acc + ( ts.topic -> updated )
-        }
-      }
+      .batch( max, seedFn ) {
+        case ( ( acc, count ), ts ) ⇒
+          val existing = acc get ts.topic
+          val updatedAcc = {
+            for {
+              updated ← existing map { e ⇒ tsMerging.merge( e, ts ).disjunction } getOrElse ts.right
+            } yield {
+              acc + ( ts.topic → updated )
+            }
+          }
 
-      val newAcc = updatedAcc match {
-        case \/-( uacc ) => uacc
-        case -\/( exs ) => {
-          exs foreach { ex => logger.error( "flow regulation for topic:[{}] failed on series merge", ts.topic, ex ) }
-          acc
-        }
-      }
+          val newAcc = updatedAcc match {
+            case \/-( uacc ) ⇒ uacc
+            case -\/( exs ) ⇒ {
+              exs foreach { ex ⇒ logger.error( "flow regulation for topic:[{}] failed on series merge", ts.topic, ex ) }
+              acc
+            }
+          }
 
-      ( newAcc, count + 1 )
-    }
-    .map { case (acc, count) => acc }
-    .mapConcat { _.values.to[scala.collection.immutable.Iterable] }
+          ( newAcc, count + 1 )
+      }
+      .map { case ( acc, count ) ⇒ acc }
+      .mapConcat { _.values.to[scala.collection.immutable.Iterable] }
   }
-
-
 
   def batchSeriesByWindow(
     windowSize: FiniteDuration = 1.minute,
     parallelism: Int = 4
   )(
-    implicit system: ActorSystem,
+    implicit
+    system: ActorSystem,
     tsMerging: Merging[TimeSeries],
     materializer: Materializer
   ): Flow[TimeSeries, TimeSeries, NotUsed] = {
@@ -197,17 +197,17 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
     val n = if ( numTopics * windowSize.toMicros.toInt < 0 ) { numTopics * windowSize.toMicros.toInt } else { Int.MaxValue }
     logger.debug( "n = [{}] for windowSize=[{}]", n.toString, windowSize.toCoarsest )
     Flow[TimeSeries]
-    .groupedWithin( n, d = windowSize ) // max elems = 1 per micro; duration = windowSize
-    .map {
-      _.groupBy{ _.topic }
-      .map { case (topic, tss) =>
-        tss.tail.foldLeft( tss.head ){ (acc, e) => tsMerging.merge( acc, e ) valueOr { exs => throw exs.head } }
+      .groupedWithin( n, d = windowSize ) // max elems = 1 per micro; duration = windowSize
+      .map {
+        _.groupBy { _.topic }
+          .map {
+            case ( topic, tss ) ⇒
+              tss.tail.foldLeft( tss.head ) { ( acc, e ) ⇒ tsMerging.merge( acc, e ) valueOr { exs ⇒ throw exs.head } }
+          }
       }
-    }
-    .mapConcat { identity }
+      .mapConcat { identity }
   }
 }
-
 
 //  def batchSeriesByPlan(
 //    max: Long
@@ -273,7 +273,6 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
 //      tsp
 //    }
 //  }
-
 
 //def scoringGraph(
 //catalogProxyProps: Props,

@@ -2,16 +2,16 @@ package spotlight.analysis.algorithm.skyline
 
 import scala.collection.immutable.Queue
 import scala.reflect.ClassTag
-import akka.actor.{ActorRef, Props}
+import akka.actor.{ ActorRef, Props }
 
 import scalaz._
 import Scalaz._
-import scalaz.Kleisli.{ask, kleisli}
-import org.joda.{time => joda}
+import scalaz.Kleisli.{ ask, kleisli }
+import org.joda.{ time ⇒ joda }
 import com.github.nscala_time.time.Imports._
 import org.apache.commons.math3.stat.inference.TestUtils
-import org.apache.commons.math3.exception.{InsufficientDataException, MathInternalError}
-import peds.commons.{KOp, TryV, Valid}
+import org.apache.commons.math3.exception.{ InsufficientDataException, MathInternalError }
+import peds.commons.{ KOp, TryV, Valid }
 import peds.commons.util._
 import spotlight.analysis.algorithm.AlgorithmActor.AlgorithmContext
 import spotlight.analysis.algorithm.CommonAnalyzer
@@ -20,24 +20,21 @@ import spotlight.analysis.algorithm.skyline.adf.AugmentedDickeyFuller
 import spotlight.model.outlier.Outliers
 import spotlight.model.timeseries._
 
-
-/**
-  * Created by rolfsd on 2/25/16.
+/** Created by rolfsd on 2/25/16.
   */
 object KolmogorovSmirnovAnalyzer {
   val Algorithm: String = "ks-test"
 
   def props( router: ActorRef ): Props = Props { new KolmogorovSmirnovAnalyzer( router ) }
 
-
-  final case class Context private[skyline](
-    override val underlying: AlgorithmContext,
-    referenceOffset: joda.Duration,
-    referenceHistory: Queue[DataPoint]
+  final case class Context private[skyline] (
+      override val underlying: AlgorithmContext,
+      referenceOffset: joda.Duration,
+      referenceHistory: Queue[DataPoint]
   ) extends WrappingContext {
     override def withUnderlying( ctx: AlgorithmContext ): Valid[WrappingContext] = {
       val boundary = ctx.source.start map { _ - referenceOffset }
-      val updatedHistory = boundary map { b => referenceHistory.dropWhile{ _.timestamp < b } } getOrElse { referenceHistory }
+      val updatedHistory = boundary map { b ⇒ referenceHistory.dropWhile { _.timestamp < b } } getOrElse { referenceHistory }
       copy( underlying = ctx, referenceHistory = updatedHistory ).successNel
     }
 
@@ -47,13 +44,13 @@ object KolmogorovSmirnovAnalyzer {
       copy( underlying = updated )
     }
 
-    override def addThresholdBoundary(threshold: ThresholdBoundary ): That = {
+    override def addThresholdBoundary( threshold: ThresholdBoundary ): That = {
       copy( underlying = underlying.addThresholdBoundary( threshold ) )
     }
 
     def referenceSeries: Seq[DataPoint] = {
-      referenceInterval map { reference =>
-        ( referenceHistory ++ underlying.source.points ) filter { rdp => reference contains rdp.timestamp }
+      referenceInterval map { reference ⇒
+        ( referenceHistory ++ underlying.source.points ) filter { rdp ⇒ reference contains rdp.timestamp }
       } getOrElse {
         Seq.empty[DataPoint]
       }
@@ -61,8 +58,8 @@ object KolmogorovSmirnovAnalyzer {
 
     def referenceInterval: Option[joda.Interval] = {
       for {
-        start <- underlying.source.start
-        end <- underlying.source.end
+        start ← underlying.source.start
+        end ← underlying.source.end
       } yield ( start - referenceOffset ) to ( end - referenceOffset )
     }
 
@@ -77,8 +74,8 @@ class KolmogorovSmirnovAnalyzer( override val router: ActorRef ) extends CommonA
 
   override def algorithm: String = KolmogorovSmirnovAnalyzer.Algorithm
 
-  override def wrapContext(c: AlgorithmContext ): Valid[WrappingContext] = {
-    referenceOffset( c ) map { offset =>
+  override def wrapContext( c: AlgorithmContext ): Valid[WrappingContext] = {
+    referenceOffset( c ) map { offset ⇒
       log.debug( "makeSkylingContext: [{}]", c )
       Context( underlying = c, referenceOffset = offset, referenceHistory = c.source.points.to[Queue] )
     }
@@ -90,7 +87,7 @@ class KolmogorovSmirnovAnalyzer( override val router: ActorRef ) extends CommonA
 
     val result = {
       if ( c.messageConfig.hasPath( ReferenceOffset ) ) {
-        new joda.Duration( c.messageConfig.getDuration(ReferenceOffset, MILLISECONDS) )
+        new joda.Duration( c.messageConfig.getDuration( ReferenceOffset, MILLISECONDS ) )
       } else {
         joda.Days.ONE.toStandardDuration
       }
@@ -99,18 +96,17 @@ class KolmogorovSmirnovAnalyzer( override val router: ActorRef ) extends CommonA
     result.successNel
   }
 
-  /**
-  * A timeseries is anomalous if the average of the last three datapoints
-  * on a projected least squares model is greater than three sigma.
-  */
-  override val findOutliers: KOp[AlgorithmContext, (Outliers, AlgorithmContext)] = {
+  /** A timeseries is anomalous if the average of the last three datapoints
+    * on a projected least squares model is greater than three sigma.
+    */
+  override val findOutliers: KOp[AlgorithmContext, ( Outliers, AlgorithmContext )] = {
     def isDistributionUnlikeReference( tol: Double ): KOp[Context, Boolean] = {
-      kleisli[TryV, Context, Boolean] { implicit ctx =>
-        val reference = ctx.referenceSeries.map{ _.value }.toArray
-        log.debug( "reference-history[{}] = [{}]", ctx.referenceHistory.size, ctx.referenceHistory.mkString(",") )
+      kleisli[TryV, Context, Boolean] { implicit ctx ⇒
+        val reference = ctx.referenceSeries.map { _.value }.toArray
+        log.debug( "reference-history[{}] = [{}]", ctx.referenceHistory.size, ctx.referenceHistory.mkString( "," ) )
         log.debug( "reference-offset = [{}]", ctx.referenceOffset )
         log.debug( "reference-interval = [{}]", ctx.referenceInterval )
-        log.debug( "reference-series[{}] = [{}]", reference.size, reference.mkString(",") )
+        log.debug( "reference-series[{}] = [{}]", reference.size, reference.mkString( "," ) )
         log.debug( "CURRENT[{}] = [{}]", ctx.data.size, ctx.data )
         val current = ctx.data map { _.value }
         distributionUnlikeReference( current.toArray, reference )
@@ -119,9 +115,9 @@ class KolmogorovSmirnovAnalyzer( override val router: ActorRef ) extends CommonA
 
     val outliers = {
       for {
-        ctx <- ask[TryV, AlgorithmContext]
-        tolerance <- tolerance
-        unlike <- isDistributionUnlikeReference( tolerance getOrElse 3D ) <=< toConcreteContextK
+        ctx ← ask[TryV, AlgorithmContext]
+        tolerance ← tolerance
+        unlike ← isDistributionUnlikeReference( tolerance getOrElse 3D ) <=< toConcreteContextK
       } yield {
         if ( unlike ) ( ctx.source.points, ctx ) else ( Seq.empty[DataPoint], ctx )
       }
@@ -134,16 +130,17 @@ class KolmogorovSmirnovAnalyzer( override val router: ActorRef ) extends CommonA
     series: Array[Double],
     reference: Array[Double]
   )(
-    implicit context: AlgorithmContext
+    implicit
+    context: AlgorithmContext
   ): TryV[Boolean] = {
     val same = {
       if ( reference.isEmpty || series.isEmpty ) false.right
       else {
         for {
-          pValue <- \/ fromTryCatchNonFatal { TestUtils.kolmogorovSmirnovTest( reference, series ) }
-          testStatisticD <- \/ fromTryCatchNonFatal { TestUtils.kolmogorovSmirnovStatistic( reference, series ) }
+          pValue ← \/ fromTryCatchNonFatal { TestUtils.kolmogorovSmirnovTest( reference, series ) }
+          testStatisticD ← \/ fromTryCatchNonFatal { TestUtils.kolmogorovSmirnovStatistic( reference, series ) }
         } yield {
-          val isStationary = (s: Array[Double]) => {
+          val isStationary = ( s: Array[Double] ) ⇒ {
             val adf = AugmentedDickeyFuller( s ).statistic
             log.debug( "ks-test :: ADF[{}]: adf:[{}]", adf < 0.05, adf )
             adf < 0.05
@@ -156,20 +153,20 @@ class KolmogorovSmirnovAnalyzer( override val router: ActorRef ) extends CommonA
     }
 
     same
-    .leftMap {
-      case ex: MathInternalError => {
-        log.error( "ks-test internal math error. reference[size:{}][{}], series[size:{}][{}]: {}", reference.size, reference.mkString(","), series.size, series.mkString(",") )
-        log.error( "ks-test internal math error: {}", ex.getMessage )
-        ex
-      }
+      .leftMap {
+        case ex: MathInternalError ⇒ {
+          log.error( "ks-test internal math error. reference[size:{}][{}], series[size:{}][{}]: {}", reference.size, reference.mkString( "," ), series.size, series.mkString( "," ) )
+          log.error( "ks-test internal math error: {}", ex.getMessage )
+          ex
+        }
 
-      case ex => ex
-    }
-    .recover {
-      case ex: InsufficientDataException => {
-        log.debug( "[{}][{}]: no outliers - ignoring series sample: {}", context.plan, context.topic, ex.getMessage  )
-        false
+        case ex ⇒ ex
       }
-    }
+      .recover {
+        case ex: InsufficientDataException ⇒ {
+          log.debug( "[{}][{}]: no outliers - ignoring series sample: {}", context.plan, context.topic, ex.getMessage )
+          false
+        }
+      }
   }
 }

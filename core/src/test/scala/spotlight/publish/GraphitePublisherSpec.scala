@@ -1,32 +1,30 @@
 package spotlight.publish
 
 import java.io.ByteArrayOutputStream
-import java.net.{InetAddress, InetSocketAddress, Socket}
-import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
+import java.net.{ InetAddress, InetSocketAddress, Socket }
+import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger }
 import javax.net._
-import javax.script.{Compilable, ScriptEngineManager, SimpleBindings}
+import javax.script.{ Compilable, ScriptEngineManager, SimpleBindings }
 
-import akka.actor.{ActorSystem, Props}
-import akka.testkit.{TestActorRef, TestProbe}
+import akka.actor.{ ActorSystem, Props }
+import akka.testkit.{ TestActorRef, TestProbe }
 import akka.util.ByteString
-import com.typesafe.config.{Config, ConfigFactory}
-import spotlight.model.outlier.{NoOutliers, AnalysisPlan, SeriesOutliers}
-import spotlight.model.timeseries.{DataPoint, ThresholdBoundary, TimeSeries, Topic}
+import com.typesafe.config.{ Config, ConfigFactory }
+import spotlight.model.outlier.{ NoOutliers, AnalysisPlan, SeriesOutliers }
+import spotlight.model.timeseries.{ DataPoint, ThresholdBoundary, TimeSeries, Topic }
 import spotlight.protocol.PythonPickleProtocol
 import spotlight.testkit.ParallelAkkaSpec
-import org.joda.{time => joda}
+import org.joda.{ time ⇒ joda }
 import org.mockito.Mockito._
 import org.mockito.Matchers._
 import org.mockito.invocation.InvocationOnMock
 import org.mockito.stubbing.Answer
-import org.python.core.{PyList, PyTuple}
+import org.python.core.{ PyList, PyTuple }
 import org.scalatest.Tag
 import org.scalatest.mockito.MockitoSugar
 import peds.commons.log.Trace
 
-
-/**
-  * Created by rolfsd on 12/31/15.
+/** Created by rolfsd on 12/31/15.
   */
 object GraphitePublisherSpec {
   val engine = new ScriptEngineManager().getEngineByName( "python" )
@@ -48,22 +46,20 @@ object GraphitePublisherSpec {
   )
 }
 
-
 class GraphitePublisherSpec
-extends ParallelAkkaSpec
-with MockitoSugar {
+    extends ParallelAkkaSpec
+    with MockitoSugar {
   import GraphitePublisher._
   import GraphitePublisherSpec._
   import OutlierPublisher._
 
   override val trace = Trace[GraphitePublisherSpec]
 
-
   override def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture = {
     new Fixture( config, system, slug )
   }
 
-  class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends AkkaFixture( _config, _system, _slug ) { outer =>
+  class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends AkkaFixture( _config, _system, _slug ) { outer ⇒
     val senderProbe = TestProbe( "test-sender" )
     val connected: AtomicBoolean = new AtomicBoolean( true )
     val closed: AtomicBoolean = new AtomicBoolean( false )
@@ -74,7 +70,7 @@ with MockitoSugar {
 
     val plan = mock[AnalysisPlan]
     when( plan.name ) thenReturn "plan"
-//    when( plan.algorithmConfig ) thenReturn ConfigFactory.parseString( "" )
+    //    when( plan.algorithmConfig ) thenReturn ConfigFactory.parseString( "" )
 
     val socket: Socket = mock[Socket]
     when( socket.isConnected ).thenAnswer(
@@ -108,9 +104,9 @@ with MockitoSugar {
           socket.close
         }
       }
-    ).when(output).close()
+    ).when( output ).close()
 
-    when( socketFactory.createSocket( any(classOf[InetAddress]), anyInt ) ).thenReturn( socket )
+    when( socketFactory.createSocket( any( classOf[InetAddress] ), anyInt ) ).thenReturn( socket )
 
     val publisherProps = Props(
       new GraphitePublisher with GraphitePublisher.PublishProvider {
@@ -118,7 +114,7 @@ with MockitoSugar {
 
         override lazy val maxOutstanding: Int = 1000000
         override lazy val separation: FiniteDuration = 1.second
-        override def initializeMetrics(): Unit = { }
+        override def initializeMetrics(): Unit = {}
         override lazy val batchSize: Int = 100
         override lazy val destinationAddress: InetSocketAddress = outer.address
         override def createSocket( address: InetSocketAddress ): Socket = {
@@ -130,13 +126,12 @@ with MockitoSugar {
     )
     val graphite = TestActorRef[GraphitePublisher]( publisherProps )
 
-    val dp1 = DataPoint( new joda.DateTime(100000L), 17D )
-    val dp1b = DataPoint( new joda.DateTime(103000L), 19D )
-    val dp2 = DataPoint( new joda.DateTime(117000L), 3.1415926D )
-    val dp3 = DataPoint( new joda.DateTime(9821000L), 983.120D )
+    val dp1 = DataPoint( new joda.DateTime( 100000L ), 17D )
+    val dp1b = DataPoint( new joda.DateTime( 103000L ), 19D )
+    val dp2 = DataPoint( new joda.DateTime( 117000L ), 3.1415926D )
+    val dp3 = DataPoint( new joda.DateTime( 9821000L ), 983.120D )
 
-
-    def unpickleOutput( pickle: ByteString = ByteString(output.toByteArray) ): String = {
+    def unpickleOutput( pickle: ByteString = ByteString( output.toByteArray ) ): String = {
       import scala.collection.mutable
       val results = mutable.StringBuilder.newBuilder
       // the charset is important. if the GraphitePickleReporter and this test
@@ -149,81 +144,81 @@ with MockitoSugar {
         val bindings = new SimpleBindings
         bindings.put( "payload", payload substring nextIndex )
         unpickleScript eval bindings
-        result.addAll( result.size, bindings.get("metrics").asInstanceOf[java.util.Collection[_]] )
+        result.addAll( result.size, bindings.get( "metrics" ).asInstanceOf[java.util.Collection[_]] )
         nextIndex += bindings.get( "batchLength" ).asInstanceOf[Int]
       }
 
       import scala.collection.JavaConverters._
-      result.iterator.asScala.foreach { case datapoint: PyTuple =>
-        val name = datapoint.get( 0 ).toString
-        val valueTuple = datapoint.get( 1 ).asInstanceOf[PyTuple]
-        val timestamp = valueTuple get 0
-        val value = valueTuple get 1
-        results.append( name ).append( " " ).append( value ).append( " " ).append( timestamp ).append( "\n" )
+      result.iterator.asScala.foreach {
+        case datapoint: PyTuple ⇒
+          val name = datapoint.get( 0 ).toString
+          val valueTuple = datapoint.get( 1 ).asInstanceOf[PyTuple]
+          val timestamp = valueTuple get 0
+          val value = valueTuple get 1
+          results.append( name ).append( " " ).append( value ).append( " " ).append( timestamp ).append( "\n" )
       }
 
       results.toString()
     }
   }
 
-
-  val DONE = Tag("done")
+  val DONE = Tag( "done" )
 
   "GraphitePublisher" should {
-    "disconnects from graphite" in { f: Fixture =>
+    "disconnects from graphite" in { f: Fixture ⇒
       import f._
       graphite ! Close
-//      graphite.receive( Close )
+      //      graphite.receive( Close )
       verify( socket ).close()
     }
 
-    "first replicate python protocol test" in { f: Fixture =>
+    "first replicate python protocol test" in { f: Fixture ⇒
       import f._
-      import org.joda.{ time => joda }
+      import org.joda.{ time ⇒ joda }
       import spotlight.model.timeseries._
 
       val batch = Seq(
-        ("foo".toTopic, new joda.DateTime(100000L), 1D),
-        ("bar".toTopic, new joda.DateTime(117000L), 0D),
-        ("zed".toTopic, new joda.DateTime(9821000L), 0D)
+        ( "foo".toTopic, new joda.DateTime( 100000L ), 1D ),
+        ( "bar".toTopic, new joda.DateTime( 117000L ), 0D ),
+        ( "zed".toTopic, new joda.DateTime( 9821000L ), 0D )
       )
 
-      unpickleOutput( new PythonPickleProtocol().pickleFlattenedTimeSeries( batch:_* )) mustBe {
+      unpickleOutput( new PythonPickleProtocol().pickleFlattenedTimeSeries( batch: _* ) ) mustBe {
         // timestamp long are be divided by 1000L to match graphite's epoch time
         "foo 1.0 100\nbar 0.0 117\nzed 0.0 9821\n"
       }
     }
 
-    "write one-point batch" in { f: Fixture =>
+    "write one-point batch" in { f: Fixture ⇒
       import f._
       val outliers = NoOutliers(
-        algorithms = Set("dbscan"),
-        source = TimeSeries("foo", Seq(dp1)),
+        algorithms = Set( "dbscan" ),
+        source = TimeSeries( "foo", Seq( dp1 ) ),
         plan = plan
       )
-      graphite.receive( Publish(outliers) )
+      graphite.receive( Publish( outliers ) )
       graphite.receive( Flush, senderProbe.ref )
-      senderProbe.expectMsg( GraphitePublisher.Flushed(true) )
+      senderProbe.expectMsg( GraphitePublisher.Flushed( true ) )
       val actual = ByteString( output.toByteArray )
       unpickleOutput( actual ) mustBe "foo 0.0 100\n"
     }
 
-    "write full batch" in { f: Fixture =>
+    "write full batch" in { f: Fixture ⇒
       import f._
       val outliers = SeriesOutliers(
-        algorithms = Set("dbscan"),
-        source = TimeSeries("foo", Seq(dp1, dp2)),
-        outliers = Seq(dp2),
+        algorithms = Set( "dbscan" ),
+        source = TimeSeries( "foo", Seq( dp1, dp2 ) ),
+        outliers = Seq( dp2 ),
         plan = plan
       )
       // NoOutlier pickle will be include 0.0 for each second in source range
-      graphite.receive( Publish(outliers) )
+      graphite.receive( Publish( outliers ) )
       graphite.receive( Flush, senderProbe.ref )
-      senderProbe.expectMsg( GraphitePublisher.Flushed(true) )
+      senderProbe.expectMsg( GraphitePublisher.Flushed( true ) )
       unpickleOutput() mustBe "foo 0.0 100\nfoo 1.0 117\n"
     }
 
-    "write past full batch" in { f: Fixture =>
+    "write past full batch" in { f: Fixture ⇒
       import f._
 
       val graphite2 = TestActorRef[GraphitePublisher](
@@ -233,7 +228,7 @@ with MockitoSugar {
 
             override val maxOutstanding: Int = 1000000
             override val separation: FiniteDuration = 1.second
-            override def initializeMetrics(): Unit = { }
+            override def initializeMetrics(): Unit = {}
             override val batchSize: Int = 100
             override def destinationAddress: InetSocketAddress = f.address
             override def createSocket( address: InetSocketAddress ): Socket = {
@@ -246,63 +241,60 @@ with MockitoSugar {
       )
 
       val outliers = SeriesOutliers(
-        algorithms = Set("dbscan"),
-        source = TimeSeries("foo", Seq(dp1, dp2, dp3)),
-        outliers = Seq(dp1),
+        algorithms = Set( "dbscan" ),
+        source = TimeSeries( "foo", Seq( dp1, dp2, dp3 ) ),
+        outliers = Seq( dp1 ),
         plan = plan
       )
-      graphite2.receive( Publish(outliers) )
+      graphite2.receive( Publish( outliers ) )
       graphite2.receive( Flush, senderProbe.ref )
-      senderProbe.expectMsg( GraphitePublisher.Flushed(true) )
+      senderProbe.expectMsg( GraphitePublisher.Flushed( true ) )
       unpickleOutput() mustBe "spotlight.outlier.plan.foo 1.0 100\nspotlight.outlier.plan.foo 0.0 117\nspotlight.outlier.plan.foo 0.0 9821\n"
     }
 
-    "write full no-outlier batch" in { f: Fixture =>
+    "write full no-outlier batch" in { f: Fixture ⇒
       import f._
       val outliers = NoOutliers(
-        algorithms = Set("dbscan"),
-        source = TimeSeries("foo", Seq(dp1, dp1b)),
+        algorithms = Set( "dbscan" ),
+        source = TimeSeries( "foo", Seq( dp1, dp1b ) ),
         plan = plan
       )
       // NoOutlier pickle will be include 0.0 for each second in source range
-      graphite.receive( Publish(outliers) )
+      graphite.receive( Publish( outliers ) )
       graphite.receive( Flush, senderProbe.ref )
-      senderProbe.expectMsg( GraphitePublisher.Flushed(true) )
+      senderProbe.expectMsg( GraphitePublisher.Flushed( true ) )
       unpickleOutput() mustBe "foo 0.0 100\nfoo 0.0 101\nfoo 0.0 102\nfoo 0.0 103\n"
     }
 
-    "write sanitize names" in { f: Fixture =>
+    "write sanitize names" in { f: Fixture ⇒
       import f._
       val outliers = SeriesOutliers(
-        algorithms = Set("dbscan"),
-        source = TimeSeries("foo bar", Seq(dp1, dp2, dp3)),
-        outliers = Seq(dp1),
+        algorithms = Set( "dbscan" ),
+        source = TimeSeries( "foo bar", Seq( dp1, dp2, dp3 ) ),
+        outliers = Seq( dp1 ),
         plan = plan
       )
-      graphite.receive( Publish(outliers) )
+      graphite.receive( Publish( outliers ) )
       graphite.receive( Flush, senderProbe.ref )
-      senderProbe.expectMsg( GraphitePublisher.Flushed(true) )
+      senderProbe.expectMsg( GraphitePublisher.Flushed( true ) )
       unpickleOutput() mustBe "foo-bar 1.0 100\nfoo-bar 0.0 117\nfoo-bar 0.0 9821\n"
     }
 
-    "ignores double opens" in { f: Fixture =>
+    "ignores double opens" in { f: Fixture ⇒
       import f._
       graphite.receive( Open )
       graphite.receive( Open )
       openCount.get mustBe 1
     }
 
-
-
-    "write past full batch with threshold boundaries" taggedAs (WIP) in { f: Fixture =>
+    "write past full batch with threshold boundaries" taggedAs ( WIP ) in { f: Fixture ⇒
       import f._
 
       val algos = Set( "dbscan", "x", "y" )
-      val algConfig = ConfigFactory.parseString( algos.map{ a => s"${a}.publish-threshold: yes" }.mkString("\n") )
+      val algConfig = ConfigFactory.parseString( algos.map { a ⇒ s"${a}.publish-threshold: yes" }.mkString( "\n" ) )
       when( plan.algorithmConfig ) thenReturn algConfig
 
-      algos foreach { a => plan.algorithmConfig.getBoolean( s"${a}.publish-threshold" ) mustBe true }
-
+      algos foreach { a ⇒ plan.algorithmConfig.getBoolean( s"${a}.publish-threshold" ) mustBe true }
 
       val graphite2 = TestActorRef[GraphitePublisher](
         Props(
@@ -311,7 +303,7 @@ with MockitoSugar {
 
             override val maxOutstanding: Int = 1000000
             override val separation: FiniteDuration = 1.second
-            override def initializeMetrics(): Unit = { }
+            override def initializeMetrics(): Unit = {}
             override val batchSize: Int = 2
             override def destinationAddress: InetSocketAddress = f.address
             override def createSocket( address: InetSocketAddress ): Socket = {
@@ -324,29 +316,29 @@ with MockitoSugar {
       )
 
       val controlBoundaries = Map(
-        "x" -> Seq(
-                   ThresholdBoundary.fromExpectedAndDistance( dp1.timestamp, 1, 0.1 ),
-                   ThresholdBoundary.fromExpectedAndDistance( dp2.timestamp, 1, 0.25 ),
-                   ThresholdBoundary.fromExpectedAndDistance( dp3.timestamp, 1, 0.3 )
+        "x" → Seq(
+          ThresholdBoundary.fromExpectedAndDistance( dp1.timestamp, 1, 0.1 ),
+          ThresholdBoundary.fromExpectedAndDistance( dp2.timestamp, 1, 0.25 ),
+          ThresholdBoundary.fromExpectedAndDistance( dp3.timestamp, 1, 0.3 )
         ),
-        "y" -> Seq(
-                   ThresholdBoundary.fromExpectedAndDistance( dp1.timestamp, 3, 0.3 ),
-                   ThresholdBoundary.fromExpectedAndDistance( dp2.timestamp, 3, 0.5 ),
-                   ThresholdBoundary.fromExpectedAndDistance( dp3.timestamp, 3, 0.7 )
+        "y" → Seq(
+          ThresholdBoundary.fromExpectedAndDistance( dp1.timestamp, 3, 0.3 ),
+          ThresholdBoundary.fromExpectedAndDistance( dp2.timestamp, 3, 0.5 ),
+          ThresholdBoundary.fromExpectedAndDistance( dp3.timestamp, 3, 0.7 )
         )
       )
 
       val outliers = SeriesOutliers(
         algorithms = algos,
-        source = TimeSeries("foo", Seq(dp1, dp2, dp3)),
-        outliers = Seq(dp1),
+        source = TimeSeries( "foo", Seq( dp1, dp2, dp3 ) ),
+        outliers = Seq( dp1 ),
         plan = plan,
         thresholdBoundaries = controlBoundaries
       )
 
-      graphite2.receive( Publish(outliers) )
+      graphite2.receive( Publish( outliers ) )
       graphite2.receive( Flush, senderProbe.ref )
-      senderProbe.expectMsg( GraphitePublisher.Flushed(true) )
+      senderProbe.expectMsg( GraphitePublisher.Flushed( true ) )
       unpickleOutput() mustBe (
         "spotlight.outlier.plan.foo 1.0 100\nspotlight.outlier.plan.foo 0.0 117\nspotlight.outlier.plan.foo 0.0 9821\n" +
         "spotlight.outlier.plan.x.floor.foo 0.9 100\nspotlight.outlier.plan.x.expected.foo 1.0 100\nspotlight.outlier.plan.x.ceiling.foo 1.1 100\n" +
@@ -360,5 +352,4 @@ with MockitoSugar {
 
   }
 }
-
 

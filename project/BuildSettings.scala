@@ -5,9 +5,9 @@ import sbt._
 import spray.revolver.RevolverPlugin._
 
 object BuildSettings {
-  val VERSION = "2.2.1"
+  val VERSION = "2.2.2"
 
-  val defaultBuildSettings = Defaults.coreDefaultSettings ++ Format.settings ++ Revolver.settings ++ Seq(
+  val defaultBuildSettings = Defaults.coreDefaultSettings ++ Format.settings ++ /* Revolver.settings ++ */ Seq(
     version := VERSION,
     organization := "com.github.dmrolfs",
     licenses += ("MIT", url("http://opensource.org/licenses/MIT")),
@@ -99,7 +99,7 @@ object BuildSettings {
         pomExtra := {
           <scm>
             <url>https://github.com</url>
-            <connection>https://github.com/dmrolfs/shapeless-builder.git</connection>
+            <connection>https://github.com/dmrolfs/spotlight.git</connection>
           </scm>
           <developers>
             <developer>

@@ -9,13 +9,13 @@ object SpotlightBuild extends Build {
   lazy val root = {
     ( project in file(".") )
     .settings( defaultBuildSettings:_* )
-    .aggregate( core, publisher, graphite, batch )
+    .aggregate( core, /*publisher,*/ graphite, batch )
   }
 
-  lazy val publisher = {
-    ( project in file("publisher") )
-    .settings( defaultBuildSettings ++ publishSettings )
-  }
+  // lazy val publisher = {
+  //   ( project in file("publisher") )
+  //   .settings( defaultBuildSettings ++ publishSettings )
+  // }
 
 //  lazy val subscriber = {
 //    ( project in file("subscriber") )

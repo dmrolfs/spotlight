@@ -7,13 +7,11 @@ import org.apache.commons.math3.ml.clustering.DoublePoint
 import org.apache.commons.math3.stat.descriptive.MultivariateSummaryStatistics
 import spotlight.model.timeseries._
 
-
-/**
-  * Created by rolfsd on 1/26/16.
+/** Created by rolfsd on 1/26/16.
   */
 trait HistoricalStatistics extends Serializable {
   def :+( point: PointA ): HistoricalStatistics
-  @deprecated("replace with RecentHistory", "20161004") def recordLastPoints( points: Seq[PointA] ): HistoricalStatistics
+  @deprecated( "replace with RecentHistory", "20161004" ) def recordLastPoints( points: Seq[PointA] ): HistoricalStatistics
 
   def covariance: RealMatrix
   def dimension: Int
@@ -26,42 +24,39 @@ trait HistoricalStatistics extends Serializable {
   def sum: PointA
   def sumLog: PointA
   def sumOfSquares: PointA
-  @deprecated("replace with RecentHistory", "20161004") def lastPoints: Seq[PointA]
+  @deprecated( "replace with RecentHistory", "20161004" ) def lastPoints: Seq[PointA]
   override def toString: String = {
     s"HistoricalStatistics(" +
-    s"N:${N} " +
-    s"""m:${mean.mkString(", ")} """ +
-    s"""sd:${standardDeviation.mkString(", ")} """ +
-    s"""min-max:[${min.zip(max).mkString(", ")}]""" +
-    ")"
+      s"N:${N} " +
+      s"""m:${mean.mkString( ", " )} """ +
+      s"""sd:${standardDeviation.mkString( ", " )} """ +
+      s"""min-max:[${min.zip( max ).mkString( ", " )}]""" +
+      ")"
   }
 }
 
-
 object HistoricalStatistics {
-//  val LastN: Int = 6 * 60 * 24 // 6pts / sec for 1-day    // 3
+  //  val LastN: Int = 6 * 60 * 24 // 6pts / sec for 1-day    // 3
 
   def apply( k: Int, isCovarianceBiasCorrected: Boolean ): HistoricalStatistics = {
-    ApacheMath3HistoricalStatistics( new MultivariateSummaryStatistics(k, isCovarianceBiasCorrected), RecentHistory.apply() )
+    ApacheMath3HistoricalStatistics( new MultivariateSummaryStatistics( k, isCovarianceBiasCorrected ), RecentHistory.apply() )
   }
 
   def fromActivePoints( points: Seq[DoublePoint], isCovarianceBiasCorrected: Boolean ): HistoricalStatistics = {
-    points.foldLeft( HistoricalStatistics(k = 2, isCovarianceBiasCorrected) ) { (h, p) => h :+ p }
+    points.foldLeft( HistoricalStatistics( k = 2, isCovarianceBiasCorrected ) ) { ( h, p ) ⇒ h :+ p }
   }
 
-
-  final case class ApacheMath3HistoricalStatistics private[analysis](
-    all: MultivariateSummaryStatistics,
-    recent: RecentHistory
+  final case class ApacheMath3HistoricalStatistics private[analysis] (
+      all: MultivariateSummaryStatistics,
+      recent: RecentHistory
   ) extends HistoricalStatistics {
     override def :+( point: PointA ): HistoricalStatistics = {
       all addValue point
       this
     }
 
-
-    @deprecated("replace with RecentHistory", "20161004") override def recordLastPoints( points: Seq[PointA] ): HistoricalStatistics = this.copy( recent = recent withPoints points )
-    @deprecated("replace with RecentHistory", "20161004") override def lastPoints: Seq[PointA] = recent.points
+    @deprecated( "replace with RecentHistory", "20161004" ) override def recordLastPoints( points: Seq[PointA] ): HistoricalStatistics = this.copy( recent = recent withPoints points )
+    @deprecated( "replace with RecentHistory", "20161004" ) override def lastPoints: Seq[PointA] = recent.points
 
     override def N: Long = all.getN
     override def mean: PointA = all.getMean
@@ -77,7 +72,6 @@ object HistoricalStatistics {
     //todo underlying serializable ops
   }
 }
-
 
 /*
 http://stackoverflow.com/questions/9200874/implementing-exponential-moving-average-in-java

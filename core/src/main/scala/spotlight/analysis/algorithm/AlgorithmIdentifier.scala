@@ -8,9 +8,7 @@ import AlgorithmIdentifier.SpanType
 import bloomfilter.CanGenerateHashFrom
 import peds.commons.identifier.ShortUUID
 
-
-/**
-  * Created by rolfsd on 2/1/17.
+/** Created by rolfsd on 2/1/17.
   */
 case class AlgorithmIdentifier( planName: String, planId: String, spanType: SpanType, span: String ) extends Equals {
   override def hashCode(): Int = {
@@ -27,19 +25,19 @@ case class AlgorithmIdentifier( planName: String, planId: String, spanType: Span
 
   override def equals( rhs: Any ): Boolean = {
     rhs match {
-      case that: AlgorithmIdentifier => {
+      case that: AlgorithmIdentifier ⇒ {
         if ( this eq that ) true
         else {
           ( that.## == this.## ) &&
-          ( that canEqual this ) &&
-          ( this.planId == that.planId ) &&
-          ( this.planName == that.planName ) &&
-          ( this.spanType == that.spanType ) &&
-          ( this.span == that.span )
+            ( that canEqual this ) &&
+            ( this.planId == that.planId ) &&
+            ( this.planName == that.planName ) &&
+            ( this.spanType == that.spanType ) &&
+            ( this.span == that.span )
         }
       }
 
-      case _ => false
+      case _ ⇒ false
     }
   }
 
@@ -55,8 +53,8 @@ object AlgorithmIdentifier extends ClassLogging {
   object SpanType {
     def from( spanRep: String ): Valid[SpanType] = {
       options
-      .collectFirst { case st if st.label == spanRep => st.successNel[Throwable] }
-      .getOrElse { Validation.failureNel( new IllegalStateException(s"unknown algorithm id span type:${spanRep}") ) }
+        .collectFirst { case st if st.label == spanRep ⇒ st.successNel[Throwable] }
+        .getOrElse { Validation.failureNel( new IllegalStateException( s"unknown algorithm id span type:${spanRep}" ) ) }
     }
 
     lazy val options: Seq[SpanType] = Seq( TopicSpan, GroupSpan )
@@ -72,34 +70,33 @@ object AlgorithmIdentifier extends ClassLogging {
     override def next( hint: String ): String = ShortUUID().toString
   }
 
+  private lazy val IdFormat = s"""(.*)@(.*):(${AlgorithmIdentifier.SpanType.options.map { _.label }.mkString( "|" )}):(.*)""".r
 
-  private lazy val IdFormat = s"""(.*)@(.*):(${AlgorithmIdentifier.SpanType.options.map{ _.label }.mkString("|")}):(.*)""".r
-
-  def toAggregateId(id: AlgorithmIdentifier ): String = id.planName + "@" + id.planId + ":" + id.spanType.label + ":" + id.span
+  def toAggregateId( id: AlgorithmIdentifier ): String = id.planName + "@" + id.planId + ":" + id.spanType.label + ":" + id.span
 
   def fromAggregateId( aggregateId: String ): Valid[AlgorithmIdentifier] = {
     aggregateId match {
-      case IdFormat( planName, planId, stype, span ) => {
+      case IdFormat( planName, planId, stype, span ) ⇒ {
         SpanType.from( stype )
-        .map { spanType => AlgorithmIdentifier( planName = planName, planId = planId, spanType = spanType, span = span ) }
-        .leftMap { exs =>
-          log.error(
-            Map(
-              "@msg" -> "failed to parse span type from algorithm aggregateId",
-              "aggregateId" -> aggregateId,
-              "parsed" -> Map(
-                "plan-name" -> planName,
-                "plan-id" -> planId,
-                "span-type" -> stype,
-                "span" -> span
+          .map { spanType ⇒ AlgorithmIdentifier( planName = planName, planId = planId, spanType = spanType, span = span ) }
+          .leftMap { exs ⇒
+            log.error(
+              Map(
+                "@msg" → "failed to parse span type from algorithm aggregateId",
+                "aggregateId" → aggregateId,
+                "parsed" → Map(
+                  "plan-name" → planName,
+                  "plan-id" → planId,
+                  "span-type" → stype,
+                  "span" → span
+                )
               )
             )
-          )
-          exs
-        }
+            exs
+          }
       }
 
-      case _ => {
+      case _ ⇒ {
         Validation.failureNel(
           new IllegalStateException(
             s"failed to parse algorithm aggregateId[${aggregateId}], which does not match expected format."
@@ -110,7 +107,7 @@ object AlgorithmIdentifier extends ClassLogging {
   }
 
   def nextId( planName: String, planId: String, spanType: SpanType, spanHint: String ): AlgorithmIdentifier = {
-    AlgorithmIdentifier( planName = planName, planId = planId, spanType = spanType, span = spanType.next(spanHint) )
+    AlgorithmIdentifier( planName = planName, planId = planId, spanType = spanType, span = spanType.next( spanHint ) )
   }
 
   implicit val canGenerateHash: CanGenerateHashFrom[AlgorithmIdentifier] = new CanGenerateHashFrom[AlgorithmIdentifier] {
