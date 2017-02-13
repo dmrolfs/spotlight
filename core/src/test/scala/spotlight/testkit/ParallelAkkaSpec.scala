@@ -2,27 +2,25 @@ package spotlight.testkit
 
 import java.util.concurrent.atomic.AtomicInteger
 
-import scala.concurrent.{Await, Future}
+import scala.concurrent.{ Await, Future }
 import scala.concurrent.duration._
 import akka.actor.ActorSystem
 import akka.dispatch.Dispatchers
-import akka.event.{Logging, LoggingAdapter}
+import akka.event.{ Logging, LoggingAdapter }
 import akka.testkit.TestEvent.Mute
-import akka.testkit.{DeadLettersFilter, TestKit}
+import akka.testkit.{ DeadLettersFilter, TestKit }
 import com.persist.logging._
 
-import scalaz.{-\/, \/, \/-}
-import com.typesafe.config.{Config, ConfigFactory}
-import com.typesafe.scalalogging.{LazyLogging, StrictLogging}
+import scalaz.{ -\/, \/, \/- }
+import com.typesafe.config.{ Config, ConfigFactory }
+import com.typesafe.scalalogging.{ LazyLogging, StrictLogging }
 import demesne.testkit.concurrent.CountDownFunction
-import org.scalatest.{MustMatchers, Outcome, ParallelTestExecution, Tag, fixture}
+import org.scalatest.{ MustMatchers, Outcome, ParallelTestExecution, Tag, fixture }
 import peds.commons.log.Trace
 import peds.commons.util._
 
-
-/**
- * Created by rolfsd on 10/28/15.
- */
+/** Created by rolfsd on 10/28/15.
+  */
 object ParallelAkkaSpec extends LazyLogging {
   val testPosition: AtomicInteger = new AtomicInteger()
 
@@ -99,13 +97,12 @@ object ParallelAkkaSpec extends LazyLogging {
     )
   }
 
-
   def getCallerName( clazz: Class[_] ): String = {
-    val s = (Thread.currentThread.getStackTrace map (_.getClassName) drop 1)
-            .dropWhile( _ matches "(java.lang.Thread|.*AkkaSpec.?$)" )
+    val s = ( Thread.currentThread.getStackTrace map ( _.getClassName ) drop 1 )
+      .dropWhile( _ matches "(java.lang.Thread|.*AkkaSpec.?$)" )
     val reduced = s.lastIndexWhere( _ == clazz.getName ) match {
       case -1 ⇒ s
-      case z  ⇒ s drop (z + 1)
+      case z ⇒ s drop ( z + 1 )
     }
     reduced.head.replaceFirst( """.*\.""", "" ).replaceAll( "[^a-zA-Z_0-9]", "_" )
   }
@@ -113,17 +110,17 @@ object ParallelAkkaSpec extends LazyLogging {
 }
 
 trait ParallelAkkaSpec
-extends fixture.WordSpec
-with MustMatchers
-with ParallelTestExecution
-with StrictLogging {
-  outer =>
+    extends fixture.WordSpec
+    with MustMatchers
+    with ParallelTestExecution
+    with StrictLogging {
+  outer ⇒
 
   val trace = Trace( getClass.safeSimpleName )
 
   object WIP extends Tag( "wip" )
 
-//  def makeSystem( name: String, config: Config ): ActorSystem = ActorSystem( name, config )
+  //  def makeSystem( name: String, config: Config ): ActorSystem = ActorSystem( name, config )
 
   type Fixture <: AkkaFixture
   type FixtureParam = Fixture
@@ -132,7 +129,6 @@ with StrictLogging {
   def testConfiguration( test: OneArgTest, slug: String ): Config = ParallelAkkaSpec.testConf( systemName = slug )
   def testSystem( test: OneArgTest, config: Config, slug: String ): ActorSystem = ActorSystem( name = slug, config )
   def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture
-
 
   class AkkaFixture( val config: Config, _system: ActorSystem, val slug: String ) extends TestKit( _system ) {
     var loggingSystem: LoggingSystem = _
@@ -145,17 +141,17 @@ with StrictLogging {
       logger.warn( "... done waiting for logging system " )
     }
 
-    def after( test: OneArgTest ): Unit = { }
+    def after( test: OneArgTest ): Unit = {}
 
     val log: LoggingAdapter = Logging( system, outer.getClass )
 
-    def spawn( dispatcherId: String = Dispatchers.DefaultDispatcherId )( body: => Unit ): Unit = {
-      Future( body )( system.dispatchers.lookup(dispatcherId) )
+    def spawn( dispatcherId: String = Dispatchers.DefaultDispatcherId )( body: ⇒ Unit ): Unit = {
+      Future( body )( system.dispatchers.lookup( dispatcherId ) )
     }
 
     def muteDeadLetters( messageClasses: Class[_]* )( sys: ActorSystem = system ): Unit = {
       if ( !sys.log.isDebugEnabled ) {
-        def mute( clazz: Class[_] ): Unit = sys.eventStream.publish( Mute(DeadLettersFilter(clazz)(occurrences = Int.MaxValue)) )
+        def mute( clazz: Class[_] ): Unit = sys.eventStream.publish( Mute( DeadLettersFilter( clazz )( occurrences = Int.MaxValue ) ) )
 
         if ( messageClasses.isEmpty ) mute( classOf[AnyRef] )
         else messageClasses foreach mute
@@ -170,29 +166,30 @@ with StrictLogging {
 
     val fixture = \/ fromTryCatchNonFatal { createAkkaFixture( test, config, system, slug ) }
 
-    val results = fixture map { f =>
+    val results = fixture map { f ⇒
       logger.debug( ".......... before test .........." )
       f before test
       logger.debug( "++++++++++ starting test ++++++++++" )
-      ( test(f), f )
+      ( test( f ), f )
     }
 
-    val outcome = results map { case (outcome, f) =>
-      logger.debug( "---------- finished test ------------" )
-      f after test
-      logger.debug( ".......... after test .........." )
+    val outcome = results map {
+      case ( outcome, f ) ⇒
+        logger.debug( "---------- finished test ------------" )
+        f after test
+        logger.debug( ".......... after test .........." )
 
-      Option(f.system) foreach { s =>
-        val terminated = s.terminate()
-        Await.ready( terminated, 1.second )
-      }
+        Option( f.system ) foreach { s ⇒
+          val terminated = s.terminate()
+          Await.ready( terminated, 1.second )
+        }
 
-      outcome
+        outcome
     }
 
     outcome match {
-      case \/-( o ) => o
-      case -\/( ex ) => {
+      case \/-( o ) ⇒ o
+      case -\/( ex ) ⇒ {
         logger.error( s"test[${test.name}] failed", ex )
         system.terminate()
         throw ex

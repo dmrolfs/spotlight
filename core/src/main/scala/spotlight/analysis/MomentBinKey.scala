@@ -3,16 +3,14 @@ package spotlight.analysis
 import scalaz.Validation
 import peds.commons.Valid
 
-
-/**
-  * Created by rolfsd on 9/21/16.
+/** Created by rolfsd on 9/21/16.
   */
 class MomentBinKey {
   case class MomentBinKey( dayOfWeek: DayOfWeek, hourOfDay: Int ) {
     def id: String = s"${dayOfWeek.label}:${hourOfDay}"
   }
 
-  import org.joda.{ time => joda }
+  import org.joda.{ time ⇒ joda }
 
   sealed trait DayOfWeek {
     def label: String
@@ -20,11 +18,11 @@ class MomentBinKey {
   }
 
   object DayOfWeek {
-    def fromJodaKey( key: Int ): Valid[DayOfWeek] = Validation.fromTryCatchNonFatal{ JodaDays(key) }.toValidationNel
+    def fromJodaKey( key: Int ): Valid[DayOfWeek] = Validation.fromTryCatchNonFatal { JodaDays( key ) }.toValidationNel
 
     val JodaDays: Map[Int, DayOfWeek] = Map(
-                                             Seq( Sunday, Monday, Tuesday, Wednesday, Thursday, Friday, Saturday ).map{ d => d.jodaKey -> d }:_*
-                                           )
+      Seq( Sunday, Monday, Tuesday, Wednesday, Thursday, Friday, Saturday ).map { d ⇒ d.jodaKey → d }: _*
+    )
   }
 
   case object Sunday extends DayOfWeek {

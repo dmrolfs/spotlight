@@ -2,25 +2,24 @@ package spotlight.model
 
 import bloomfilter.CanGenerateHashFrom
 import bloomfilter.CanGenerateHashFrom.CanGenerateHashFromString
-import org.joda.{time => joda}
+import org.joda.{ time ⇒ joda }
 import org.apache.commons.math3.ml.clustering.DoublePoint
 import peds.akka.envelope.WorkId
 
-
 package object timeseries {
-//  type IdentifiedTimeSeries = (TimeSeries, Set[WorkId])
+  //  type IdentifiedTimeSeries = (TimeSeries, Set[WorkId])
 
   type PointA = Array[Double]
-  type PointT = (Double, Double)
+  type PointT = ( Double, Double )
 
   implicit class PointAWrapper( val underlying: PointA ) extends AnyVal {
     def timestamp: Double = toPointT._1
     def dateTime: joda.DateTime = new joda.DateTime( timestamp.toLong )
     def value: Double = toPointT._2
 
-    def toPointT: PointT = ( underlying(0), underlying(1) )
+    def toPointT: PointT = ( underlying( 0 ), underlying( 1 ) )
     def toDoublePoint: DoublePoint = new DoublePoint( underlying )
-    def toDataPoint: DataPoint = DataPoint( timestamp = new joda.DateTime(underlying(0).toLong), value = underlying(1) )
+    def toDataPoint: DataPoint = DataPoint( timestamp = new joda.DateTime( underlying( 0 ).toLong ), value = underlying( 1 ) )
   }
 
   implicit class PointTWrapper( val underlying: PointT ) extends AnyVal {
@@ -30,7 +29,7 @@ package object timeseries {
 
     def toPointA: PointA = Array( underlying._1, underlying._2 )
     def toDoublePoint: DoublePoint = new DoublePoint( toPointA )
-    def toDataPoint: DataPoint = DataPoint( timestamp = new joda.DateTime(underlying._1.toLong), value = underlying._2 )
+    def toDataPoint: DataPoint = DataPoint( timestamp = new joda.DateTime( underlying._1.toLong ), value = underlying._2 )
   }
 
   implicit class DoublePointWrapper( val underlying: DoublePoint ) extends AnyVal {
@@ -45,7 +44,7 @@ package object timeseries {
     }
     def toDataPoint: DataPoint = {
       val Array( ts, v ) = underlying.getPoint
-      DataPoint( timestamp = new joda.DateTime(ts.toLong), value = v )
+      DataPoint( timestamp = new joda.DateTime( ts.toLong ), value = v )
     }
   }
 
@@ -67,7 +66,6 @@ package object timeseries {
     def toDataPoints: Seq[DataPoint] = underlying map { _.toDataPoint }
   }
 
-
   implicit def pointa2pointt( pt: PointA ): PointT = pt.toPointT
   implicit def pointa2doublepoint( pt: PointA ): DoublePoint = pt.toDoublePoint
   implicit def pointt2pointa( pt: PointT ): PointA = pt.toPointA
@@ -82,9 +80,7 @@ package object timeseries {
   implicit def doublepoints2pointas( dps: Seq[DoublePoint] ): Seq[PointA] = dps map { doublepoint2pointa }
   implicit def doublepoints2pointts( dps: Seq[DoublePoint] ): Seq[PointT] = dps map { doublepoint2pointt }
 
-
   type Matrix[T] = IndexedSeq[IndexedSeq[T]]
-
 
   case class Topic( name: String ) {
 
@@ -92,7 +88,6 @@ package object timeseries {
 
     override def toString: String = name
   }
-
 
   object Topic {
     implicit object CanGenerateTopicHash extends CanGenerateHashFrom[Topic] {
@@ -104,24 +99,22 @@ package object timeseries {
     def findAncestor( topics: Topic* ): Topic = {
       def trim( topic: String ): String = {
         val Delim = """[._+\:\-\/\\]+""".r
-        Delim.findPrefixOf( topic.reverse ) map { t => topic.slice( 0, topic.length - t.length ) } getOrElse topic
+        Delim.findPrefixOf( topic.reverse ) map { t ⇒ topic.slice( 0, topic.length - t.length ) } getOrElse topic
       }
 
       trim(
         if ( topics.isEmpty ) ""
         else {
           var i = 0
-          topics( 0 ).name.takeWhile( ch => topics.forall( _.name(i) == ch ) && { i += 1; true } ).mkString
+          topics( 0 ).name.takeWhile( ch ⇒ topics.forall( _.name( i ) == ch ) && { i += 1; true } ).mkString
         }
       )
     }
   }
 
-
   implicit class TopicString( val underlying: String ) extends AnyVal {
     def toTopic: Topic = Topic fromString underlying
   }
-
 
   trait TimeSeriesError
 }

@@ -1,28 +1,26 @@
 package spotlight.model.timeseries
 
-import org.joda.{time => joda}
+import org.joda.{ time ⇒ joda }
 
-
-/**
-  * Created by rolfsd on 3/17/16.
+/** Created by rolfsd on 3/17/16.
   */
 object ThresholdBoundary {
   def fromExpectedAndDistance( timestamp: Long, expected: Double, distance: Double ): ThresholdBoundary = {
-    fromExpectedAndDistance( new joda.DateTime(timestamp), expected, distance )
+    fromExpectedAndDistance( new joda.DateTime( timestamp ), expected, distance )
   }
 
   def fromExpectedAndDistance( timestamp: joda.DateTime, expected: Double, distance: Double ): ThresholdBoundary = {
     import scalaz.Unzip
     import scalaz.std.option._
 
-    @inline def optional( v: Double ): Option[Double] = if ( v.isNaN ) None else Some(v)
+    @inline def optional( v: Double ): Option[Double] = if ( v.isNaN ) None else Some( v )
 
     val checked = for {
-      e <- optional( expected )
-      d <- optional( distance )
+      e ← optional( expected )
+      d ← optional( distance )
     } yield ( e - d, e + d )
 
-    val (f, c) = Unzip[Option] unzip checked
+    val ( f, c ) = Unzip[Option] unzip checked
     ThresholdBoundary( timestamp = timestamp, floor = f, expected = optional( expected ), ceiling = c )
   }
 
@@ -34,10 +32,10 @@ object ThresholdBoundary {
 }
 
 case class ThresholdBoundary(
-  timestamp: joda.DateTime,
-  floor: Option[Double] = None,
-  expected: Option[Double] = None,
-  ceiling: Option[Double] = None
+    timestamp: joda.DateTime,
+    floor: Option[Double] = None,
+    expected: Option[Double] = None,
+    ceiling: Option[Double] = None
 ) {
   def isOutlier( value: Double ): Boolean = !contains( value )
   def contains( value: Double ): Boolean = {

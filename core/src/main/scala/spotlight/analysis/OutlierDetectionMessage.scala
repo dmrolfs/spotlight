@@ -2,20 +2,18 @@ package spotlight.analysis
 
 import scala.reflect.ClassTag
 import akka.actor.ActorRef
-import scalaz.{Scalaz, Validation}
+import scalaz.{ Scalaz, Validation }
 import Scalaz._
-import com.typesafe.config.{Config, ConfigFactory}
+import com.typesafe.config.{ Config, ConfigFactory }
 import peds.commons.Valid
 import peds.commons.identifier.TaggedID
 import demesne.CommandLike
 import peds.akka.envelope.WorkId
-import spotlight.model.outlier.{CorrelatedSeries, AnalysisPlan}
-import spotlight.model.timeseries.{TimeSeries, TimeSeriesBase, Topic}
+import spotlight.model.outlier.{ CorrelatedSeries, AnalysisPlan }
+import spotlight.model.timeseries.{ TimeSeries, TimeSeriesBase, Topic }
 import spotlight.model.outlier.AnalysisPlan.Scope
 
-
-/**
-  * Created by rolfsd on 9/21/16.
+/** Created by rolfsd on 9/21/16.
   */
 sealed trait OutlierDetectionMessage extends CommandLike {
   override type ID = Any // AnalysisPlanModule.module.ID
@@ -29,7 +27,7 @@ sealed trait OutlierDetectionMessage extends CommandLike {
   def subscriber: Option[ActorRef] = None
   def correlationIds: Set[WorkId]
   lazy val scope: AnalysisPlan.Scope = AnalysisPlan.Scope( plan, topic )
-//  def message: CorrelatedSeries
+  //  def message: CorrelatedSeries
 }
 
 object OutlierDetectionMessage {
@@ -39,22 +37,21 @@ object OutlierDetectionMessage {
     subscriber: Option[ActorRef] = None,
     correlationIds: Set[WorkId] = Set.empty[WorkId]
   ): Valid[OutlierDetectionMessage] = {
-    checkPlan( plan, ts ) map { p => DetectOutliersInSeries( ts, p, subscriber, correlationIds ) }
+    checkPlan( plan, ts ) map { p ⇒ DetectOutliersInSeries( ts, p, subscriber, correlationIds ) }
   }
 
-  def unapply( m: OutlierDetectionMessage ): Option[(AnalysisPlan, Topic, m.Source)] = Some( (m.plan, m.topic, m.source) )
+  def unapply( m: OutlierDetectionMessage ): Option[( AnalysisPlan, Topic, m.Source )] = Some( ( m.plan, m.topic, m.source ) )
 
   def checkPlan( plan: AnalysisPlan, ts: TimeSeriesBase ): Valid[AnalysisPlan] = {
     if ( plan appliesTo ts ) plan.successNel else Validation.failureNel( PlanMismatchError( plan, ts ) )
   }
 }
 
-
-final case class DetectOutliersInSeries private[analysis](
-  override val source: TimeSeries,
-  override val plan: AnalysisPlan,
-  override val subscriber: Option[ActorRef],
-  override val correlationIds: Set[WorkId]
+final case class DetectOutliersInSeries private[analysis] (
+    override val source: TimeSeries,
+    override val plan: AnalysisPlan,
+    override val subscriber: Option[ActorRef],
+    override val correlationIds: Set[WorkId]
 ) extends OutlierDetectionMessage {
   override def targetId: TID = plan.id
   override def topic: Topic = source.topic
@@ -62,13 +59,12 @@ final case class DetectOutliersInSeries private[analysis](
   override def evSource: ClassTag[TimeSeries] = ClassTag( classOf[TimeSeries] )
 }
 
-
-final case class DetectUsing private[analysis](
-  override val targetId: DetectUsing#TID,
-  algorithm: String,
-  payload: OutlierDetectionMessage,
-  @deprecated("???replace with RecentHistory or remove or ???", "20161004") history: HistoricalStatistics,
-  properties: Config = ConfigFactory.empty()
+final case class DetectUsing private[analysis] (
+    override val targetId: DetectUsing#TID,
+    algorithm: String,
+    payload: OutlierDetectionMessage,
+    @deprecated( "???replace with RecentHistory or remove or ???", "20161004" ) history: HistoricalStatistics,
+    properties: Config = ConfigFactory.empty()
 ) extends OutlierDetectionMessage {
   override def topic: Topic = payload.topic
   override type Source = payload.Source
@@ -83,10 +79,9 @@ final case class DetectUsing private[analysis](
   override def toString: String = s"DetectUsing(algorithm:[${algorithm}] payload:[${payload}] properties:[${properties}])"
 }
 
-
-final case class UnrecognizedPayload private[analysis](
-  algorithm: String,
-  request: DetectUsing
+final case class UnrecognizedPayload private[analysis] (
+    algorithm: String,
+    request: DetectUsing
 ) extends OutlierDetectionMessage {
   override def targetId: TID = plan.id
   override def topic: Topic = request.topic

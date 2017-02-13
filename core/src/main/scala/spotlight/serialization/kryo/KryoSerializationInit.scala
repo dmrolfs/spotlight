@@ -1,12 +1,10 @@
 package spotlight.serialization.kryo
 
 import com.esotericsoftware.kryo.Kryo
-import org.joda.{time => joda}
-import de.javakaffee.kryoserializers.jodatime.{JodaDateTimeSerializer, JodaLocalDateSerializer, JodaLocalDateTimeSerializer}
+import org.joda.{ time ⇒ joda }
+import de.javakaffee.kryoserializers.jodatime.{ JodaDateTimeSerializer, JodaLocalDateSerializer, JodaLocalDateTimeSerializer }
 
-
-/**
-  * Created by rolfsd on 11/1/16.
+/** Created by rolfsd on 11/1/16.
   */
 class KryoSerializationInit {
   def customize( kryo: Kryo ): Unit = {
@@ -15,6 +13,6 @@ class KryoSerializationInit {
     kryo.addDefaultSerializer( classOf[joda.LocalDateTime], classOf[JodaLocalDateTimeSerializer] )
 
     kryo.addDefaultSerializer( classOf[com.typesafe.config.Config], classOf[KryoConfigSerializer] )
-    kryo.addDefaultSerializer( Class.forName("com.typesafe.config.impl.SimpleConfig"), classOf[KryoConfigSerializer] )
+    kryo.addDefaultSerializer( Class.forName( "com.typesafe.config.impl.SimpleConfig" ), classOf[KryoConfigSerializer] )
   }
 }

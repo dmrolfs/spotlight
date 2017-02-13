@@ -1,23 +1,20 @@
 package spotlight
 
-import java.net.{InetAddress, InetSocketAddress}
+import java.net.{ InetAddress, InetSocketAddress }
 import scala.concurrent.duration._
 import scala.util.matching.Regex
 import scalaz.Scalaz._
 import scalaz._
 import com.typesafe.config._
 import com.typesafe.scalalogging.LazyLogging
-import peds.commons.{V, Valid}
+import peds.commons.{ V, Valid }
 import spotlight.analysis.OutlierDetection
 import spotlight.model.outlier._
 import spotlight.model.timeseries.Topic
-import spotlight.protocol.{GraphiteSerializationProtocol, MessagePackProtocol, PythonPickleProtocol}
-
-
+import spotlight.protocol.{ GraphiteSerializationProtocol, MessagePackProtocol, PythonPickleProtocol }
 
 //todo refactor into base required settings and allow for app-specific extension
-/**
-  * Created by rolfsd on 1/12/16.
+/** Created by rolfsd on 1/12/16.
   */
 trait Settings extends LazyLogging {
   def sourceAddress: InetSocketAddress
@@ -45,9 +42,9 @@ trait Settings extends LazyLogging {
          |   cluster-port: ${clusterPort}
          |   max-frame-length: ${maxFrameLength}
          |   protocol: ${protocol.getClass.getCanonicalName}
-         |   window-duration: ${windowDuration}
-         |   ${graphiteAddress.map{ ga => "graphite-address:\""+ga.toString+"\"" } getOrElse "" }
-         |   detection-budget: ${detectionBudget}
+         |   window-duration: ${windowDuration.toCoarsest}
+         |   ${graphiteAddress.map { ga ⇒ "graphite-address:\"" + ga.toString + "\"" } getOrElse ""}
+         |   detection-budget: ${detectionBudget.toCoarsest}
          |   parallelism-factor: ${parallelismFactor}
          |   parallelism: ${parallelism}
          |   tcp-inbound-buffer-size: ${tcpInboundBufferSize}
@@ -70,9 +67,9 @@ trait Settings extends LazyLogging {
       |\tmax frame size  : ${maxFrameLength}
       |\tprotocol        : ${protocol}
       |\twindow          : ${windowDuration.toCoarsest}
-      |\tdetection budget: ${detectionBudget}
+      |\tdetection budget: ${detectionBudget.toCoarsest}
       |\tAvail Processors: ${Runtime.getRuntime.availableProcessors}
-      |\tplans           : [${plans.zipWithIndex.map{ case (p,i) => f"${i}%2d: ${p}"}.mkString("\n","\n","\n")}]
+      |\tplans           : [${plans.zipWithIndex.map { case ( p, i ) ⇒ f"${i}%2d: ${p}" }.mkString( "\n", "\n", "\n" )}]
     """.stripMargin
   }
 }
@@ -80,17 +77,17 @@ trait Settings extends LazyLogging {
 object Settings extends LazyLogging {
   val SettingsPathRoot = "spotlight.settings."
 
-//  def sourceAddressFrom( c: Config ): Option[InetSocketAddress] = {
-//    val Path = SettingsPathRoot + "source-address"
-//    if ( c hasPath Path ) {
-//      //todo look into InetSocketAddress to reverse string into object
-////      val addr = c getString Path
-////      Some( InetSocketAddress.createUnresolved(addr, 0) )
-//      ???
-//    } else {
-//      None
-//    }
-//  }
+  //  def sourceAddressFrom( c: Config ): Option[InetSocketAddress] = {
+  //    val Path = SettingsPathRoot + "source-address"
+  //    if ( c hasPath Path ) {
+  //      //todo look into InetSocketAddress to reverse string into object
+  ////      val addr = c getString Path
+  ////      Some( InetSocketAddress.createUnresolved(addr, 0) )
+  //      ???
+  //    } else {
+  //      None
+  //    }
+  //  }
 
   def clusterPortFrom( c: Config ): Option[Int] = {
     val Path = SettingsPathRoot + "cluster-port"
@@ -102,15 +99,15 @@ object Settings extends LazyLogging {
     if ( c hasPath Path ) Some( c getInt Path ) else None
   }
 
-//  def protocolFrom( c: Config ): Option[GraphiteSerializationProtocol] = {
-//    val Path = SettingsPathRoot + "protocol"
-//    //todo use reflection to load and instantiate object from class name
-//    if ( c hasPath Path ) Some( c getInt Path ) else None
-//  }
+  //  def protocolFrom( c: Config ): Option[GraphiteSerializationProtocol] = {
+  //    val Path = SettingsPathRoot + "protocol"
+  //    //todo use reflection to load and instantiate object from class name
+  //    if ( c hasPath Path ) Some( c getInt Path ) else None
+  //  }
 
   def windowDurationFrom( c: Config ): Option[FiniteDuration] = {
     val Path = SettingsPathRoot + "window-duration"
-    if ( c hasPath Path ) Some( FiniteDuration(c.getDuration(Path, NANOSECONDS), NANOSECONDS) ) else None
+    if ( c hasPath Path ) Some( FiniteDuration( c.getDuration( Path, NANOSECONDS ), NANOSECONDS ) ) else None
   }
 
   //  def graphiteAddressFrom( c: Config ): Option[InetSocketAddress] = {
@@ -152,33 +149,32 @@ object Settings extends LazyLogging {
     }
   }
 
-  type Reload = () => V[Settings]
-
+  type Reload = () ⇒ V[Settings]
 
   def reloader(
     args: Array[String]
   )(
-    config: => Config = { ConfigFactory.load }
+    config: ⇒ Config = { ConfigFactory.load }
   )(
-    invalidateCache: () => Unit = () => { ConfigFactory.invalidateCaches() }
+    invalidateCache: () ⇒ Unit = () ⇒ { ConfigFactory.invalidateCaches() }
   ): Reload = {
     val usage = checkUsage( args )
 
-    () => {
+    () ⇒ {
       invalidateCache()
       for {
-        u <- usage.disjunction
-        c <- checkConfiguration( config, u ).disjunction
+        u ← usage.disjunction
+        c ← checkConfiguration( config, u ).disjunction
       } yield makeSettings( u, c )
     }
   }
 
-  def apply( args: Array[String], config: => Config = ConfigFactory.load ): Valid[Settings] = {
+  def apply( args: Array[String], config: ⇒ Config = ConfigFactory.load ): Valid[Settings] = {
     import scalaz.Validation.FlatMap._
 
     for {
-      u <- checkUsage( args )
-      c <- checkConfiguration( config, u )
+      u ← checkUsage( args )
+      c ← checkConfiguration( config, u )
     } yield makeSettings( u, c )
   }
 
@@ -186,8 +182,8 @@ object Settings extends LazyLogging {
     val parser = UsageSettings.makeUsageConfig
     logger.info( "Settings args:[{}]", args )
     parser.parse( args, UsageSettings.zero ) match {
-      case Some( settings ) => settings.successNel
-      case None => Validation.failureNel( UsageConfigurationError(parser.usage) )
+      case Some( settings ) ⇒ settings.successNel
+      case None ⇒ Validation.failureNel( UsageConfigurationError( parser.usage ) )
     }
   }
 
@@ -207,50 +203,50 @@ object Settings extends LazyLogging {
 
   private def checkConfiguration( config: Config, usage: UsageSettings ): Valid[Config] = {
     object Req {
-      def withUsageSetting( path: String, setting: Option[_] ): Req = new Req( path, () => { setting.isDefined } )
+      def withUsageSetting( path: String, setting: Option[_] ): Req = new Req( path, () ⇒ { setting.isDefined } )
       def withoutUsageSetting( path: String ): Req = new Req( path, NotDefined )
-      val NotDefined = () => { false }
+      val NotDefined = () ⇒ { false }
 
       def check( r: Req ): Valid[String] = {
-        if ( r.inUsage() || config.hasPath(r.path) ) r.path.successNel
+        if ( r.inUsage() || config.hasPath( r.path ) ) r.path.successNel
         else Validation.failureNel( UsageConfigurationError( s"expected configuration path [${r.path}]" ) )
       }
     }
-    case class Req( path: String, inUsage: () => Boolean )
+    case class Req( path: String, inUsage: () ⇒ Boolean )
 
     val required: List[Req] = List(
       Req.withUsageSetting( Directory.SOURCE_HOST, usage.sourceHost ),
       Req.withUsageSetting( Directory.SOURCE_PORT, usage.sourcePort ),
-//      Req.withoutUsageSetting( Directory.PUBLISH_GRAPHITE_HOST ),
-//      Req.withoutUsageSetting( Directory.PUBLISH_GRAPHITE_PORT ),
+      //      Req.withoutUsageSetting( Directory.PUBLISH_GRAPHITE_HOST ),
+      //      Req.withoutUsageSetting( Directory.PUBLISH_GRAPHITE_PORT ),
       Req.withoutUsageSetting( Directory.DETECTION_BUDGET ),
       Req.withoutUsageSetting( Directory.PLAN_PATH ),
       Req.withoutUsageSetting( Directory.TCP_INBOUND_BUFFER_SIZE ),
       Req.withoutUsageSetting( Directory.WORKFLOW_BUFFER_SIZE )
     )
 
-    required.traverseU{ Req.check }.map{ _ => config }
+    required.traverseU { Req.check }.map { _ ⇒ config }
   }
 
   private def makeSettings( usage: UsageSettings, config: Config ): Settings = {
     val sourceHost: InetAddress = usage.sourceHost getOrElse {
-      if ( config.hasPath(Directory.SOURCE_HOST) ) InetAddress.getByName( config.getString(Directory.SOURCE_HOST) )
+      if ( config.hasPath( Directory.SOURCE_HOST ) ) InetAddress.getByName( config.getString( Directory.SOURCE_HOST ) )
       else InetAddress.getLocalHost
     }
 
     val sourcePort = usage.sourcePort getOrElse { config.getInt( Directory.SOURCE_PORT ) }
 
     val maxFrameLength = {
-      if ( config.hasPath(Directory.SOURCE_MAX_FRAME_LENGTH) ) config.getInt( Directory.SOURCE_MAX_FRAME_LENGTH )
+      if ( config.hasPath( Directory.SOURCE_MAX_FRAME_LENGTH ) ) config.getInt( Directory.SOURCE_MAX_FRAME_LENGTH )
       else 4 + scala.math.pow( 2, 20 ).toInt // from graphite documentation
     }
 
     val protocol = {
-      if ( config.hasPath(Directory.SOURCE_PROTOCOL) ) {
-        config.getString(Directory.SOURCE_PROTOCOL).toLowerCase match {
-          case "messagepack" | "message-pack" => MessagePackProtocol
-          case "pickle" => new PythonPickleProtocol
-          case _ => new PythonPickleProtocol
+      if ( config.hasPath( Directory.SOURCE_PROTOCOL ) ) {
+        config.getString( Directory.SOURCE_PROTOCOL ).toLowerCase match {
+          case "messagepack" | "message-pack" ⇒ MessagePackProtocol
+          case "pickle" ⇒ new PythonPickleProtocol
+          case _ ⇒ new PythonPickleProtocol
         }
       } else {
         new PythonPickleProtocol
@@ -258,21 +254,21 @@ object Settings extends LazyLogging {
     }
 
     val windowSize = usage.windowSize getOrElse {
-      if ( config.hasPath(Directory.SOURCE_WINDOW_SIZE) ) {
+      if ( config.hasPath( Directory.SOURCE_WINDOW_SIZE ) ) {
         FiniteDuration( config.getDuration( Directory.SOURCE_WINDOW_SIZE ).toNanos, NANOSECONDS )
       } else {
         2.minutes
       }
     }
 
-    val graphiteHost = if ( config.hasPath(Directory.PUBLISH_GRAPHITE_HOST) ) {
-      Some( InetAddress.getByName(config.getString(Directory.PUBLISH_GRAPHITE_HOST)) )
+    val graphiteHost = if ( config.hasPath( Directory.PUBLISH_GRAPHITE_HOST ) ) {
+      Some( InetAddress.getByName( config.getString( Directory.PUBLISH_GRAPHITE_HOST ) ) )
     } else {
       None
     }
 
-    val graphitePort = if ( config.hasPath(Directory.PUBLISH_GRAPHITE_PORT) ) {
-      Some( config.getInt(Directory.PUBLISH_GRAPHITE_PORT) )
+    val graphitePort = if ( config.hasPath( Directory.PUBLISH_GRAPHITE_PORT ) ) {
+      Some( config.getInt( Directory.PUBLISH_GRAPHITE_PORT ) )
     } else {
       Some( 2004 )
     }
@@ -283,11 +279,11 @@ object Settings extends LazyLogging {
       protocol = protocol,
       windowDuration = windowSize,
       graphiteAddress = {
-        for {
-          h <- graphiteHost
-          p <- graphitePort
-        } yield new InetSocketAddress( h, p )
-      },
+      for {
+        h ← graphiteHost
+        p ← graphitePort
+      } yield new InetSocketAddress( h, p )
+    },
       config = ConfigFactory.parseString( SimpleSettings.AkkaRemotePortPath + "=" + usage.clusterPort ).withFallback( config ),
       args = usage.args
     )
@@ -305,19 +301,18 @@ object Settings extends LazyLogging {
     }
   }
 
-
   object SimpleSettings {
     val AkkaRemotePortPath = "akka.remote.netty.tcp.port"
   }
 
-  final case class SimpleSettings private[Settings](
-    override val sourceAddress: InetSocketAddress,
-    override val maxFrameLength: Int,
-    override val protocol: GraphiteSerializationProtocol,
-    override val windowDuration: FiniteDuration,
-    override val graphiteAddress: Option[InetSocketAddress],
-    override val config: Config,
-    override val args: Seq[String]
+  final case class SimpleSettings private[Settings] (
+      override val sourceAddress: InetSocketAddress,
+      override val maxFrameLength: Int,
+      override val protocol: GraphiteSerializationProtocol,
+      override val windowDuration: FiniteDuration,
+      override val graphiteAddress: Option[InetSocketAddress],
+      override val config: Config,
+      override val args: Seq[String]
   ) extends Settings with LazyLogging {
     override def clusterPort: Int = config.getInt( SimpleSettings.AkkaRemotePortPath )
 
@@ -335,9 +330,9 @@ object Settings extends LazyLogging {
 
   }
 
-  case class UsageConfigurationError private[Settings]( usage: String ) extends IllegalArgumentException( usage )
+  case class UsageConfigurationError private[Settings] ( usage: String ) extends IllegalArgumentException( usage )
 
-  final case class UsageSettings private[Settings](
+  final case class UsageSettings private[Settings] (
     clusterPort: Int = 2552,
     sourceHost: Option[InetAddress] = None,
     sourcePort: Option[Int] = None,
@@ -350,27 +345,27 @@ object Settings extends LazyLogging {
 
     def makeUsageConfig = new scopt.OptionParser[UsageSettings]( "spotlight" ) {
       //todo remove once release is current with corresponding dev
-      implicit val inetAddressRead: scopt.Read[InetAddress] = scopt.Read.reads { InetAddress.getByName(_) }
+      implicit val inetAddressRead: scopt.Read[InetAddress] = scopt.Read.reads { InetAddress.getByName( _ ) }
 
       head( "spotlight", "0.1.a" )
 
-      opt[InetAddress]( 'h', "host" ) action { (e, c) =>
-        c.copy( sourceHost = Some(e) )
-      } text( "connection address to source" )
+      opt[InetAddress]( 'h', "host" ) action { ( e, c ) ⇒
+        c.copy( sourceHost = Some( e ) )
+      } text ( "connection address to source" )
 
-      opt[Int]( 'p', "port" ) action { (e, c) =>
-        c.copy( sourcePort = Some(e) )
-      } text( "connection port of source server")
+      opt[Int]( 'p', "port" ) action { ( e, c ) ⇒
+        c.copy( sourcePort = Some( e ) )
+      } text ( "connection port of source server" )
 
-      opt[Int]( 'c', "cluster-port" ) action { (e, c) =>
+      opt[Int]( 'c', "cluster-port" ) action { ( e, c ) ⇒
         c.copy( clusterPort = e )
       }
 
-      opt[Long]( 'w', "window" ) action { (e, c) =>
-        c.copy( windowSize = Some(FiniteDuration(e, SECONDS)) )
-      } text( "batch window size (in seconds) for collecting time series data. Default = 60s." )
+      opt[Long]( 'w', "window" ) action { ( e, c ) ⇒
+        c.copy( windowSize = Some( FiniteDuration( e, SECONDS ) ) )
+      } text ( "batch window size (in seconds) for collecting time series data. Default = 60s." )
 
-      arg[String]( "<arg>..." ).unbounded().optional().action { (a, c) => c.copy( args = c.args :+ a )}
+      arg[String]( "<arg>..." ).unbounded().optional().action { ( a, c ) ⇒ c.copy( args = c.args :+ a ) }
 
       help( "help" )
 
@@ -393,7 +388,6 @@ object Settings extends LazyLogging {
     }
   }
 
-
   object PlanFactory {
     def makePlans( planSpecifications: Config, detectionBudget: Duration ): Set[AnalysisPlan] = {
       import scala.collection.JavaConversions._
@@ -401,100 +395,100 @@ object Settings extends LazyLogging {
       logger.debug( "#TEST settings.makePlans with budget:[{}] specs:[\n{}\n]", detectionBudget, planSpecifications )
       val result = {
         planSpecifications
-        .root
-        .collect { case (n, s: ConfigObject) => (n, s.toConfig) }
-        .toSeq
-        .map {
-          case (name, spec) => {
-            logger.info(
-              "Settings making plan from specification[origin:{} @ {}]: [{}]",
-              spec.origin(), spec.origin().lineNumber().toString, spec
-            )
+          .root
+          .collect { case ( n, s: ConfigObject ) ⇒ ( n, s.toConfig ) }
+          .toSeq
+          .map {
+            case ( name, spec ) ⇒ {
+              logger.info(
+                "Settings making plan from specification[origin:{} @ {}]: [{}]",
+                spec.origin(), spec.origin().lineNumber().toString, spec
+              )
 
-            val IS_DEFAULT = "is-default"
-            val TOPICS = "topics"
-            val REGEX = "regex"
+              val IS_DEFAULT = "is-default"
+              val TOPICS = "topics"
+              val REGEX = "regex"
 
-            val grouping: Option[AnalysisPlan.Grouping] = {
-              val GROUP_LIMIT = "group.limit"
-              val GROUP_WITHIN = "group.within"
-              val limit = if ( spec hasPath GROUP_LIMIT ) spec getInt GROUP_LIMIT else 10000
-              logger.info( "CONFIGURATION spec: [{}]", spec )
-              val window = if ( spec hasPath GROUP_WITHIN ) {
-                Some( FiniteDuration( spec.getDuration( GROUP_WITHIN ).toNanos, NANOSECONDS ) )
+              val grouping: Option[AnalysisPlan.Grouping] = {
+                val GROUP_LIMIT = "group.limit"
+                val GROUP_WITHIN = "group.within"
+                val limit = if ( spec hasPath GROUP_LIMIT ) spec getInt GROUP_LIMIT else 10000
+                logger.info( "CONFIGURATION spec: [{}]", spec )
+                val window = if ( spec hasPath GROUP_WITHIN ) {
+                  Some( FiniteDuration( spec.getDuration( GROUP_WITHIN ).toNanos, NANOSECONDS ) )
+                } else {
+                  None
+                }
+
+                window map { w ⇒ AnalysisPlan.Grouping( limit, w ) }
+              }
+
+              //todo: add configuration for at-least and majority
+              val ( timeout, algorithms ) = pullCommonPlanFacets( spec, detectionBudget )
+
+              if ( spec.hasPath( IS_DEFAULT ) && spec.getBoolean( IS_DEFAULT ) ) {
+                logger info s"topic[$name] default plan origin: ${spec.origin} line:${spec.origin.lineNumber}"
+                Some(
+                  AnalysisPlan.default(
+                    name = name,
+                    timeout = timeout,
+                    isQuorum = makeIsQuorum( spec, algorithms.size ),
+                    reduce = makeOutlierReducer( spec ),
+                    algorithms = algorithms,
+                    grouping = grouping,
+                    planSpecification = spec
+                  )
+                )
+              } else if ( spec hasPath TOPICS ) {
+                import scala.collection.JavaConverters._
+                logger info s"topic[$name] topic plan origin: ${spec.origin} line:${spec.origin.lineNumber}"
+
+                Some(
+                  AnalysisPlan.forTopics(
+                    name = name,
+                    timeout = timeout,
+                    isQuorum = makeIsQuorum( spec, algorithms.size ),
+                    reduce = makeOutlierReducer( spec ),
+                    algorithms = algorithms,
+                    grouping = grouping,
+                    planSpecification = spec,
+                    extractTopic = OutlierDetection.extractOutlierDetectionTopic,
+                    topics = spec.getStringList( TOPICS ).asScala.map { Topic( _ ) }.toSet
+                  )
+                )
+              } else if ( spec hasPath REGEX ) {
+                logger info s"topic[$name] regex plan origin: ${spec.origin} line:${spec.origin.lineNumber}"
+                Some(
+                  AnalysisPlan.forRegex(
+                    name = name,
+                    timeout = timeout,
+                    isQuorum = makeIsQuorum( spec, algorithms.size ),
+                    reduce = makeOutlierReducer( spec ),
+                    algorithms = algorithms,
+                    grouping = grouping,
+                    planSpecification = spec,
+                    extractTopic = OutlierDetection.extractOutlierDetectionTopic,
+                    regex = new Regex( spec.getString( REGEX ) )
+                  )
+                )
               } else {
                 None
               }
-
-              window map { w => AnalysisPlan.Grouping( limit, w ) }
-            }
-
-            //todo: add configuration for at-least and majority
-            val ( timeout, algorithms ) = pullCommonPlanFacets( spec, detectionBudget )
-
-            if ( spec.hasPath(IS_DEFAULT) && spec.getBoolean(IS_DEFAULT) ) {
-              logger info s"topic[$name] default plan origin: ${spec.origin} line:${spec.origin.lineNumber}"
-              Some(
-                AnalysisPlan.default(
-                  name = name,
-                  timeout = timeout,
-                  isQuorum = makeIsQuorum( spec, algorithms.size ),
-                  reduce = makeOutlierReducer( spec ),
-                  algorithms = algorithms,
-                  grouping = grouping,
-                  planSpecification = spec
-                )
-              )
-            } else if ( spec hasPath TOPICS ) {
-              import scala.collection.JavaConverters._
-              logger info s"topic[$name] topic plan origin: ${spec.origin} line:${spec.origin.lineNumber}"
-
-              Some(
-                AnalysisPlan.forTopics(
-                  name = name,
-                  timeout = timeout,
-                  isQuorum = makeIsQuorum( spec, algorithms.size ),
-                  reduce = makeOutlierReducer( spec ),
-                  algorithms = algorithms,
-                  grouping = grouping,
-                  planSpecification = spec,
-                  extractTopic = OutlierDetection.extractOutlierDetectionTopic,
-                  topics = spec.getStringList(TOPICS).asScala.map{ Topic(_) }.toSet
-                )
-              )
-            } else if ( spec hasPath REGEX ) {
-              logger info s"topic[$name] regex plan origin: ${spec.origin} line:${spec.origin.lineNumber}"
-              Some(
-                AnalysisPlan.forRegex(
-                  name = name,
-                  timeout = timeout,
-                  isQuorum = makeIsQuorum( spec, algorithms.size ),
-                  reduce = makeOutlierReducer( spec ),
-                  algorithms = algorithms,
-                  grouping = grouping,
-                  planSpecification = spec,
-                  extractTopic = OutlierDetection.extractOutlierDetectionTopic,
-                  regex = new Regex( spec.getString(REGEX) )
-                )
-              )
-            } else {
-              None
             }
           }
-        }
       }
 
       logger.debug( "#TEST settings.factor.makePlans: [{}]", result.mkString( "\n", "\n", "\n" ) )
       result.flatten.toSet
     }
 
-    private def pullCommonPlanFacets( spec: Config, detectionBudget: Duration ): (Duration, Set[String]) = {
+    private def pullCommonPlanFacets( spec: Config, detectionBudget: Duration ): ( Duration, Set[String] ) = {
       import scala.collection.JavaConversions._
 
       def effectiveBudget( budget: Duration, utilization: Double ): Duration = {
         budget match {
-          case b if b.isFinite() => utilization * b
-          case b => b
+          case b if b.isFinite() ⇒ utilization * b
+          case b ⇒ b
         }
       }
 
@@ -514,10 +508,9 @@ object Settings extends LazyLogging {
         IsQuorum.AtLeastQuorumSpecification( totalIssued = algorithmSize, triggerPoint = trigger )
       } else {
         val trigger = if ( spec hasPath MAJORITY ) spec.getDouble( MAJORITY ) else 50D
-        IsQuorum.MajorityQuorumSpecification( totalIssued = algorithmSize, triggerPoint = ( trigger / 100D) )
+        IsQuorum.MajorityQuorumSpecification( totalIssued = algorithmSize, triggerPoint = ( trigger / 100D ) )
       }
     }
   }
 }
-
 

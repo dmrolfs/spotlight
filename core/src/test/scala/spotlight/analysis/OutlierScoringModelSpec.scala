@@ -5,42 +5,39 @@ import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicInteger
 
 import scala.concurrent.duration._
-import scala.concurrent.{Await, Future}
+import scala.concurrent.{ Await, Future }
 import scala.util.Failure
 import akka.actor.ActorSystem
 import akka.pattern.ask
 import akka.stream.scaladsl._
-import akka.stream.testkit.scaladsl.{TestSink, TestSource}
-import akka.stream.{ActorMaterializer, Materializer, OverflowStrategy}
+import akka.stream.testkit.scaladsl.{ TestSink, TestSource }
+import akka.stream.{ ActorMaterializer, Materializer, OverflowStrategy }
 import akka.testkit._
 import akka.util.ByteString
-import akka.{NotUsed, pattern}
-import com.github.nscala_time.time.Imports.{richDateTime, richSDuration}
-import com.typesafe.config.{Config, ConfigFactory, ConfigOrigin}
-import demesne.{AggregateRootType, BoundedContext, DomainModel}
+import akka.{ NotUsed, pattern }
+import com.github.nscala_time.time.Imports.{ richDateTime, richSDuration }
+import com.typesafe.config.{ Config, ConfigFactory, ConfigOrigin }
+import demesne.{ AggregateRootType, BoundedContext, DomainModel }
 import org.apache.commons.math3.random.RandomDataGenerator
-import org.joda.{time => joda}
+import org.joda.{ time ⇒ joda }
 import org.scalatest.Tag
 import org.scalatest.mockito.MockitoSugar
 import org.mockito.Mockito._
 import peds.commons.log.Trace
-import spotlight.analysis.shard.{CellShardModule, LookupShardModule}
-import spotlight.analysis.{AnalysisPlanProtocol => AP}
+import spotlight.analysis.shard.{ CellShardModule, LookupShardModule }
+import spotlight.analysis.{ AnalysisPlanProtocol ⇒ AP }
 import spotlight.analysis.algorithm.statistical.SimpleMovingAverageAlgorithm
 import spotlight.model.outlier._
 import spotlight.model.timeseries.TimeSeriesBase.Merging
-import spotlight.model.timeseries.{DataPoint, TimeSeries}
-import spotlight.protocol.{GraphiteSerializationProtocol, PythonPickleProtocol}
+import spotlight.model.timeseries.{ DataPoint, TimeSeries }
+import spotlight.protocol.{ GraphiteSerializationProtocol, PythonPickleProtocol }
 import spotlight.testkit.ParallelAkkaSpec
-import spotlight.{Settings, Spotlight}
+import spotlight.{ Settings, Spotlight }
 
-
-/**
- * Created by rolfsd on 10/28/15.
- */
+/** Created by rolfsd on 10/28/15.
+  */
 class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
   import OutlierScoringModelSpec._
-
 
   override def testConfiguration( test: OneArgTest, slug: String ): Config = {
     val tc = ConfigFactory.parseString(
@@ -59,13 +56,12 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
         | }
         |}
       """.stripMargin
-                                      )
+    )
     val c = spotlight.testkit.config( systemName = slug )
     import scala.collection.JavaConversions._
-    logger.debug( "Test Config: akka.cluster.seed-nodes=[{}]", c.getStringList("akka.cluster.seed-nodes").mkString(", "))
+    logger.debug( "Test Config: akka.cluster.seed-nodes=[{}]", c.getStringList( "akka.cluster.seed-nodes" ).mkString( ", " ) )
     tc withFallback c
   }
-
 
   override def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture = {
     new Fixture( config, system, slug )
@@ -88,17 +84,17 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
   }
 
   class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends AkkaFixture( _config, _system, _slug ) {
-    fixture =>
+    fixture ⇒
 
-//    logger.debug( "config:: akka.actor.provider=[{}] origin:[{}]", config.getValue("akka.actor.provider"), config.getValue("akka.actor.provider").origin() )
+    //    logger.debug( "config:: akka.actor.provider=[{}] origin:[{}]", config.getValue("akka.actor.provider"), config.getValue("akka.actor.provider").origin() )
 
     implicit val materializer: Materializer = ActorMaterializer()
 
     val settings: Settings = {
-      Settings( Array("-c", "2552"),  _config ).disjunction match {
-        case scalaz.\/-( s ) => s
-        case scalaz.-\/( exs ) => {
-          exs foreach { ex => logger.info( "Setting error: [{}]", ex ) }
+      Settings( Array( "-c", "2552" ), _config ).disjunction match {
+        case scalaz.\/-( s ) ⇒ s
+        case scalaz.-\/( exs ) ⇒ {
+          exs foreach { ex ⇒ logger.info( "Setting error: [{}]", ex ) }
           throw exs.head
         }
       }
@@ -112,14 +108,14 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
 
     //    val configurationReloader = Settings.reloader( Array.empty[String] )()()
 
-//    val algo = SeriesDensityAnalyzer.Algorithm
+    //    val algo = SeriesDensityAnalyzer.Algorithm
     val algo = SimpleMovingAverageAlgorithm.algorithm.label
     val algoRef = TestProbe()
-    val routingTable = Map( algo -> algoRef.ref )
+    val routingTable = Map( algo → algoRef.ref )
 
     val grouping: Option[AnalysisPlan.Grouping] = {
       val window = None
-      window map { w => AnalysisPlan.Grouping( limit = 10000, w ) }
+      window map { w ⇒ AnalysisPlan.Grouping( limit = 10000, w ) }
     }
 
     val plan = AnalysisPlan.default(
@@ -128,7 +124,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
       grouping = grouping,
       timeout = 500.millis,
       isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = 1, triggerPoint = 1 ),
-      reduce = ReduceOutliers.byCorroborationPercentage(50),
+      reduce = ReduceOutliers.byCorroborationPercentage( 50 ),
       planSpecification = ConfigFactory.parseString(
         s"""
           |algorithm-config.${algo}.seedEps: 5.0
@@ -149,8 +145,8 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
       import scala.concurrent.ExecutionContext.Implicits.global
       val bc = {
         for {
-          made <- BoundedContext.make( Symbol(slug), config, rootTypes, startTasks = Set() )
-          started <- made.start()
+          made ← BoundedContext.make( Symbol( slug ), config, rootTypes, startTasks = Set() )
+          started ← made.start()
         } yield started
       }
       Await.result( bc, 5.seconds )
@@ -165,7 +161,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
         grouping = g,
         timeout = 500.millis,
         isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = 1, triggerPoint = 1 ),
-        reduce = ReduceOutliers.byCorroborationPercentage(50),
+        reduce = ReduceOutliers.byCorroborationPercentage( 50 ),
         planSpecification = ConfigFactory.parseString(
           s"""
              |algorithm-config.${algo}.seedEps: 5.0
@@ -179,7 +175,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
   }
 
   object Fixture {
-    case class TickA( topic: String = "[default]", values: Seq[Int] = Seq(TickA.tickId.incrementAndGet()) )
+    case class TickA( topic: String = "[default]", values: Seq[Int] = Seq( TickA.tickId.incrementAndGet() ) )
 
     object TickA {
       val tickId = new AtomicInteger()
@@ -187,12 +183,11 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
     }
   }
 
-
   val NEXT = Tag( "next" )
   val DONE = Tag( "done" )
 
   "GraphiteModel" should {
-    "convert pickle to TimeSeries" in { f: Fixture =>
+    "convert pickle to TimeSeries" in { f: Fixture ⇒
       import f._
       val now = joda.DateTime.now
       val dp = makeDataPoints( points, start = now ).take( 5 )
@@ -201,7 +196,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
       actual mustBe expected
     }
 
-    "flow convert graphite pickle into TimeSeries" in { f: Fixture =>
+    "flow convert graphite pickle into TimeSeries" in { f: Fixture ⇒
       import f._
       val now = joda.DateTime.now
       val dp = makeDataPoints( points, start = now ).take( 5 )
@@ -209,12 +204,12 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
 
       val flowUnderTest = protocol.unmarshalTimeSeriesData
       //      val flowUnderTest = Flow[ByteString].mapConcat( PythonPickleProtocol.toTimeSeries )
-      val future = Source( List(pickledWithDefaultTopic(dp)) ).via( flowUnderTest ).runWith( Sink.head )
+      val future = Source( List( pickledWithDefaultTopic( dp ) ) ).via( flowUnderTest ).runWith( Sink.head )
       val result = Await.result( future, 200.millis.dilated )
       result mustBe expected
     }
 
-    "framed flow convert graphite pickle into TimeSeries" in { f: Fixture =>
+    "framed flow convert graphite pickle into TimeSeries" in { f: Fixture ⇒
       import f._
       val now = joda.DateTime.now
       val dp = makeDataPoints( points, start = now ).take( 5 )
@@ -224,18 +219,18 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
         .via( protocol.framingFlow() )
         .via( protocol.unmarshalTimeSeriesData )
 
-      val future = Source( List(withHeader(pickledWithDefaultTopic(dp))) ).via( flowUnderTest ).runWith( Sink.head )
+      val future = Source( List( withHeader( pickledWithDefaultTopic( dp ) ) ) ).via( flowUnderTest ).runWith( Sink.head )
       val result = Await.result( future, 1.second.dilated )
       result mustBe expected
     }
 
-    "convert pickles from framed ByteStream" in { f: Fixture =>
+    "convert pickles from framed ByteStream" in { f: Fixture ⇒
       import f._
       val now = joda.DateTime.now
       val dp1 = makeDataPoints( points, start = now ).take( 5 )
-      val dp2 = makeDataPoints( pointsA, start = now+7 ).take( 5 )
+      val dp2 = makeDataPoints( pointsA, start = now + 7 ).take( 5 )
 
-//      val expected = TimeSeries.seriesMerging.merge( TimeSeries("foobar", dp1), TimeSeries("foobar", dp2) ).toOption.get
+      //      val expected = TimeSeries.seriesMerging.merge( TimeSeries("foobar", dp1), TimeSeries("foobar", dp2) ).toOption.get
       val expected = TimeSeries( "foobar", dp1 ++ dp2 )
       trace( s"expected = $expected" )
 
@@ -243,15 +238,15 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
         .via( protocol.framingFlow() )
         .via( protocol.unmarshalTimeSeriesData )
 
-      val pickles = withHeader( pickled( Seq(dp1, dp2) map { ("foobar", _) } ) )
+      val pickles = withHeader( pickled( Seq( dp1, dp2 ) map { ( "foobar", _ ) } ) )
       trace( s"pickles = ${pickles.utf8String}" )
       trace( s"byte-pickles = ${pickles}" )
-      val future = Source( List(pickles) ).via( flowUnderTest ).runWith( Sink.head )
+      val future = Source( List( pickles ) ).via( flowUnderTest ).runWith( Sink.head )
       val result = Await.result( future, 1.second.dilated )
       result mustBe expected
     }
 
-    "read sliding window" in { f: Fixture =>
+    "read sliding window" in { f: Fixture ⇒
       import f._
 
       val now = joda.DateTime.now
@@ -261,29 +256,27 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
 
       val expected = Set(
         TimeSeries( "bar", dp2 ),
-        TimeSeries.seriesMerging.merge( TimeSeries("foo", dp1), TimeSeries("foo", dp3) ).toOption.get
+        TimeSeries.seriesMerging.merge( TimeSeries( "foo", dp1 ), TimeSeries( "foo", dp3 ) ).toOption.get
       )
-
 
       val flowUnderTest: Flow[TimeSeries, TimeSeries, NotUsed] = {
         OutlierScoringModel.batchSeriesByWindow( windowSize = 1.second, parallelism = 4 )
       }
 
       val topics = List( "foo", "bar", "foo" )
-      val data: List[TimeSeries] = topics.zip(List(dp1, dp2, dp3)).map{ case (t,p) => TimeSeries(t, p) }
-      trace( s"""data=[${data.mkString(",\n")}]""")
+      val data: List[TimeSeries] = topics.zip( List( dp1, dp2, dp3 ) ).map { case ( t, p ) ⇒ TimeSeries( t, p ) }
+      trace( s"""data=[${data.mkString( ",\n" )}]""" )
 
       val future = Source( data )
-                   .via( flowUnderTest )
-                   .grouped( 10 )
-                   .runWith( Sink.head )
+        .via( flowUnderTest )
+        .grouped( 10 )
+        .runWith( Sink.head )
 
       val result = Await.result( future, 1.second.dilated )
       result.toSet mustBe expected
     }
 
-
-    "batch series by plan passthru without merging with demand" in { f: Fixture =>
+    "batch series by plan passthru without merging with demand" in { f: Fixture ⇒
       import OutlierScoringModelSpec._
       import f._
 
@@ -291,24 +284,24 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
       val p2 = makePlan( "p2", None )
       val myPlans = Set( p1, p2 )
 
-
       val flowUnderTest = {
         Flow[TimeSeries]
-        .map { ts =>
-          myPlans collect { case p if p appliesTo ts =>
-            logger.debug( "plan [{}] applies to ts [{}]", p.name, ts.topic )
-//            (ts, AnalysisPlan.Scope(p, ts.topic))
-            ts
+          .map { ts ⇒
+            myPlans collect {
+              case p if p appliesTo ts ⇒
+                logger.debug( "plan [{}] applies to ts [{}]", p.name, ts.topic )
+                //            (ts, AnalysisPlan.Scope(p, ts.topic))
+                ts
+            }
           }
-        }
-        .mapConcat { identity }
-//        .via( OutlierScoringModel.batchSeriesByPlan(100) )
-        .via( OutlierScoringModel.regulateByTopic(100) )
-        .map { m =>
-          logger.info( "passing message onto plan router: [{}]", m )
-          m
-        }
-        .named( "preFlow" )
+          .mapConcat { identity }
+          //        .via( OutlierScoringModel.batchSeriesByPlan(100) )
+          .via( OutlierScoringModel.regulateByTopic( 100 ) )
+          .map { m ⇒
+            logger.info( "passing message onto plan router: [{}]", m )
+            m
+          }
+          .named( "preFlow" )
       }
 
       val pts1 = makeDataPoints( values = Seq.fill( 9 )( 1.0 ) )
@@ -322,7 +315,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
 
       val data = Seq( ts1, ts2 )
 
-      val (pub, sub) = TestSource.probe[TimeSeries].via( flowUnderTest ).toMat( TestSink.probe[TimeSeries] )( Keep.both ).run()
+      val ( pub, sub ) = TestSource.probe[TimeSeries].via( flowUnderTest ).toMat( TestSink.probe[TimeSeries] )( Keep.both ).run()
 
       val ps = pub.expectSubscription()
       val ss = sub.expectSubscription()
@@ -335,7 +328,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
       sub.expectNext() mustBe ts2
     }
 
-    "batch series by plan with merging if backpressured" in { f: Fixture =>
+    "batch series by plan with merging if backpressured" in { f: Fixture ⇒
       import OutlierScoringModelSpec._
       import f._
 
@@ -343,24 +336,24 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
       val p2 = makePlan( "p2", None )
       val myPlans = Set( p1, p2 )
 
-
       val flowUnderTest = {
         Flow[TimeSeries]
-        .map { ts =>
-          myPlans collect { case p if p appliesTo ts =>
-            logger.debug( "plan [{}] applies to ts [{}]", p.name, ts.topic )
-//            (ts, AnalysisPlan.Scope(p, ts.topic))
-            ts
+          .map { ts ⇒
+            myPlans collect {
+              case p if p appliesTo ts ⇒
+                logger.debug( "plan [{}] applies to ts [{}]", p.name, ts.topic )
+                //            (ts, AnalysisPlan.Scope(p, ts.topic))
+                ts
+            }
           }
-        }
-        .mapConcat { identity }
-//        .via( OutlierScoringModel.batchSeriesByPlan(100) )
-        .via( OutlierScoringModel.regulateByTopic(100) )
-        .map { m =>
-          logger.info( "passing message onto plan router: [{}]", m )
-          m
-        }
-        .named( "preFlow" )
+          .mapConcat { identity }
+          //        .via( OutlierScoringModel.batchSeriesByPlan(100) )
+          .via( OutlierScoringModel.regulateByTopic( 100 ) )
+          .map { m ⇒
+            logger.info( "passing message onto plan router: [{}]", m )
+            m
+          }
+          .named( "preFlow" )
       }
 
       val pts1 = makeDataPoints( values = Seq.fill( 9 )( 1.0 ) )
@@ -374,7 +367,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
 
       val data = Seq( ts1, ts2 )
 
-      val (pub, sub) = TestSource.probe[TimeSeries].via( flowUnderTest ).toMat( TestSink.probe[TimeSeries] )( Keep.both ).run()
+      val ( pub, sub ) = TestSource.probe[TimeSeries].via( flowUnderTest ).toMat( TestSink.probe[TimeSeries] )( Keep.both ).run()
 
       val ps = pub.expectSubscription()
       val ss = sub.expectSubscription()
@@ -386,7 +379,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
       sub.expectNext() mustBe expectedTs
     }
 
-    "detect Outliers" taggedAs WIP in { f: Fixture =>
+    "detect Outliers" taggedAs WIP in { f: Fixture ⇒
       import com.github.nscala_time.time.OrderingImplicits._
       import f._
       import system.dispatcher
@@ -395,7 +388,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
       val algos = Set( algo )
       val grouping: Option[AnalysisPlan.Grouping] = {
         val window = None
-        window map { w => AnalysisPlan.Grouping( limit = 10000, w ) }
+        window map { w ⇒ AnalysisPlan.Grouping( limit = 10000, w ) }
       }
 
       val defaultPlan = AnalysisPlan.default(
@@ -404,11 +397,11 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
         grouping = grouping,
         timeout = 5000.millis,
         isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = algos.size, triggerPoint = 1 ),
-        reduce = ReduceOutliers.byCorroborationPercentage(50),
+        reduce = ReduceOutliers.byCorroborationPercentage( 50 ),
         planSpecification = ConfigFactory.parseString(
           algos
-          .map { a =>
-            s"""
+            .map { a ⇒
+              s"""
                |algorithm-config.${a} {
                |  tolerance: 1.043822701 // eps:0.75
                |  seedEps: 0.75
@@ -416,12 +409,12 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
                |  distance: Mahalanobis // Euclidean
                |}
             """.stripMargin
-          }
-          .mkString( "\n" )
+            }
+            .mkString( "\n" )
         )
       )
 
-      val testSettings = new TestSettingsWithPlans( Set(defaultPlan), settings )
+      val testSettings = new TestSettingsWithPlans( Set( defaultPlan ), settings )
 
       logger.debug( "default plan = [{}]", defaultPlan )
       implicit val timeout = akka.util.Timeout( 5.seconds )
@@ -429,11 +422,11 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
       val catalogRef = Await.result( Spotlight.makeCatalog( testSettings )( boundedContext ), 30.seconds )
       logger.info( "Catalog ref = [{}]", catalogRef )
 
-      import PlanCatalogProtocol.{CatalogFlow, MakeFlow, WaitForStart}
+      import PlanCatalogProtocol.{ CatalogFlow, MakeFlow, WaitForStart }
       val catalogFlow = {
         for {
-          _ <- catalogRef ? WaitForStart
-          CatalogFlow( f ) <- ( catalogRef ? MakeFlow( 2, system, timeout, materializer) ).mapTo[CatalogFlow]
+          _ ← catalogRef ? WaitForStart
+          CatalogFlow( f ) ← ( catalogRef ? MakeFlow( 2, system, timeout, materializer ) ).mapTo[CatalogFlow]
         } yield f
       }
 
@@ -443,36 +436,36 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
       logger.debug( "USE NOW = {}", now )
 
       val dp1 = makeDataPoints( points, start = now, period = 1.seconds )
-//      val dp2 = makeDataPoints( pointsA, start = joda.DateTime.now )
-//      val dp3 = makeDataPoints( pointsB, start = joda.DateTime.now )
+      //      val dp2 = makeDataPoints( pointsA, start = joda.DateTime.now )
+      //      val dp3 = makeDataPoints( pointsB, start = joda.DateTime.now )
 
-      val expectedPoints = Seq( 1, 30 ).map{ dp1.apply }.sortBy{ _.timestamp }
+      val expectedPoints = Seq( 1, 30 ).map { dp1.apply }.sortBy { _.timestamp }
 
       val expected = SeriesOutliers(
         algorithms = algos,
-        source = TimeSeries("foo", dp1),
+        source = TimeSeries( "foo", dp1 ),
         outliers = expectedPoints,
         plan = defaultPlan
       )
-//      val expected = TimeSeries( "foo", (dp1 ++ dp3).sortBy( _.timestamp ) )
+      //      val expected = TimeSeries( "foo", (dp1 ++ dp3).sortBy( _.timestamp ) )
 
-////      val graphiteFlow = OutlierScoringModel.batchSeriesByPlan( max = 1000 )
-//      val graphiteFlow = OutlierScoringModel.regulateByTopic( max = 1000 )
-////      val detectFlow = AnalysisPlanDetectionRouter.flow( planRouter )
-//      val detectFlow = PlanCatalog.flow2( catalogRef )
+      ////      val graphiteFlow = OutlierScoringModel.batchSeriesByPlan( max = 1000 )
+      //      val graphiteFlow = OutlierScoringModel.regulateByTopic( max = 1000 )
+      ////      val detectFlow = AnalysisPlanDetectionRouter.flow( planRouter )
+      //      val detectFlow = PlanCatalog.flow2( catalogRef )
 
-//      val flowUnderTest = {
-//        Flow[TimeSeries]
-////        .map{ ts => (ts, AnalysisPlan.Scope(defaultPlan, ts.topic)) }
-//        .via( graphiteFlow )
-//        .via( detectFlow )
-//      }
+      //      val flowUnderTest = {
+      //        Flow[TimeSeries]
+      ////        .map{ ts => (ts, AnalysisPlan.Scope(defaultPlan, ts.topic)) }
+      //        .via( graphiteFlow )
+      //        .via( detectFlow )
+      //      }
 
-      val (pub, sub) = {
+      val ( pub, sub ) = {
         TestSource.probe[TimeSeries]
-        .via( flowUnderTest )
-        .toMat( TestSink.probe[Outliers] )( Keep.both )
-        .run()
+          .via( flowUnderTest )
+          .toMat( TestSink.probe[Outliers] )( Keep.both )
+          .run()
       }
 
       val ps = pub.expectSubscription()
@@ -481,15 +474,15 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
       ss.request( 1 )
 
       val topics = List( "foo", "bar", "foo" )
-      val data: List[TimeSeries] = topics.zip(List(dp1)).map{ case (t,p) => TimeSeries(t, p) }
+      val data: List[TimeSeries] = topics.zip( List( dp1 ) ).map { case ( t, p ) ⇒ TimeSeries( t, p ) }
 
-      logger.debug( "waiting to start.....")
+      logger.debug( "waiting to start....." )
       Thread.sleep( 1000 )
-      logger.debug( "....starting")
+      logger.debug( "....starting" )
       data foreach { ps.sendNext }
       val actual = sub.expectNext()
       actual.algorithms mustBe expected.algorithms
-      actual mustBe a [SeriesOutliers]
+      actual mustBe a[SeriesOutliers]
       actual.asInstanceOf[SeriesOutliers].outliers mustBe expected.outliers
       actual.anomalySize mustBe expected.anomalySize
       actual.hasAnomalies mustBe expected.hasAnomalies
@@ -499,87 +492,87 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
       actual mustBe expected
     }
 
-    "grouped Example" in { f: Fixture =>
+    "grouped Example" in { f: Fixture ⇒
       import f._
 
       val topics = IndexedSeq( "a", "b", "b", "b", "c" )
 
-      val tickFn = () => {
+      val tickFn = () ⇒ {
         val next = Fixture.TickA.tickId.incrementAndGet()
         val topic = topics( next % topics.size )
-        Fixture.TickA( topic, Seq(next) )
+        Fixture.TickA( topic, Seq( next ) )
       }
 
-//      def conflateFlow[T](): Flow[T, T, Unit] = {
-//        Flow[T]
-//        .conflate( _ => List.empty[T] ){ (l, u) => u :: l }
-//        .mapConcat(identity)
-//      }
+      //      def conflateFlow[T](): Flow[T, T, Unit] = {
+      //        Flow[T]
+      //        .conflate( _ => List.empty[T] ){ (l, u) => u :: l }
+      //        .mapConcat(identity)
+      //      }
 
-      val source = Source.tick( 0.second, 50.millis, tickFn ).map { t => t() }
+      val source = Source.tick( 0.second, 50.millis, tickFn ).map { t ⇒ t() }
 
       val flowUnderTest: Flow[Fixture.TickA, Fixture.TickA, NotUsed] = {
         Flow[Fixture.TickA]
-        .groupedWithin( n = 10000, d = 210.millis )
-        .map {
-          _.groupBy( _.topic )
-          .map {case (topic, es) => es.tail.foldLeft( es.head ) {(acc, e) => Fixture.TickA.merge( acc, e ) } }
-        }
-        .mapConcat { identity }
+          .groupedWithin( n = 10000, d = 210.millis )
+          .map {
+            _.groupBy( _.topic )
+              .map { case ( topic, es ) ⇒ es.tail.foldLeft( es.head ) { ( acc, e ) ⇒ Fixture.TickA.merge( acc, e ) } }
+          }
+          .mapConcat { identity }
       }
 
       val future = {
         source
-        .via( flowUnderTest )
-//        .grouped( 5 )
-        .runWith( Sink.head )
+          .via( flowUnderTest )
+          //        .grouped( 5 )
+          .runWith( Sink.head )
       }
 
       val result = Await.result( future, 5.seconds.dilated )
-      result mustBe Fixture.TickA("b", Seq(1,2,3))
+      result mustBe Fixture.TickA( "b", Seq( 1, 2, 3 ) )
     }
 
-    "ex1" in { f: Fixture =>
+    "ex1" in { f: Fixture ⇒
       import f._
-      val sinkUnderTest = Flow[Int].map{ _ * 2 }.toMat{ Sink.fold( 0 ){ _ + _ } }( Keep.right )
+      val sinkUnderTest = Flow[Int].map { _ * 2 }.toMat { Sink.fold( 0 ) { _ + _ } }( Keep.right )
       val future = Source( 1 to 4 ) runWith sinkUnderTest
       val result = Await.result( future, 2.seconds.dilated )
       result mustBe 20
     }
 
-    "ex2" in { f: Fixture =>
+    "ex2" in { f: Fixture ⇒
       import f._
-      val sourceUnderTest = Source.repeat(1).map(_ * 2)
-      val future = sourceUnderTest.grouped(10).runWith(Sink.head)
+      val sourceUnderTest = Source.repeat( 1 ).map( _ * 2 )
+      val future = sourceUnderTest.grouped( 10 ).runWith( Sink.head )
       val result = Await.result( future, 2.second.dilated )
-      result mustBe Seq.fill(10)(2)
+      result mustBe Seq.fill( 10 )( 2 )
     }
 
-    "ex3" in { f: Fixture =>
+    "ex3" in { f: Fixture ⇒
       import f._
-      val flowUnderTest = Flow[Int].takeWhile(_ < 5)
-      val future = Source( 1 to 10 ).via( flowUnderTest ).runWith( Sink.fold(Seq.empty[Int]){ _ :+ _ } )
+      val flowUnderTest = Flow[Int].takeWhile( _ < 5 )
+      val future = Source( 1 to 10 ).via( flowUnderTest ).runWith( Sink.fold( Seq.empty[Int] ) { _ :+ _ } )
       val result = Await.result( future, 2.seconds.dilated )
-      result mustBe (1 to 4)
+      result mustBe ( 1 to 4 )
     }
 
-    "ex4" in { f: Fixture =>
+    "ex4" in { f: Fixture ⇒
       import akka.pattern.pipe
       import f._
       import f.system.dispatcher
 
-      val sourceUnderTest = Source( 1 to 4 ).grouped(2)
+      val sourceUnderTest = Source( 1 to 4 ).grouped( 2 )
       val probe = TestProbe()
-      sourceUnderTest.grouped(2).runWith(Sink.head).pipeTo(probe.ref)
-      probe.expectMsg( 2.seconds.dilated, Seq(Seq(1,2), Seq(3,4)))
+      sourceUnderTest.grouped( 2 ).runWith( Sink.head ).pipeTo( probe.ref )
+      probe.expectMsg( 2.seconds.dilated, Seq( Seq( 1, 2 ), Seq( 3, 4 ) ) )
     }
 
-    "ex5" in { f: Fixture =>
+    "ex5" in { f: Fixture ⇒
       import f._
       case object Tick
       val sourceUnderTest = Source.tick( 0.seconds, 200.millis, Tick )
       val probe = TestProbe()
-      val cancellable = sourceUnderTest.to( Sink.actorRef(probe.ref, "completed") ).run()
+      val cancellable = sourceUnderTest.to( Sink.actorRef( probe.ref, "completed" ) ).run()
 
       probe.expectMsg( 1.second, Tick )
       probe.expectNoMsg( 175.millis )
@@ -588,31 +581,31 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
       probe.expectMsg( 200.millis.dilated, "completed" )
     }
 
-    "ex6" in { f: Fixture =>
+    "ex6" in { f: Fixture ⇒
       import f._
-      val sinkUnderTest = Flow[Int].map(_.toString).toMat(Sink.fold("")(_ + _))(Keep.right)
-      val (ref, future) = Source.actorRef( 8, OverflowStrategy.fail ).toMat(sinkUnderTest)(Keep.both).run()
+      val sinkUnderTest = Flow[Int].map( _.toString ).toMat( Sink.fold( "" )( _ + _ ) )( Keep.right )
+      val ( ref, future ) = Source.actorRef( 8, OverflowStrategy.fail ).toMat( sinkUnderTest )( Keep.both ).run()
 
       ref ! 1
       ref ! 2
       ref ! 3
-      ref ! akka.actor.Status.Success("done")
+      ref ! akka.actor.Status.Success( "done" )
 
       val result = Await.result( future, 1.second.dilated )
       result mustBe "123"
     }
 
-    "ex7" in { f: Fixture =>
+    "ex7" in { f: Fixture ⇒
       import f._
-      val sourceUnderTest = Source( 1 to 4 ).filter(_ % 2 == 0).map(_ * 2)
+      val sourceUnderTest = Source( 1 to 4 ).filter( _ % 2 == 0 ).map( _ * 2 )
       sourceUnderTest
         .runWith( TestSink.probe[Int] )
-        .request(2)
-        .expectNext(4, 8)
+        .request( 2 )
+        .expectNext( 4, 8 )
         .expectComplete()
     }
 
-    "ex8" in { f: Fixture =>
+    "ex8" in { f: Fixture ⇒
       import f._
       val sinkUnderTest = Sink.cancelled
       TestSource.probe[Int]
@@ -621,23 +614,23 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
         .expectCancellation()
     }
 
-    "ex9" in { f: Fixture =>
+    "ex9" in { f: Fixture ⇒
       import f._
       val sinkUnderTest = Sink.head[Int]
-      val (probe, future) = TestSource.probe[Int].toMat( sinkUnderTest )( Keep.both ).run()
-      probe.sendError( new Exception("BOOM") )
+      val ( probe, future ) = TestSource.probe[Int].toMat( sinkUnderTest )( Keep.both ).run()
+      probe.sendError( new Exception( "BOOM" ) )
       Await.ready( future, 100.millis )
       val Failure( exception ) = future.value.get
       exception.getMessage mustBe "BOOM"
     }
 
-    "ex10" in { f: Fixture =>
+    "ex10" in { f: Fixture ⇒
       pending
-//      akka docs seem to req updating from 1.x
+      //      akka docs seem to req updating from 1.x
       import f._
       import system.dispatcher
-      val flowUnderTest = Flow[Int].mapAsyncUnordered(2) { sleep =>
-        pattern.after( 10.millis * sleep, using = system.scheduler )( Future.successful(sleep) )
+      val flowUnderTest = Flow[Int].mapAsyncUnordered( 2 ) { sleep ⇒
+        pattern.after( 10.millis * sleep, using = system.scheduler )( Future.successful( sleep ) )
       }
 
       val ( pub, sub ) = TestSource.probe[Int]
@@ -651,7 +644,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
       pub.sendNext( 1 )
       sub.expectNextUnordered( 1, 2, 3 )
 
-      pub.sendError( new Exception("Power surge in the linear subroutine C-47!") )
+      pub.sendError( new Exception( "Power surge in the linear subroutine C-47!" ) )
       val ex = sub.expectError
       ex.getMessage.contains( "C-47" ) mustBe true
     }
@@ -669,27 +662,27 @@ object OutlierScoringModelSpec {
     ByteString( result )
   }
 
-  def pickledWithDefaultTopic( dp: Seq[DataPoint] ): ByteString = pickled( Seq(("foobar", dp)) )
+  def pickledWithDefaultTopic( dp: Seq[DataPoint] ): ByteString = pickled( Seq( ( "foobar", dp ) ) )
 
-  def pickled(metrics: Seq[(String, Seq[DataPoint])] ): ByteString = trace.block( s"pickled($metrics)" ) {
+  def pickled( metrics: Seq[( String, Seq[DataPoint] )] ): ByteString = trace.block( s"pickled($metrics)" ) {
     import net.razorvine.pickle.Pickler
 
     val data = new java.util.LinkedList[AnyRef]
     for {
-      metric <- metrics
-      (topic, points) = metric
-      p <- points
+      metric ← metrics
+      ( topic, points ) = metric
+      p ← points
     } {
       val dp: Array[Any] = Array( p.timestamp.getMillis / 1000L, p.value )
       val metric: Array[AnyRef] = Array( topic, dp )
       data add metric
     }
-    trace( s"data = $data")
+    trace( s"data = $data" )
 
     val pickler = new Pickler( false )
     val out = pickler dumps data
 
-    trace( s"""payload[${out.size}] = ${ByteString(out).decodeString("ISO-8859-1")}""" )
+    trace( s"""payload[${out.size}] = ${ByteString( out ).decodeString( "ISO-8859-1" )}""" )
     ByteString( out )
   }
 
@@ -697,7 +690,7 @@ object OutlierScoringModelSpec {
     values: Seq[Double],
     start: joda.DateTime = joda.DateTime.now,
     period: FiniteDuration = 1.second,
-    wiggleFactor: (Double, Double) = (1.0, 1.0)
+    wiggleFactor: ( Double, Double ) = ( 1.0, 1.0 )
   ): Seq[DataPoint] = {
     val secs = start.getMillis / 1000L
     val epochStart = new joda.DateTime( secs * 1000L )
@@ -707,20 +700,19 @@ object OutlierScoringModelSpec {
       else random.nextUniform( wiggleFactor._1, wiggleFactor._2 )
     }
 
-    values.zipWithIndex map { vi =>
-      val (v, i) = vi
-      val adj = (i * nextFactor) * period
+    values.zipWithIndex map { vi ⇒
+      val ( v, i ) = vi
+      val adj = ( i * nextFactor ) * period
       val ts = epochStart + adj.toJodaDuration
       DataPoint( timestamp = ts, value = v )
     }
   }
 
   def spike( data: Seq[DataPoint], value: Double = 1000D )( position: Int = data.size - 1 ): TimeSeries = {
-    val (front, last) = data.sortBy{ _.timestamp.getMillis }.splitAt( position )
+    val ( front, last ) = data.sortBy { _.timestamp.getMillis }.splitAt( position )
     val spiked = ( front :+ last.head.copy( value = value ) ) ++ last.tail
     TimeSeries( "test-series", spiked )
   }
-
 
   val points: Seq[Double] = Seq(
     9.46,
@@ -758,7 +750,6 @@ object OutlierScoringModelSpec {
     24.1,
     39.2
   )
-
 
   val pointsA: Seq[Double] = Seq(
     9.46,

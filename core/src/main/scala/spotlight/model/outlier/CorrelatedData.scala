@@ -4,9 +4,7 @@ import peds.akka.envelope.WorkId
 import shapeless.Lens
 import spotlight.model.outlier.AnalysisPlan.Scope
 
-
-/**
-  * Created by rolfsd on 11/4/16.
+/** Created by rolfsd on 11/4/16.
   */
 trait CorrelatedData[T] {
   def data: T
@@ -18,7 +16,7 @@ trait CorrelatedData[T] {
 }
 
 object CorrelatedData {
-  def unapply( cdata: CorrelatedData[_] ): Option[(Any, Set[WorkId], Option[AnalysisPlan.Scope])] = {
+  def unapply( cdata: CorrelatedData[_] ): Option[( Any, Set[WorkId], Option[AnalysisPlan.Scope] )] = {
     Some( cdata.data, cdata.correlationIds, cdata.scope )
   }
 

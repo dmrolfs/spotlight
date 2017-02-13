@@ -11,13 +11,11 @@ import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import peds.commons.TryV
 import spotlight.analysis.algorithm.AlgorithmModule
 import spotlight.analysis.algorithm.AlgorithmProtocol.Advanced
-import spotlight.analysis.{DetectUsing, RecentHistory}
+import spotlight.analysis.{ DetectUsing, RecentHistory }
 import spotlight.model.timeseries._
 import spotlight.analysis.algorithm.AlgorithmModule.ShapeCompanion
 
-
-/**
-  * Grubbs' test is used to detect a single outlier in a univariate data set that follows an approximately normal distribution.
+/** Grubbs' test is used to detect a single outlier in a univariate data set that follows an approximately normal distribution.
   * This implementation applies Grubbs to each point individually considering its prior neighbors.
   *
   * Created by rolfsd on 10/5/16.
@@ -29,19 +27,19 @@ case class GrubbsShape( movingStatistics: DescriptiveStatistics, sampleSize: Int
     def optionalNaN( d: Double ): Option[Double] = if ( d.isNaN ) None else Some( d )
 
     rhs match {
-      case that: GrubbsShape => {
+      case that: GrubbsShape ⇒ {
         if ( this eq that ) true
         else {
           ( that.## == this.## ) &&
-          ( that canEqual this ) &&
-          ( this.movingStatistics.getN == that.movingStatistics.getN ) &&
-          ( optionalNaN(this.movingStatistics.getMean) == optionalNaN(that.movingStatistics.getMean) ) &&
-          ( optionalNaN(this.movingStatistics.getStandardDeviation) == optionalNaN(that.movingStatistics.getStandardDeviation) ) &&
-          ( this.sampleSize == that.sampleSize )
+            ( that canEqual this ) &&
+            ( this.movingStatistics.getN == that.movingStatistics.getN ) &&
+            ( optionalNaN( this.movingStatistics.getMean ) == optionalNaN( that.movingStatistics.getMean ) ) &&
+            ( optionalNaN( this.movingStatistics.getStandardDeviation ) == optionalNaN( that.movingStatistics.getStandardDeviation ) ) &&
+            ( this.sampleSize == that.sampleSize )
         }
       }
 
-      case _ => false
+      case _ ⇒ false
     }
   }
 
@@ -51,16 +49,16 @@ case class GrubbsShape( movingStatistics: DescriptiveStatistics, sampleSize: Int
         41 * (
           41 + sampleSize.##
         ) + movingStatistics.getN.##
-      )  + movingStatistics.getMean.##
+      ) + movingStatistics.getMean.##
     ) + movingStatistics.getStandardDeviation.##
   }
 
   override def toString: String = {
-    s"${ClassUtils.getAbbreviatedName(getClass, 15)}( " +
-    s"sampleSize:[${sampleSize}] " +
-    s"movingStatistics:[N:${movingStatistics.getN} m:${movingStatistics.getMean} sd:${movingStatistics.getStandardDeviation} " +
-    s"range:[${movingStatistics.getMin} - ${movingStatistics.getMax}]] " +
-    ")"
+    s"${ClassUtils.getAbbreviatedName( getClass, 15 )}( " +
+      s"sampleSize:[${sampleSize}] " +
+      s"movingStatistics:[N:${movingStatistics.getN} m:${movingStatistics.getMean} sd:${movingStatistics.getStandardDeviation} " +
+      s"range:[${movingStatistics.getMin} - ${movingStatistics.getMax}]] " +
+      ")"
   }
 }
 
@@ -68,8 +66,8 @@ object GrubbsShape extends ShapeCompanion[GrubbsShape] {
   val SampleSizePath = "sample-size"
 
   override def zero( configuration: Option[Config] ): GrubbsShape = {
-    val sampleSize = valueFrom( configuration, SampleSizePath ){ _.getInt( SampleSizePath ) } getOrElse RecentHistory.LastN
-    GrubbsShape( new DescriptiveStatistics(sampleSize), sampleSize )
+    val sampleSize = valueFrom( configuration, SampleSizePath ) { _.getInt( SampleSizePath ) } getOrElse RecentHistory.LastN
+    GrubbsShape( new DescriptiveStatistics( sampleSize ), sampleSize )
   }
 
   override def advance( original: GrubbsShape, advanced: Advanced ): GrubbsShape = {
@@ -79,10 +77,8 @@ object GrubbsShape extends ShapeCompanion[GrubbsShape] {
   }
 }
 
-
-object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfiguration { outer =>
-  /**
-    * Shape represents the culminated value of applying the algorithm over the time series data for this ID.
+object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfiguration { outer ⇒
+  /** Shape represents the culminated value of applying the algorithm over the time series data for this ID.
     */
   override type Shape = GrubbsShape
   override val evShape: ClassTag[Shape] = ClassTag( classOf[GrubbsShape] )
@@ -95,8 +91,8 @@ object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfig
 
     override def prepareData( c: Context ): Seq[DoublePoint] = c.tailAverage()( c.data )
 
-    override def step( point: PointT, shape: Shape )( implicit s: State, c: Context ): Option[(Boolean, ThresholdBoundary)] = {
-      val result = grubbsScore( shape ) map { grubbs =>
+    override def step( point: PointT, shape: Shape )( implicit s: State, c: Context ): Option[( Boolean, ThresholdBoundary )] = {
+      val result = grubbsScore( shape ) map { grubbs ⇒
         val threshold = ThresholdBoundary.fromExpectedAndDistance(
           timestamp = point.timestamp.toLong,
           expected = shape.movingStatistics.getMean,
@@ -107,15 +103,15 @@ object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfig
       }
 
       result match {
-        case \/-( r ) => Some( r )
+        case \/-( r ) ⇒ Some( r )
 
-        case -\/( ex: AlgorithmModule.InsufficientDataSize ) => {
+        case -\/( ex: AlgorithmModule.InsufficientDataSize ) ⇒ {
           import spotlight.model.timeseries._
           logger.debug( "skipping point[{}] until sufficient history is established: {}", point, ex.getMessage )
-          Some( (false, ThresholdBoundary empty point.timestamp.toLong) )
+          Some( ( false, ThresholdBoundary empty point.timestamp.toLong ) )
         }
 
-        case -\/( ex ) => {
+        case -\/( ex ) ⇒ {
           logger.warn( s"exception raised in ${algorithm.label} step calculation", ex )
           throw ex
         }
@@ -124,39 +120,38 @@ object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfig
 
     def grubbsScore( shape: Shape )( implicit c: Context ): TryV[Double] = {
       for {
-        size <- checkSize( shape.movingStatistics.getN )
-        critical <- criticalValue( shape )
+        size ← checkSize( shape.movingStatistics.getN )
+        critical ← criticalValue( shape )
       } yield {
         val mean = shape.movingStatistics.getMean
         val sd = shape.movingStatistics.getStandardDeviation
         val thresholdSquared = math.pow( critical, 2 )
-        ((size - 1) / math.sqrt(size)) * math.sqrt( thresholdSquared / (size - 2 + thresholdSquared) )
+        ( ( size - 1 ) / math.sqrt( size ) ) * math.sqrt( thresholdSquared / ( size - 2 + thresholdSquared ) )
       }
     }
 
-    def criticalValue( shape: Shape)( implicit c: Context ): TryV[Double] = {
+    def criticalValue( shape: Shape )( implicit c: Context ): TryV[Double] = {
       def calculateCritical( size: Long ): TryV[Double] = {
         \/ fromTryCatchNonFatal {
           val degreesOfFreedom = math.max( size - 2, 1 ) //todo: not a great idea but for now avoiding error if size <= 2
-          new TDistribution( degreesOfFreedom ).inverseCumulativeProbability( c.alpha / (2.0 * size) )
+          new TDistribution( degreesOfFreedom ).inverseCumulativeProbability( c.alpha / ( 2.0 * size ) )
         }
       }
 
       for {
-        size <- checkSize( shape.movingStatistics.getN )
-        critical <- calculateCritical( size )
+        size ← checkSize( shape.movingStatistics.getN )
+        critical ← calculateCritical( size )
       } yield critical
     }
 
-    /**
-      * The test should not be used for sample sizes of six or fewer since it frequently tags most of the points as outliers.
+    /** The test should not be used for sample sizes of six or fewer since it frequently tags most of the points as outliers.
       * @param size
       * @return
       */
     private def checkSize( size: Long ): TryV[Long] = {
       size match {
-        case s if s < minimumDataPoints => AlgorithmModule.InsufficientDataSize( label, s, minimumDataPoints ).left
-        case s => s.right
+        case s if s < minimumDataPoints ⇒ AlgorithmModule.InsufficientDataSize( label, s, minimumDataPoints ).left
+        case s ⇒ s.right
       }
     }
   }
@@ -172,10 +167,10 @@ object GrubbsAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfig
   }
 
   override def makeContext( message: DetectUsing, state: Option[State] ): Context = {
-    val context = Context.getAlpha( message.properties ) map { alpha => Context( message, alpha ) }
+    val context = Context.getAlpha( message.properties ) map { alpha ⇒ Context( message, alpha ) }
     context match {
-      case \/-( c ) => c
-      case -\/( ex ) => throw ex
+      case \/-( c ) ⇒ c
+      case -\/( ex ) ⇒ throw ex
     }
   }
 }

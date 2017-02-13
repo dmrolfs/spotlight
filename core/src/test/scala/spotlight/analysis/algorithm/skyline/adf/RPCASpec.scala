@@ -4,34 +4,31 @@ import org.apache.commons.math3.linear.MatrixUtils
 import org.scalatest._
 import peds.commons.log.Trace
 
-
-/**
-  *
-  * Created by rolfsd on 3/6/16.
+/** Created by rolfsd on 3/6/16.
   */
 class RPCASpec
-extends fixture.WordSpec
-with MustMatchers
-with ParallelTestExecution {
+    extends fixture.WordSpec
+    with MustMatchers
+    with ParallelTestExecution {
   val trace = Trace[RPCASpec]
 
   override type FixtureParam = Fixture
 
-  class Fixture { outer =>
+  class Fixture { outer ⇒
     def vectorToMatrix( x: Array[Double], rows: Int, cols: Int ): Array[Array[Double]] = {
       val input2D = MatrixUtils.createRealMatrix( rows, cols )
       for {
-        n <- 0 until x.size
+        n ← 0 until x.size
         i = n % rows
         j = math.floor( n / rows ).toInt
-      } { input2D.addToEntry( i, j, x(n) ) }
+      } { input2D.addToEntry( i, j, x( n ) ) }
       input2D.getData
     }
 
     def matrixApproximatelyEquals( X: Array[Array[Double]], Y: Array[Array[Double]], epsilon: Double ): Boolean = {
       val xs = X.flatten
       val ys = Y.flatten
-      xs.zip( ys ).exists{ xy => math.abs( xy._1 - xy._2 ) > epsilon }
+      xs.zip( ys ).exists { xy ⇒ math.abs( xy._1 - xy._2 ) > epsilon }
     }
   }
 
@@ -47,9 +44,8 @@ with ParallelTestExecution {
 
   object WIP extends Tag( "wip" )
 
-
   "FPCA" should {
-    "work :-)" in { f: Fixture =>
+    "work :-)" in { f: Fixture ⇒
       import f._
 
       val ts = Array(
@@ -118,7 +114,6 @@ with ParallelTestExecution {
     }
   }
 }
-
 
 //public void testRSVD() {
 //  System.out.println("Running Test: testRSVD");
