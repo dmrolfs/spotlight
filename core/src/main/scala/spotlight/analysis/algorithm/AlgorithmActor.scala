@@ -1,23 +1,22 @@
 package spotlight.analysis.algorithm
 
-import akka.actor.{Actor, ActorLogging, ActorPath, ActorRef}
+import akka.actor.{ Actor, ActorLogging, ActorPath, ActorRef }
 import akka.event.LoggingReceive
 import scalaz._
 import Scalaz._
-import scalaz.Kleisli.{ask, kleisli}
+import scalaz.Kleisli.{ ask, kleisli }
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.LazyLogging
-import nl.grons.metrics.scala.{MetricName, Timer}
-import org.apache.commons.math3.linear.{EigenDecomposition, MatrixUtils}
-import org.apache.commons.math3.ml.distance.{DistanceMeasure, EuclideanDistance}
+import nl.grons.metrics.scala.{ MetricName, Timer }
+import org.apache.commons.math3.linear.{ EigenDecomposition, MatrixUtils }
+import org.apache.commons.math3.ml.distance.{ DistanceMeasure, EuclideanDistance }
 import org.apache.commons.math3.ml.clustering.DoublePoint
 import peds.akka.metrics.InstrumentedActor
-import peds.commons.{KOp, TryV}
+import peds.commons.{ KOp, TryV }
 import peds.commons.math.MahalanobisDistance
-import spotlight.analysis.{DetectUsing, DetectionAlgorithmRouter, HistoricalStatistics, RecentHistory, UnrecognizedPayload}
+import spotlight.analysis.{ DetectUsing, DetectionAlgorithmRouter, HistoricalStatistics, RecentHistory, UnrecognizedPayload }
 import spotlight.model.outlier.AnalysisPlan
 import spotlight.model.timeseries._
-
 
 @deprecated( "replaced by AlgorithmModule and AlgorithmModule.AlgorithmProtocol", "v2" )
 sealed trait AlgorithmProtocolOLD
@@ -25,7 +24,6 @@ object AlgorithmProtocolOLD extends {
   case class Register( scopeId: AnalysisPlan.Scope, routerRef: ActorRef ) extends AlgorithmProtocolOLD
   case class Registered( scopeId: AnalysisPlan.Scope ) extends AlgorithmProtocolOLD
 }
-
 
 @deprecated( "replaced by AlgorithmModule and AlgorithmModule.AlgorithmProtocol", "v2" )
 trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
@@ -43,10 +41,10 @@ trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
     router ! DetectionAlgorithmRouter.RegisterAlgorithmReference( algorithm, self )
   }
 
-  override def receive: Receive = LoggingReceive{ around( quiescent ) }
+  override def receive: Receive = LoggingReceive { around( quiescent ) }
 
   def quiescent: Receive = {
-    case AlgorithmProtocolOLD.Register( scopeId, routerRef ) => {
+    case AlgorithmProtocolOLD.Register( scopeId, routerRef ) ⇒ {
       import scala.concurrent.duration._
       import akka.pattern.{ ask, pipe }
 
@@ -54,53 +52,52 @@ trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
       implicit val ec = context.dispatcher
 
       val resp = ( routerRef ? DetectionAlgorithmRouter.RegisterAlgorithmReference( algorithm, self ) )
-      val registered = resp map { case DetectionAlgorithmRouter.AlgorithmRegistered( a ) if a == algorithm =>
-        AlgorithmProtocolOLD.Registered( scopeId )
+      val registered = resp map {
+        case DetectionAlgorithmRouter.AlgorithmRegistered( a ) if a == algorithm ⇒
+          AlgorithmProtocolOLD.Registered( scopeId )
       }
       registered pipeTo sender()
     }
 
-    case DetectionAlgorithmRouter.AlgorithmRegistered( a ) if a == algorithm => {
+    case DetectionAlgorithmRouter.AlgorithmRegistered( a ) if a == algorithm ⇒ {
       log.info( "registration confirmed for [{}] @ [{}] with {}", algorithm, self.path, sender().path )
-      context become LoggingReceive{ around( detect ) }
+      context become LoggingReceive { around( detect ) }
     }
 
-    case m: DetectUsing => throw AlgorithmActor.AlgorithmUsedBeforeRegistrationError( algorithm, self.path )
+    case m: DetectUsing ⇒ throw AlgorithmActor.AlgorithmUsedBeforeRegistrationError( algorithm, self.path )
   }
 
   def detect: Receive
 
   override def unhandled( message: Any ): Unit = {
     message match {
-      case m: DetectUsing => {
+      case m: DetectUsing ⇒ {
         log.warning( "algorithm [{}] does not recognize requested payload: [{}]", algorithm, m )
         sender() ! UnrecognizedPayload( algorithm, m )
       }
 
-      case m => super.unhandled( m )
+      case m ⇒ super.unhandled( m )
     }
   }
-
 
   // -- algorithm functional elements --
 
   def algorithmContext: KOp[DetectUsing, AlgorithmContext] = {
-    Kleisli[TryV, DetectUsing, AlgorithmContext] { m => AlgorithmContext( m, m.source.points ).right }
+    Kleisli[TryV, DetectUsing, AlgorithmContext] { m ⇒ AlgorithmContext( m, m.source.points ).right }
   }
 
   val tolerance: KOp[AlgorithmContext, Option[Double]] = Kleisli[TryV, AlgorithmContext, Option[Double]] { _.tolerance }
 
   val messageConfig: KOp[AlgorithmContext, Config] = kleisli[TryV, AlgorithmContext, Config] { _.messageConfig.right }
 
-  /**
-    * Some algorithms require a minimum number of points in order to determine an anomaly. To address this circumstance, these
+  /** Some algorithms require a minimum number of points in order to determine an anomaly. To address this circumstance, these
     * algorithms can use fillDataFromHistory to draw from shape the points necessary to create an appropriate group.
     * @param minimalSize of the data grouping
     * @return
     */
   def fillDataFromHistory( minimalSize: Int = RecentHistory.LastN ): KOp[AlgorithmContext, Seq[DoublePoint]] = {
     for {
-      ctx <- ask[TryV, AlgorithmContext]
+      ctx ← ask[TryV, AlgorithmContext]
     } yield {
       val original = ctx.data
       if ( minimalSize < original.size ) original
@@ -133,7 +130,7 @@ object AlgorithmActor {
 
     type That <: AlgorithmContext
     def withSource( newSource: TimeSeriesBase ): That
-    def addThresholdBoundary(control: ThresholdBoundary ): That
+    def addThresholdBoundary( control: ThresholdBoundary ): That
   }
 
   @deprecated( "replaced by AlgorithmModule and AlgorithmModule.AlgorithmProtocol", "v2" )
@@ -142,12 +139,11 @@ object AlgorithmActor {
       SimpleAlgorithmContext( message, message.source, data )
     }
 
-
-    final case class SimpleAlgorithmContext private[algorithm](
-      override val message: DetectUsing,
-      override val source: TimeSeriesBase,
-      override val data: Seq[DoublePoint],
-      override val thresholdBoundaries: Seq[ThresholdBoundary] = Seq.empty[ThresholdBoundary]
+    final case class SimpleAlgorithmContext private[algorithm] (
+        override val message: DetectUsing,
+        override val source: TimeSeriesBase,
+        override val data: Seq[DoublePoint],
+        override val thresholdBoundaries: Seq[ThresholdBoundary] = Seq.empty[ThresholdBoundary]
     ) extends AlgorithmContext {
       override val algorithm: String = message.algorithm
       override val topic: Topic = message.topic
@@ -162,22 +158,22 @@ object AlgorithmActor {
             logger.debug(
               "DISTANCE_MEASURE message.shape.covariance = [{}] determinant:[{}]",
               message.history.covariance,
-              new EigenDecomposition(message.history.covariance).getDeterminant.toString
+              new EigenDecomposition( message.history.covariance ).getDeterminant.toString
             )
             MahalanobisDistance.fromCovariance( message.history.covariance )
           } else {
-            logger.debug( "DISTANCE_MEASURE point data = {}", data.mkString("[",",","]"))
+            logger.debug( "DISTANCE_MEASURE point data = {}", data.mkString( "[", ",", "]" ) )
             MahalanobisDistance.fromPoints( MatrixUtils.createRealMatrix( data.toArray map { _.toPointA } ) )
           }
           logger.debug( "DISTANCE_MEASURE mahal = [{}]", mahal )
-          mahal.disjunction.leftMap{ _.head }
+          mahal.disjunction.leftMap { _.head }
         }
 
         val distancePath = algorithm + ".distance"
         if ( message.properties hasPath distancePath ) {
           message.properties.getString( distancePath ).toLowerCase match {
-            case "euclidean" | "euclid" => new EuclideanDistance().right[Throwable]
-            case "mahalanobis" | "mahal" | _ => makeMahalanobisDistance
+            case "euclidean" | "euclid" ⇒ new EuclideanDistance().right[Throwable]
+            case "mahalanobis" | "mahal" | _ ⇒ makeMahalanobisDistance
           }
         } else {
           makeMahalanobisDistance
@@ -193,12 +189,11 @@ object AlgorithmActor {
 
       override type That = SimpleAlgorithmContext
       override def withSource( newSource: TimeSeriesBase ): That = copy( source = newSource )
-      override def addThresholdBoundary(threshold: ThresholdBoundary ): That = {
+      override def addThresholdBoundary( threshold: ThresholdBoundary ): That = {
         copy( thresholdBoundaries = thresholdBoundaries :+ threshold )
       }
     }
   }
-
 
   @deprecated( "replaced by AlgorithmModule and AlgorithmModule.AlgorithmProtocol", "v2" )
   case class AlgorithmUsedBeforeRegistrationError( algorithm: String, path: ActorPath )

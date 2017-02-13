@@ -1,20 +1,18 @@
 package spotlight.infrastructure
 
 import scala.concurrent.duration._
-import scala.util.{Failure, Success}
+import scala.util.{ Failure, Success }
 import akka.Done
-import akka.actor.{ActorIdentity, ActorPath, ActorRef, Identify, Props}
+import akka.actor.{ ActorIdentity, ActorPath, ActorRef, Identify, Props }
 import akka.persistence.journal.leveldb
 import akka.util.Timeout
 
 import scalaz.concurrent.Task
-import com.typesafe.scalalogging.{Logger, StrictLogging}
+import com.typesafe.scalalogging.{ Logger, StrictLogging }
 import peds.commons.concurrent._
-import demesne.{BoundedContext, StartTask}
+import demesne.{ BoundedContext, StartTask }
 
-
-/**
-  * Created by rolfsd on 10/25/16.
+/** Created by rolfsd on 10/25/16.
   */
 object SharedLeveldbStore extends StrictLogging {
   val Name = "store"
@@ -23,19 +21,19 @@ object SharedLeveldbStore extends StrictLogging {
 
   def start( createActor: Boolean = false ): StartTask = {
     val actionLabel = if ( createActor ) "create" else "connect"
-    StartTask.withBoundTask( s"${actionLabel} shared LevelDB ${Name}" ) { implicit bc: BoundedContext =>
+    StartTask.withBoundTask( s"${actionLabel} shared LevelDB ${Name}" ) { implicit bc: BoundedContext ⇒
       val clusterPort = {
         val ClusterPortPath = "spotlight.settings.cluster-port"
         if ( bc.configuration hasPath ClusterPortPath ) bc.configuration.getInt( ClusterPortPath ) else 2551
       }
 
       for {
-        _ <- logConfiguration()
-        ref <- startStore( SharedLeveldbStore.Name, createActor )
+        _ ← logConfiguration()
+        ref ← startStore( SharedLeveldbStore.Name, createActor )
         path = ref map { _.path } getOrElse {
           ActorPath fromString s"akka.tcp://${bc.system.name}@127.0.0.1:${clusterPort}/user/${SharedLeveldbStore.Name}"
         }
-        id <- identifyStore( path, actionLabel )
+        id ← identifyStore( path, actionLabel )
       } yield Done
     }
   }
@@ -53,7 +51,7 @@ object SharedLeveldbStore extends StrictLogging {
       logger.info( "SharedLeveldbStore: akka.persistence.journal.plugin: [{}]", journalPlugin )
 
       val JournalDirPath = "akka.persistence.journal.leveldb-shared.store.dir" // JournalPluginPath+".store.dir"
-      val journalDir = if ( bc.configuration hasPath JournalDirPath ) Some( bc.configuration.getString(JournalDirPath) ) else None
+      val journalDir = if ( bc.configuration hasPath JournalDirPath ) Some( bc.configuration.getString( JournalDirPath ) ) else None
       logger.info( "SharedLeveldbStore: journal dir: [{}]", journalDir )
 
       val SnapshotsDirPath = "akka.persistence.snapshot-store.local.dir"
@@ -77,19 +75,19 @@ object SharedLeveldbStore extends StrictLogging {
     import akka.pattern.ask
     implicit val dispatcher = bc.system.dispatcher
     implicit val timeout = Timeout( 1.minute )
-    val id = ( bc.system.actorSelection( path ) ? Identify(None) ).mapTo[ActorIdentity]
+    val id = ( bc.system.actorSelection( path ) ? Identify( None ) ).mapTo[ActorIdentity]
     id onComplete {
-      case Success( ActorIdentity(_, Some(ref)) ) => {
+      case Success( ActorIdentity( _, Some( ref ) ) ) ⇒ {
         logger.info( "setting reference and system with shared leveldb journal {}...", Name )
         leveldb.SharedLeveldbJournal.setStore( ref, bc.system )
       }
 
-      case Success( id ) => {
+      case Success( id ) ⇒ {
         bc.system.log.error( "shared journal {} not {} at {}", Name, actionLabel, path )
         bc.system.terminate()
       }
 
-      case Failure( ex ) => {
+      case Failure( ex ) ⇒ {
         bc.system.log.error( "failure not {} shared journal {} at {}", actionLabel, Name, path )
         bc.system.terminate()
       }

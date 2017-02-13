@@ -1,14 +1,13 @@
 package spotlight.model.outlier
 
 import scala.reflect._
-import scalaz.{Lens => _, _}
+import scalaz.{ Lens ⇒ _, _ }
 import Scalaz._
 import shapeless._
 import peds.commons.Valid
 import peds.archetype.domain.model.core.Entity
 import peds.commons.identifier.TaggedID
 import spotlight.model.timeseries.Topic
-
 
 //todo remove with stateful algo?
 trait OutlierHistory extends Entity {
@@ -30,7 +29,7 @@ object OutlierHistory {
 
   def apply( series: Outliers ): Valid[OutlierHistory] = {
     val annotations = OutlierAnnotation annotationsFromSeries series
-    annotations map { a => SimpleOutlierHistory( id = series.topic, outlierAnnotations = a ) }
+    annotations map { a ⇒ SimpleOutlierHistory( id = series.topic, outlierAnnotations = a ) }
   }
 
   val idLens: Lens[OutlierHistory, OutlierHistory#TID] = new Lens[OutlierHistory, OutlierHistory#TID] {
@@ -47,7 +46,7 @@ object OutlierHistory {
 
   val nameLens: Lens[OutlierHistory, String] = new Lens[OutlierHistory, String] {
     override def get( h: OutlierHistory ): String = topicLens.get( h ).name
-    override def set( h: OutlierHistory)( n: String ): OutlierHistory = topicLens.set( h )( n )
+    override def set( h: OutlierHistory )( n: String ): OutlierHistory = topicLens.set( h )( n )
   }
 
   val outlierAnnotationsLens: Lens[OutlierHistory, Seq[OutlierAnnotation]] = new Lens[OutlierHistory, Seq[OutlierAnnotation]] {
@@ -55,10 +54,9 @@ object OutlierHistory {
     override def set( h: OutlierHistory )( os: Seq[OutlierAnnotation] ): OutlierHistory = SimpleOutlierHistory( h.id, os )
   }
 
-
   case class SimpleOutlierHistory(
-    override val id: OutlierHistory#TID,
-    override val outlierAnnotations: Seq[OutlierAnnotation]
+      override val id: OutlierHistory#TID,
+      override val outlierAnnotations: Seq[OutlierAnnotation]
   ) extends OutlierHistory {
     override val name: String = id.get.name
   }

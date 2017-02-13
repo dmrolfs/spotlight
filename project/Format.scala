@@ -10,6 +10,11 @@ object Format {
     FormattingPreferences().
       setPreference( DoubleIndentClassDeclaration, true ).
       setPreference( MultilineScaladocCommentsStartOnFirstLine, true ).
-      setPreference( PlaceScaladocAsterisksBeneathSecondAsterisk, true )
+      setPreference( PlaceScaladocAsterisksBeneathSecondAsterisk, true ).
+      // setPreference( FirstParameterOnNewline, "Force" ).
+      // setPreference( DanglingCloseParenthesis, "Force").
+      setPreference( RewriteArrowSymbols, true ).
+      setPreference( SpaceInsideParentheses, true ).
+      setPreference( SpacesAroundMultiImports, true )
   }
 }

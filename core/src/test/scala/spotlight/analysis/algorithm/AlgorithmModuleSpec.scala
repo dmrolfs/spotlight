@@ -2,50 +2,45 @@ package spotlight.analysis.algorithm
 
 import scala.concurrent.duration._
 import scala.reflect.ClassTag
-import akka.actor.{ActorRef, ActorSystem}
+import akka.actor.{ ActorRef, ActorSystem }
 import akka.pattern.ask
 import akka.testkit._
 import com.persist.logging._
 import com.typesafe.config.Config
 import org.scalatest.concurrent.ScalaFutures
-import org.joda.{time => joda}
+import org.joda.{ time ⇒ joda }
 import demesne.AggregateRootType
 import demesne.testkit.AggregateRootSpec
 import org.apache.commons.math3.random.RandomDataGenerator
-import org.apache.commons.math3.stat.descriptive.{DescriptiveStatistics, StatisticalSummary}
+import org.apache.commons.math3.stat.descriptive.{ DescriptiveStatistics, StatisticalSummary }
 import org.mockito.Mockito._
-import org.scalatest.{Assertion, OptionValues}
+import org.scalatest.{ Assertion, OptionValues }
 import peds.akka.envelope._
 import peds.archetype.domain.model.core.EntityIdentifying
 import peds.commons.V
 import peds.commons.identifier.ShortUUID
 import peds.commons.log.Trace
-import spotlight.analysis.{DetectOutliersInSeries, DetectUsing, HistoricalStatistics}
-import spotlight.analysis.algorithm.{AlgorithmProtocol => P}
+import spotlight.analysis.{ DetectOutliersInSeries, DetectUsing, HistoricalStatistics }
+import spotlight.analysis.algorithm.{ AlgorithmProtocol ⇒ P }
 import spotlight.model.outlier._
 import spotlight.model.timeseries._
 import spotlight.testkit.TestCorrelatedSeries
 
 import scala.concurrent.Await
 
-
-/**
-  * Created by rolfsd on 6/9/16.
+/** Created by rolfsd on 6/9/16.
   */
-abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] with ScalaFutures with OptionValues { outer =>
+abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] with ScalaFutures with OptionValues { outer ⇒
   private val trace = Trace[AlgorithmModuleSpec[S]]
-
 
   override type ID = AlgorithmModule#ID
   override type Protocol = AlgorithmProtocol.type
   override val protocol: Protocol = AlgorithmProtocol
 
-
   type Module <: AlgorithmModule
   val defaultModule: Module
   type State = AlgorithmState[defaultModule.Shape]
   lazy val identifying: EntityIdentifying[State] = defaultModule.identifying
-
 
   override def testSlug( test: OneArgTest ): String = {
     s"Test-${defaultModule.algorithm.label}-${testPosition.incrementAndGet()}"
@@ -54,15 +49,15 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
   override def testConfiguration( test: OneArgTest, slug: String ): Config = {
     val c = spotlight.testkit.config( systemName = slug )
     import scala.collection.JavaConversions._
-    logger.debug( "Test Config: akka.cluster.seed-nodes=[{}]", c.getStringList("akka.cluster.seed-nodes").mkString(", "))
+    logger.debug( "Test Config: akka.cluster.seed-nodes=[{}]", c.getStringList( "akka.cluster.seed-nodes" ).mkString( ", " ) )
     c
   }
 
   override type Fixture <: AlgorithmFixture
 
   abstract class AlgorithmFixture( _config: Config, _system: ActorSystem, _slug: String )
-  extends AggregateFixture( _config, _system, _slug ) {
-    fixture =>
+      extends AggregateFixture( _config, _system, _slug ) {
+    fixture ⇒
     private val trace = Trace[AlgorithmFixture]
 
     val sender = TestProbe()
@@ -78,9 +73,9 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
     }
 
     override def after( test: OneArgTest ): Unit = {
-      Option( loggingSystem ) foreach { ls =>
+      Option( loggingSystem ) foreach { ls ⇒
         logger.warn( "#TEST stopping persist logger..." )
-//        Await.ready( ls.stop, 15.seconds )
+        //        Await.ready( ls.stop, 15.seconds )
       }
 
       logger.warn( "#TEST STOPPED PERSIST LOGGER" )
@@ -105,7 +100,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
       import scala.concurrent.duration._
       val grouping: Option[AnalysisPlan.Grouping] = {
         val window = None
-        window map { w => AnalysisPlan.Grouping( limit = 10000, w ) }
+        window map { w ⇒ AnalysisPlan.Grouping( limit = 10000, w ) }
       }
 
       AnalysisPlan.default( "", 1.second, isQuorun, reduce, Set.empty[String], grouping ).appliesTo
@@ -130,7 +125,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
       r
     }
 
-//    override def nextId(): module.TID = identifying.tag( ShortUUID() )
+    //    override def nextId(): module.TID = identifying.tag( ShortUUID() )
     override def nextId(): module.TID = identifying.tag(
       AlgorithmIdentifier.nextId(
         planName = plan.name,
@@ -146,22 +141,21 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
 
     override def rootTypes: Set[AggregateRootType] = Set( module.rootType )
 
-
     type TestState = module.State
     type TestShape = module.Shape
 
-//    val shapeLens = module.analysisStateCompanion.shapeLens
+    //    val shapeLens = module.analysisStateCompanion.shapeLens
     //    val thresholdLens = module.analysisStateCompanion.thresholdLens
     //    val advancedLens = shapeLens ~ thresholdLens
-//    val advancedLens = shapeLens
+    //    val advancedLens = shapeLens
 
-    def expectedUpdatedShape( shape: TestShape, event: P.Advanced): TestShape
+    def expectedUpdatedShape( shape: TestShape, event: P.Advanced ): TestShape
 
-    def actualVsExpectedState(actual: Option[State], expected: Option[State]): Unit = {
+    def actualVsExpectedState( actual: Option[State], expected: Option[State] ): Unit = {
       actual.isDefined mustBe expected.isDefined
       for {
-        a <- actual
-        e <- expected
+        a ← actual
+        e ← expected
       } {
         logger.debug( "TEST: actualVsExpected STATE:\n  Actual:[{}]\nExpected:[{}]", a, e )
         a.id.id mustBe e.id.id
@@ -182,7 +176,8 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
       actual: TestShape,
       expected: TestShape
     )(
-      implicit ordering: Ordering[TestShape]
+      implicit
+      ordering: Ordering[TestShape]
     ): Unit = {
       logger.debug( "TEST: actualVsExpected SHAPE:\n  Actual:[{}]\nExpected:[{}]", actual.toString, expected.toString )
       assert( ordering.equiv( actual, expected ) )
@@ -195,7 +190,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
       series: TimeSeries,
       history: HistoricalStatistics,
       expectedResults: Seq[Expected],
-      assertShapeFn: ( TestShape ) => Assertion = (_: TestShape) => succeed
+      assertShapeFn: ( TestShape ) ⇒ Assertion = ( _: TestShape ) ⇒ succeed
     ): Unit = {
       import scala.concurrent.duration._
       logger.info( "TEST: ShortUUID id:[{}] aggregate.path:[{}]", id, aggregate.path )
@@ -203,67 +198,69 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
         DetectUsing(
           targetId = algorithmAggregateId,
           algorithm = module.algorithm.label,
-          payload = DetectOutliersInSeries( series, plan, Option(subscriber.ref), Set.empty[WorkId] ),
+          payload = DetectOutliersInSeries( series, plan, Option( subscriber.ref ), Set.empty[WorkId] ),
           history = history
         )
       )(
-        sender.ref
-      )
+          sender.ref
+        )
 
-      val expectedAnomalies = expectedResults.exists { e => e.isOutlier }
+      val expectedAnomalies = expectedResults.exists { e ⇒ e.isOutlier }
 
       sender.expectMsgPF( 500.millis.dilated, hint ) {
-        case m @ Envelope( SeriesOutliers( a, s, p, o, t ), _ ) if expectedAnomalies => {
+        case m @ Envelope( SeriesOutliers( a, s, p, o, t ), _ ) if expectedAnomalies ⇒ {
           logger.info( "evaluate EXPECTED ANOMALIES..." )
           a mustBe Set( module.algorithm.label )
           s mustBe series
           o.size mustBe 1
           o mustBe Seq( series.points.last )
 
-          t( module.algorithm.label ).zip( expectedResults ).zipWithIndex foreach { case ( ((actual, expected), i) ) =>
-            logger.info( "evaluate[{}]: actual:[{}]  expected:[{}]", i.toString, actual, expected )
-            (i, actual.floor) mustBe(i, expected.floor)
-            (i, actual.expected) mustBe(i, expected.expected)
-            (i, actual.ceiling) mustBe(i, expected.ceiling)
+          t( module.algorithm.label ).zip( expectedResults ).zipWithIndex foreach {
+            case ( ( ( actual, expected ), i ) ) ⇒
+              logger.info( "evaluate[{}]: actual:[{}]  expected:[{}]", i.toString, actual, expected )
+              ( i, actual.floor ) mustBe ( i, expected.floor )
+              ( i, actual.expected ) mustBe ( i, expected.expected )
+              ( i, actual.ceiling ) mustBe ( i, expected.ceiling )
           }
         }
 
-        case m @ Envelope( NoOutliers( a, s, p, t ), _ ) if !expectedAnomalies => {
+        case m @ Envelope( NoOutliers( a, s, p, t ), _ ) if !expectedAnomalies ⇒ {
           logger.info( "evaluate EXPECTED normal..." )
           a mustBe Set( module.algorithm.label )
           s mustBe series
 
-          t( module.algorithm.label ).zip( expectedResults ).zipWithIndex foreach { case ( ((actual, expected), i) ) =>
-            logger.debug( "evaluating expectation: {}", i.toString )
-            actual.floor.isDefined mustBe expected.floor.isDefined
-            for {
-              af <- actual.floor
-              ef <- expected.floor
-            } {af mustBe ef +- 0.000001}
+          t( module.algorithm.label ).zip( expectedResults ).zipWithIndex foreach {
+            case ( ( ( actual, expected ), i ) ) ⇒
+              logger.debug( "evaluating expectation: {}", i.toString )
+              actual.floor.isDefined mustBe expected.floor.isDefined
+              for {
+                af ← actual.floor
+                ef ← expected.floor
+              } { af mustBe ef +- 0.000001 }
 
-            actual.expected.isDefined mustBe expected.expected.isDefined
-            for {
-              ae <- actual.expected
-              ee <- expected.expected
-            } {ae mustBe ee +- 0.000001}
+              actual.expected.isDefined mustBe expected.expected.isDefined
+              for {
+                ae ← actual.expected
+                ee ← expected.expected
+              } { ae mustBe ee +- 0.000001 }
 
-            actual.ceiling.isDefined mustBe expected.ceiling.isDefined
-            for {
-              ac <- actual.ceiling
-              ec <- expected.ceiling
-            } {ac mustBe ec +- 0.000001}
+              actual.ceiling.isDefined mustBe expected.ceiling.isDefined
+              for {
+                ac ← actual.ceiling
+                ec ← expected.ceiling
+              } { ac mustBe ec +- 0.000001 }
           }
         }
       }
 
-      logger.info( "TEST: --- AFTER DETECTUSING ---")
+      logger.info( "TEST: --- AFTER DETECTUSING ---" )
 
       import akka.pattern.ask
 
-      logger.info( "TEST: --  GETTING SNAPSHOT ---")
+      logger.info( "TEST: --  GETTING SNAPSHOT ---" )
 
       val actual = ( aggregate ? P.GetTopicShapeSnapshot( id, series.topic ) ).mapTo[P.TopicShapeSnapshot]
-      whenReady( actual, timeout( 15.seconds.dilated ) ) { a =>
+      whenReady( actual, timeout( 15.seconds.dilated ) ) { a ⇒
         val as = a.snapshot
         logger.info( "{}: ACTUAL = [{}]", hint, as )
         as mustBe defined
@@ -277,9 +274,8 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
     }
   }
 
-
   case class Expected( isOutlier: Boolean, floor: Option[Double], expected: Option[Double], ceiling: Option[Double] ) {
-    def stepResult( i: Int, intervalSeconds: Int = 10 )( implicit start: joda.DateTime ): Option[(Boolean, ThresholdBoundary)] = {
+    def stepResult( i: Int, intervalSeconds: Int = 10 )( implicit start: joda.DateTime ): Option[( Boolean, ThresholdBoundary )] = {
       Some(
         isOutlier,
         ThresholdBoundary(
@@ -297,9 +293,9 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
       val tb = result map { _.thresholdBoundary }
       Expected(
         isOutlier,
-        floor = tb.flatMap{ _.floor },
-        expected = tb.flatMap{ _.expected },
-        ceiling = tb.flatMap{ _.ceiling }
+        floor = tb.flatMap { _.floor },
+        expected = tb.flatMap { _.expected },
+        ceiling = tb.flatMap { _.ceiling }
       )
     }
   }
@@ -311,24 +307,24 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
     outliers: Seq[Boolean],
     history: Seq[DataPoint] = Seq.empty[DataPoint], // datapoints?
     tolerance: Double = 3.0
-  ): (Seq[Expected], Option[magnet.Result]) = {
+  ): ( Seq[Expected], Option[magnet.Result] ) = {
     val all = history ++ points
     val calculated: List[Option[magnet.Result]] = {
       for {
-        pos <- ( 1 to all.size ).toList
+        pos ← ( 1 to all.size ).toList
         pts = all take pos
-      } yield Option( magnet(pts) )
+      } yield Option( magnet( pts ) )
     }
 
     val results = None :: calculated //todo: right thinking?  prove out with subsequent batch
     logger.info( "TEST: results-size:[{}]  points-size:[{}] history-size:[{}]", results.size.toString, points.size.toString, history.size.toString )
-    val expected = outliers.zip( results.drop(history.size) ) map { case (o, r) =>
-      Expected.fromStatistics( isOutlier = o, tolerance = tolerance, result = r )
+    val expected = outliers.zip( results.drop( history.size ) ) map {
+      case ( o, r ) ⇒
+        Expected.fromStatistics( isOutlier = o, tolerance = tolerance, result = r )
     }
-    logger.info( "makeExpected: calculated result:[{}] expected:[{}]", results.last, expected.mkString("\n","\n","\n") )
+    logger.info( "makeExpected: calculated result:[{}] expected:[{}]", results.last, expected.mkString( "\n", "\n", "\n" ) )
     ( expected, results.last )
   }
-
 
   sealed trait NoHint
   object NoHint extends NoHint
@@ -349,9 +345,9 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
 
   abstract class CommonCalculationMagnet extends CalculationMagnet {
     case class Result(
-      override val underlying: StatisticalSummary,
-      override val timestamp: joda.DateTime,
-      override val tolerance: Double
+        override val underlying: StatisticalSummary,
+        override val timestamp: joda.DateTime,
+        override val tolerance: Double
     ) extends CalculationMagnetResult {
       override type Value = StatisticalSummary
       override def statistics: Option[StatisticalSummary] = Option( underlying )
@@ -366,7 +362,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
 
     override def apply( points: Seq[DataPoint] ): Result = {
       Result(
-        underlying = new DescriptiveStatistics( points.map{ _.value }.toArray ),
+        underlying = new DescriptiveStatistics( points.map { _.value }.toArray ),
         timestamp = points.last.timestamp,
         tolerance = 3.0
       )
@@ -374,51 +370,50 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
   }
 
   object CalculationMagnet {
-    implicit def fromNoHint( noHint: NoHint ): CalculationMagnet = new CommonCalculationMagnet { }
+    implicit def fromNoHint( noHint: NoHint ): CalculationMagnet = new CommonCalculationMagnet {}
   }
-
 
   def makeDataPoints(
     values: Seq[Double],
     start: joda.DateTime = joda.DateTime.now,
     period: FiniteDuration = 1.second,
-    timeWiggle: (Double, Double) = (1D, 1D),
-    valueWiggle: (Double, Double) = (1D, 1D)
+    timeWiggle: ( Double, Double ) = ( 1D, 1D ),
+    valueWiggle: ( Double, Double ) = ( 1D, 1D )
   ): Seq[DataPoint] = {
     val random = new RandomDataGenerator
 
-    def nextFactor( wiggle: (Double, Double) ): Double = {
-      val (lower, upper) = wiggle
+    def nextFactor( wiggle: ( Double, Double ) ): Double = {
+      val ( lower, upper ) = wiggle
       if ( upper <= lower ) upper else random.nextUniform( lower, upper )
     }
 
     val secs = start.getMillis / 1000L
     val epochStart = new joda.DateTime( secs * 1000L )
 
-    values.zipWithIndex map { vi =>
+    values.zipWithIndex map { vi ⇒
       import com.github.nscala_time.time.Imports._
-      val (v, i) = vi
-      val tadj = ( i * nextFactor(timeWiggle) ) * period
+      val ( v, i ) = vi
+      val tadj = ( i * nextFactor( timeWiggle ) ) * period
       val ts = epochStart + tadj.toJodaDuration
       val vadj = nextFactor( valueWiggle )
-      DataPoint( timestamp = ts, value = (v * vadj) )
+      DataPoint( timestamp = ts, value = ( v * vadj ) )
     }
   }
 
   def spike( topic: Topic, data: Seq[DataPoint], value: Double = 1000D )( position: Int = data.size - 1 ): TimeSeries = {
-    val (front, last) = data.sortBy{ _.timestamp.getMillis }.splitAt( position )
+    val ( front, last ) = data.sortBy { _.timestamp.getMillis }.splitAt( position )
     val spiked = ( front :+ last.head.copy( value = value ) ) ++ last.tail
     TimeSeries( topic, spiked )
   }
 
-  def historyWith( prior: Option[HistoricalStatistics], series: TimeSeries ): HistoricalStatistics = trace.block("historyWith") {
-    logger.info( "series:{}", series)
+  def historyWith( prior: Option[HistoricalStatistics], series: TimeSeries ): HistoricalStatistics = trace.block( "historyWith" ) {
+    logger.info( "series:{}", series )
     logger.info( "prior={}", prior )
-    prior map { h =>
-      logger.info( "Adding series to prior shape")
-      series.points.foldLeft( h ){ _ :+ _ }
+    prior map { h ⇒
+      logger.info( "Adding series to prior shape" )
+      series.points.foldLeft( h ) { _ :+ _ }
     } getOrElse {
-      logger.info( "Creating new shape from series")
+      logger.info( "Creating new shape from series" )
       HistoricalStatistics.fromActivePoints( series.points, false )
     }
   }
@@ -430,22 +425,23 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
   ): Seq[DataPoint] = {
     val lastPoints = last.drop( last.size - tailLength + 1 ) map { _.value }
     data.map { _.timestamp }
-    .zipWithIndex
-    .map { case (ts, i ) =>
-      val pointsToAverage: Seq[Double] = {
-        if ( i < tailLength ) {
-          val all = lastPoints ++ data.take( i + 1 ).map{ _.value }
-          all.drop( all.size - tailLength )
-        } else {
-          data
-          .map { _.value }
-          .slice( i - tailLength + 1, i + 1 )
-        }
-      }
+      .zipWithIndex
+      .map {
+        case ( ts, i ) ⇒
+          val pointsToAverage: Seq[Double] = {
+            if ( i < tailLength ) {
+              val all = lastPoints ++ data.take( i + 1 ).map { _.value }
+              all.drop( all.size - tailLength )
+            } else {
+              data
+                .map { _.value }
+                .slice( i - tailLength + 1, i + 1 )
+            }
+          }
 
-      ( ts, pointsToAverage )
-    }
-    .map { case (ts, pts) => DataPoint( timestamp = ts, value = pts.sum / pts.size ) }
+          ( ts, pointsToAverage )
+      }
+      .map { case ( ts, pts ) ⇒ DataPoint( timestamp = ts, value = pts.sum / pts.size ) }
   }
 
   def calculateControlBoundaries(
@@ -454,66 +450,64 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
     lastPoints: Seq[DataPoint] = Seq.empty[DataPoint]
   ): Seq[ThresholdBoundary]
 
-
   def bootstrapSuite(): Unit = {
     s"${defaultModule.algorithm.label} entity" should {
-      "have zero shape before advance" in { f: Fixture =>
+      "have zero shape before advance" taggedAs WIP in { f: Fixture ⇒
         import f._
 
         logger.debug( "aggregate = [{}]", aggregate )
         val actual = ( aggregate ? P.GetTopicShapeSnapshot( id, scope.topic ) ).mapTo[P.TopicShapeSnapshot]
-        whenReady( actual, timeout(5.seconds) ) { a =>
+        whenReady( actual, timeout( 5.seconds ) ) { a ⇒
           a.sourceId.id mustBe id.id
           a.snapshot mustBe None
         }
       }
 
-      "advance for datapoint processing" in { f: Fixture =>
+      "advance for datapoint processing" in { f: Fixture ⇒
         import f._
 
         val pt = DataPoint( nowTimestamp, 3.14159 )
-        val t = ThresholdBoundary( nowTimestamp, Some(1.1), Some(2.2), Some(3.3) )
+        val t = ThresholdBoundary( nowTimestamp, Some( 1.1 ), Some( 2.2 ), Some( 3.3 ) )
         val adv = P.Advanced( id, scope.topic, pt, true, t )
         logger.debug( "TEST: Advancing: [{}] for id:[{}]", adv, id )
         aggregate ! adv
 
-        Thread.sleep(1000)
+        Thread.sleep( 1000 )
         logger.debug( "TEST: getting current shape of id:[{}]...", id )
         whenReady(
           ( aggregate ? P.GetTopicShapeSnapshot( id, adv.topic ) ).mapTo[P.TopicShapeSnapshot],
-          timeout( 15.seconds.dilated
-        ) ){ s1 =>
-          val zero = module.shapeCompanion.zero( None )
-          actualVsExpectedShape( s1.snapshot.get.asInstanceOf[TestShape], expectedUpdatedShape(zero, adv) )
-        }
+          timeout( 15.seconds.dilated )
+        ) { s1 ⇒
+            val zero = module.shapeCompanion.zero( None )
+            actualVsExpectedShape( s1.snapshot.get.asInstanceOf[TestShape], expectedUpdatedShape( zero, adv ) )
+          }
       }
     }
   }
 
-
   def analysisStateSuite(): Unit = {
     s"${defaultModule.algorithm.label}" should {
-//      "advance state" in { f: Fixture =>
-//        import f._
-//        val zero = module.shapeCompanion.zero( None )
-//        val pt = DataPoint( nowTimestamp, 3.14159 )
-//        val t = ThresholdBoundary( nowTimestamp, Some(1.1), Some(2.2), Some(3.3) )
-//        val adv = P.Advanced( id, scope.topic, pt, false, t )
-////        val zeroWithThreshold = thresholdLens.modify( zero ){ _ :+ t }
-//        val zeroWithThreshold = zero
-//        val actual = module.shapeCompanion.advance( zeroWithThreshold, adv )
-////        val actual = shapeLens.modify( zeroWithThreshold ){ s => module.analysisStateCompanion.advanceShape(s, adv) }
-//        val expected = expectedUpdatedShape( zero, adv )
-//        logger.debug( "TEST: expectedState=[{}]", expected )
-//        actualVsExpectedShape( actual, expected )
-//      }
+      //      "advance state" in { f: Fixture =>
+      //        import f._
+      //        val zero = module.shapeCompanion.zero( None )
+      //        val pt = DataPoint( nowTimestamp, 3.14159 )
+      //        val t = ThresholdBoundary( nowTimestamp, Some(1.1), Some(2.2), Some(3.3) )
+      //        val adv = P.Advanced( id, scope.topic, pt, false, t )
+      ////        val zeroWithThreshold = thresholdLens.modify( zero ){ _ :+ t }
+      //        val zeroWithThreshold = zero
+      //        val actual = module.shapeCompanion.advance( zeroWithThreshold, adv )
+      ////        val actual = shapeLens.modify( zeroWithThreshold ){ s => module.analysisStateCompanion.advanceShape(s, adv) }
+      //        val expected = expectedUpdatedShape( zero, adv )
+      //        logger.debug( "TEST: expectedState=[{}]", expected )
+      //        actualVsExpectedShape( actual, expected )
+      //      }
 
-      "advance shape" in { f: Fixture =>
+      "advance shape" in { f: Fixture ⇒
         import f._
         val zero = module.shapeCompanion.zero( None )
-        logger.debug( "TEST: zero=[{}]", zero)
+        logger.debug( "TEST: zero=[{}]", zero )
         val pt = DataPoint( nowTimestamp, 3.14159 )
-        val t = ThresholdBoundary( nowTimestamp, Some(1.1), Some(2.2), Some(3.3) )
+        val t = ThresholdBoundary( nowTimestamp, Some( 1.1 ), Some( 2.2 ), Some( 3.3 ) )
         val adv = P.Advanced( id, scope.topic, pt, false, t )
         val expected = expectedUpdatedShape( zero, adv )
         logger.debug( "TEST: expectedShape=[{}]", expected )

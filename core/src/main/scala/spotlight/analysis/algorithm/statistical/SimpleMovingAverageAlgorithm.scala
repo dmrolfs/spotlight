@@ -10,15 +10,12 @@ import spotlight.analysis.algorithm.AlgorithmProtocol.Advanced
 import spotlight.analysis.algorithm.AlgorithmModule
 import spotlight.analysis.algorithm.AlgorithmModule.ShapeCompanion
 import spotlight.model.timeseries._
-import squants.information.{Bytes, Information}
+import squants.information.{ Bytes, Information }
 
-
-/**
-  * Created by rolfsd on 6/8/16.
+/** Created by rolfsd on 6/8/16.
   */
-object SimpleMovingAverageAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfiguration { outer =>
-  /**
-    * Shape represents the culminated value of applying the algorithm over the time series data for this ID.
+object SimpleMovingAverageAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfiguration { outer ⇒
+  /** Shape represents the culminated value of applying the algorithm over the time series data for this ID.
     */
   override type Shape = SummaryStatistics
   object Shape extends ShapeCompanion[Shape] {
@@ -38,7 +35,7 @@ object SimpleMovingAverageAlgorithm extends AlgorithmModule with AlgorithmModule
 
     override def prepareData( c: Context ): Seq[DoublePoint] = { c.tailAverage()( c.data ) }
 
-    override def step( point: PointT, shape: Shape )( implicit s: State, c: Context ): Option[(Boolean, ThresholdBoundary)] = {
+    override def step( point: PointT, shape: Shape )( implicit s: State, c: Context ): Option[( Boolean, ThresholdBoundary )] = {
       val mean = shape.getMean
       val stddev = shape.getStandardDeviation
       val threshold = ThresholdBoundary.fromExpectedAndDistance(
@@ -47,7 +44,7 @@ object SimpleMovingAverageAlgorithm extends AlgorithmModule with AlgorithmModule
         distance = c.tolerance * stddev
       )
 
-      Some( (threshold isOutlier point.value, threshold) )
+      Some( ( threshold isOutlier point.value, threshold ) )
     }
   }
 
@@ -55,9 +52,8 @@ object SimpleMovingAverageAlgorithm extends AlgorithmModule with AlgorithmModule
 
   override def makeContext( message: DetectUsing, state: Option[State] ): Context = new CommonContext( message )
 
-  /**
-    * Optimization available for algorithms to more efficiently respond to size estimate requests for algorithm sharding.
+  /** Optimization available for algorithms to more efficiently respond to size estimate requests for algorithm sharding.
     * @return blended average size for the algorithm shape
     */
-  override def estimatedAverageShapeSize: Option[Information] = Some( Bytes(100) )
+  override def estimatedAverageShapeSize: Option[Information] = Some( Bytes( 100 ) )
 }

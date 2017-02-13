@@ -3,7 +3,7 @@ import sbt._
 
 object Dependencies {
   object peds {
-    val version = "0.4.7"
+    val version = "0.4.8"
     def module( id: String ) = "com.github.dmrolfs" %% s"peds-$id" % version withSources() withJavadoc()
     def all = Seq( commons, akka, archetype )
 
@@ -14,14 +14,14 @@ object Dependencies {
   }
 
   object demesne {
-    val version = "2.1.3"
+    val version = "2.1.3.1"
     def module( id: String ) = "com.github.dmrolfs" %% s"demesne-$id" % version withSources() withJavadoc()
     val core = module( "core" )
     val testkit = module( "testkit" )
   }
 
   object akka {
-    val version = "2.4.16"
+    val version = "2.4.17"
     def module( id: String ) = "com.typesafe.akka" %% s"akka-$id" % version withSources() withJavadoc()
     val all: Seq[ModuleID] = Seq( actor, stream, agent, cluster, clusterSharding, contrib, persistence, remote, slf4j )
 
@@ -137,7 +137,7 @@ object Dependencies {
       val core = "org.apache.avro" % "avro" % version
       val tools = "org.apache.avro" % "avro-tools" % version
       val mapred = "org.apache.avro" % "avro-mapred" % version
-      val scavro = "org.oedura" %% "scavro" % "1.0.1"
+      val scavro = "org.oedura" %% "scavro" % "1.0.2"
     }
 
     object betterFiles {

@@ -6,14 +6,12 @@ import akka.util.ByteString
 import com.typesafe.scalalogging.LazyLogging
 import spotlight.model.timeseries.TimeSeries
 
-
-/**
-  * Created by rolfsd on 11/25/15.
+/** Created by rolfsd on 11/25/15.
   */
 case object MessagePackProtocol extends GraphiteSerializationProtocol with LazyLogging {
   override def framingFlow( maximumFrameLength: Int ): Flow[ByteString, ByteString, NotUsed] = ??? //todo implement message pack protocol or remove
 
-  override def toTimeSeries(bytes: ByteString ): List[TimeSeries] = {
+  override def toTimeSeries( bytes: ByteString ): List[TimeSeries] = {
     import org.velvia.MsgPack
     import org.json4s._
     import org.json4s.jackson.JsonMethods._

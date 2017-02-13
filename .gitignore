@@ -16,6 +16,7 @@ icon?
 # sbt specific
 .cache/
 .history/
+.ensime_cache/
 .lib/
 dist/*
 target/

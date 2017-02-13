@@ -1,21 +1,19 @@
 package spotlight.protocol
 
-import java.io.{ByteArrayOutputStream, OutputStreamWriter}
+import java.io.{ ByteArrayOutputStream, OutputStreamWriter }
 import java.math.BigInteger
 import java.nio.charset.Charset
-import java.nio.{ByteBuffer, ByteOrder}
+import java.nio.{ ByteBuffer, ByteOrder }
 
 import akka.NotUsed
-import akka.stream.scaladsl.{Flow, Framing}
+import akka.stream.scaladsl.{ Flow, Framing }
 import akka.util.ByteString
 import com.typesafe.scalalogging.LazyLogging
 import net.razorvine.pickle.Pickler
-import org.joda.{time => joda}
+import org.joda.{ time ⇒ joda }
 import spotlight.model.timeseries._
 
-
-/**
-  * Created by rolfsd on 11/25/15.
+/** Created by rolfsd on 11/25/15.
   */
 object PythonPickleProtocol {
   val SizeFieldLength = 4
@@ -31,10 +29,9 @@ object PythonPickleProtocol {
     }
   }
 
-
-  final case class PickleException private[protocol]( part: String, value: Any )
-  extends Exception( s"failed to parse ${part} for [${value.toString}] of type [${value.getClass.getName}]" )
-  with GraphiteSerializationProtocol.ProtocolException
+  final case class PickleException private[protocol] ( part: String, value: Any )
+    extends Exception( s"failed to parse ${part} for [${value.toString}] of type [${value.getClass.getName}]" )
+    with GraphiteSerializationProtocol.ProtocolException
 
   private[protocol] object Opcodes {
     val charset = Charset forName "UTF-8"
@@ -65,7 +62,7 @@ class PythonPickleProtocol extends GraphiteSerializationProtocol with LazyLoggin
       maximumFrameLength = maximumFrameLength,
       byteOrder = ByteOrder.BIG_ENDIAN
     )
-    .map { _ drop SizeFieldLength }
+      .map { _ drop SizeFieldLength }
   }
 
   case class Metric( topic: Topic, timestamp: joda.DateTime, value: Double )
@@ -81,48 +78,49 @@ class PythonPickleProtocol extends GraphiteSerializationProtocol with LazyLoggin
       val pickles = pck.asInstanceOf[java.util.ArrayList[Array[AnyRef]]]
 
       val metrics = for {
-        p <- pickles
+        p ← pickles
       } yield {
         val tuple = p
-        val dp = tuple(1).asInstanceOf[Array[AnyRef]]
+        val dp = tuple( 1 ).asInstanceOf[Array[AnyRef]]
 
         val topic: String = tuple( 0 ).asInstanceOf[Any] match {
-          case s: String => s
-          case unknown => throw PickleException( part = "topic", value = unknown )
+          case s: String ⇒ s
+          case unknown ⇒ throw PickleException( part = "topic", value = unknown )
         }
 
-        val unixEpochSeconds: Long = dp(0).asInstanceOf[Any] match {
-          case l: Long => l
-          case i: Int => i.toLong
-          case bi: BigInteger => bi.longValue
-          case d: Double => d.toLong
-          case s: String => s.toLong
-          case unknown => throw PickleException( part = "timestamp", value = unknown )
+        val unixEpochSeconds: Long = dp( 0 ).asInstanceOf[Any] match {
+          case l: Long ⇒ l
+          case i: Int ⇒ i.toLong
+          case bi: BigInteger ⇒ bi.longValue
+          case d: Double ⇒ d.toLong
+          case s: String ⇒ s.toLong
+          case unknown ⇒ throw PickleException( part = "timestamp", value = unknown )
         }
 
-        val v: Double = dp(1).asInstanceOf[Any] match {
-          case d: Double => d
-          case f: Float => f.toDouble
-          case bd: BigDecimal => bd.doubleValue
-          case i: Int => i.toDouble
-          case l: Long => l.toDouble
-          case s: String =>s.toDouble
-          case unknown => throw PickleException( part = "value", value = unknown )
+        val v: Double = dp( 1 ).asInstanceOf[Any] match {
+          case d: Double ⇒ d
+          case f: Float ⇒ f.toDouble
+          case bd: BigDecimal ⇒ bd.doubleValue
+          case i: Int ⇒ i.toDouble
+          case l: Long ⇒ l.toDouble
+          case s: String ⇒ s.toDouble
+          case unknown ⇒ throw PickleException( part = "value", value = unknown )
         }
 
-        Metric( topic = topic, timestamp = new joda.DateTime(unixEpochSeconds * 1000L), value = v )
+        Metric( topic = topic, timestamp = new joda.DateTime( unixEpochSeconds * 1000L ), value = v )
       }
 
-      val result = metrics groupBy { _.topic } map { case (t, ms) =>
-        val points = ms map { m => DataPoint( timestamp = m.timestamp, value = m.value ) }
-        TimeSeries( topic = t, points = points.toIndexedSeq )
+      val result = metrics groupBy { _.topic } map {
+        case ( t, ms ) ⇒
+          val points = ms map { m ⇒ DataPoint( timestamp = m.timestamp, value = m.value ) }
+          TimeSeries( topic = t, points = points.toIndexedSeq )
       }
 
       result.toList
     }
   }
 
-  type DataPointTuple = (Topic, Long, String)
+  type DataPointTuple = ( Topic, Long, String )
 
   def pickle( points: DataPointTuple* )( implicit charset: Charset = Opcodes.charset ): ByteString = {
     val out = new ByteArrayOutputStream( points.size * 75 ) // Extremely rough estimate of 75 bytes per message
@@ -133,41 +131,43 @@ class PythonPickleProtocol extends GraphiteSerializationProtocol with LazyLoggin
     pickled append MARK
     pickled append LIST
 
-    points map { case (n, ts, v) =>
-      (sanitize(n.name), ts, sanitize(v))
-    } foreach { case (name, timestamp, value) =>
-      // start the outer tuple
-      pickled append MARK
+    points map {
+      case ( n, ts, v ) ⇒
+        ( sanitize( n.name ), ts, sanitize( v ) )
+    } foreach {
+      case ( name, timestamp, value ) ⇒
+        // start the outer tuple
+        pickled append MARK
 
-      // the metric name is a string.
-      pickled append STRING
-      // the single quotes are to match python's repr("abcd")
-      pickled append QUOTE
-      pickled append name
-      pickled append QUOTE
-      pickled append LF
+        // the metric name is a string.
+        pickled append STRING
+        // the single quotes are to match python's repr("abcd")
+        pickled append QUOTE
+        pickled append name
+        pickled append QUOTE
+        pickled append LF
 
-      // start the inner tuple
-      pickled append MARK
+        // start the inner tuple
+        pickled append MARK
 
-      // timestamp is a long
-      pickled append LONG
-      pickled append timestamp.toString
-      // the trailing L is to match python's repr(long(1234))
-      pickled append LONG
-      pickled append LF
+        // timestamp is a long
+        pickled append LONG
+        pickled append timestamp.toString
+        // the trailing L is to match python's repr(long(1234))
+        pickled append LONG
+        pickled append LF
 
-      // and the value is a string.
-      pickled append STRING
-      pickled append QUOTE
-      pickled append value
-      pickled append QUOTE
-      pickled append LF
+        // and the value is a string.
+        pickled append STRING
+        pickled append QUOTE
+        pickled append value
+        pickled append QUOTE
+        pickled append LF
 
-      pickled append TUPLE // inner close
-      pickled append TUPLE // outer close
+        pickled append TUPLE // inner close
+        pickled append TUPLE // outer close
 
-      pickled append APPEND
+        pickled append APPEND
     }
 
     // every pickle ends with STOP
@@ -178,17 +178,17 @@ class PythonPickleProtocol extends GraphiteSerializationProtocol with LazyLoggin
     return ByteString( out.toByteArray ).withHeader
   }
 
-
   def pickleFlattenedTimeSeries(
-    points: (Topic, joda.DateTime, Double)*
+    points: ( Topic, joda.DateTime, Double )*
   )(
-    implicit charset: Charset = Opcodes.charset
+    implicit
+    charset: Charset = Opcodes.charset
   ): ByteString = {
-    pickle( points map { case (topic, timestamp, value) => ( topic, timestamp.getMillis / 1000L, value.toString ) }:_* )
+    pickle( points map { case ( topic, timestamp, value ) ⇒ ( topic, timestamp.getMillis / 1000L, value.toString ) }: _* )
   }
 
   def pickleTimeSeries( ts: TimeSeries )( implicit charset: Charset = Opcodes.charset ): ByteString = {
-    pickleFlattenedTimeSeries( ts.points map { dp => ( ts.topic, dp.timestamp, dp.value ) }:_* )
+    pickleFlattenedTimeSeries( ts.points map { dp ⇒ ( ts.topic, dp.timestamp, dp.value ) }: _* )
   }
 
   val Whitespace = "[\\s]+".r

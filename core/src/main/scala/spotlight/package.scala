@@ -1,7 +1,6 @@
 import com.typesafe.config.ConfigFactory
 
-/**
-  * Created by rolfsd on 1/17/17.
+/** Created by rolfsd on 1/17/17.
   */
 package object spotlight {
   val MetricBasePath = "spotlight.metrics.basename"

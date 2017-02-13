@@ -1,19 +1,18 @@
 package spotlight.model.timeseries
 
 import scala.concurrent.duration.{ SECONDS, TimeUnit }
-import scalaz.{ Ordering => _, _ }, Scalaz._
+import scalaz.{ Ordering ⇒ _, _ }, Scalaz._
 import shapeless.Lens
-import org.joda.{ time => joda }
+import org.joda.{ time ⇒ joda }
 import com.github.nscala_time.time.Imports._
 import peds.commons.Valid
 import peds.commons.math.Interpolator
-
 
 trait TimeSeriesCohort extends TimeSeriesBase {
   override def size: Int = data.size
   def data: IndexedSeq[TimeSeries]
   def precision: TimeUnit
-  def toMatrix: Matrix[(joda.DateTime, Double)]
+  def toMatrix: Matrix[( joda.DateTime, Double )]
 }
 
 object TimeSeriesCohort {
@@ -26,7 +25,7 @@ object TimeSeriesCohort {
   }
 
   def apply( data: IndexedSeq[TimeSeries], precision: TimeUnit ): TimeSeriesCohort = {
-    val prefix = Topic.findAncestor( data.map( _.topic ):_* )
+    val prefix = Topic.findAncestor( data.map( _.topic ): _* )
     SimpleTimeSeriesCohort( prefix, data, precision )
   }
 
@@ -53,7 +52,6 @@ object TimeSeriesCohort {
     }
   }
 
-
   case class TimeFrame( bounds: joda.Interval, mid: joda.DateTime )
 
   def timeframes( start: joda.DateTime, end: joda.DateTime, millisUnit: Long ): Stream[TimeFrame] = {
@@ -61,13 +59,12 @@ object TimeSeriesCohort {
     else {
       val unitEnd = start plus millisUnit
       val frameEnd = implicitly[Ordering[joda.DateTime]].min( end + 1.milli, unitEnd )
-      val midMillis = ( (start.getMillis.toDouble + frameEnd.getMillis.toDouble) / 2.0 ).toLong
+      val midMillis = ( ( start.getMillis.toDouble + frameEnd.getMillis.toDouble ) / 2.0 ).toLong
       val mid = new joda.DateTime( midMillis )
       val interval = start to frameEnd
       TimeFrame( interval, mid ) #:: timeframes( frameEnd, end, millisUnit )
     }
   }
-
 
   import TimeSeriesBase.Merging
 
@@ -75,7 +72,7 @@ object TimeSeriesCohort {
     override def zero( topic: Topic ): TimeSeriesCohort = TimeSeriesCohort( topic )
 
     override def merge( lhs: TimeSeriesCohort, rhs: TimeSeriesCohort ): Valid[TimeSeriesCohort] = {
-      ( checkTopic(lhs.topic, rhs.topic) |@| combineSeries(lhs.data, rhs.data) ) { (_, merged) =>
+      ( checkTopic( lhs.topic, rhs.topic ) |@| combineSeries( lhs.data, rhs.data ) ) { ( _, merged ) ⇒
         dataLens.set( lhs )( merged )
       }
     }
@@ -84,17 +81,18 @@ object TimeSeriesCohort {
       lhs: IndexedSeq[TimeSeries],
       rhs: IndexedSeq[TimeSeries]
     )(
-      implicit seriesMerge: Merging[TimeSeries]
+      implicit
+      seriesMerge: Merging[TimeSeries]
     ): Valid[IndexedSeq[TimeSeries]] = {
       import scalaz.Validation.FlatMap._
 
       val merged = lhs ++ rhs
-      val (uniques, dups) = merged groupBy { _.topic } map { _._2 } partition { _.size == 1 }
+      val ( uniques, dups ) = merged groupBy { _.topic } map { _._2 } partition { _.size == 1 }
       val dupsMerged = for {
-        d <- dups
+        d ← dups
       } yield {
         val zero: Valid[TimeSeries] = TimeSeries( d.head.topic, IndexedSeq.empty[DataPoint] ).successNel
-        d.foldLeft( zero ) { (acc: Valid[TimeSeries], c: TimeSeries) =>
+        d.foldLeft( zero ) { ( acc: Valid[TimeSeries], c: TimeSeries ) ⇒
           acc flatMap { seriesMerge.merge( _, c ) }
         }
       }
@@ -103,71 +101,68 @@ object TimeSeriesCohort {
     }
   }
 
-
-
-  final case class SimpleTimeSeriesCohort private[timeseries](
-    override val topic: Topic,
-    override val data: IndexedSeq[TimeSeries],
-    override val precision: TimeUnit
+  final case class SimpleTimeSeriesCohort private[timeseries] (
+      override val topic: Topic,
+      override val data: IndexedSeq[TimeSeries],
+      override val precision: TimeUnit
   ) extends TimeSeriesCohort {
     override def points: Seq[DataPoint] = data flatMap { _.points }
 
     override val start: Option[joda.DateTime] = {
       val result = for {
-        d <- data
-        h <- d.points.headOption
+        d ← data
+        h ← d.points.headOption
       } yield h.timestamp
 
-      if ( result.nonEmpty ) Some(result.min) else None
+      if ( result.nonEmpty ) Some( result.min ) else None
       //      data.map( _.points.head.timestamp ).min
     }
 
     override val end: Option[joda.DateTime] = {
       val result = for {
-        d <- data
-        h <- d.points.lastOption
+        d ← data
+        h ← d.points.lastOption
       } yield h.timestamp
 
-      if ( result.nonEmpty ) Some(result.max) else None
-//      data.map( _.points.last.timestamp ).max
+      if ( result.nonEmpty ) Some( result.max ) else None
+      //      data.map( _.points.last.timestamp ).max
     }
 
     private val unit: Long = precision toMillis 1
 
     //todo: refactor fp / kleisli arrows
-    /**
-     * organizes data set into frames of interpolated values. Frames are defined by grouping time axis into time frames
-     * according to precision; e.g., SECONDS precision results in time frames of 1-second.
-     * There is a row for each time frame from the cohort's start and including the cohort's end; i.e., the last frame may be
-     * shorter depending on where the cohort's end lands within the potential frame.
-     * Within each frame the value is either:
-     * - if no points exists within the frame, it is empty
-     * - if one point exists within the frame, then it is the point,
-     * - if multiple points exist within the frame, then the x-value is the frame's midpoint and the y-value is the
-     * interpolated at the mid-point.
-     *
-     * @return a sequence of interpolated values per time frame.
-     */
-    override lazy val toMatrix: Matrix[(joda.DateTime, Double)] = {
+    /** organizes data set into frames of interpolated values. Frames are defined by grouping time axis into time frames
+      * according to precision; e.g., SECONDS precision results in time frames of 1-second.
+      * There is a row for each time frame from the cohort's start and including the cohort's end; i.e., the last frame may be
+      * shorter depending on where the cohort's end lands within the potential frame.
+      * Within each frame the value is either:
+      * - if no points exists within the frame, it is empty
+      * - if one point exists within the frame, then it is the point,
+      * - if multiple points exist within the frame, then the x-value is the frame's midpoint and the y-value is the
+      * interpolated at the mid-point.
+      *
+      * @return a sequence of interpolated values per time frame.
+      */
+    override lazy val toMatrix: Matrix[( joda.DateTime, Double )] = {
       val result = for {
-        s <- start
-        e <- end
+        s ← start
+        e ← end
       } yield {
         for {
-          frame <- timeframes( s, e, unit ).toIndexedSeq
+          frame ← timeframes( s, e, unit ).toIndexedSeq
         } yield {
           val frameGroup = for {
-            d <- data
-            points = d.points.filter{ frame.bounds contains _.timestamp }.toList
+            d ← data
+            points = d.points.filter { frame.bounds contains _.timestamp }.toList
           } yield {
             points match {
-              case Nil => None
-              case p :: Nil => Some( (p.timestamp, p.value) )
-              case pts => {
+              case Nil ⇒ None
+              case p :: Nil ⇒ Some( ( p.timestamp, p.value ) )
+              case pts ⇒ {
                 val xs = pts map { _.timestamp.getMillis.toDouble }
                 val ys = pts map { _.value }
-                val result = Interpolator( xs.toArray, ys.toArray ) map { interpolate =>
-                  ( frame.mid, interpolate(frame.mid.getMillis.toDouble) )
+                val result = Interpolator( xs.toArray, ys.toArray ) map { interpolate ⇒
+                  ( frame.mid, interpolate( frame.mid.getMillis.toDouble ) )
                 }
 
                 result.toOption
@@ -178,18 +173,13 @@ object TimeSeriesCohort {
         }
       }
 
-      result getOrElse IndexedSeq.empty[IndexedSeq[(joda.DateTime, Double)]]
+      result getOrElse IndexedSeq.empty[IndexedSeq[( joda.DateTime, Double )]]
     }
   }
 }
 
-
-
-
-
 //todo      for each series disperse elems into frames
 //todo      for each frame interpolate y value based on xs and ys by mid point
-
 
 //      for {
 //        (s, mid, e) <- frames( start, end + 1.milli, precision toMillis 1 ).toIndexedSeq

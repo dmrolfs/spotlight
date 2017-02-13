@@ -2,14 +2,13 @@ package spotlight.model.outlier
 
 import scalaz._
 import Scalaz._
-import com.typesafe.scalalogging.{LazyLogging, Logger}
+import com.typesafe.scalalogging.{ LazyLogging, Logger }
 import org.slf4j.LoggerFactory
-import org.joda.{time => joda}
-import peds.commons.{V, Valid}
+import org.joda.{ time ⇒ joda }
+import peds.commons.{ V, Valid }
 import shapeless.syntax.typeable._
 import spotlight.model.outlier.ReduceOutliers.CorroboratedReduceOutliers.Check
-import spotlight.model.timeseries.{ThresholdBoundary, DataPoint, TimeSeriesBase, Topic}
-
+import spotlight.model.timeseries.{ ThresholdBoundary, DataPoint, TimeSeriesBase, Topic }
 
 trait ReduceOutliers extends Serializable {
   def apply(
@@ -21,26 +20,23 @@ trait ReduceOutliers extends Serializable {
 
 object ReduceOutliers extends LazyLogging {
   def byCorroborationPercentage( threshold: Double ): ReduceOutliers = new CorroboratedReduceOutliers {
-    override def isCorroborated: Check = ( plan: AnalysisPlan ) => ( count: Int ) => {
+    override def isCorroborated: Check = ( plan: AnalysisPlan ) ⇒ ( count: Int ) ⇒ {
       ( threshold / 100D * plan.algorithms.size.toDouble ) <= count
     }
 
     override def toString: String = s"CorroboratedReduceOutliers( required-percent-of-votes-per-point:[${threshold}]% )"
   }
 
-
   def byCorroborationCount( minimum: Int ): ReduceOutliers = new CorroboratedReduceOutliers {
-    override def isCorroborated: Check = ( plan: AnalysisPlan ) => ( count: Int ) => {
+    override def isCorroborated: Check = ( plan: AnalysisPlan ) ⇒ ( count: Int ) ⇒ {
       minimum <= count || plan.algorithms.size <= count
     }
 
     override def toString: String = s"CorroboratedReduceOutliers( required-votes-per-point:[${minimum}] )"
   }
 
-
-
-  final case class EmptyResultsError private[outlier]( plan: AnalysisPlan, topic: Topic )
-  extends IllegalStateException( s"ReduceOutliers called on empty results in plan:[${plan.name}] topic:[${topic}]" )
+  final case class EmptyResultsError private[outlier] ( plan: AnalysisPlan, topic: Topic )
+    extends IllegalStateException( s"ReduceOutliers called on empty results in plan:[${plan.name}] topic:[${topic}]" )
 
   def checkResults( results: OutlierAlgorithmResults, plan: AnalysisPlan, topic: Topic ): Valid[OutlierAlgorithmResults] = {
     if ( results.nonEmpty ) results.successNel
@@ -48,7 +44,7 @@ object ReduceOutliers extends LazyLogging {
   }
 
   object CorroboratedReduceOutliers {
-    type Check = AnalysisPlan => Int => Boolean
+    type Check = AnalysisPlan ⇒ Int ⇒ Boolean
   }
 
   abstract class CorroboratedReduceOutliers extends ReduceOutliers {
@@ -68,8 +64,8 @@ object ReduceOutliers extends LazyLogging {
       // )
 
       for {
-        r <- checkResults( results, plan, source.topic ).disjunction
-        result <- reduce( r, source, plan ).disjunction
+        r ← checkResults( results, plan, source.topic ).disjunction
+        result ← reduce( r, source, plan ).disjunction
       } yield result
     }
 
@@ -80,14 +76,15 @@ object ReduceOutliers extends LazyLogging {
     ): Valid[Outliers] = {
       val tally = OutlierAlgorithmResults tally results
 
-      val corroboratedTimestamps = tally.collect{ case (dp, c) if isCorroborated( plan )( c.size ) => dp }.toSet
-      val corroboratedOutliers = source.points filter { dp => corroboratedTimestamps contains dp.timestamp }
+      val corroboratedTimestamps = tally.collect { case ( dp, c ) if isCorroborated( plan )( c.size ) ⇒ dp }.toSet
+      val corroboratedOutliers = source.points filter { dp ⇒ corroboratedTimestamps contains dp.timestamp }
 
       val combinedThresholds = {
         Map(
-          results.toSeq.map{ case (a, o) =>
-            ( a, o.thresholdBoundaries.get( a ).getOrElse{Seq.empty[ThresholdBoundary] } )
-          }:_*
+          results.toSeq.map {
+            case ( a, o ) ⇒
+              ( a, o.thresholdBoundaries.get( a ).getOrElse { Seq.empty[ThresholdBoundary] } )
+          }: _*
         )
       }
       // logger.debug( "REDUCE combined threshold: [{}]", combinedThresholds.mkString(",") )
@@ -99,7 +96,7 @@ object ReduceOutliers extends LazyLogging {
         plan = plan,
         source = source,
         outliers = corroboratedOutliers,
-                          thresholdBoundaries = combinedThresholds
+        thresholdBoundaries = combinedThresholds
       )
     }
 
@@ -116,7 +113,7 @@ object ReduceOutliers extends LazyLogging {
       val WatchedTopic = "prod-las.em.authz-proxy.1.proxy.p95"
       def acknowledge( t: Topic ): Boolean = t.name == WatchedTopic
 
-      if ( acknowledge(source.topic) ) {
+      if ( acknowledge( source.topic ) ) {
         val debugLogger = Logger( LoggerFactory getLogger "Debug" )
 
         debugLogger.info(
@@ -125,9 +122,9 @@ object ReduceOutliers extends LazyLogging {
             |    REDUCE: corroborated outlier points: [{}]
             |    REDUCE: tally: [{}]
           """.stripMargin,
-          plan.name + ":" + WatchedTopic, corroboratedOutliers.size.toString, source.points.size.toString, source.interval.getOrElse(""),
-          corroboratedOutliers.mkString(","),
-          if ( tally.nonEmpty ) tally.toSeq.sortBy{ case (ts, as) => ts }.map{ case (ts, as) => s"""${ts}: [${as.mkString(", ")}]""" }.mkString( "\n      REDUCE:  - ", "\n      REDUCE:  - ", "\n") else ""
+          plan.name + ":" + WatchedTopic, corroboratedOutliers.size.toString, source.points.size.toString, source.interval.getOrElse( "" ),
+          corroboratedOutliers.mkString( "," ),
+          if ( tally.nonEmpty ) tally.toSeq.sortBy { case ( ts, as ) ⇒ ts }.map { case ( ts, as ) ⇒ s"""${ts}: [${as.mkString( ", " )}]""" }.mkString( "\n      REDUCE:  - ", "\n      REDUCE:  - ", "\n" ) else ""
         )
       }
     }

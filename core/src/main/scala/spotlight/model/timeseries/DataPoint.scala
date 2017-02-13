@@ -1,8 +1,7 @@
 package spotlight.model.timeseries
 
 import org.apache.commons.math3.ml.clustering.DoublePoint
-import org.joda.{time => joda}
-
+import org.joda.{ time ⇒ joda }
 
 case class DataPoint( timestamp: joda.DateTime, value: Double ) {
   def toPointA: PointA = Array( timestamp.getMillis.toDouble, value )
@@ -14,18 +13,18 @@ case class DataPoint( timestamp: joda.DateTime, value: Double ) {
 
 object DataPoint {
   def fromPointA( pt: PointA ): DataPoint = {
-    val Array(ts, v) = pt
-    DataPoint( timestamp = new joda.DateTime(ts.toLong), value = v )
+    val Array( ts, v ) = pt
+    DataPoint( timestamp = new joda.DateTime( ts.toLong ), value = v )
   }
 
   def fromPointT( pt: PointT ): DataPoint = {
-    val (ts, v) = pt
-    DataPoint( timestamp = new joda.DateTime(ts.toLong), value = v )
+    val ( ts, v ) = pt
+    DataPoint( timestamp = new joda.DateTime( ts.toLong ), value = v )
   }
 
   def fromDoublePoint( pt: DoublePoint ): DataPoint = {
-    val Array(ts, v) = pt.getPoint
-    DataPoint( timestamp = new joda.DateTime(ts.toLong), value = v )
+    val Array( ts, v ) = pt.getPoint
+    DataPoint( timestamp = new joda.DateTime( ts.toLong ), value = v )
   }
 
   implicit class SeqDataPointWrapper( val underlying: Seq[DataPoint] ) extends AnyVal {

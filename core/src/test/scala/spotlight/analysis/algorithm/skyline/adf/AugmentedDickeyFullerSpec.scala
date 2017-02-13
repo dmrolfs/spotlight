@@ -6,21 +6,18 @@ import peds.commons.log.Trace
 
 import scala.util.Random
 
-
-/**
-  *
-  * Created by rolfsd on 3/6/16.
+/** Created by rolfsd on 3/6/16.
   */
 class AugmentedDickeyFullerSpec
-extends fixture.WordSpec
-with MustMatchers
-with ParallelTestExecution {
+    extends fixture.WordSpec
+    with MustMatchers
+    with ParallelTestExecution {
   val trace = Trace[AugmentedDickeyFullerSpec]
 
   override type FixtureParam = Fixture
 
   class Fixture {
-    outer =>
+    outer ⇒
     //    def vectorToMatrix( x: Array[Double], rows: Int, cols: Int ): Array[Array[Double]] = {
     //      val input2D = MatrixUtils.createRealMatrix( rows, cols )
     //      for {
@@ -40,8 +37,8 @@ with ParallelTestExecution {
 
   def createFixture(): Fixture = new Fixture
 
-  override def withFixture(test: OneArgTest): Outcome = {
-    val fixture = createFixture( )
+  override def withFixture( test: OneArgTest ): Outcome = {
+    val fixture = createFixture()
     try {
       test( fixture )
     } finally {
@@ -50,35 +47,34 @@ with ParallelTestExecution {
 
   object WIP extends Tag( "wip" )
 
-
   "AugmentedDickeyFuller" should {
-    "spot linear trend" taggedAs (WIP) in { f: Fixture =>
+    "spot linear trend" taggedAs ( WIP ) in { f: Fixture ⇒
       import f._
 
       val rand = new Random
-      val x = ( 0 until 100 ).map { i => ( i + 1 ) + 5 * rand.nextDouble }.toArray
+      val x = ( 0 until 100 ).map { i ⇒ ( i + 1 ) + 5 * rand.nextDouble }.toArray
       val adf = AugmentedDickeyFuller( x )
-      trace( s"""adf drift = [${adf.zeroPaddedDiff.mkString(",")}]""" )
+      trace( s"""adf drift = [${adf.zeroPaddedDiff.mkString( "," )}]""" )
       trace( s"""adf t = [${adf.statistic}]""" )
       adf.needsDiff mustBe true
     }
 
   }
 
-  "spot trend with outlier" in { f: Fixture =>
+  "spot trend with outlier" in { f: Fixture ⇒
     import f._
 
     val rand = new Random
     val x = {
       ( 0 until 100 )
-      .collect{
-        case 50 => 100D
-        case i => ( i + 1 ) + 5 * rand.nextDouble
-      }.toArray
+        .collect {
+          case 50 ⇒ 100D
+          case i ⇒ ( i + 1 ) + 5 * rand.nextDouble
+        }.toArray
     }
 
     val adf = AugmentedDickeyFuller( x )
-    trace( s"""adf drift = [${adf.zeroPaddedDiff.mkString(",")}]""" )
+    trace( s"""adf drift = [${adf.zeroPaddedDiff.mkString( "," )}]""" )
     trace( s"""adf statistic = [${adf.statistic}]""" )
     adf.needsDiff mustBe true
   }

@@ -1,6 +1,7 @@
 import Dependencies._
 import sbtassembly.AssemblyPlugin.autoImport.MergeStrategy
-
+import org.oedura.scavro.plugin.AvroCodegenPlugin
+AvroCodegenPlugin.autoImport.baseAvroCodegenSettings
 
 name := "spotlight-publisher"
 
