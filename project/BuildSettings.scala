@@ -5,13 +5,13 @@ import sbt._
 import spray.revolver.RevolverPlugin._
 
 object BuildSettings {
-  val VERSION = "2.2.3"
+  val VERSION = "2.3.0-SNAPSHOT"
 
   val defaultBuildSettings = Defaults.coreDefaultSettings ++ Format.settings ++ /* Revolver.settings ++ */ Seq(
     version := VERSION,
     organization := "com.github.dmrolfs",
     licenses += ("MIT", url("http://opensource.org/licenses/MIT")),
-    crossScalaVersions := Seq( "2.11.8" ),
+    crossScalaVersions := Seq( "2.12.1" ),
     scalaVersion := crossScalaVersions{ (vs: Seq[String]) => vs.head }.value,
     // updateOptions := updateOptions.value.withCachedResolution(true),
     scalacOptions ++= Seq(
