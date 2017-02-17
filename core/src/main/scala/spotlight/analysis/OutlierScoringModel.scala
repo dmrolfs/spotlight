@@ -11,8 +11,8 @@ import akka.stream.stage._
 import com.typesafe.scalalogging.{ Logger, StrictLogging }
 import org.slf4j.LoggerFactory
 import bloomfilter.mutable.BloomFilter
-import peds.akka.metrics.Instrumented
-import peds.akka.stream.StreamMonitor
+import omnibus.akka.metrics.Instrumented
+import omnibus.akka.stream.StreamMonitor
 import spotlight.Settings
 import spotlight.model.outlier._
 import spotlight.model.timeseries.TimeSeriesBase.Merging

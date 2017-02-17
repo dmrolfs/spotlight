@@ -19,29 +19,29 @@ import bloomfilter.CanGenerateHashFrom.CanGenerateHashFromString
 
 import scalaz._
 import Scalaz._
-import scalaz.Kleisli.{ ask, kleisli }
+import scalaz.Kleisli.{ask, kleisli}
 import com.typesafe.config.Config
 import com.typesafe.config.ConfigException.BadValue
 import org.apache.commons.math3.ml.clustering.DoublePoint
-import com.codahale.metrics.{ Metric, MetricFilter }
-import nl.grons.metrics.scala.{ Meter, MetricName, Timer }
-import squants.information.{ Bytes, Information }
-import com.persist.logging.{ ActorLogging ⇒ PersistActorLogging, _ }
-import peds.akka.envelope._
-import peds.akka.metrics.{ Instrumented, InstrumentedActor }
-import peds.akka.persistence.{ Passivating, SnapshotLimiter }
-import peds.akka.publish.{ EventPublisher, StackableStreamPublisher }
-import peds.archetype.domain.model.core.{ Entity, EntityIdentifying }
-import peds.commons.{ KOp, TryV, Valid }
-import peds.commons.identifier.{ Identifying, ShortUUID, TaggedID }
+import com.codahale.metrics.{Metric, MetricFilter}
+import nl.grons.metrics.scala.{Meter, MetricName, Timer}
+import squants.information.{Bytes, Information}
+import com.persist.logging.{ActorLogging => PersistActorLogging, _}
+import omnibus.akka.envelope._
+import omnibus.akka.metrics.{Instrumented, InstrumentedActor}
+import omnibus.akka.persistence.{Passivating, SnapshotLimiter}
+import omnibus.akka.publish.{EventPublisher, StackableStreamPublisher}
+import omnibus.archetype.domain.model.core.{Entity, EntityIdentifying}
+import omnibus.commons.{KOp, TryV, Valid}
+import omnibus.commons.identifier.{Identifying, ShortUUID, TaggedID}
 import demesne._
-import demesne.repository.{ AggregateRootRepository, EnvelopingAggregateRootRepository }
-import demesne.repository.AggregateRootRepository.{ ClusteredAggregateContext, LocalAggregateContext }
+import demesne.repository.{AggregateRootRepository, EnvelopingAggregateRootRepository}
+import demesne.repository.AggregateRootRepository.{ClusteredAggregateContext, LocalAggregateContext}
 import shapeless.the
 import spotlight.analysis._
 import spotlight.analysis.algorithm.AlgorithmModule.ID
 import spotlight.analysis.algorithm.AlgorithmProtocol.RouteMessage
-import spotlight.model.outlier.{ AnalysisPlan, NoOutliers, Outliers }
+import spotlight.model.outlier.{AnalysisPlan, NoOutliers, Outliers}
 import spotlight.model.timeseries._
 
 object AlgorithmProtocol extends AggregateProtocol[AlgorithmModule.ID] {

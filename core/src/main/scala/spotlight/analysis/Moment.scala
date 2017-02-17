@@ -4,8 +4,8 @@ import scalaz._
 import Scalaz._
 import com.typesafe.scalalogging.LazyLogging
 import org.apache.commons.math3.stat.descriptive.StatisticalSummary
-import peds.commons.Valid
-import peds.commons.util._
+import omnibus.commons.Valid
+import omnibus.commons.util._
 
 /** Created by rolfsd on 1/26/16.
   */

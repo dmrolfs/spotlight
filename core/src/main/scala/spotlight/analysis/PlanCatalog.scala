@@ -17,9 +17,9 @@ import Scalaz._
 import com.typesafe.config.Config
 import com.persist.logging._
 import nl.grons.metrics.scala.MetricName
-import peds.akka.envelope._
-import peds.akka.envelope.pattern.{ ask ⇒ envAsk }
-import peds.akka.metrics.InstrumentedActor
+import omnibus.akka.envelope._
+import omnibus.akka.envelope.pattern.{ ask ⇒ envAsk }
+import omnibus.akka.metrics.InstrumentedActor
 import demesne.{ BoundedContext, DomainModel }
 import spotlight.Settings
 import spotlight.analysis.OutlierDetection.DetectionResult
@@ -472,7 +472,7 @@ abstract class PlanCatalog( boundedContext: BoundedContext )
 
   val admin: Receive = {
     case req @ P.GetPlansForTopic( topic ) ⇒ {
-      import peds.akka.envelope.pattern.pipe
+      import omnibus.akka.envelope.pattern.pipe
 
       implicit val ec = context.system.dispatcher //todo: consider moving off actor threadpool
 
@@ -502,7 +502,7 @@ abstract class PlanCatalog( boundedContext: BoundedContext )
     timeout: Timeout,
     materializer: Materializer
   ): Future[DetectFlow] = {
-    import peds.akka.stream.StreamMonitor._
+    import omnibus.akka.stream.StreamMonitor._
 
     implicit val ec = context.dispatcher
     def collectPlanFlows( model: DomainModel, plans: Set[AnalysisPlan.Summary] ): Future[Set[DetectFlow]] = {
@@ -715,7 +715,7 @@ abstract class PlanCatalog( boundedContext: BoundedContext )
 //materializer: Materializer
 //): Flow[TimeSeries, Outliers, NotUsed] = {
 //  import PlanCatalogProtocol.Route
-//  import peds.akka.stream.StreamMonitor._
+//  import omnibus.akka.stream.StreamMonitor._
 //  import WatchPoints.{ Intake, Outlet }
 //
 //  implicit val ec = system.dispatcher
@@ -752,7 +752,7 @@ abstract class PlanCatalog( boundedContext: BoundedContext )
 //  materializer: Materializer
 //  ): Flow[TimeSeries, Outliers, NotUsed] = {
 //  import PlanCatalogProtocol.Route
-//  import peds.akka.stream.StreamMonitor._
+//  import omnibus.akka.stream.StreamMonitor._
 //  import WatchPoints.{Intake, Collector, Outlet}
 //
 //  val outletProps = CommonActorPublisher.props[DetectionResult]()

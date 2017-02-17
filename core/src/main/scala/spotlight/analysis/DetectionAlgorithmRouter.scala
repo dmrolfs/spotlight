@@ -10,10 +10,10 @@ import scalaz._
 import Scalaz._
 import com.typesafe.config.{ Config, ConfigValue, ConfigValueType }
 import demesne.{ AggregateRootType, BoundedContext, DomainModel, StartTask }
-import peds.akka.envelope._
-import peds.akka.metrics.InstrumentedActor
-import peds.commons.{ TryV, Valid }
-import peds.commons.concurrent._
+import omnibus.akka.envelope._
+import omnibus.akka.metrics.InstrumentedActor
+import omnibus.commons.{ TryV, Valid }
+import omnibus.commons.concurrent._
 import spotlight.analysis.algorithm._
 import spotlight.analysis.algorithm.statistical._
 import spotlight.model.outlier.AnalysisPlan

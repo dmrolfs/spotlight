@@ -22,11 +22,11 @@ import org.joda.time.DateTime
 import org.slf4j.LoggerFactory
 import org.json4s._
 import org.json4s.jackson.JsonMethods
-import peds.akka.metrics.Instrumented
-import peds.akka.stream.StreamMonitor
+import omnibus.akka.metrics.Instrumented
+import omnibus.akka.stream.StreamMonitor
 import demesne.BoundedContext
-import peds.akka.stream.Limiter
-import peds.commons.TryV
+import omnibus.akka.stream.Limiter
+import omnibus.commons.TryV
 import spotlight.{ Settings, Spotlight, SpotlightContext }
 import spotlight.analysis.DetectFlow
 import spotlight.model.outlier._
@@ -137,7 +137,7 @@ object FileBatchExample extends Instrumented with ClassLogging {
   }
 
   override lazy val metricBaseName: MetricName = {
-    import peds.commons.util._
+    import omnibus.commons.util._
     MetricName( getClass.getPackage.getName, getClass.safeSimpleName )
   }
 
@@ -248,7 +248,7 @@ object FileBatchExample extends Instrumented with ClassLogging {
 
     val graph = GraphDSL.create() { implicit b ⇒
       import GraphDSL.Implicits._
-      import peds.akka.stream.StreamMonitor._
+      import omnibus.akka.stream.StreamMonitor._
 
       def watch[T]( label: String ): Flow[T, T, NotUsed] = Flow[T].map { e ⇒ log.info( Map( label → e.toString ) ); e }
 

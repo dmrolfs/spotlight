@@ -21,12 +21,12 @@ import com.persist.logging.{ ActorLogging ⇒ PersistActorLogging, _ }
 import shapeless.{ Lens, lens }
 import com.typesafe.config.{ Config, ConfigObject, ConfigValueType }
 import nl.grons.metrics.scala.{ Meter, MetricName }
-import peds.akka.envelope._
-import peds.akka.metrics.{ Instrumented, InstrumentedActor }
-import peds.akka.publish.{ EventPublisher, StackableStreamPublisher }
-import peds.archetype.domain.model.core.{ Entity, EntityIdentifying, EntityLensProvider }
-import peds.commons.identifier.ShortUUID
-import peds.akka.supervision.{ IsolatedDefaultSupervisor, OneForOneStrategyFactory }
+import omnibus.akka.envelope._
+import omnibus.akka.metrics.{ Instrumented, InstrumentedActor }
+import omnibus.akka.publish.{ EventPublisher, StackableStreamPublisher }
+import omnibus.archetype.domain.model.core.{ Entity, EntityIdentifying, EntityLensProvider }
+import omnibus.commons.identifier.ShortUUID
+import omnibus.akka.supervision.{ IsolatedDefaultSupervisor, OneForOneStrategyFactory }
 import demesne._
 import demesne.index.local.IndexLocalAgent
 import demesne.index.{ Directive, IndexBusSubscription, StackableIndexBusPublisher }
@@ -366,7 +366,7 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
         def detectorName( p: AnalysisPlan ): String = OutlierDetection.name( p.name )
 
         def startWorkers( p: AnalysisPlan, routes: Map[String, AlgorithmRoute] ): ( ActorRef, ActorRef, ActorRef ) = {
-          import peds.akka.supervision.IsolatedLifeCycleSupervisor.{ WaitForStart, GetChildren, Children, Started }
+          import omnibus.akka.supervision.IsolatedLifeCycleSupervisor.{ WaitForStart, GetChildren, Children, Started }
           import akka.pattern.ask
 
           log.info(
@@ -591,7 +591,7 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
       }
 
       def detectionFlow( p: AnalysisPlan, parallelism: Int )( implicit system: ActorSystem, timeout: Timeout ): DetectFlow = {
-        import peds.akka.envelope.pattern.ask
+        import omnibus.akka.envelope.pattern.ask
 
         implicit val ec: scala.concurrent.ExecutionContext = system.dispatcher
 

@@ -39,7 +39,7 @@ libraryDependencies ++=
     demesne.testkit,
     quality.inmemory,
     "org.python" % "jython-standalone" % "2.5.3",
-    "com.github.marklister" %% "product-collections" % "1.4.3"
+    "com.github.marklister" %% "product-collections" % "1.4.5"
   )
 
 addCompilerPlugin("org.scalamacros" % "paradise" % "2.1.0" cross CrossVersion.full)

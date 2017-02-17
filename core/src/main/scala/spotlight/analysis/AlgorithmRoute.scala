@@ -5,9 +5,9 @@ import scalaz.\/
 import com.persist.logging._
 import com.typesafe.config.{ Config, ConfigFactory, ConfigObject, ConfigValueType }
 import demesne.{ AggregateRootType, DomainModel }
-import peds.akka.envelope._
-import peds.commons.identifier.{ Identifying, ShortUUID }
-import peds.commons.util._
+import omnibus.akka.envelope._
+import omnibus.commons.identifier.{ Identifying, ShortUUID }
+import omnibus.commons.util._
 import spotlight.Settings
 import spotlight.analysis.algorithm.{ AlgorithmIdentifier, AlgorithmModule, AlgorithmProtocol }
 import spotlight.analysis.shard._

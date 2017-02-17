@@ -3,10 +3,10 @@ package spotlight.analysis.algorithm
 import scalaz._
 import Scalaz._
 import com.persist.logging._
-import peds.commons.Valid
+import omnibus.commons.Valid
 import AlgorithmIdentifier.SpanType
 import bloomfilter.CanGenerateHashFrom
-import peds.commons.identifier.ShortUUID
+import omnibus.commons.identifier.ShortUUID
 
 /** Created by rolfsd on 2/1/17.
   */

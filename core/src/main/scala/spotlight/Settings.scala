@@ -7,7 +7,7 @@ import scalaz.Scalaz._
 import scalaz._
 import com.typesafe.config._
 import com.typesafe.scalalogging.LazyLogging
-import peds.commons.{ V, Valid }
+import omnibus.commons.{ V, Valid }
 import spotlight.analysis.OutlierDetection
 import spotlight.model.outlier._
 import spotlight.model.timeseries.Topic
