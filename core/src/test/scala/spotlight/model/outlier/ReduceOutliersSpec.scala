@@ -3,11 +3,11 @@ package spotlight.model.outlier
 import org.scalatest._
 import org.scalatest.mockito.MockitoSugar
 import org.mockito.Mockito._
-import org.mockito.Matchers._
+import org.mockito.ArgumentMatchers._
 import org.joda.{ time ⇒ joda }
 import com.github.nscala_time.time.Imports._
 import com.typesafe.scalalogging.LazyLogging
-import peds.commons.log.Trace
+import omnibus.commons.log.Trace
 import spotlight.model.timeseries.{ ThresholdBoundary, DataPoint, TimeSeries }
 
 class ReduceOutliersSpec

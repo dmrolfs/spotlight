@@ -9,10 +9,10 @@ import akka.util.Timeout
 import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.StrictLogging
 import org.scalatest.concurrent.ScalaFutures
-import peds.akka.envelope.Envelope
+import omnibus.akka.envelope.Envelope
 import demesne.{AggregateRootType, BoundedContext, DomainModel}
 import demesne.testkit.concurrent.CountDownFunction
-import peds.akka.envelope._
+import omnibus.akka.envelope._
 import spotlight.Settings
 import spotlight.analysis.PlanCatalogProtocol.CatalogedPlans
 import spotlight.analysis.{AnalysisPlanProtocol => AP}
@@ -48,7 +48,7 @@ class PlanCatalogSpec extends ParallelAkkaSpec with ScalaFutures with StrictLogg
       val bc = {
         for {
           made <- BoundedContext.make( Symbol(slug), config, rootTypes )
-          started <- made.start()
+          started <- made.start()( global, actorTimeout )
         } yield started
       }
       Await.result( bc, 5.seconds )
@@ -69,7 +69,7 @@ class PlanCatalogSpec extends ParallelAkkaSpec with ScalaFutures with StrictLogg
 
     def stateFrom( ar: ActorRef, topic: Topic ): Future[CatalogedPlans] = {
       import scala.concurrent.ExecutionContext.Implicits.global
-      import peds.akka.envelope.pattern.ask
+      import omnibus.akka.envelope.pattern.ask
 
       ( ar ?+ P.GetPlansForTopic(topic) ).mapTo[Envelope].map{ _.payload }.mapTo[P.CatalogedPlans]
     }
@@ -141,7 +141,7 @@ class PlanCatalogSpec extends ParallelAkkaSpec with ScalaFutures with StrictLogg
 //      }
 //    }
 //
-//    override val module: Module = new PassivationModule
+//    override val module: Algo = new PassivationModule
 //    override def moduleCompanions: List[AggregateRootModule] = {
 //      val result = List( AnalysisPlanModule.module, fixture.module )
 //      logger.debug( "TEST: PASSIVATION-FIXTURE module-companions:[{}]", result.mkString(", ") )

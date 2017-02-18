@@ -6,18 +6,16 @@ import scala.util.matching.Regex
 import scalaz.{ Ordering ⇒ _, _ }
 import Scalaz._
 import com.typesafe.config.{ Config, ConfigFactory }
-import peds.archetype.domain.model.core._
-import peds.commons._
-import peds.commons.identifier._
-import peds.commons.util._
+import omnibus.archetype.domain.model.core._
+import omnibus.commons._
+import omnibus.commons.identifier._
+import omnibus.commons.util._
 import spotlight.model.timeseries.{ TimeSeriesBase, Topic }
 
 /** Created by rolfsd on 10/4/15.
   */
 sealed trait AnalysisPlan extends Entity with Equals {
   override type ID = ShortUUID
-  override val evID: ClassTag[ID] = classTag[ShortUUID]
-  override val evTID: ClassTag[TID] = classTag[TaggedID[ShortUUID]]
 
   override def slug: String = name
   def appliesTo: AnalysisPlan.AppliesTo
@@ -103,20 +101,16 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
 
     trait ScopeIdentifying[T] { self: Identifying[T] ⇒
       override type ID = Scope
-      override val evID: ClassTag[ID] = classTag[Scope]
-      override val evTID: ClassTag[TID] = classTag[TaggedID[Scope]]
-      override def nextId: TryV[TID] = new IllegalStateException( "scopes are fixed to plan:topic pairs so not generated" ).left
-      override def fromString( idstr: String ): ID = {
-        val Array( p, t ) = idstr split ':'
+      override def nextTID: TryV[TID] = new IllegalStateException( "scopes are fixed to plan:topic pairs so not generated" ).left
+      override def idFromString( idRep: String ): ID = {
+        val Array( p, t ) = idRep split ':'
         Scope( plan = p, topic = t )
       }
     }
   }
 
   implicit val analysisPlanIdentifying: EntityIdentifying[AnalysisPlan] = {
-    new EntityIdentifying[AnalysisPlan] with ShortUUID.ShortUuidIdentifying[AnalysisPlan] {
-      override val evEntity: ClassTag[AnalysisPlan] = classTag[AnalysisPlan]
-    }
+    new EntityIdentifying[AnalysisPlan] with ShortUUID.ShortUuidIdentifying[AnalysisPlan]
   }
 
   import shapeless._
@@ -241,7 +235,7 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
     appliesTo: ( Any ) ⇒ Boolean
   ): AnalysisPlan = {
     SimpleAnalysisPlan(
-      id = analysisPlanIdentifying.safeNextId,
+      id = TryV.unsafeGet( analysisPlanIdentifying.nextTID ),
       name = name,
       appliesTo = AppliesTo.function( appliesTo ),
       algorithms = algorithms ++ getAlgorithms( planSpecification ),
@@ -267,7 +261,7 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
     appliesTo: PartialFunction[Any, Boolean]
   ): AnalysisPlan = {
     SimpleAnalysisPlan(
-      id = analysisPlanIdentifying.safeNextId,
+      id = TryV.unsafeGet( analysisPlanIdentifying.nextTID ),
       name = name,
       appliesTo = AppliesTo.partialFunction( appliesTo ),
       algorithms = algorithms ++ getAlgorithms( planSpecification ),
@@ -293,7 +287,7 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
     topics: Set[Topic]
   ): AnalysisPlan = {
     SimpleAnalysisPlan(
-      id = analysisPlanIdentifying.safeNextId,
+      id = TryV.unsafeGet( analysisPlanIdentifying.nextTID ),
       name = name,
       appliesTo = AppliesTo.topics( topics, extractTopic ),
       algorithms = algorithms ++ getAlgorithms( planSpecification ),
@@ -319,7 +313,7 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
     topics: String*
   ): AnalysisPlan = {
     SimpleAnalysisPlan(
-      id = analysisPlanIdentifying.safeNextId,
+      id = TryV.unsafeGet( analysisPlanIdentifying.nextTID ),
       name = name,
       appliesTo = AppliesTo.topics( topics.map { Topic( _ ) }.toSet, extractTopic ),
       algorithms = algorithms ++ getAlgorithms( planSpecification ),
@@ -345,7 +339,7 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
     regex: Regex
   ): AnalysisPlan = {
     SimpleAnalysisPlan(
-      id = analysisPlanIdentifying.safeNextId,
+      id = TryV.unsafeGet( analysisPlanIdentifying.nextTID ),
       name = name,
       appliesTo = AppliesTo.regex( regex, extractTopic ),
       algorithms = algorithms ++ getAlgorithms( planSpecification ),
@@ -369,7 +363,7 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
     planSpecification: Config = ConfigFactory.empty
   ): AnalysisPlan = {
     SimpleAnalysisPlan(
-      id = analysisPlanIdentifying.safeNextId,
+      id = TryV.unsafeGet( analysisPlanIdentifying.nextTID ),
       name = name,
       appliesTo = AppliesTo.all,
       algorithms = algorithms ++ getAlgorithms( planSpecification ),

@@ -3,7 +3,7 @@ package spotlight.model.outlier
 import scalaz._, Scalaz._
 import org.joda.{ time ⇒ joda }
 import com.github.nscala_time.time.Imports._
-import peds.commons.Valid
+import omnibus.commons.Valid
 
 trait OutlierAnnotation {
   def start: joda.DateTime

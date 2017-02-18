@@ -1,7 +1,7 @@
 package spotlight
 
 import com.typesafe.config.{ Config, ConfigFactory }
-import peds.commons.identifier.ShortUUID
+import omnibus.commons.identifier.ShortUUID
 
 /** Created by rolfsd on 7/5/16.
   */

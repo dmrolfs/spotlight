@@ -14,7 +14,7 @@ import org.scalatest.mock.MockitoSugar
 import org.mockito.Mockito._
 import org.mockito.Matchers._
 import org.mockito.stubbing.Answer
-import peds.commons.log.Trace
+import omnibus.commons.log.Trace
 import org.apache.hadoop.conf.{ Configuration => HConfiguration }
 import org.apache.avro.Schema
 import org.apache.avro.file._

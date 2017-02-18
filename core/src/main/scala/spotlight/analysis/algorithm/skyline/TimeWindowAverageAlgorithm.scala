@@ -3,7 +3,7 @@
 //import com.typesafe.config.Config
 //import org.apache.commons.lang3.ClassUtils
 //import org.apache.commons.math3.ml.clustering.DoublePoint
-//import peds.commons.{TryV, Valid}
+//import omnibus.commons.{TryV, Valid}
 //import shapeless.Lens
 //import spotlight.analysis.{DetectUsing, HistoricalStatistics, RecentHistory}
 //import spotlight.analysis.algorithm.AlgorithmModule

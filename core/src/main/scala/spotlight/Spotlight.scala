@@ -84,9 +84,9 @@ object Spotlight extends Instrumented with StrictLogging {
       AnalysisPlanModule.module.rootType,
       LookupShardModule.rootType,
       CellShardModule.module.rootType,
-      SimpleMovingAverageAlgorithm.rootType,
-      GrubbsAlgorithm.rootType,
-      ExponentialMovingAverageAlgorithm.rootType
+      SimpleMovingAverageAlgorithm.module.rootType,
+      GrubbsAlgorithm.module.rootType,
+      ExponentialMovingAverageAlgorithm.module.rootType
     )
   }
 

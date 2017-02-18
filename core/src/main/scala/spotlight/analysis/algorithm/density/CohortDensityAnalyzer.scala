@@ -7,7 +7,7 @@
 //import Scalaz._
 //import org.apache.commons.math3.ml.clustering.{Cluster, DoublePoint}
 //import org.apache.commons.math3.stat.{descriptive => stat}
-//import peds.commons.KOp
+//import omnibus.commons.KOp
 //import spotlight.analysis.algorithm.AlgorithmActor
 //import spotlight.analysis.{DetectOutliersInCohort, DetectUsing}
 //import spotlight.model.outlier.{CohortOutliers, NoOutliers, Outliers}

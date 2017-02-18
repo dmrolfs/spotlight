@@ -23,7 +23,7 @@ import org.joda.{ time ⇒ joda }
 import org.scalatest.Tag
 import org.scalatest.mockito.MockitoSugar
 import org.mockito.Mockito._
-import peds.commons.log.Trace
+import omnibus.commons.log.Trace
 import spotlight.analysis.shard.{ CellShardModule, LookupShardModule }
 import spotlight.analysis.{ AnalysisPlanProtocol ⇒ AP }
 import spotlight.analysis.algorithm.statistical.SimpleMovingAverageAlgorithm
@@ -109,7 +109,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
     //    val configurationReloader = Settings.reloader( Array.empty[String] )()()
 
     //    val algo = SeriesDensityAnalyzer.Algorithm
-    val algo = SimpleMovingAverageAlgorithm.algorithm.label
+    val algo = SimpleMovingAverageAlgorithm.label
     val algoRef = TestProbe()
     val routingTable = Map( algo → algoRef.ref )
 
@@ -137,7 +137,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
       AnalysisPlanModule.module.rootType,
       LookupShardModule.rootType,
       CellShardModule.module.rootType,
-      SimpleMovingAverageAlgorithm.rootType
+      SimpleMovingAverageAlgorithm.module.rootType
     )
 
     lazy val boundedContext: BoundedContext = trace.block( "boundedContext" ) {
@@ -383,7 +383,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
       import com.github.nscala_time.time.OrderingImplicits._
       import f._
       import system.dispatcher
-      import peds.akka.envelope._
+      import omnibus.akka.envelope._
 
       val algos = Set( algo )
       val grouping: Option[AnalysisPlan.Grouping] = {

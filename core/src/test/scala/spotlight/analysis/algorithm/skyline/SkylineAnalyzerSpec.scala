@@ -14,8 +14,8 @@ import org.joda.{ time ⇒ joda }
 import org.mockito.Mockito._
 import org.scalatest.Tag
 import org.scalatest.mock.MockitoSugar
-import peds.akka.envelope.WorkId
-import peds.commons.identifier.{ ShortUUID, TaggedID }
+import omnibus.akka.envelope.WorkId
+import omnibus.commons.identifier.{ ShortUUID, TaggedID }
 
 /** Created by rolfsd on 2/15/16.
   */

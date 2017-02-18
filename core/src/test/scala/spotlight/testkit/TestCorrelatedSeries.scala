@@ -1,6 +1,6 @@
 package spotlight.testkit
 
-import peds.akka.envelope.WorkId
+import omnibus.akka.envelope.WorkId
 import spotlight.model.outlier.{ CorrelatedData, AnalysisPlan, _ }
 import spotlight.model.timeseries.TimeSeries
 

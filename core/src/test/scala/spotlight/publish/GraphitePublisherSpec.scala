@@ -16,13 +16,13 @@ import spotlight.protocol.PythonPickleProtocol
 import spotlight.testkit.ParallelAkkaSpec
 import org.joda.{ time ⇒ joda }
 import org.mockito.Mockito._
-import org.mockito.Matchers._
+import org.mockito.ArgumentMatchers._
 import org.mockito.invocation.InvocationOnMock
 import org.mockito.stubbing.Answer
 import org.python.core.{ PyList, PyTuple }
 import org.scalatest.Tag
 import org.scalatest.mockito.MockitoSugar
-import peds.commons.log.Trace
+import omnibus.commons.log.Trace
 
 /** Created by rolfsd on 12/31/15.
   */

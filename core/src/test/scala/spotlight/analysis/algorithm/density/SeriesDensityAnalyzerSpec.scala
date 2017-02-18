@@ -15,9 +15,9 @@ import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import org.joda.{ time ⇒ joda }
 import org.mockito.Mockito._
 import org.scalatest.mockito.MockitoSugar
-import peds.akka.envelope.WorkId
-import peds.commons.V
-import peds.commons.identifier.{ ShortUUID, TaggedID }
+import omnibus.akka.envelope.WorkId
+import omnibus.commons.V
+import omnibus.commons.identifier.{ ShortUUID, TaggedID }
 import shapeless._
 import spotlight.analysis._
 import spotlight.analysis.algorithm.{ AlgorithmActor, CommonAnalyzer }

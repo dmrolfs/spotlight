@@ -9,8 +9,8 @@ import org.joda.{ time ⇒ joda }
 import com.typesafe.scalalogging.LazyLogging
 import org.apache.commons.math3.ml.clustering.DoublePoint
 import org.apache.commons.math3.stat.descriptive.SummaryStatistics
-import peds.commons.{ KOp, Valid }
-import peds.commons.util._
+import omnibus.commons.{ KOp, Valid }
+import omnibus.commons.util._
 import spotlight.analysis.algorithm.AlgorithmActor.AlgorithmContext
 import spotlight.analysis.algorithm.CommonAnalyzer
 import CommonAnalyzer.WrappingContext

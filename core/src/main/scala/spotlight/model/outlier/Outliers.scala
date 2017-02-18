@@ -2,8 +2,8 @@ package spotlight.model.outlier
 
 import scala.annotation.tailrec
 import org.joda.{ time ⇒ joda }
-import peds.commons.util._
-import peds.commons.Valid
+import omnibus.commons.util._
+import omnibus.commons.Valid
 import spotlight.model.timeseries._
 
 //todo re-seal with FanOutShape Outlier Detection

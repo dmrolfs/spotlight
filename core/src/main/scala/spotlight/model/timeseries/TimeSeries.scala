@@ -4,8 +4,8 @@ import scalaz._, Scalaz._
 import shapeless.Lens
 import org.joda.{ time ⇒ joda }
 import com.github.nscala_time.time.Imports._
-import peds.commons.Valid
-import peds.commons.util._
+import omnibus.commons.Valid
+import omnibus.commons.util._
 
 sealed trait TimeSeries extends TimeSeriesBase {
   override def size: Int = points.size

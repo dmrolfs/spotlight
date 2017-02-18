@@ -110,8 +110,6 @@ case class AnalysisPlanState( plan: AnalysisPlan ) extends Entity {
   override type ID = plan.ID
   override type TID = plan.TID
   override def id: TID = plan.id
-  override val evID: ClassTag[ID] = classTag[ID]
-  override val evTID: ClassTag[TID] = classTag[TID]
   override def name: String = plan.name
   override def canEqual( that: Any ): Boolean = that.isInstanceOf[AnalysisPlanState]
 
@@ -134,8 +132,9 @@ case class AnalysisPlanState( plan: AnalysisPlan ) extends Entity {
 object AnalysisPlanState {
   def allAlgorithms( algorithms: Set[String], algorithmSpec: Config ): Set[String] = {
     import scala.collection.immutable
-    import scala.collection.JavaConversions._
-    val inSpec = algorithmSpec.root.entrySet.to[immutable.Set] map { _.getKey }
+    import scala.collection.JavaConverters._
+
+    val inSpec = algorithmSpec.root.entrySet.asScala.to[immutable.Set] map { _.getKey }
     algorithms ++ inSpec
   }
 }
@@ -273,7 +272,6 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
   implicit val identifying: EntityIdentifying[AnalysisPlanState] = {
     new EntityIdentifying[AnalysisPlanState] with ShortUUID.ShortUuidIdentifying[AnalysisPlanState] {
       override lazy val idTag: Symbol = AnalysisPlan.analysisPlanIdentifying.idTag
-      override val evEntity: ClassTag[AnalysisPlanState] = classTag[AnalysisPlanState]
     }
   }
 
@@ -306,11 +304,10 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
 
   val module: EntityAggregateModule[AnalysisPlanState] = {
     val b = EntityAggregateModule.builderFor[AnalysisPlanState, AnalysisPlanProtocol.type].make
-    import b.P.{ Tag ⇒ BTag, Props ⇒ BProps, _ }
+    import b.P.{ Props ⇒ BProps, _ }
 
     b
       .builder
-      .set( BTag, identifying.idTag )
       .set( Environment, LocalAggregate )
       .set( BProps, AggregateRoot.PlanActor.props( _, _ ) )
       .set( PassivateTimeout, 5.minutes )
@@ -440,7 +437,6 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
       val failuresMeter: Meter = metrics.meter( "failures" )
 
       override var state: AnalysisPlanState = _
-      override val evState: ClassTag[AnalysisPlanState] = classTag[AnalysisPlanState]
 
       var detector: ActorRef = _
 
@@ -485,7 +481,7 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
         }
       }
 
-      val IdType = identifying.evTID
+      val IdType = classTag[identifying.TID]
 
       override def quiescent: Receive = {
         case P.Add( IdType( targetId ), info ) if targetId == aggregateId ⇒ {

@@ -4,8 +4,8 @@ import scala.concurrent.Await
 import scala.concurrent.duration._
 import akka.testkit._
 import com.typesafe.config.{ Config, ConfigFactory }
-import peds.akka.envelope._
-import peds.akka.envelope.pattern.ask
+import omnibus.akka.envelope._
+import omnibus.akka.envelope.pattern.ask
 import akka.actor.{ ActorRef, ActorSystem, Props }
 import demesne.index.StackableIndexBusPublisher
 import demesne.module.{ AggregateEnvironment, LocalAggregate }
@@ -13,10 +13,10 @@ import demesne.{ AggregateRootType, DomainModel }
 import demesne.repository.AggregateRootProps
 import demesne.module.entity.{ EntityAggregateModule, EntityProtocol }
 import org.scalatest.{ OptionValues, Tag }
-import peds.akka.publish.StackableStreamPublisher
-import peds.commons.V
-import peds.commons.identifier.{ ShortUUID, TaggedID }
-import peds.commons.log.Trace
+import omnibus.akka.publish.StackableStreamPublisher
+import omnibus.commons.{ TryV, V }
+import omnibus.commons.identifier.{ ShortUUID, TaggedID }
+import omnibus.commons.log.Trace
 import shapeless.Lens
 import spotlight.analysis.AnalysisPlanModule.AggregateRoot.PlanActor
 import spotlight.analysis.AnalysisPlanModule.AggregateRoot.PlanActor.{ FlowConfigurationProvider, WorkerProvider }
@@ -29,7 +29,6 @@ import spotlight.model.timeseries._
 /** Created by rolfsd on 6/15/16.
   */
 class AnalysisPlanModuleSpec extends EntityModuleSpec[AnalysisPlanState] with OptionValues { outer ⇒
-  override type ID = AnalysisPlanModule.module.ID
   override type Protocol = AnalysisPlanProtocol.type
   override val protocol: Protocol = AnalysisPlanProtocol
 
@@ -57,7 +56,7 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[AnalysisPlanState] with Op
     protected val trace: Trace[_]
 
     val identifying = AnalysisPlanModule.identifying
-    override def nextId(): module.TID = identifying.safeNextId
+    override def nextId(): module.TID = TryV.unsafeGet( identifying.nextTID )
     lazy val plan = makePlan( "TestPlan", None )
     override lazy val tid: TID = plan.id
 
@@ -79,10 +78,10 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[AnalysisPlanState] with Op
     }
 
     override def rootTypes: Set[AggregateRootType] = trace.block( "rootTypes" ) {
-      super.rootTypes ++ Set( SimpleMovingAverageAlgorithm.rootType )
+      super.rootTypes ++ Set( SimpleMovingAverageAlgorithm.module.rootType )
     }
 
-    lazy val algo: String = SimpleMovingAverageAlgorithm.algorithm.label
+    lazy val algo: String = SimpleMovingAverageAlgorithm.label
 
     def stateFrom( ar: ActorRef, tid: module.TID ): AnalysisPlan = {
       import scala.concurrent.ExecutionContext.Implicits.global
@@ -350,7 +349,7 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[AnalysisPlanState] with Op
         case AnalysisPlanProtocol.AlgorithmsChanged( id, algos, config, added, dropped ) ⇒ {
           id mustBe tid
           algos mustBe Set( "foo", "bar", "zed" )
-          dropped mustBe Set( SimpleMovingAverageAlgorithm.algorithm.label )
+          dropped mustBe Set( SimpleMovingAverageAlgorithm.label )
           added mustBe Set( "foo", "bar", "zed" )
           config mustBe testConfig
         }

@@ -1,5 +1,6 @@
 package spotlight.analysis.algorithm
 
+import java.io.Serializable
 import scala.concurrent.duration._
 import scala.reflect.ClassTag
 import akka.actor.{ ActorRef, ActorSystem }
@@ -15,35 +16,35 @@ import org.apache.commons.math3.random.RandomDataGenerator
 import org.apache.commons.math3.stat.descriptive.{ DescriptiveStatistics, StatisticalSummary }
 import org.mockito.Mockito._
 import org.scalatest.{ Assertion, OptionValues }
-import peds.akka.envelope._
-import peds.archetype.domain.model.core.EntityIdentifying
-import peds.commons.V
-import peds.commons.identifier.ShortUUID
-import peds.commons.log.Trace
+import omnibus.akka.envelope._
+import omnibus.commons.{ TryV, V }
+import omnibus.commons.identifier.Identifying
+import omnibus.commons.log.Trace
 import spotlight.analysis.{ DetectOutliersInSeries, DetectUsing, HistoricalStatistics }
 import spotlight.analysis.algorithm.{ AlgorithmProtocol ⇒ P }
 import spotlight.model.outlier._
 import spotlight.model.timeseries._
-import spotlight.testkit.TestCorrelatedSeries
-
-import scala.concurrent.Await
 
 /** Created by rolfsd on 6/9/16.
   */
-abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] with ScalaFutures with OptionValues { outer ⇒
-  private val trace = Trace[AlgorithmModuleSpec[S]]
+abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
+    extends AggregateRootSpec[S] with ScalaFutures with OptionValues {
+  outer ⇒
 
-  override type ID = AlgorithmModule#ID
+  private val trace = Trace[AlgorithmSpec[S]]
+
+  override type ID = Algorithm.ID
   override type Protocol = AlgorithmProtocol.type
   override val protocol: Protocol = AlgorithmProtocol
 
-  type Module <: AlgorithmModule
-  val defaultModule: Module
-  type State = AlgorithmState[defaultModule.Shape]
-  lazy val identifying: EntityIdentifying[State] = defaultModule.identifying
+  type Algo <: Algorithm[S]
+  val defaultAlgorithm: Algo
+  type State = defaultAlgorithm.State
+  type Shape = defaultAlgorithm.Shape
+  lazy val identifying: Identifying.Aux[defaultAlgorithm.State, Algorithm.ID] = defaultAlgorithm.identifying
 
   override def testSlug( test: OneArgTest ): String = {
-    s"Test-${defaultModule.algorithm.label}-${testPosition.incrementAndGet()}"
+    s"Test-${defaultAlgorithm.label}-${testPosition.incrementAndGet()}"
   }
 
   override def testConfiguration( test: OneArgTest, slug: String ): Config = {
@@ -67,7 +68,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
 
     override def before( test: OneArgTest ): Unit = {
       super.before( test )
-      loggingSystem = LoggingSystem( _system, s"Test:${defaultModule.algorithm.label}", "1", "localhost" )
+      loggingSystem = LoggingSystem( _system, s"Test:${defaultAlgorithm.label}", "1", "localhost" )
       logger.error( "#TEST #############  logging system: [{}]", loggingSystem )
       logger.info( "Fixture: DomainModel=[{}]", model )
     }
@@ -114,10 +115,10 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
 
     val scope = AnalysisPlan.Scope( plan = "TestPlan", topic = "test.topic" )
     val plan = mock[AnalysisPlan]
-    when( plan.id ).thenReturn( AnalysisPlan.analysisPlanIdentifying.nextId.toOption.get )
+    when( plan.id ).thenReturn( TryV.unsafeGet( AnalysisPlan.analysisPlanIdentifying.nextTID ) )
     when( plan.name ).thenReturn( scope.plan )
     when( plan.appliesTo ).thenReturn( fixture.appliesToAll )
-    when( plan.algorithms ).thenReturn( Set( module.algorithm.label ) )
+    when( plan.algorithms ).thenReturn( Set( defaultAlgorithm.label ) )
 
     lazy val aggregate: ActorRef = {
       val r = module aggregateOf id
@@ -135,14 +136,14 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
       )
     )
 
-    type Module = outer.Module
-    override lazy val module: Module = outer.defaultModule
-    implicit val evShape: ClassTag[module.Shape] = module.evShape
+    type Module = defaultAlgorithm.module.type
+    override lazy val module: Module = defaultAlgorithm.module
+    //    implicit val evShape: ClassTag[module.Shape] = module.evShape
 
     override def rootTypes: Set[AggregateRootType] = Set( module.rootType )
 
-    type TestState = module.State
-    type TestShape = module.Shape
+    type TestState = defaultAlgorithm.State
+    type TestShape = defaultAlgorithm.Shape
 
     //    val shapeLens = module.analysisStateCompanion.shapeLens
     //    val thresholdLens = module.analysisStateCompanion.thresholdLens
@@ -186,7 +187,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
 
     def evaluate(
       hint: String,
-      algorithmAggregateId: module.TID,
+      algorithmAggregateId: Algorithm.TID,
       series: TimeSeries,
       history: HistoricalStatistics,
       expectedResults: Seq[Expected],
@@ -197,7 +198,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
       aggregate.sendEnvelope(
         DetectUsing(
           targetId = algorithmAggregateId,
-          algorithm = module.algorithm.label,
+          algorithm = defaultAlgorithm.label,
           payload = DetectOutliersInSeries( series, plan, Option( subscriber.ref ), Set.empty[WorkId] ),
           history = history
         )
@@ -210,12 +211,12 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
       sender.expectMsgPF( 500.millis.dilated, hint ) {
         case m @ Envelope( SeriesOutliers( a, s, p, o, t ), _ ) if expectedAnomalies ⇒ {
           logger.info( "evaluate EXPECTED ANOMALIES..." )
-          a mustBe Set( module.algorithm.label )
+          a mustBe Set( defaultAlgorithm.label )
           s mustBe series
           o.size mustBe 1
           o mustBe Seq( series.points.last )
 
-          t( module.algorithm.label ).zip( expectedResults ).zipWithIndex foreach {
+          t( defaultAlgorithm.label ).zip( expectedResults ).zipWithIndex foreach {
             case ( ( ( actual, expected ), i ) ) ⇒
               logger.info( "evaluate[{}]: actual:[{}]  expected:[{}]", i.toString, actual, expected )
               ( i, actual.floor ) mustBe ( i, expected.floor )
@@ -226,10 +227,10 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
 
         case m @ Envelope( NoOutliers( a, s, p, t ), _ ) if !expectedAnomalies ⇒ {
           logger.info( "evaluate EXPECTED normal..." )
-          a mustBe Set( module.algorithm.label )
+          a mustBe Set( defaultAlgorithm.label )
           s mustBe series
 
-          t( module.algorithm.label ).zip( expectedResults ).zipWithIndex foreach {
+          t( defaultAlgorithm.label ).zip( expectedResults ).zipWithIndex foreach {
             case ( ( ( actual, expected ), i ) ) ⇒
               logger.debug( "evaluating expectation: {}", i.toString )
               actual.floor.isDefined mustBe expected.floor.isDefined
@@ -267,7 +268,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
         as.value mustBe an[TestShape]
         val sas = as.value.asInstanceOf[TestShape]
         a.sourceId.id mustBe id.id
-        a.algorithm mustBe module.algorithm.label
+        a.algorithm mustBe defaultAlgorithm.label
         logger.info( "asserting shape: {}", sas )
         assertShapeFn( sas )
       }
@@ -421,7 +422,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
   def tailAverageData(
     data: Seq[DataPoint],
     last: Seq[DataPoint] = Seq.empty[DataPoint],
-    tailLength: Int = defaultModule.AlgorithmContext.DefaultTailAverageLength
+    tailLength: Int = AlgorithmContext.DefaultTailAverageLength
   ): Seq[DataPoint] = {
     val lastPoints = last.drop( last.size - tailLength + 1 ) map { _.value }
     data.map { _.timestamp }
@@ -451,7 +452,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
   ): Seq[ThresholdBoundary]
 
   def bootstrapSuite(): Unit = {
-    s"${defaultModule.algorithm.label} entity" should {
+    s"${defaultAlgorithm.label} entity" should {
       "have zero shape before advance" taggedAs WIP in { f: Fixture ⇒
         import f._
 
@@ -478,7 +479,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
           ( aggregate ? P.GetTopicShapeSnapshot( id, adv.topic ) ).mapTo[P.TopicShapeSnapshot],
           timeout( 15.seconds.dilated )
         ) { s1 ⇒
-            val zero = module.shapeCompanion.zero( None )
+            val zero = shapeless.the[Advancing[Shape]].zero( None )
             actualVsExpectedShape( s1.snapshot.get.asInstanceOf[TestShape], expectedUpdatedShape( zero, adv ) )
           }
       }
@@ -486,7 +487,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
   }
 
   def analysisStateSuite(): Unit = {
-    s"${defaultModule.algorithm.label}" should {
+    s"${defaultAlgorithm.label}" should {
       //      "advance state" in { f: Fixture =>
       //        import f._
       //        val zero = module.shapeCompanion.zero( None )
@@ -504,7 +505,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
 
       "advance shape" in { f: Fixture ⇒
         import f._
-        val zero = module.shapeCompanion.zero( None )
+        val zero = shapeless.the[Advancing[S]].zero( None )
         logger.debug( "TEST: zero=[{}]", zero )
         val pt = DataPoint( nowTimestamp, 3.14159 )
         val t = ThresholdBoundary( nowTimestamp, Some( 1.1 ), Some( 2.2 ), Some( 3.3 ) )
@@ -512,7 +513,7 @@ abstract class AlgorithmModuleSpec[S: ClassTag] extends AggregateRootSpec[S] wit
         val expected = expectedUpdatedShape( zero, adv )
         logger.debug( "TEST: expectedShape=[{}]", expected )
 
-        val actual = module.shapeCompanion.advance( zero, adv )
+        val actual = shapeless.the[Advancing[S]].advance( zero, adv )
         actualVsExpectedShape( actual, expected )
       }
     }

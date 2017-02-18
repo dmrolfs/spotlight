@@ -2,9 +2,9 @@ import sbt.Keys._
 import sbt._
 
 object Dependencies {
-  object peds {
-    val version = "0.4.8"
-    def module( id: String ) = "com.github.dmrolfs" %% s"peds-$id" % version withSources() withJavadoc()
+  object omnibus {
+    val version = "0.5.0-SNAPSHOT"
+    def module( id: String ) = "com.github.dmrolfs" %% s"omnibus-$id" % version withSources() withJavadoc()
     def all = Seq( commons, akka, archetype )
 
     val commons = module( "commons" )
@@ -14,7 +14,7 @@ object Dependencies {
   }
 
   object demesne {
-    val version = "2.1.3.1"
+    val version = "2.2.0-SNAPSHOT"
     def module( id: String ) = "com.github.dmrolfs" %% s"demesne-$id" % version withSources() withJavadoc()
     val core = module( "core" )
     val testkit = module( "testkit" )
@@ -38,7 +38,7 @@ object Dependencies {
     val testkit = module( "testkit" )
     val streamsTestkit = module( "stream-testkit" )
 
-    val kryo = "com.github.romix.akka" %% "akka-kryo-serialization" % "0.5.0"
+    val kryo = "com.github.romix.akka" %% "akka-kryo-serialization" % "0.5.1"
     val kryoSerializers = "de.javakaffee" % "kryo-serializers" % "0.41"
   }
 
@@ -95,14 +95,14 @@ object Dependencies {
     val hdrhistogram = "org.hdrhistogram" % "HdrHistogram" % "2.1.9"
 
     object kamon {
-      val version = "0.6.4"
-      def module( id: String ) = "io.kamon" %% s"kamon-$id" % version
-      def all = Seq( core, scala, akka, akkaRemote, system, statsd )
+      val version = "0.6.5"
+      def module( id: String, v: String = version ) = "io.kamon" %% s"kamon-$id" % v
+      def all = Seq( core, scala, akka, /*akkaRemote,*/ system, statsd )
 
       val core = module( "core" )
       val scala = module( "scala" )
-      val akka = module( "akka" )
-      val akkaRemote = module( "akka-remote" )
+      val akka = module( "akka-2.4", "0.6.6" )
+      // val akkaRemote = "io.kamon" % "kamon-akka-remote-2.4" % "" // module( "akka-remote", "0.6.6" )
       val system = module( "system-metrics" )
       val statsd = module( "statsd" )
       val logReporter = module( "log-reporter" )
@@ -112,7 +112,7 @@ object Dependencies {
   object facility {
     val offheap = "sh.den" % "scala-offheap_2.11" % "0.1"
     val fastutil = "it.unimi.dsi" % "fastutil" % "7.1.0" withSources() withJavadoc()
-    val bloomFilter = "com.github.alexandrnikitin" %% "bloom-filter" % "0.8.0" withSources() withJavadoc()
+    val bloomFilter = "com.github.alexandrnikitin" % "bloom-filter_2.11" % "0.8.0" withSources() withJavadoc()
     val json4sJackson = "org.json4s" %% "json4s-jackson" % "3.5.0"
     val uuid = "com.eaio.uuid" % "uuid" % "3.4"
     val config = "com.typesafe" % "config" % "1.3.1"
@@ -126,7 +126,7 @@ object Dependencies {
     val math3 = "org.apache.commons" % "commons-math3" % "3.6.1" withSources() withJavadoc()
 //    val suanshu = "com.numericalmethod" % "suanshu" % "3.4.0" intransitive()  // don't want to use due to $$$
     val scopt = "com.github.scopt" %% "scopt" % "3.5.0"
-    val pyrolite = "net.razorvine" % "pyrolite" % "4.18"
+    val pyrolite = "net.razorvine" % "pyrolite" % "4.17"
     val msgpack = "org.velvia" % "msgpack4s_2.11" % "0.6.0"
 
     val hadoopClient = "org.apache.hadoop" % "hadoop-client" % "2.7.3" intransitive // exclude( "log4j", "log4j" )
@@ -164,7 +164,7 @@ object Dependencies {
 
   val commonDependencies = {
     log.all ++
-    peds.all ++
+    omnibus.all ++
     time.all ++
     Seq(
       akka.actor,

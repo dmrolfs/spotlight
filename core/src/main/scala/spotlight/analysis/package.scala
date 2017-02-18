@@ -5,7 +5,7 @@ import akka.NotUsed
 import akka.stream.scaladsl.Flow
 import com.typesafe.config.Config
 import org.apache.commons.math3.ml.distance.{ DistanceMeasure, EuclideanDistance }
-import peds.commons.math.MahalanobisDistance
+import omnibus.commons.math.MahalanobisDistance
 import spotlight.model.outlier.{ AnalysisPlan, Outliers }
 import spotlight.model.timeseries.{ TimeSeries, TimeSeriesBase }
 

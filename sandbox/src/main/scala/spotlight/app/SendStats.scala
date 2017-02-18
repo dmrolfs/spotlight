@@ -12,7 +12,7 @@ import com.typesafe.scalalogging.StrictLogging
 import org.apache.commons.math3.random.RandomDataGenerator
 import org.joda.{ time => joda }
 import org.parboiled2._
-import peds.commons.log.Trace
+import omnibus.commons.log.Trace
 import resource._
 import scopt.OptionParser
 import spotlight.model.timeseries._

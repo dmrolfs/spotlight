@@ -12,8 +12,8 @@ import org.apache.commons.math3.random.RandomDataGenerator
 import org.joda.{ time ⇒ joda }
 import org.scalatest.mockito.MockitoSugar
 import org.mockito.Mockito._
-import peds.akka.envelope.WorkId
-import peds.commons.identifier.{ ShortUUID, TaggedID }
+import omnibus.akka.envelope.WorkId
+import omnibus.commons.identifier.{ ShortUUID, TaggedID }
 import shapeless._
 import spotlight.analysis._
 import spotlight.analysis.algorithm.AlgorithmActor

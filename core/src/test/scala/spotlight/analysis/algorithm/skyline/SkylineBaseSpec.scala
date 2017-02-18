@@ -15,7 +15,7 @@ import org.joda.{ time ⇒ joda }
 import org.mockito.Mockito._
 import org.scalatest.Tag
 import org.scalatest.mockito.MockitoSugar
-import peds.commons.V
+import omnibus.commons.V
 import spotlight.analysis.algorithm.CommonAnalyzer
 
 /** Created by rolfsd on 2/15/16.

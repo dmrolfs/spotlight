@@ -4,8 +4,8 @@ import scala.concurrent.Await
 import scala.concurrent.duration._
 import akka.testkit._
 import com.typesafe.config.{ Config, ConfigFactory }
-import peds.akka.envelope._
-import peds.akka.envelope.pattern.ask
+import omnibus.akka.envelope._
+import omnibus.akka.envelope.pattern.ask
 import akka.actor.{ ActorRef, ActorSystem, Props }
 import com.typesafe.scalalogging.StrictLogging
 import demesne.index.StackableIndexBusPublisher
@@ -13,10 +13,11 @@ import demesne.{ AggregateRootType, DomainModel }
 import demesne.module.{ AggregateEnvironment, LocalAggregate }
 import demesne.module.entity.{ EntityAggregateModule, EntityProtocol }
 import demesne.repository.AggregateRootProps
-import peds.akka.publish.StackableStreamPublisher
-import peds.archetype.domain.model.core.EntityIdentifying
-import peds.commons.identifier.{ ShortUUID, TaggedID }
-import peds.commons.log.Trace
+import omnibus.akka.publish.StackableStreamPublisher
+import omnibus.archetype.domain.model.core.EntityIdentifying
+import omnibus.commons.TryV
+import omnibus.commons.identifier.{ Identifying, ShortUUID, TaggedID }
+import omnibus.commons.log.Trace
 import shapeless.Lens
 import spotlight.analysis.AnalysisPlanModule.AggregateRoot.PlanActor
 import spotlight.analysis.AnalysisPlanModule.AggregateRoot.PlanActor.{ FlowConfigurationProvider, WorkerProvider }
@@ -31,11 +32,10 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[AnalysisPlanSta
 
   val trace = Trace[AnalysisPlanModulePassivationSpec]
 
-  override type ID = AnalysisPlanState#ID
   override type Protocol = AnalysisPlanProtocol.type
   override val protocol: Protocol = AnalysisPlanProtocol
 
-  implicit val moduleIdentifying = AnalysisPlanModule.identifying
+  implicit val moduleIdentifying: Identifying.Aux[AnalysisPlanState, AnalysisPlanState#ID] = AnalysisPlanModule.identifying
 
   override def testConfiguration( test: OneArgTest, slug: String ): Config = {
     AnalysisPlanModulePassivationSpec.config( systemName = slug )
@@ -78,9 +78,9 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[AnalysisPlanSta
     }
 
     override val identifying: EntityIdentifying[AnalysisPlanState] = AnalysisPlanModule.identifying
-    override def nextId(): module.TID = identifying.safeNextId
+    override def nextId(): module.TID = TryV.unsafeGet( identifying.nextTID )
 
-    val algo: String = SimpleMovingAverageAlgorithm.algorithm.label
+    val algo: String = SimpleMovingAverageAlgorithm.label
 
     def makePlan( name: String, g: Option[AnalysisPlan.Grouping] ): AnalysisPlan = {
       AnalysisPlan.default(
@@ -157,7 +157,7 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[AnalysisPlanSta
           pid mustBe planTid
           algos mustBe Set( "stella", "otis", "apollo" )
           added mustBe Set( "stella", "otis", "apollo" )
-          dropped mustBe Set( SimpleMovingAverageAlgorithm.algorithm.label )
+          dropped mustBe Set( SimpleMovingAverageAlgorithm.label )
           assert( c.isEmpty )
         }
       }
@@ -183,7 +183,7 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[AnalysisPlanSta
           pid mustBe p1.id
           algos mustBe Set( "stella", "otis", "apollo" )
           added mustBe Set( "stella", "otis", "apollo" )
-          dropped mustBe Set( SimpleMovingAverageAlgorithm.algorithm.label )
+          dropped mustBe Set( SimpleMovingAverageAlgorithm.label )
           assert( c.isEmpty )
         }
       }

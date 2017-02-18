@@ -7,15 +7,15 @@ import akka.event.LoggingReceive
 import akka.persistence.{ RecoveryCompleted, SnapshotOffer }
 import com.persist.logging._
 import nl.grons.metrics.scala.{ Histogram, Meter, MetricName }
-import peds.akka.envelope._
-import peds.akka.metrics.{ Instrumented, InstrumentedActor }
-import peds.akka.publish.{ EventPublisher, StackableStreamPublisher }
-import peds.commons.identifier._
-import peds.commons.util._
+import omnibus.akka.envelope._
+import omnibus.akka.metrics.{ Instrumented, InstrumentedActor }
+import omnibus.akka.publish.{ EventPublisher, StackableStreamPublisher }
+import omnibus.commons.identifier._
+import omnibus.commons.util._
 import demesne._
 import demesne.module.{ LocalAggregate, SimpleAggregateModule }
 import spotlight.analysis.DetectUsing
-import spotlight.analysis.algorithm.{ AlgorithmModule, AlgorithmProtocol ⇒ AP }
+import spotlight.analysis.algorithm.{ Algorithm, AlgorithmProtocol ⇒ AP }
 import spotlight.model.outlier.AnalysisPlan
 import spotlight.model.timeseries._
 
@@ -27,14 +27,14 @@ object CellShardProtocol extends AggregateProtocol[CellShardCatalog#ID] {
     plan: AnalysisPlan.Summary,
     algorithmRootType: AggregateRootType,
     nrCells: Int,
-    nextAlgorithmId: () ⇒ AlgorithmModule.TID
+    nextAlgorithmId: () ⇒ Algorithm.TID
   ) extends Command
 
   case class Added(
     override val sourceId: Added#TID,
     plan: AnalysisPlan.Summary,
     algorithmRootType: AggregateRootType,
-    nextAlgorithmId: () ⇒ AlgorithmModule.TID,
+    nextAlgorithmId: () ⇒ Algorithm.TID,
     cells: Vector[AlgoTID]
   ) extends Event
 }
@@ -42,12 +42,11 @@ object CellShardProtocol extends AggregateProtocol[CellShardCatalog#ID] {
 case class CellShardCatalog(
     plan: AnalysisPlan.Summary,
     algorithmRootType: AggregateRootType,
-    override val nextAlgorithmId: () ⇒ AlgorithmModule.TID,
+    override val nextAlgorithmId: () ⇒ Algorithm.TID,
     cells: Vector[AlgoTID]
 ) extends ShardCatalog with Equals with ClassLogging {
-  import CellShardCatalog.identifying
-
-  override def id: TID = identifying.tag( ShardCatalog.ID( plan.id, algorithmRootType.name ).asInstanceOf[identifying.ID] ).asInstanceOf[TID]
+  override def id: TID = ShardCatalog.idFor( plan, algorithmRootType.name )( CellShardCatalog.identifying )
+  //  override def id: TID = identifying.tag( ShardCatalog.ID( plan.id, algorithmRootType.name ).asInstanceOf[identifying.ID] ).asInstanceOf[TID]
   override def name: String = plan.name
   override def slug: String = plan.slug
   val size: Int = cells.size
@@ -89,7 +88,7 @@ case class CellShardCatalog(
 }
 
 object CellShardCatalog {
-  implicit val identifying: Identifying[CellShardCatalog] = new ShardCatalog.ShardCatalogIdentifying[CellShardCatalog] {
+  implicit val identifying: Identifying.Aux[CellShardCatalog, ShardCatalog.ID] = new ShardCatalog.ShardCatalogIdentifying[CellShardCatalog] {
     override val idTag: Symbol = Symbol( "cell-shard" )
   }
 }
@@ -98,15 +97,14 @@ object CellShardModule extends ClassLogging {
   type ID = CellShardCatalog#ID
   type TID = CellShardCatalog#TID
 
-  implicit val identifying: Identifying[CellShardCatalog] = CellShardCatalog.identifying
+  //  implicit val identifying: Identifying[CellShardCatalog] = CellShardCatalog.identifying
 
-  val module: SimpleAggregateModule[CellShardCatalog] = {
-    val b = SimpleAggregateModule.builderFor[CellShardCatalog].make
-    import b.P.{ Props ⇒ BProps, Tag ⇒ BTag, _ }
+  val module: SimpleAggregateModule[CellShardCatalog, CellShardCatalog#ID] = {
+    val b = SimpleAggregateModule.builderFor[CellShardCatalog, CellShardCatalog#ID].make
+    import b.P.{ Props ⇒ BProps, _ }
 
     b
       .builder
-      .set( BTag, identifying.idTag )
       .set( Environment, LocalAggregate )
       .set( BProps, ShardingActor.props( _, _ ) )
       .build()
@@ -193,7 +191,7 @@ object CellShardModule extends ClassLogging {
     // }
 
     override var state: CellShardCatalog = _
-    override val evState: ClassTag[CellShardCatalog] = classTag[CellShardCatalog]
+    //    override val evState: ClassTag[CellShardCatalog] = classTag[CellShardCatalog]
 
     override def acceptance: Acceptance = {
       case ( CellShardProtocol.Added( tid, p, rt, next, cells ), s ) if Option( s ).isEmpty ⇒ {

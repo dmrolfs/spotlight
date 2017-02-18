@@ -9,7 +9,7 @@ import omnibus.akka.envelope._
 import omnibus.commons.identifier.{ Identifying, ShortUUID }
 import omnibus.commons.util._
 import spotlight.Settings
-import spotlight.analysis.algorithm.{ AlgorithmIdentifier, AlgorithmModule, AlgorithmProtocol }
+import spotlight.analysis.algorithm.{ AlgorithmIdentifier, Algorithm, AlgorithmProtocol }
 import spotlight.analysis.shard._
 import spotlight.model.outlier.AnalysisPlan
 import squants.information.{ Bytes, Information, Megabytes }
@@ -68,7 +68,7 @@ object AlgorithmRoute extends ClassLogging {
       referenceFor( message ) forwardEnvelope AlgorithmProtocol.RouteMessage( targetId = algorithmIdFor( message ), message )
     }
 
-    def algorithmIdFor( message: Any ): AlgorithmModule.TID = {
+    def algorithmIdFor( message: Any ): Algorithm.TID = {
       val result = message match {
         case m: DetectUsing ⇒ {
           algorithmIdentifying.tag(
@@ -122,7 +122,7 @@ object AlgorithmRoute extends ClassLogging {
         }
       }
 
-      result.asInstanceOf[AlgorithmModule.TID]
+      result.asInstanceOf[Algorithm.TID]
     }
 
     override def referenceFor( message: Any )( implicit context: ActorContext ): ActorRef = {
@@ -188,7 +188,7 @@ object AlgorithmRoute extends ClassLogging {
         ref
       }
 
-      def nextAlgorithmId( plan: AnalysisPlan.Summary, algorithmRootType: AggregateRootType ): () ⇒ AlgorithmModule.TID = { () ⇒
+      def nextAlgorithmId( plan: AnalysisPlan.Summary, algorithmRootType: AggregateRootType ): () ⇒ Algorithm.TID = { () ⇒
         algorithmRootType.identifying.tag(
           AlgorithmIdentifier(
           planName = plan.name,
@@ -196,7 +196,7 @@ object AlgorithmRoute extends ClassLogging {
           spanType = AlgorithmIdentifier.GroupSpan,
           span = ShortUUID().toString()
         ).asInstanceOf[algorithmRootType.identifying.ID]
-        ).asInstanceOf[AlgorithmModule.TID]
+        ).asInstanceOf[Algorithm.TID]
       }
 
       def idFor(
@@ -224,11 +224,11 @@ object AlgorithmRoute extends ClassLogging {
       )
 
       def from( plan: AnalysisPlan.Summary )( implicit model: DomainModel ): Option[Strategy] = {
-        import scala.collection.JavaConversions._
+        import scala.collection.JavaConverters._
         import shapeless.syntax.typeable._
 
         for {
-          v ← Settings.detectionPlansConfigFrom( model.configuration ).root.find { _._1 == plan.name }.map { _._2 }
+          v ← Settings.detectionPlansConfigFrom( model.configuration ).root.asScala.find { _._1 == plan.name }.map { _._2 }
           co ← v.cast[ConfigObject]
           c = co.toConfig if c hasPath PlanShardPath
           shardValue = c getValue PlanShardPath
@@ -245,12 +245,13 @@ object AlgorithmRoute extends ClassLogging {
 
             case ConfigValueType.OBJECT ⇒ {
               import scala.reflect._
-              import scala.collection.JavaConversions._
+              import scala.collection.JavaConverters._
+
               val ConfigObjectType = classTag[ConfigObject]
               val specs = c.getConfig( PlanShardPath ).root
 
               if ( specs.size == 1 ) {
-                val ( key, ConfigObjectType( value ) ) = specs.head
+                val ( key, ConfigObjectType( value ) ) = specs.asScala.head
                 makeStrategy( key, value.toConfig )
               } else {
                 val ex = new IllegalStateException(
