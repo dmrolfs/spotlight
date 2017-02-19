@@ -13,7 +13,7 @@ import org.typelevel.scalatest.{ DisjunctionMatchers, DisjunctionValues }
 import omnibus.commons.TryV
 import omnibus.commons.log.Trace
 import spotlight.analysis.RecentHistory
-import spotlight.analysis.algorithm.{ Algorithm, AlgorithmModule, AlgorithmSpec, AlgorithmProtocol ⇒ P }
+import spotlight.analysis.algorithm.{ Algorithm, AlgorithmSpec, AlgorithmProtocol ⇒ P }
 import spotlight.model.timeseries._
 
 /** Created by rolfsd on 10/7/16.

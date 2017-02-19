@@ -49,8 +49,8 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
 
   override def testConfiguration( test: OneArgTest, slug: String ): Config = {
     val c = spotlight.testkit.config( systemName = slug )
-    import scala.collection.JavaConversions._
-    logger.debug( "Test Config: akka.cluster.seed-nodes=[{}]", c.getStringList( "akka.cluster.seed-nodes" ).mkString( ", " ) )
+    import scala.collection.JavaConverters._
+    logger.debug( "Test Config: akka.cluster.seed-nodes=[{}]", c.getStringList( "akka.cluster.seed-nodes" ).asScala.mkString( ", " ) )
     c
   }
 
@@ -140,7 +140,12 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
     override lazy val module: Module = defaultAlgorithm.module
     //    implicit val evShape: ClassTag[module.Shape] = module.evShape
 
-    override def rootTypes: Set[AggregateRootType] = Set( module.rootType )
+    override def rootTypes: Set[AggregateRootType] = {
+      logger.debug( "default algorithm[{}] label:[{}] ", defaultAlgorithm, defaultAlgorithm.label )
+      logger.debug( "algorithm module:[{}] identifying:[{}]", defaultAlgorithm.module, module.identifying )
+      logger.debug( "algorithm root type:[{}]", module.rootType )
+      Set( module.rootType )
+    }
 
     type TestState = defaultAlgorithm.State
     type TestShape = defaultAlgorithm.Shape

@@ -58,8 +58,8 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
       """.stripMargin
     )
     val c = spotlight.testkit.config( systemName = slug )
-    import scala.collection.JavaConversions._
-    logger.debug( "Test Config: akka.cluster.seed-nodes=[{}]", c.getStringList( "akka.cluster.seed-nodes" ).mkString( ", " ) )
+    import scala.collection.JavaConverters._
+    logger.debug( "Test Config: akka.cluster.seed-nodes=[{}]", c.getStringList( "akka.cluster.seed-nodes" ).asScala.mkString( ", " ) )
     tc withFallback c
   }
 

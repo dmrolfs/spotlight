@@ -78,7 +78,12 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[AnalysisPlanState] with Op
     }
 
     override def rootTypes: Set[AggregateRootType] = trace.block( "rootTypes" ) {
-      super.rootTypes ++ Set( SimpleMovingAverageAlgorithm.module.rootType )
+      val srt = super.rootTypes
+      logger.info( "super root-types: [{}]", srt )
+      val sma = SimpleMovingAverageAlgorithm.module.rootType
+      logger.info( "sma root-type: [{}]", sma )
+      srt ++ Set( sma )
+      //      super.rootTypes ++ Set( SimpleMovingAverageAlgorithm.module.rootType )
     }
 
     lazy val algo: String = SimpleMovingAverageAlgorithm.label
@@ -284,7 +289,7 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[AnalysisPlanState] with Op
     //      testProbe.expectNoMsg()
     //    }
 
-    "add AnalysisPlan" in { f: Fixture ⇒
+    "add AnalysisPlan" taggedAs WIP in { f: Fixture ⇒
       import f._
 
       entity ! protocol.Add( tid, Some( plan ) )

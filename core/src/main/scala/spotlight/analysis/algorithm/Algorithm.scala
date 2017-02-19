@@ -1,17 +1,18 @@
 package spotlight.analysis.algorithm
 
 import java.io.Serializable
+
 import scala.annotation.tailrec
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
-import scala.util.Random
+import scala.util.{ Random, Try }
 import scala.reflect._
 import akka.actor._
 import akka.agent.Agent
 import akka.cluster.sharding.ShardRegion
 import akka.event.LoggingReceive
 import akka.persistence._
-import bloomfilter.mutable.BloomFilter
+//import bloomfilter.mutable.BloomFilter
 import bloomfilter.CanGenerateHashFrom
 import bloomfilter.CanGenerateHashFrom.CanGenerateHashFromString
 
@@ -80,7 +81,12 @@ case class AlgorithmState[S](
   override def toString: String = s"""State( algorithm:${name} id:[${id}] shapesNr:[${shapes.size}] )"""
 }
 
-object AlgorithmModule {
+/** Created by rolfsd on 6/5/16.
+  */
+object Algorithm extends ClassLogging {
+  type ID = AlgorithmIdentifier
+  type TID = TaggedID[ID]
+
   trait ConfigurationProvider {
     /** approximate number of points in a one day window size @ 1 pt per 10s
       */
@@ -91,13 +97,6 @@ object AlgorithmModule {
   }
 
   private[algorithm] val gitterFactor: Random = new Random()
-}
-
-/** Created by rolfsd on 6/5/16.
-  */
-object Algorithm extends ClassLogging {
-  type ID = AlgorithmIdentifier
-  type TID = TaggedID[ID]
 
   case class InsufficientDataSize(
     algorithm: String,
@@ -120,21 +119,22 @@ object Algorithm extends ClassLogging {
   ) extends BadValue( path, s"For algorithm, ${algorithm}, ${path} must: ${requirement}" )
 
   class ShardMonitor( algorithmLabel: String ) {
-    val shards: Agent[( Long, BloomFilter[Algorithm.ID] )] = {
-      //todo make config driven
-      Agent( ( 0L, BloomFilter[Algorithm.ID]( numberOfItems = 10000, falsePositiveRate = 0.1 ) ) )( ExecutionContext.global )
-    }
+    def shards: Long = 0L // _shards.get()._1
+    //    val _shards: Agent[( Long, BloomFilter[Algorithm.ID] )] = {
+    //      todo make config driven
+    //      Agent( ( 0L, BloomFilter[Algorithm.ID]( numberOfItems = 10000, falsePositiveRate = 0.1 ) ) )( ExecutionContext.global )
+    //    }
 
     def :+( id: Algorithm.ID ): Unit = {
-      shards send { css ⇒
-        val ( c, ss ) = css
-        if ( ss mightContain id ) ( c, ss )
-        else {
-          log.info( Map( "@msg" → "created new algorithm shard", "algorithm" → algorithmLabel, "id" → id.toString ) )
-          ss add id
-          ( c + 1L, ss )
-        }
-      }
+      //      _shards send { css ⇒
+      //        val ( c, ss ) = css
+      //        if ( ss mightContain id ) ( c, ss )
+      //        else {
+      //          log.info( Map( "@msg" → "created new algorithm shard", "algorithm" → algorithmLabel, "id" → id.toString ) )
+      //          ss add id
+      //          ( c + 1L, ss )
+      //        }
+      //      }
     }
   }
 
@@ -166,7 +166,7 @@ object Algorithm extends ClassLogging {
 }
 
 abstract class Algorithm[S <: Serializable: Advancing]
-    extends AlgorithmModule.ConfigurationProvider with Instrumented with ClassLogging {
+    extends Algorithm.ConfigurationProvider with Instrumented with ClassLogging {
   algorithm ⇒
 
   type Shape = S
@@ -176,11 +176,11 @@ abstract class Algorithm[S <: Serializable: Advancing]
   type Context <: AlgorithmContext
   def makeContext( message: DetectUsing, state: Option[State] ): Context
 
-  val label: String
+  def label: String
   def prepareData( c: Context ): Seq[DoublePoint] = c.data
   def step( point: PointT, shape: Shape )( implicit s: State, c: Context ): Option[( Boolean, ThresholdBoundary )]
 
-  implicit val identifying: Identifying.Aux[State, Algorithm.ID] = new Identifying[State] {
+  implicit lazy val identifying: Identifying.Aux[State, Algorithm.ID] = new Identifying[State] {
     override type ID = Algorithm.ID
     override val idTag: Symbol = Symbol( algorithm.label )
     override def tidOf( s: AlgorithmState[Shape] ): TID = s.id
@@ -223,7 +223,12 @@ abstract class Algorithm[S <: Serializable: Advancing]
 
   def initializeMetrics(): Unit = {
     stripLingeringMetrics()
-    metrics.gauge( Algorithm.ShardMonitor.ShardsMetricName ) { shardMonitor.shards.get()._1 }
+    \/ fromTryCatchNonFatal {
+      metrics.gauge( Algorithm.ShardMonitor.ShardsMetricName ) { algorithm.shardMonitor.shards }
+    } match {
+      case \/-( g ) ⇒ log.debug( Map( "@msg" → "gauge created", "gauge" → Algorithm.ShardMonitor.ShardsMetricName ) )
+      case -\/( ex ) ⇒ log.debug( Map( "@msg" → "gauge already exists", "gauge" → Algorithm.ShardMonitor.ShardsMetricName ) )
+    }
   }
 
   def stripLingeringMetrics(): Unit = {
@@ -236,11 +241,13 @@ abstract class Algorithm[S <: Serializable: Advancing]
     )
   }
 
-  case object module extends AggregateRootModule[State, Algorithm.ID] with ClassLogging {
-    self: AlgorithmModule.ConfigurationProvider ⇒
-
+  lazy val module: AggregateRootModule[State, Algorithm.ID] = new AggregateRootModule[State, Algorithm.ID] with ClassLogging {
     import AlgorithmProtocol.Advanced
 
+    override def toString: String = s"AlgorithmModule( identifying:${this.identifying} ${this.identifying.idTag} )"
+
+    log.debug( Map( "@msg" → "#TEST algorithm identifying", "identifying" → identifying ) )
+    log.debug( Map( "@msg" → "#TEST algorithm identifying tag", "idTag" → identifying.idTag ) )
     override lazy val shardName: String = algorithm.label
 
     val AdvancedType: ClassTag[Advanced] = classTag[Advanced]
@@ -267,7 +274,7 @@ abstract class Algorithm[S <: Serializable: Advancing]
             new SnapshotSpecification {
               override val snapshotInterval: FiniteDuration = 2.minutes // 5.minutes okay //todo make config driven
               override val snapshotInitialDelay: FiniteDuration = {
-                val delay = snapshotInterval + snapshotInterval * AlgorithmModule.gitterFactor.nextDouble()
+                val delay = snapshotInterval + snapshotInterval * Algorithm.gitterFactor.nextDouble()
                 FiniteDuration( delay.toMillis, MILLISECONDS )
               }
             }

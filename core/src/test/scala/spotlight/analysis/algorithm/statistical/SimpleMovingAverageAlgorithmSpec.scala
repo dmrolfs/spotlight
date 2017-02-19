@@ -3,12 +3,15 @@ package spotlight.analysis.algorithm.statistical
 import scala.annotation.tailrec
 import akka.actor.ActorSystem
 import com.typesafe.config.Config
+import demesne.BoundedContext
 import org.apache.commons.math3.stat.descriptive.{ DescriptiveStatistics, SummaryStatistics }
 import org.mockito.Mockito._
 import org.scalatest.Assertion
 import spotlight.analysis.algorithm.{ Advancing, AlgorithmSpec, AlgorithmProtocol ⇒ P }
 import spotlight.model.timeseries._
 import spotlight.analysis.algorithm.summaryStatisticsAdvancing
+
+import scala.concurrent.Await
 
 /** Created by rolfsd on 6/9/16.
   */
@@ -22,6 +25,29 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmSpec[SummaryStatistics] 
   }
 
   class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends AlgorithmFixture( _config, _system, _slug ) {
+    override lazy val boundedContext: BoundedContext = {
+      logger.debug( s"SMA-FIXTURE: boundedContext($slug)" )
+      import scala.concurrent.duration._
+      val key = Symbol( s"BoundedContext-${slug}" )
+
+      import scala.concurrent.ExecutionContext.Implicits.global
+
+      val bc = for {
+        made ← BoundedContext.make( key, config, userResources = resources, startTasks = startTasks( system ) )
+        _ = logger.debug( "made bounded context: [{}]", made )
+        _ = logger.debug( "using roottypes:[{}]", rootTypes )
+        filled ← made addAggregateTypes rootTypes
+        _ = logger.debug( "fille bounded context[{}] with root-types:[{}]", filled, rootTypes.mkString( ", " ) )
+        m ← filled.futureModel map { m ⇒ logger.debug( "TEST: future model new rootTypes:[{}]", m.rootTypes.mkString( ", " ) ); m }
+        _ = logger.debug( "model:[{}]", m )
+        started ← filled.start()
+      } yield started
+
+      val result = Await.result( bc, 5.seconds )
+      logger.debug( "Bounded Context root-type:[{}]", result.unsafeModel.rootTypes.mkString( ", " ) )
+      result
+    }
+
     override implicit val shapeOrdering: Ordering[Shape] = new Ordering[Shape] {
       override def compare( lhs: TestShape, rhs: TestShape ): Int = {
         if ( lhs == rhs ) 0

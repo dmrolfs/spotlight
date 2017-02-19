@@ -143,7 +143,7 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
         }
     }
 
-    algorithmContext >=> wrap
+    super.algorithmContext >=> wrap
   }
 
   def toConcreteContextK: KOp[OLD_AlgorithmContext, C] = kleisli { toConcreteContext }

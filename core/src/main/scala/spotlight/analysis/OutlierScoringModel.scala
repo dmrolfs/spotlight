@@ -10,7 +10,7 @@ import akka.stream.scaladsl._
 import akka.stream.stage._
 import com.typesafe.scalalogging.{ Logger, StrictLogging }
 import org.slf4j.LoggerFactory
-import bloomfilter.mutable.BloomFilter
+//import bloomfilter.mutable.BloomFilter
 import omnibus.akka.metrics.Instrumented
 import omnibus.akka.stream.StreamMonitor
 import spotlight.Settings
@@ -93,7 +93,7 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
     new GraphStage[FlowShape[TimeSeries, TimeSeries]] {
       val count = new AtomicInteger( 0 )
       //      var bloom = BloomFilter[Topic]( maxFalsePosProbability = 0.1, 10000000 )
-      val bloom = BloomFilter[Topic]( numberOfItems = 10000000, falsePositiveRate = 0.1 )
+      //      val bloom = BloomFilter[Topic]( numberOfItems = 10000000, falsePositiveRate = 0.1 )
 
       val in = Inlet[TimeSeries]( "logMetric.in" )
       val out = Outlet[TimeSeries]( "logMetric.out" )
@@ -106,23 +106,23 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
             in,
             new InHandler {
               override def onPush(): Unit = {
-                val e = grab( in )
-
-                //                if ( !bloom.has_?( e.topic ) ) {
-                if ( !bloom.mightContain( e.topic ) ) {
-                  bloom add e.topic
-                  //                  bloom += e.topic
-                  if ( !e.topic.name.startsWith( OutlierMetricPrefix ) ) {
-                    destination.debug(
-                      "[{}] Plan for {}: {}",
-                      count.incrementAndGet().toString,
-                      e.topic,
-                      plans find { _ appliesTo e } getOrElse "NONE"
-                    )
-                  }
-                }
-
-                push( out, e )
+                //                val e = grab( in )
+                //
+                //                //                if ( !bloom.has_?( e.topic ) ) {
+                //                if ( !bloom.mightContain( e.topic ) ) {
+                //                  bloom add e.topic
+                //                  //                  bloom += e.topic
+                //                  if ( !e.topic.name.startsWith( OutlierMetricPrefix ) ) {
+                //                    destination.debug(
+                //                      "[{}] Plan for {}: {}",
+                //                      count.incrementAndGet().toString,
+                //                      e.topic,
+                //                      plans find { _ appliesTo e } getOrElse "NONE"
+                //                    )
+                //                  }
+                //                }
+                //
+                //                push( out, e )
               }
             }
           )
