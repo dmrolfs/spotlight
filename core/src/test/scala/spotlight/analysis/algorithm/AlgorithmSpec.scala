@@ -2,7 +2,6 @@ package spotlight.analysis.algorithm
 
 import java.io.Serializable
 import java.util.concurrent.atomic.AtomicInteger
-
 import scala.concurrent.duration._
 import scala.reflect.ClassTag
 import akka.actor.{ ActorRef, ActorSystem }
@@ -67,18 +66,7 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
     val subscriber = TestProbe()
 
     var loggingSystem: LoggingSystem = LoggingSystem( _system, s"Test:${defaultAlgorithm.label}", "1", "localhost" )
-    logger.error( "#TEST #############  logging system: [{}]", loggingSystem )
-    logger.debug( "#TEST AA default algorithm[{}] label:[{}] ", defaultAlgorithm, defaultAlgorithm.label )
-    logger.debug( "#TEST BB algorithm module:[{}]", defaultAlgorithm.module )
-    logger.debug( "#TEST CC algorithm identifying:[{}]", defaultAlgorithm.identifying )
-    //    logger.info( "Fixture: DomainModel=[{}]", model )
-
-    override def before( test: OneArgTest ): Unit = {
-      super.before( test )
-      //      loggingSystem = LoggingSystem( _system, s"Test:${defaultAlgorithm.label}", "1", "localhost" )
-      //      logger.error( "#TEST #############  logging system: [{}]", loggingSystem )
-      //      logger.info( "Fixture: DomainModel=[{}]", model )
-    }
+    logger.info( "#TEST #############  logging system: [{}]", loggingSystem )
 
     override def after( test: OneArgTest ): Unit = {
       Option( loggingSystem ) foreach { ls ⇒
@@ -145,7 +133,7 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
 
     type Module = defaultAlgorithm.module.type
     private val moduleCounter: AtomicInteger = new AtomicInteger( 0 )
-    override lazy val module: Module = {
+    override val module: Module = {
       if ( 1 < moduleCounter.incrementAndGet() ) throw new IllegalStateException( "#TEST infinite loop" )
 
       logger.debug( "#TEST getting module from defaultAlgorithm:[{}]", defaultAlgorithm )
@@ -153,9 +141,6 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
       logger.debug( "#TEST:module: result:[{}]", m )
       m
     }
-    logger.debug( "#TEST D algorithm module identifying:[{}]", module.identifying )
-    logger.debug( "#TEST E algorithm root type:[{}]", module.rootType )
-    //    implicit val evShape: ClassTag[module.Shape] = module.evShape
 
     override def rootTypes: Set[AggregateRootType] = { Set( module.rootType ) }
 

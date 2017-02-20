@@ -1,7 +1,6 @@
 package spotlight.analysis.algorithm
 
 import java.io.Serializable
-import java.util.concurrent.atomic.AtomicInteger
 
 import scala.annotation.tailrec
 import scala.concurrent.duration._
@@ -167,8 +166,6 @@ abstract class Algorithm[S <: Serializable: Advancing]
     extends Algorithm.ConfigurationProvider with Instrumented with ClassLogging {
   algorithm ⇒
 
-  log.error( Map( "@msg" → "#TEST Algorithm initializer" ) )
-
   type Shape = S
   type State = AlgorithmState[S]
 
@@ -241,15 +238,9 @@ abstract class Algorithm[S <: Serializable: Advancing]
     )
   }
 
-  private val moduleCounter: AtomicInteger = new AtomicInteger( 0 )
-  lazy val module: AggregateRootModule[State, Algorithm.ID] = {
-    if ( 1 < moduleCounter.incrementAndGet() ) throw new IllegalStateException( "infinite loop" )
-
-    log.error( Map( "@msg" → "Algorithm creating module", "count" → moduleCounter.get() ) )
-    val r = new AlgorithmModule()( identifying )
-    log.error( Map( "@msg" → "Algorithm module created", "module" → r.toString ) )
-    r
-  }
+  // module needs explicit algorithm.identifying to the module. Relying on implicit passing results in some fault that may be
+  // an infinite loop -- tests were very short on symptoms.
+  val module: AggregateRootModule[State, Algorithm.ID] = new AlgorithmModule()( algorithm.identifying )
 
   class AlgorithmModule( implicit override val identifying: Identifying.Aux[State, Algorithm.ID] )
       extends AggregateRootModule[State, Algorithm.ID]()( identifying ) with ClassLogging { algorithmModule ⇒
@@ -258,8 +249,6 @@ abstract class Algorithm[S <: Serializable: Advancing]
 
     override def toString: String = s"AlgorithmModule( ${the[Identifying[State]].idTag.name} )"
 
-    log.error( Map( "@msg" → "#TEST algorithm MODULE identifying", "identifying" → identifying ) )
-    log.error( Map( "@msg" → "#TEST algorithm MODULE identifying tag", "idTag" → identifying.idTag ) )
     override lazy val shardName: String = algorithm.label
 
     val AdvancedType: ClassTag[Advanced] = classTag[Advanced]
@@ -703,8 +692,6 @@ abstract class Algorithm[S <: Serializable: Advancing]
         kleisli[TryV, Context, Seq[Advanced]] { implicit analysisContext ⇒
           def tryStep( pt: PointT, shape: Shape ): TryV[( Boolean, ThresholdBoundary )] = {
             \/ fromTryCatchNonFatal {
-              //            logger.debug( "algorithm {}.step( {} ): before-shape=[{}]", algorithm.label.name, pt, shape.toString )
-
               algorithm
                 .step( pt, shape )( state, analysisContext )
                 .getOrElse {
