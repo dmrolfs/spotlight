@@ -151,9 +151,7 @@ object PastPeriod extends ClassLogging {
 
 /** Created by rolfsd on 10/14/16.
   */
-object PastPeriodAverageAlgorithm extends Algorithm[PastPeriod.Shape] { algorithm ⇒
-  override val label: String = "past-period"
-
+object PastPeriodAverageAlgorithm extends Algorithm[PastPeriod.Shape]( label = "past-period" ) { algorithm ⇒
   override def prepareData( c: Context ): Seq[DoublePoint] = c.tailAverage()( c.data )
 
   override def step( point: PointT, shape: Shape )( implicit s: State, c: Context ): Option[( Boolean, ThresholdBoundary )] = {

@@ -1,7 +1,7 @@
 package spotlight.analysis.algorithm
 
 import akka.actor.{ ActorPath, NotInfluenceReceiveTimeout }
-import squants.information.Information
+import squants.information.{ Bytes, Information }
 import demesne.{ AggregateProtocol, MessageLike }
 import spotlight.model.timeseries.{ DataPoint, ThresholdBoundary, Topic }
 
@@ -14,7 +14,7 @@ object AlgorithmProtocol extends AggregateProtocol[Algorithm.ID] {
 
   case class EstimateSize( override val targetId: EstimateSize#TID ) extends Message with NotInfluenceReceiveTimeout
   case class EstimatedSize( val sourceId: Algorithm.TID, nrShapes: Int, size: Information ) extends ProtocolMessage {
-    def averageSizePerShape: Information = size / nrShapes
+    def averageSizePerShape: Information = if ( nrShapes != 0 ) ( size / nrShapes ) else Bytes( 0 )
   }
 
   object EstimatedSize {

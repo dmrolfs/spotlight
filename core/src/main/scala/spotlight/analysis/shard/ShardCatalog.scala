@@ -5,14 +5,14 @@ import omnibus.archetype.domain.model.core.Entity
 import omnibus.commons.{ TryV, Valid }
 import omnibus.commons.identifier.{ Identifying, ShortUUID }
 import omnibus.commons.util._
-import spotlight.analysis.algorithm.Algorithm
+import spotlight.analysis.algorithm.AlgorithmIdGenerator
 import spotlight.model.outlier.AnalysisPlan
 
 /** Created by rolfsd on 1/18/17.
   */
 trait ShardCatalog extends Entity {
   override type ID = ShardCatalog.ID
-  val nextAlgorithmId: () ⇒ Algorithm.TID
+  val idGenerator: AlgorithmIdGenerator
 }
 
 object ShardCatalog {

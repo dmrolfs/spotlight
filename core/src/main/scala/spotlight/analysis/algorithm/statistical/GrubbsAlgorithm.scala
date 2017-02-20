@@ -78,9 +78,7 @@ object GrubbsShape {
   }
 }
 
-object GrubbsAlgorithm extends Algorithm[GrubbsShape] { algorithm ⇒
-  override val label: String = "grubbs"
-
+object GrubbsAlgorithm extends Algorithm[GrubbsShape]( label = "grubbs" ) { algorithm ⇒
   val minimumDataPoints: Int = 7
 
   override def prepareData( c: Context ): Seq[DoublePoint] = c.tailAverage()( c.data )

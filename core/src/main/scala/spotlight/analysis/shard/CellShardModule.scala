@@ -15,7 +15,7 @@ import omnibus.commons.util._
 import demesne._
 import demesne.module.{ LocalAggregate, SimpleAggregateModule }
 import spotlight.analysis.DetectUsing
-import spotlight.analysis.algorithm.{ Algorithm, AlgorithmProtocol ⇒ AP }
+import spotlight.analysis.algorithm.{ Algorithm, AlgorithmIdGenerator, AlgorithmProtocol ⇒ AP }
 import spotlight.model.outlier.AnalysisPlan
 import spotlight.model.timeseries._
 
@@ -27,14 +27,14 @@ object CellShardProtocol extends AggregateProtocol[CellShardCatalog#ID] {
     plan: AnalysisPlan.Summary,
     algorithmRootType: AggregateRootType,
     nrCells: Int,
-    nextAlgorithmId: () ⇒ Algorithm.TID
+    idGenerator: AlgorithmIdGenerator
   ) extends Command
 
   case class Added(
     override val sourceId: Added#TID,
     plan: AnalysisPlan.Summary,
     algorithmRootType: AggregateRootType,
-    nextAlgorithmId: () ⇒ Algorithm.TID,
+    idGenerator: AlgorithmIdGenerator,
     cells: Vector[AlgoTID]
   ) extends Event
 }
@@ -42,7 +42,7 @@ object CellShardProtocol extends AggregateProtocol[CellShardCatalog#ID] {
 case class CellShardCatalog(
     plan: AnalysisPlan.Summary,
     algorithmRootType: AggregateRootType,
-    override val nextAlgorithmId: () ⇒ Algorithm.TID,
+    override val idGenerator: AlgorithmIdGenerator,
     cells: Vector[AlgoTID]
 ) extends ShardCatalog with Equals with ClassLogging {
   override def id: TID = ShardCatalog.idFor( plan, algorithmRootType.name )( CellShardCatalog.identifying )
@@ -246,8 +246,8 @@ object CellShardModule extends ClassLogging {
 
     val admin: Receive = {
       case e: CellShardProtocol.Add if e.targetId == aggregateId && Option( state ).isEmpty ⇒ {
-        val cells = List.fill( e.nrCells ) { e.nextAlgorithmId() }
-        persist( P.Added( e.targetId, e.plan, e.algorithmRootType, e.nextAlgorithmId, cells.toVector ) ) { acceptAndPublish }
+        val cells = List.fill( e.nrCells ) { e.idGenerator.next() }
+        persist( P.Added( e.targetId, e.plan, e.algorithmRootType, e.idGenerator, cells.toVector ) ) { acceptAndPublish }
       }
 
       case e: CellShardProtocol.Add if e.targetId == aggregateId && Option( state ).nonEmpty ⇒ {}

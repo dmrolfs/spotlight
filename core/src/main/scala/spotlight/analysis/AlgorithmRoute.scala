@@ -1,15 +1,16 @@
 package spotlight.analysis
 
 import akka.actor.{ ActorContext, ActorRef }
+
 import scalaz.\/
 import com.persist.logging._
 import com.typesafe.config.{ Config, ConfigFactory, ConfigObject, ConfigValueType }
 import demesne.{ AggregateRootType, DomainModel }
 import omnibus.akka.envelope._
-import omnibus.commons.identifier.{ Identifying, ShortUUID }
+import omnibus.commons.identifier.Identifying
 import omnibus.commons.util._
 import spotlight.Settings
-import spotlight.analysis.algorithm.{ AlgorithmIdentifier, Algorithm, AlgorithmProtocol }
+import spotlight.analysis.algorithm.{ Algorithm, AlgorithmIdGenerator, AlgorithmIdentifier, AlgorithmProtocol }
 import spotlight.analysis.shard._
 import spotlight.model.outlier.AnalysisPlan
 import squants.information.{ Bytes, Information, Megabytes }
@@ -62,7 +63,9 @@ object AlgorithmRoute extends ClassLogging {
       algorithmRootType: AggregateRootType,
       model: DomainModel
   ) extends AlgorithmRoute with ClassLogging with com.typesafe.scalalogging.StrictLogging {
-    implicit lazy val algorithmIdentifying: Identifying[_] = algorithmRootType.identifying
+    implicit lazy val algorithmIdentifying: Identifying.Aux[_, Algorithm.ID] = {
+      algorithmRootType.identifying.asInstanceOf[Identifying.Aux[_, Algorithm.ID]]
+    }
 
     override def forward( message: Any )( implicit sender: ActorRef, context: ActorContext ): Unit = {
       referenceFor( message ) forwardEnvelope AlgorithmProtocol.RouteMessage( targetId = algorithmIdFor( message ), message )
@@ -73,11 +76,11 @@ object AlgorithmRoute extends ClassLogging {
         case m: DetectUsing ⇒ {
           algorithmIdentifying.tag(
             AlgorithmIdentifier(
-            planName = plan.name,
-            planId = plan.id.id.toString,
-            spanType = AlgorithmIdentifier.TopicSpan,
-            span = m.topic.toString
-          ).asInstanceOf[algorithmIdentifying.ID]
+              planName = plan.name,
+              planId = plan.id.id.toString,
+              spanType = AlgorithmIdentifier.TopicSpan,
+              span = m.topic.toString
+            )
           )
         }
 
@@ -148,7 +151,7 @@ object AlgorithmRoute extends ClassLogging {
       strategy: Strategy,
       implicit val model: DomainModel
   ) extends AlgorithmRoute {
-    implicit val scIdentifying: Identifying[ShardCatalog.ID] = strategy.identifying
+    implicit val scIdentifying: Identifying.Aux[_, ShardCatalog.ID] = strategy.identifying
     val shardingId: ShardCatalog#TID = strategy.idFor( plan, algorithmRootType.name )
     val shardingRef = strategy.actorFor( plan, algorithmRootType )( model )
 
@@ -172,7 +175,9 @@ object AlgorithmRoute extends ClassLogging {
       def key: String
       def makeAddCommand( plan: AnalysisPlan.Summary, algorithmRootType: AggregateRootType ): Option[Any]
 
-      implicit lazy val identifying: Identifying[ShardCatalog.ID] = rootType.identifying.asInstanceOf[Identifying[ShardCatalog.ID]]
+      implicit lazy val identifying: Identifying.Aux[_, ShardCatalog.ID] = {
+        rootType.identifying.asInstanceOf[Identifying.Aux[_, ShardCatalog.ID]]
+      }
 
       def actorFor(
         plan: AnalysisPlan.Summary,
@@ -188,25 +193,41 @@ object AlgorithmRoute extends ClassLogging {
         ref
       }
 
-      def nextAlgorithmId( plan: AnalysisPlan.Summary, algorithmRootType: AggregateRootType ): () ⇒ Algorithm.TID = { () ⇒
-        algorithmRootType.identifying.tag(
-          AlgorithmIdentifier(
-          planName = plan.name,
-          planId = plan.id.id.toString(),
-          spanType = AlgorithmIdentifier.GroupSpan,
-          span = ShortUUID().toString()
-        ).asInstanceOf[algorithmRootType.identifying.ID]
-        ).asInstanceOf[Algorithm.TID]
-      }
+      //      def nextAlgorithmId( plan: AnalysisPlan.Summary, algorithmRootType: AggregateRootType ): Algorithm.TID = {
+      //        import scala.language.existentials
+      //        val identifying = algorithmRootType.identifying.asInstanceOf[Identifying.Aux[_, Algorithm.ID]]
+      //        identifying.tag(
+      //          AlgorithmIdentifier(
+      //            planName = plan.name,
+      //            planId = plan.id.id.toString(),
+      //            spanType = AlgorithmIdentifier.GroupSpan,
+      //            span = ShortUUID().toString()
+      //          )
+      //        )
+      //      }
+      //      def nextAlgorithmId( plan: AnalysisPlan.Summary, algorithmRootType: AggregateRootType ): () ⇒ Algorithm.TID = { () ⇒
+      //        algorithmRootType.i
+      //
+      //
+      //        algorithmRootType.identifying.tag(
+      //          AlgorithmIdentifier(
+      //          planName = plan.name,
+      //          planId = plan.id.id.toString(),
+      //          spanType = AlgorithmIdentifier.GroupSpan,
+      //          span = ShortUUID().toString()
+      //        ).asInstanceOf[algorithmRootType.identifying.ID]
+      //        ).asInstanceOf[Algorithm.TID]
+      //      }
 
       def idFor(
         plan: AnalysisPlan.Summary,
         algorithmLabel: String
       )(
         implicit
-        identifying: Identifying[ShardCatalog#ID]
+        identifying: Identifying.Aux[_, ShardCatalog#ID]
       ): ShardCatalog#TID = {
-        identifying.tag( ShardCatalog.ID( plan.id, algorithmLabel ).asInstanceOf[identifying.ID] ).asInstanceOf[ShardCatalog#TID]
+        log.error( Map( "@msg" → "#TEST creating Shard ID -- look for null plan info", "plan" → Map( "name" → plan.name, "id" → plan.id.toString ), "algorithm" → algorithmLabel ) )
+        identifying.tag( ShardCatalog.ID( plan.id, algorithmLabel ) )
       }
     }
 
@@ -316,7 +337,7 @@ object AlgorithmRoute extends ClassLogging {
             plan,
             algorithmRootType,
             nrCells = nrCells,
-            nextAlgorithmId( plan, algorithmRootType )
+            idGenerator = AlgorithmIdGenerator( plan.name, plan.id, algorithmRootType )
           )
         )
       }
@@ -350,7 +371,7 @@ object AlgorithmRoute extends ClassLogging {
             algorithmRootType,
             expectedNrTopics,
             bySize,
-            nextAlgorithmId( plan, algorithmRootType )
+            AlgorithmIdGenerator( plan.name, plan.id, algorithmRootType )
           )
         )
       }

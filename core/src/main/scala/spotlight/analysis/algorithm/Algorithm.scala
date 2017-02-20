@@ -162,7 +162,7 @@ object Algorithm extends ClassLogging {
   }
 }
 
-abstract class Algorithm[S <: Serializable: Advancing]
+abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
     extends Algorithm.ConfigurationProvider with Instrumented with ClassLogging {
   algorithm ⇒
 
@@ -173,7 +173,6 @@ abstract class Algorithm[S <: Serializable: Advancing]
   type Context <: AlgorithmContext
   def makeContext( message: DetectUsing, state: Option[State] ): Context
 
-  def label: String
   def prepareData( c: Context ): Seq[DoublePoint] = c.data
   def step( point: PointT, shape: Shape )( implicit s: State, c: Context ): Option[( Boolean, ThresholdBoundary )]
 
@@ -200,6 +199,7 @@ abstract class Algorithm[S <: Serializable: Advancing]
     algorithm.estimatedAverageShapeSize
       .map { _ * state.shapes.size }
       .getOrElse {
+        log.warn( Map( "@msg" → "algorithm estimateSize relying on serialization - look to optimize", "algorithm" → label ) )
         import akka.serialization.{ SerializationExtension, Serializer }
         val serializer: Serializer = SerializationExtension( system ) findSerializerFor state
         val bytes = akka.util.ByteString( serializer toBinary state )
@@ -405,10 +405,7 @@ abstract class Algorithm[S <: Serializable: Advancing]
         log.info( "#TEST algo persistenceIdFromPath: aidRep = {}", aidRep )
         val pid = AlgorithmIdentifier.fromAggregateId( aidRep ).disjunction match {
           case \/-( aid ) ⇒ {
-            log.info( "#TEST algo persistenceIdFromPath: algo-identifier: planName: {}", aid.planName )
-            log.info( "#TEST algo persistenceIdFromPath: algo-identifier: planId: {}", aid.planId )
-            log.info( "#TEST algo persistenceIdFromPath: algo-identifier: spanType: {}", aid.spanType )
-            log.info( "#TEST algo persistenceIdFromPath: algo-identifier: span: {}", aid.span )
+            log.info( "#TEST algo persistenceIdFromPath: algo-identifier: planName[{}] planId[{}] spanType[{}] span[{}]", aid.planName, aid.planId, aid.spanType, aid.span )
             algorithmModule.identifying.tag( aid ).toString
           }
 

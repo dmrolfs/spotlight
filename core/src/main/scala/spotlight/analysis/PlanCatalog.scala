@@ -524,7 +524,7 @@ abstract class PlanCatalog( boundedContext: BoundedContext )
 
     def detectFrom( planFlows: Set[DetectFlow] ): Future[DetectFlow] = {
       val nrFlows = planFlows.size
-      log.debug( Map( "@msg" → "making PlanCatalog graph with [plans", "nr-plans" → nrFlows ) )
+      log.debug( Map( "@msg" → "making PlanCatalog graph for plans", "nr-plans" → nrFlows ) )
 
       val graph = Future {
         GraphDSL.create() { implicit b ⇒

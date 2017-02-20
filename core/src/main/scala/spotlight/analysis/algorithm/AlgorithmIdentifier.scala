@@ -6,7 +6,9 @@ import com.persist.logging._
 import omnibus.commons.Valid
 import AlgorithmIdentifier.SpanType
 import bloomfilter.CanGenerateHashFrom
-import omnibus.commons.identifier.ShortUUID
+import demesne.AggregateRootType
+import omnibus.commons.identifier.{ Identifying, ShortUUID }
+import spotlight.model.outlier.AnalysisPlan
 
 /** Created by rolfsd on 2/1/17.
   */
@@ -77,6 +79,8 @@ object AlgorithmIdentifier extends ClassLogging {
   def fromAggregateId( aggregateId: String ): Valid[AlgorithmIdentifier] = {
     aggregateId match {
       case IdFormat( planName, planId, stype, span ) ⇒ {
+        log.info( Map( "@msg" → "#TEST fromAggregateId -- look for null", "aggregateId" → aggregateId, "parsed" → Map( "planName" → planName, "planId" → planId, "stype" → stype, "span" → span ) ) )
+
         SpanType.from( stype )
           .map { spanType ⇒ AlgorithmIdentifier( planName = planName, planId = planId, spanType = spanType, span = span ) }
           .leftMap { exs ⇒
@@ -122,5 +126,23 @@ object AlgorithmIdentifier extends ClassLogging {
         ) + CanGenerateHashFromString.generateHash( from.spanType.label )
       ) + CanGenerateHashFromString.generateHash( from.span )
     }
+  }
+}
+
+case class AlgorithmIdGenerator( planName: String, planId: AnalysisPlan#TID, algorithmRootType: AggregateRootType ) {
+  import scala.language.existentials
+  @transient private val identifying: Identifying.Aux[_, Algorithm.ID] = {
+    algorithmRootType.identifying.asInstanceOf[Identifying.Aux[_, Algorithm.ID]]
+  }
+
+  def next(): Algorithm.TID = {
+    identifying.tag(
+      AlgorithmIdentifier(
+        planName = planName,
+        planId = planId.id.toString(),
+        spanType = AlgorithmIdentifier.GroupSpan,
+        span = ShortUUID().toString()
+      )
+    )
   }
 }

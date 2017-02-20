@@ -7,8 +7,7 @@ import spotlight.model.timeseries._
 
 /** Created by rolfsd on 11/12/16.
   */
-object ExponentialMovingAverageAlgorithm extends Algorithm[Moment] { algorithm ⇒
-  override val label: String = "ewma"
+object ExponentialMovingAverageAlgorithm extends Algorithm[Moment]( label = "ewma" ) { algorithm ⇒
   override def step( point: PointT, shape: Shape )( implicit s: State, c: Context ): Option[( Boolean, ThresholdBoundary )] = {
     shape.statistics map { stats ⇒
       log.debug(

@@ -9,9 +9,7 @@ import squants.information.{ Bytes, Information }
 
 /** Created by rolfsd on 6/8/16.
   */
-object SimpleMovingAverageAlgorithm extends Algorithm[SummaryStatistics] { algorithm ⇒
-  override val label: String = "simple-moving-average"
-
+object SimpleMovingAverageAlgorithm extends Algorithm[SummaryStatistics]( label = "simple-moving-average" ) { algorithm ⇒
   override def prepareData( c: Context ): Seq[DoublePoint] = { c.tailAverage()( c.data ) }
 
   override def step( point: PointT, shape: Shape )( implicit s: State, c: Context ): Option[( Boolean, ThresholdBoundary )] = {

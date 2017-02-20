@@ -5,7 +5,6 @@ import scala.reflect._
 import akka.actor.{ ActorRef, Cancellable, Props }
 import akka.event.LoggingReceive
 import akka.persistence.RecoveryCompleted
-
 import nl.grons.metrics.scala.{ Meter, MetricName }
 import squants.information._
 import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap
@@ -19,7 +18,7 @@ import demesne._
 import demesne.repository.CommonLocalRepository
 import spotlight.analysis.DetectUsing
 import spotlight.analysis.shard.ShardCatalog.ShardCatalogIdentifying
-import spotlight.analysis.algorithm.{ Algorithm, AlgorithmProtocol ⇒ AP }
+import spotlight.analysis.algorithm.{ Algorithm, AlgorithmIdGenerator, AlgorithmProtocol ⇒ AP }
 import spotlight.model.outlier.AnalysisPlan
 import spotlight.model.timeseries._
 
@@ -34,7 +33,7 @@ object LookupShardProtocol extends AggregateProtocol[LookupShardCatalog#ID] {
     algorithmRootType: AggregateRootType,
     expectedNrTopics: Int,
     controlBySize: Information,
-    nextAlgorithmId: () ⇒ Algorithm.TID
+    idGenerator: AlgorithmIdGenerator
   //    control: Option[Control] = None
   ) extends Command
 
@@ -44,7 +43,7 @@ object LookupShardProtocol extends AggregateProtocol[LookupShardCatalog#ID] {
     algorithmRootType: AggregateRootType,
     expectedNrTopics: Int,
     controlBySize: Information,
-    nextAlgorithmId: () ⇒ Algorithm.TID
+    idGenerator: AlgorithmIdGenerator
   //    control: LookupShardCatalog.Control
   ) extends Event
 
@@ -62,7 +61,7 @@ case class LookupShardCatalog(
     plan: AnalysisPlan.Summary,
     algorithmRootType: AggregateRootType,
     control: LookupShardCatalog.Control,
-    override val nextAlgorithmId: () ⇒ Algorithm.TID,
+    override val idGenerator: AlgorithmIdGenerator,
     shards: Object2ObjectOpenHashMap[Topic, AlgoTID]
 ) extends ShardCatalog with Equals {
   import LookupShardCatalog.identifying
@@ -297,7 +296,7 @@ object LookupShardModule extends AggregateRootModule[LookupShardCatalog, LookupS
             plan = p,
             algorithmRootType = rt,
             control = LookupShardCatalog.Control.BySize( bySize ),
-            nextAlgorithmId = nextAlgorithmId,
+            idGenerator = AlgorithmIdGenerator( p.name, p.id, rt ),
             shards = LookupShardCatalog.makeShardMap( nrTopics )
           )
 
@@ -405,7 +404,7 @@ object LookupShardModule extends AggregateRootModule[LookupShardCatalog, LookupS
             availability
               .mostAvailable
               .getOrElse {
-                val nid = state.nextAlgorithmId()
+                val nid = state.idGenerator.next()
                 context become active( availability withNewShardId nid )
                 log.info(
                   "ShardCatalog[{}]: creating new shard id: NID[{}]  root-type:[{}] tag:[{}]",
