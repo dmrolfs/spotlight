@@ -52,11 +52,18 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
     val parallelism = settings.parallelismFactor
 
     GraphDSL.create() { implicit b ⇒
+      val start = b.add( Flow[TimeSeries].map { ts ⇒ logger.warn( "#TEST entering scoring flow ts:[{}]", ts ); ts } )
       val logMetrics = b.add( logMetric( Logger( LoggerFactory getLogger "Metrics" ), settings.plans ) )
-      val blockPriors = b.add( Flow[TimeSeries] filter { notReportedBySpotlight } )
+      val blockPriors = b.add(
+        Flow[TimeSeries]
+          .map { ts ⇒ logger.warn( "#TEST after logMetric ts:[{}}", ts ); ts }
+          .filter { notReportedBySpotlight }
+          .map { ts ⇒ logger.warn( "#TEST after filter spotlight reported ts:[{}}", ts ); ts }
+      )
       val zipWithInPlan = b.add(
         Flow[TimeSeries]
           .map { ts ⇒ ( ts, isPlanned( ts, settings.plans ) ) }
+          .map { tsp ⇒ logger.warn( "#TEST: scoring: zipWithPlans is-planned:[{}] ts:[{}]", tsp._2.toString, tsp._1 ); tsp }
           .buffer( 10, OverflowStrategy.backpressure ) //.watchFlow( 'preBroadcast )
       )
 
@@ -74,12 +81,12 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
       //      val buffer = b.add( Flow[TimeSeries].buffer( 10, OverflowStrategy.backpressure ).watchFlow( WatchPoints.PlanBuffer ) )
       val detect = b.add( catalogFlow.watchFlow( WatchPoints.Catalog ) )
 
-      logMetrics ~> blockPriors ~> zipWithInPlan ~> broadcast ~> passPlanned ~> regulator /*~> buffer */ ~> detect
+      start ~> logMetrics ~> blockPriors ~> zipWithInPlan ~> broadcast ~> passPlanned ~> regulator /*~> buffer */ ~> detect
       broadcast ~> passUnrecognized
 
       ScoringShape(
         FanOutShape.Ports(
-          inlet = logMetrics.in,
+          inlet = start.in,
           outlets = scala.collection.immutable.Seq( detect.out, passUnrecognized.out )
         )
       )
@@ -106,7 +113,7 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
             in,
             new InHandler {
               override def onPush(): Unit = {
-                //                val e = grab( in )
+                val e = grab( in )
                 //
                 //                //                if ( !bloom.has_?( e.topic ) ) {
                 //                if ( !bloom.mightContain( e.topic ) ) {
@@ -122,7 +129,7 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
                 //                  }
                 //                }
                 //
-                //                push( out, e )
+                push( out, e )
               }
             }
           )

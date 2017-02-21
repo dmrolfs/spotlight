@@ -13,7 +13,7 @@ import akka.util.{ ByteString, Timeout }
 import org.slf4j.LoggerFactory
 import com.typesafe.scalalogging.{ Logger, StrictLogging }
 import demesne.BoundedContext
-import kamon.Kamon
+//import kamon.Kamon
 import nl.grons.metrics.scala.MetricName
 import omnibus.akka.metrics.Instrumented
 import omnibus.akka.stream.StreamMonitor
@@ -56,7 +56,7 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
             case Failure( ex ) ⇒ {
               logger.error( "Server could not bind to source", ex )
               boundedContext.shutdown()
-              Kamon.shutdown()
+              //              Kamon.shutdown()
             }
           }
       }

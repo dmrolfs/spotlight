@@ -50,7 +50,9 @@ object AnalysisPlanProtocol extends EntityProtocol[AnalysisPlanState#ID] {
     materializer: Materializer
   ) extends Message
 
-  case class AnalysisFlow( flow: DetectFlow ) extends ProtocolMessage
+  case class AnalysisFlow( flow: DetectFlow ) extends ProtocolMessage with ClassLogging {
+    log.warn( Map( "@msg" → "Made analysis plan flow", "flow" → flow.toString ) )
+  }
 
   case class AcceptTimeSeries(
       override val targetId: AcceptTimeSeries#TID,
@@ -296,7 +298,7 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
             }
             case P.Disabled( sid, _ ) ⇒ Directive.Withdraw( sid )
             case P.Renamed( sid, oldName, newName ) ⇒ Directive.ReviseKey( oldName, newName )
-            case _: P.ProtocolMessage ⇒ Directive.Ignore
+            case _ ⇒ Directive.Ignore
           }
         )
       }
@@ -562,9 +564,14 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
         timeout: Timeout,
         materializer: Materializer
       ): DetectFlow = {
-        val entry = Flow[TimeSeries] filter { state.plan.appliesTo }
+        val entry = Flow[TimeSeries]
+          .map { ts ⇒ log.error( "detection filter timeseries[{}] per plan[{}]: check:[{}]", ts.toString, state.plan.name, state.plan.appliesTo( ts ).toString ); ts }
+          .filter { state.plan.appliesTo }
         val withGrouping = state.plan.grouping map { g ⇒ entry.via( batchSeries( g ) ) } getOrElse entry
-        withGrouping.via( detectionFlow( state.plan, parallelism ) )
+
+        withGrouping
+          .via( detectionFlow( state.plan, parallelism ) )
+          .named( s"AnalysisPlan:${state.plan.name}@${state.plan.id.id}" )
       }
 
       def batchSeries(
@@ -599,6 +606,7 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
 
         Flow[TimeSeries]
           .map { ts ⇒ OutlierDetectionMessage( ts, p ).disjunction }
+          .map { odm ⇒ log.warning( "#TEST plan flow entry odm:[{}]", odm.toString ); odm }
           .collect { case scalaz.\/-( m ) ⇒ m }
           .map { m ⇒
             inletSeries.mark()

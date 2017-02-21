@@ -245,7 +245,7 @@ object Spotlight extends Instrumented with StrictLogging {
 
     Flow
       .fromGraph( graph )
-      .named( "Spotlight" )
+      .named( "SpotlightScoringModel" )
       .withAttributes( ActorAttributes supervisionStrategy supervisionDecider )
   }
 

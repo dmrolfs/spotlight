@@ -97,7 +97,7 @@ object Dependencies {
     object kamon {
       val version = "0.6.5"
       def module( id: String, v: String = version ) = "io.kamon" %% s"kamon-$id" % v
-      def all = Seq( core, scala, akka, /*akkaRemote,*/ system, statsd )
+      def all: Seq[sbt.ModuleID] = Seq.empty[sbt.ModuleID] // Seq( core, scala, akka, /*akkaRemote,*/ system, statsd )
 
       val core = module( "core" )
       val scala = module( "scala" )
@@ -160,7 +160,6 @@ object Dependencies {
       val core = module( "core" )
     }
   }
-
 
   val commonDependencies = {
     log.all ++

@@ -2,6 +2,7 @@ package spotlight.analysis
 
 import scala.concurrent.{ Await, ExecutionContext, Future }
 import scala.concurrent.duration._
+import scala.reflect._
 import akka.{ Done, NotUsed }
 import akka.actor.{ Actor, ActorRef, ActorSystem, Props, Stash, Status }
 import akka.agent.Agent
@@ -47,7 +48,9 @@ object PlanCatalogProtocol {
     timeout: Timeout,
     materializer: Materializer
   ) extends CatalogMessage
-  case class CatalogFlow( flow: DetectFlow ) extends CatalogMessage
+  case class CatalogFlow( flow: DetectFlow ) extends CatalogMessage with ClassLogging {
+    log.warn( Map( "@msg" → "Made catalog flow", "flow" → flow.toString ) )
+  }
 
   case class Route( timeSeries: TimeSeries, correlationId: Option[WorkId] = None ) extends CatalogMessage
 
@@ -243,11 +246,13 @@ abstract class PlanCatalog( boundedContext: BoundedContext )
     }
   }
 
+  val EventType = classTag[AP.Event]
+
   val filterKnownPlansFlow: Flow[EventEnvelope2, ( P.PlanDirective, Long ), NotUsed] = {
     Flow[EventEnvelope2]
       .map { e ⇒ log.warn( Map( "@msg" → "#TEST loaded tagged event", "event" → e.toString ) ); e }
       .collect {
-        case EventEnvelope2( offset, pid, snr, event: AP.Event ) if planDirectiveForEvent isDefinedAt event ⇒ {
+        case EventEnvelope2( offset, pid, snr, EventType( event ) ) if planDirectiveForEvent isDefinedAt event ⇒ {
           val directive = planDirectiveForEvent( event )
           log.warn( Map( "@msg" → "#TEST directive for event", "offset" → offset.toString, "pid" → pid, "sequence-nr" → snr, "event" → event.toString, "directive" → directive.toString ) )
           ( directive, snr )
@@ -530,7 +535,7 @@ abstract class PlanCatalog( boundedContext: BoundedContext )
         GraphDSL.create() { implicit b ⇒
           import GraphDSL.Implicits._
 
-          val intake = b.add( Flow[TimeSeries].map { identity } /*.watchFlow( WatchPoints.Intake )*/ )
+          val intake = b.add( Flow[TimeSeries].map { identity }.map { ts ⇒ log.warn( Map( "@msg" → "#TEST catalog-flow intake", "ts" → ts.toString ) ); ts } /*.watchFlow( WatchPoints.Intake )*/ )
           val outlet = b.add( Flow[Outliers].map { identity } /*.watchFlow( WatchPoints.Outlet )*/ )
 
           if ( planFlows.nonEmpty ) {
@@ -562,7 +567,7 @@ abstract class PlanCatalog( boundedContext: BoundedContext )
       _ = log.debug( Map( "@msg" → "collect plans", "plans" → plans.toSeq.map { p ⇒ ( p.name, p.id ) }.mkString( "[", ", ", "]" ) ) )
       planFlows ← collectPlanFlows( model, plans )
       f ← detectFrom( planFlows )
-    } yield f
+    } yield f.named( s"PlanCatalog" )
   }
 
   private def dispatch( route: P.Route, interestedRef: ActorRef )( implicit ec: ExecutionContext ): Unit = {
