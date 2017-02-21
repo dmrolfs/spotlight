@@ -7,19 +7,14 @@ import akka.NotUsed
 import akka.actor._
 import akka.actor.SupervisorStrategy.{ Resume, Stop }
 import akka.event.LoggingReceive
-import akka.persistence.cassandra.journal.CassandraJournal
-import akka.persistence.cassandra.query.scaladsl.CassandraReadJournal
-import akka.persistence.query.journal.leveldb.scaladsl.LeveldbReadJournal
-import akka.persistence.query.{ EventEnvelope, EventEnvelope2, Offset, PersistenceQuery }
-import akka.persistence.query.scaladsl._
 import akka.stream.Supervision.Decider
 import akka.stream.{ ActorAttributes, Materializer }
-import akka.stream.scaladsl.{ Flow, Source }
+import akka.stream.scaladsl.Flow
 import akka.stream.Supervision
 import akka.util.Timeout
 import com.persist.logging.{ ActorLogging ⇒ PersistActorLogging, _ }
 import shapeless.{ Lens, lens }
-import com.typesafe.config.{ Config, ConfigObject, ConfigValueType }
+import com.typesafe.config.Config
 import nl.grons.metrics.scala.{ Meter, MetricName }
 import omnibus.akka.envelope._
 import omnibus.akka.metrics.{ Instrumented, InstrumentedActor }
@@ -144,114 +139,6 @@ object AnalysisPlanState {
 /** Created by rolfsd on 5/26/16.
   */
 object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Instrumented with ClassLogging { moduleOuter ⇒
-  private def journalFQN( system: ActorSystem ): String = {
-    import shapeless.syntax.typeable._
-
-    val JournalPluginPath = "akka.persistence.journal.plugin"
-    val config = system.settings.config
-
-    if ( config.hasPath( JournalPluginPath ) ) {
-      val jplugin = config.getValue( JournalPluginPath )
-      jplugin.valueType match {
-        case ConfigValueType.STRING ⇒ {
-          val fqn = {
-            jplugin.unwrapped.cast[String]
-              .map { path ⇒
-                if ( config.hasPath( path ) ) {
-                  log.warn( Map( "@msg" → "#TEST looking for class in config path", "path" → path ) )
-                  config.getConfig( path ).getString( "class" )
-                } else {
-                  log.warn( Map( "@msg" → "#TEST no configuration found for path - return empty FQN", "path" → path ) )
-                  ""
-                }
-              }
-              .getOrElse { "" }
-          }
-          log.warn( Map( "@msg" → "#TEST journal plugin string classname found", "journal" → fqn ) )
-          fqn
-        }
-
-        case ConfigValueType.OBJECT ⇒ {
-          import scala.reflect._
-          //          import scala.collection.JavaConversions._
-          val ConfigObjectType = classTag[ConfigObject]
-          val jconfig = config.getConfig( JournalPluginPath )
-          if ( jconfig.hasPath( "class" ) ) {
-            val fqn = jconfig.getString( "class" )
-            log.warn( Map( "@msg" → "#TEST journal plugin class property found", "journal" → fqn ) )
-            fqn
-          } else {
-            log.warn( "#TEST no class specified for journal plugin" )
-            ""
-          }
-        }
-
-        case t ⇒ {
-          log.warn( Map( "@msg" → "unrecognized config type", "type" → t.toString, "path" → JournalPluginPath ) )
-          ""
-        }
-      }
-    } else {
-      log.warn( "#TEST no journal plugin specified" )
-      ""
-    }
-  }
-
-  //todo move
-  type QueryJournal = ReadJournal with AllPersistenceIdsQuery with CurrentPersistenceIdsQuery with EventsByPersistenceIdQuery with CurrentEventsByPersistenceIdQuery with EventsByTagQuery2 with CurrentEventsByTagQuery2
-
-  //todo move
-  object QueryJournal {
-    object empty extends ReadJournal
-        with AllPersistenceIdsQuery
-        with CurrentPersistenceIdsQuery
-        with EventsByPersistenceIdQuery
-        with CurrentEventsByPersistenceIdQuery
-        with EventsByTagQuery2
-        with CurrentEventsByTagQuery2 {
-      override def allPersistenceIds(): Source[String, NotUsed] = Source.empty[String]
-
-      override def currentPersistenceIds(): Source[String, NotUsed] = Source.empty[String]
-
-      override def eventsByPersistenceId(
-        persistenceId: String,
-        fromSequenceNr: Long,
-        toSequenceNr: Long
-      ): Source[EventEnvelope, NotUsed] = Source.empty[EventEnvelope]
-
-      override def currentEventsByPersistenceId(
-        persistenceId: String,
-        fromSequenceNr: Long,
-        toSequenceNr: Long
-      ): Source[EventEnvelope, NotUsed] = Source.empty[EventEnvelope]
-
-      override def eventsByTag( tag: String, offset: Offset ): Source[EventEnvelope2, NotUsed] = Source.empty[EventEnvelope2]
-
-      override def currentEventsByTag( tag: String, offset: Offset ): Source[EventEnvelope2, NotUsed] = {
-        Source.empty[EventEnvelope2]
-      }
-    }
-  }
-
-  def queryJournal( system: ActorSystem ): QueryJournal = {
-    journalFQN( system ) match {
-      case fqn if fqn == classOf[CassandraJournal].getName ⇒ {
-        log.info( "cassandra journal recognized" )
-        PersistenceQuery( system ).readJournalFor[CassandraReadJournal]( CassandraReadJournal.Identifier )
-      }
-
-      case fqn if fqn == "akka.persistence.journal.leveldb.LeveldbJournal" ⇒ {
-        log.info( "leveldb journal recognized" )
-        PersistenceQuery( system ).readJournalFor[LeveldbReadJournal]( LeveldbReadJournal.Identifier )
-      }
-
-      case fqn ⇒ {
-        log.info( Map( "@msg" → "journal FQN not recognized - creating empty read journal", "journal" → fqn ) )
-        QueryJournal.empty
-      }
-    }
-  }
-
   override lazy val metricBaseName: MetricName = {
     MetricName( spotlight.BaseMetricName, spotlight.analysis.BaseMetricName )
   }

@@ -22,6 +22,7 @@ import omnibus.akka.envelope._
 import omnibus.akka.envelope.pattern.{ ask ⇒ envAsk }
 import omnibus.akka.metrics.InstrumentedActor
 import demesne.{ BoundedContext, DomainModel }
+import omnibus.akka.persistence.query.QueryJournal
 import spotlight.Settings
 import spotlight.analysis.OutlierDetection.DetectionResult
 import spotlight.analysis.PlanCatalog.WatchPoints
@@ -190,8 +191,8 @@ abstract class PlanCatalog( boundedContext: BoundedContext )
     log.info( Map( "@msg" → "query currently known plans...", "known" → renderKnownPlans() ) )
 
     val lastSequenceNr = {
-      AnalysisPlanModule
-        .queryJournal( context.system )
+      QueryJournal
+        .fromSystem( context.system )
         .currentEventsByTag( AnalysisPlanModule.module.rootType.name, NoOffset )
         .via( filterKnownPlansFlow )
         .toMat( knownPlansSink )( Keep.right )
@@ -211,8 +212,8 @@ abstract class PlanCatalog( boundedContext: BoundedContext )
 
     log.info( "starting active plan projection source..." )
 
-    AnalysisPlanModule
-      .queryJournal( context.system )
+    QueryJournal
+      .fromSystem( context.system )
       .eventsByTag( AnalysisPlanModule.module.rootType.name, Offset.sequence( sequenceId ) )
       .map { e ⇒ log.error( Map( "@msg" → "#TEST CATALOG NOTIFIED OF NEW PLAN EVENT", "event" → e.toString ) ); e }
       .via( filterKnownPlansFlow )
