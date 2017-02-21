@@ -392,7 +392,6 @@ object Settings extends LazyLogging {
     def makePlans( planSpecifications: Config, detectionBudget: Duration ): Set[AnalysisPlan] = {
       import scala.collection.JavaConverters._
 
-      logger.debug( "#TEST settings.makePlans with budget:[{}] specs:[\n{}\n]", detectionBudget, planSpecifications )
       val result = {
         planSpecifications
           .root
@@ -479,7 +478,6 @@ object Settings extends LazyLogging {
           }
       }
 
-      logger.debug( "#TEST settings.factor.makePlans: [{}]", result.mkString( "\n", "\n", "\n" ) )
       result.flatten.toSet
     }
 

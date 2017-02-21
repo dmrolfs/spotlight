@@ -226,7 +226,6 @@ object AlgorithmRoute extends ClassLogging {
         implicit
         identifying: Identifying.Aux[_, ShardCatalog#ID]
       ): ShardCatalog#TID = {
-        log.error( Map( "@msg" → "#TEST creating Shard ID -- look for null plan info", "plan" → Map( "name" → plan.name, "id" → plan.id.toString ), "algorithm" → algorithmLabel ) )
         identifying.tag( ShardCatalog.ID( plan.id, algorithmLabel ) )
       }
     }

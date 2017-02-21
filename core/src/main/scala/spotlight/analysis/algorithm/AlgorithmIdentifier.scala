@@ -79,8 +79,6 @@ object AlgorithmIdentifier extends ClassLogging {
   def fromAggregateId( aggregateId: String ): Valid[AlgorithmIdentifier] = {
     aggregateId match {
       case IdFormat( planName, planId, stype, span ) ⇒ {
-        log.info( Map( "@msg" → "#TEST fromAggregateId -- look for null", "aggregateId" → aggregateId, "parsed" → Map( "planName" → planName, "planId" → planId, "stype" → stype, "span" → span ) ) )
-
         SpanType.from( stype )
           .map { spanType ⇒ AlgorithmIdentifier( planName = planName, planId = planId, spanType = spanType, span = span ) }
           .leftMap { exs ⇒

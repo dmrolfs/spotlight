@@ -236,17 +236,17 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
   def queryJournal( system: ActorSystem ): QueryJournal = {
     journalFQN( system ) match {
       case fqn if fqn == classOf[CassandraJournal].getName ⇒ {
-        log.warn( "#TEST cassandra journal recognized" )
+        log.info( "cassandra journal recognized" )
         PersistenceQuery( system ).readJournalFor[CassandraReadJournal]( CassandraReadJournal.Identifier )
       }
 
       case fqn if fqn == "akka.persistence.journal.leveldb.LeveldbJournal" ⇒ {
-        log.warn( "#TEST leveldb journal recognized" )
+        log.info( "leveldb journal recognized" )
         PersistenceQuery( system ).readJournalFor[LeveldbReadJournal]( LeveldbReadJournal.Identifier )
       }
 
       case fqn ⇒ {
-        log.warn( Map( "@msg" → "#TEST journal FQN not recognized - creating empty read journal", "journal" → fqn ) )
+        log.info( Map( "@msg" → "journal FQN not recognized - creating empty read journal", "journal" → fqn ) )
         QueryJournal.empty
       }
     }
@@ -407,9 +407,9 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
             }
           }
 
-          log.debug( "#TEST [{}] plan waiting for foreman to start...", p.name )
+          log.debug( "[{}] plan starting foreman...", p.name )
           val r = Await.result( f, 1.second )
-          log.debug( "#TEST [{}] plan foreman and workers started: [{}]", p.name, r )
+          log.debug( "[{}] plan foreman and workers started: [{}]", p.name, r )
           r
         }
 
@@ -457,8 +457,7 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
 
           val ( _, d, _ ) = startWorkers( newState.plan, newState.routes( model ) )
           actorOuter.detector = d
-
-          log.debug( "#TEST Plan [{}] added with state:[{}] and detector:[{}]", newState.plan.name, newState, actorOuter.detector.path )
+          log.debug( "Plan [{}] added with state:[{}] and detector:[{}]", newState.plan.name, newState, actorOuter.detector.path )
           newState
         }
 
@@ -489,7 +488,6 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
         case P.Add( IdType( targetId ), info ) if targetId == aggregateId ⇒ {
           persist( P.Added( targetId, info ) ) { e ⇒
             acceptAndPublish( e )
-            log.debug( "#TEST plan[{}] notifying of Added to sender[{}]", state, sender().path.name )
             sender() !+ e // per akka docs: safe to use sender() here
           }
         }
@@ -606,7 +604,6 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
 
         Flow[TimeSeries]
           .map { ts ⇒ OutlierDetectionMessage( ts, p ).disjunction }
-          .map { odm ⇒ log.warning( "#TEST plan flow entry odm:[{}]", odm.toString ); odm }
           .collect { case scalaz.\/-( m ) ⇒ m }
           .map { m ⇒
             inletSeries.mark()

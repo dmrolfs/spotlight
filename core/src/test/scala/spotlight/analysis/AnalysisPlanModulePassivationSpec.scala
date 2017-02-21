@@ -128,7 +128,7 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[AnalysisPlanSta
       }
     }
 
-    "must not respond before add" taggedAs WIP in { f: Fixture ⇒
+    "must not respond before add" in { f: Fixture ⇒
       import f._
       val info = ( entity ?+ P.UseAlgorithms( tid, Set( "foo", "bar" ), ConfigFactory.empty() ) ).mapTo[P.PlanInfo]
       bus.expectNoMsg()
@@ -163,7 +163,7 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[AnalysisPlanSta
       }
     }
 
-    "take and recover from snapshots" in { f: Fixture ⇒
+    "take and recover from snapshots" taggedAs WIP in { f: Fixture ⇒
       import f._
 
       val p1 = makePlan( "TestPlan", None )
@@ -173,8 +173,22 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[AnalysisPlanSta
 
       logger.info( "TEST:taking Snapshot..." )
 
-      EventFilter.debug( start = "aggregate snapshot successfully saved:", occurrences = 1 ) intercept {
-        module.rootType.snapshot foreach { ss ⇒ entity !+ ss.saveSnapshotCommand( p1.id ) }
+      //      EventFilter.debug( pattern = """Using serializer \[.+\] for message \[demesne.module.entity.EntityProtocol$Added\]""" ) intercept {
+      //        intercept {
+      //          logger.warn( "In snapshot intercept..." )
+      //          module.rootType.snapshot foreach { ss ⇒
+      //            logger.warn( "commanding entity:[{}] to save snapshot: [{}]", entity.path.name, ss.saveSnapshotCommand( p1.id ).toString )
+      //            entity !+ ss.saveSnapshotCommand( p1.id )
+      //          }
+      //        }
+      //      }
+      //      EventFilter.debug( start = "aggregate snapshot successfully saved:", occurrences = 1 ) intercept {
+      EventFilter.debug( start = "saving snapshot for pid:[AnalysisPlan:", occurrences = 1 ) intercept {
+        logger.warn( "In snapshot intercept..." )
+        module.rootType.snapshot foreach { ss ⇒
+          logger.warn( "commanding entity:[{}] to save snapshot: [{}]", entity.path.name, ss.saveSnapshotCommand( p1.id ).toString )
+          entity !+ ss.saveSnapshotCommand( p1.id )
+        }
       }
 
       entity !+ P.UseAlgorithms( p1.id, Set( "stella", "otis", "apollo" ), ConfigFactory.empty() )

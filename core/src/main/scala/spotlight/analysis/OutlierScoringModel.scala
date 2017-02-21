@@ -52,18 +52,12 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
     val parallelism = settings.parallelismFactor
 
     GraphDSL.create() { implicit b ⇒
-      val start = b.add( Flow[TimeSeries].map { ts ⇒ logger.warn( "#TEST entering scoring flow ts:[{}]", ts ); ts } )
+      val start = b.add( Flow[TimeSeries].map { identity } )
       val logMetrics = b.add( logMetric( Logger( LoggerFactory getLogger "Metrics" ), settings.plans ) )
-      val blockPriors = b.add(
-        Flow[TimeSeries]
-          .map { ts ⇒ logger.warn( "#TEST after logMetric ts:[{}}", ts ); ts }
-          .filter { notReportedBySpotlight }
-          .map { ts ⇒ logger.warn( "#TEST after filter spotlight reported ts:[{}}", ts ); ts }
-      )
+      val blockPriors = b.add( Flow[TimeSeries] filter { notReportedBySpotlight } )
       val zipWithInPlan = b.add(
         Flow[TimeSeries]
           .map { ts ⇒ ( ts, isPlanned( ts, settings.plans ) ) }
-          .map { tsp ⇒ logger.warn( "#TEST: scoring: zipWithPlans is-planned:[{}] ts:[{}]", tsp._2.toString, tsp._1 ); tsp }
           .buffer( 10, OverflowStrategy.backpressure ) //.watchFlow( 'preBroadcast )
       )
 

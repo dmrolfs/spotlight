@@ -44,7 +44,7 @@ object DetectionAlgorithmRouter extends ClassLogging {
           algoRoots ← Registry.loadAlgorithms( bc, configuration )
           roots ← Registry.registerWithRouter( algoRoots )
           unknowns = algoRoots.map { case ( _, rt ) ⇒ rt }.toSet
-          _ = log.info( Map( "@msg" → "#TEST unknown algorithm routes", "unknowns" → unknowns.mkString( "[", ", ", "]" ) ) )
+          _ = log.info( Map( "@msg" → "starting with new algorithm routes", "unknowns" → unknowns.mkString( "[", ", ", "]" ) ) )
         } yield {
           log
             .info( Map( "@msg" → "DetectionAlgorithmRouter routing table", "routing-table" → roots.mkString( "[", ", ", "]" ) ) )

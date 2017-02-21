@@ -148,7 +148,7 @@ object PlanCatalog extends ClassLogging {
       override val maxInFlightCpuFactor: Double = 8.0,
       override val applicationDetectionBudget: Option[Duration] = None
   ) extends PlanCatalog( boundedContext ) with DefaultExecutionProvider with PlanProvider {
-    log.debug( Map( "@msg" → "#TEST PlanCatalog init", "specified-plans" → specifiedPlans.map( _.name ).mkString( "[", ", ", "]" ) ) )
+    log.debug( Map( "@msg" → "PlanCatalog initialized", "specified-plans" → specifiedPlans.map( _.name ).mkString( "[", ", ", "]" ) ) )
   }
 
   case object NoRegisteredPlansError extends IllegalStateException( "Cannot create detection model without registered plans" )
@@ -187,7 +187,7 @@ abstract class PlanCatalog( boundedContext: BoundedContext )
     implicit val ec = context.dispatcher
     implicit val materializer = ActorMaterializer( ActorMaterializerSettings( context.system ) )
 
-    log.info( Map( "@msg" → "#TEST query currently known plans...", "known" → renderKnownPlans() ) )
+    log.info( Map( "@msg" → "query currently known plans...", "known" → renderKnownPlans() ) )
 
     val lastSequenceNr = {
       AnalysisPlanModule
@@ -198,7 +198,9 @@ abstract class PlanCatalog( boundedContext: BoundedContext )
         .run()
     }
 
-    lastSequenceNr foreach { snr ⇒ log.info( Map( "@msg" → "#TEST ... finished query currently known plans", "snr" → snr, "known" → renderKnownPlans() ) ) }
+    lastSequenceNr foreach { snr ⇒
+      log.info( Map( "@msg" → "... finished query currently known plans", "snr" → snr, "known" → renderKnownPlans() ) )
+    }
     lastSequenceNr
   }
 
@@ -535,26 +537,25 @@ abstract class PlanCatalog( boundedContext: BoundedContext )
         GraphDSL.create() { implicit b ⇒
           import GraphDSL.Implicits._
 
-          val intake = b.add( Flow[TimeSeries].map { identity }.map { ts ⇒ log.warn( Map( "@msg" → "#TEST catalog-flow intake", "ts" → ts.toString ) ); ts } /*.watchFlow( WatchPoints.Intake )*/ )
-          val outlet = b.add( Flow[Outliers].map { identity } /*.watchFlow( WatchPoints.Outlet )*/ )
+          //          val intake = b.add( Flow[TimeSeries].map { identity }
+          //          val outlet = b.add( Flow[Outliers].map { identity }
 
-          if ( planFlows.nonEmpty ) {
+          if ( planFlows.isEmpty ) throw PlanCatalog.NoRegisteredPlansError
+          else {
             val broadcast = b.add( Broadcast[TimeSeries]( nrFlows ) )
             val merge = b.add( Merge[Outliers]( nrFlows ) )
 
-            intake ~> broadcast.in
+            //            intake ~> broadcast.in
             planFlows.zipWithIndex foreach {
               case ( pf, i ) ⇒
                 log.debug( Map( "@msg" → "adding to catalog flow, order undefined analysis flow", "index" → i ) )
                 val flow = b.add( pf )
                 broadcast.out( i ) ~> flow ~> merge.in( i )
             }
-            merge.out ~> outlet
-          } else {
-            throw PlanCatalog.NoRegisteredPlansError
-          }
+            //            merge.out ~> outlet
 
-          FlowShape( intake.in, outlet.out )
+            FlowShape( broadcast.in, merge.out )
+          }
         }
       }
 
@@ -702,10 +703,8 @@ abstract class PlanCatalog( boundedContext: BoundedContext )
 
     for {
       model ← boundedContext.futureModel
-      _ = log.debug( Map( "@msg" → "#TEST fetching info for plan", "plan-id" → pid.toString ) )
       ref = model( AnalysisPlanModule.module.rootType, pid )
       msg ← ( ref ?+ AP.GetPlan( pid ) ).mapTo[Envelope]
-      _ = log.debug( Map( "@msg" → "#TEST fetched info from plan", "plan-id" → pid.toString, "info" → msg.payload.toString ) )
       info ← toInfo( msg )
     } yield info
   }

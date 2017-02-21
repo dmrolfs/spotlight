@@ -54,7 +54,7 @@ case class CellShardCatalog(
   def apply( t: Topic ): AlgoTID = {
     log.debug(
       Map(
-        "@msg" → "#TEST: CellShardCatalog.apply",
+        "@msg" → "CellShardCatalog.apply",
         "topic" → Map( "name" → t.toString, "hashcode" → t.## ),
         "cells" → cells.size,
         "cell-assignment" → ( math.abs( t.## ) % cells.size )

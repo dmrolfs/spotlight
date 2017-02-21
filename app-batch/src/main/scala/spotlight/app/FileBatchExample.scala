@@ -200,7 +200,6 @@ object FileBatchExample extends Instrumented with ClassLogging {
 
           sourceData( settings )
             .via( Flow[String].watchSourced( DataSource ) )
-            .map { s ⇒ log.error( Map( "@msg" → "#TEST source record", "record" → s ) ); s }
             //      .via( Flow[String].buffer( 10, OverflowStrategy.backpressure ).watchSourced( Data ) )
             .via( detectionWorkflow( boundedContext, settings, scoring ) )
             .via( publish )
@@ -253,22 +252,13 @@ object FileBatchExample extends Instrumented with ClassLogging {
 
       val intakeBuffer = b.add(
         Flow[String]
-          .map { s ⇒ log.warn( Map( "@msg" → "#TEST intake", "orig" → s ) ); s }
           .buffer( conf.tcpInboundBufferSize, OverflowStrategy.backpressure )
           .watchFlow( WatchPoints.Intake )
       )
 
-      val timeSeries = b.add(
-        Flow[String]
-          .map { s ⇒ log.warn( Map( "@msg" → "#TEST to unmarshall", "orig" → s ) ); s }
-          .via( unmarshalTimeSeriesData )
-          .map { ts ⇒ log.error( Map( "@msg" → "#TEST source timeseries", "timeseries" → ts.toString ) ); ts }
-      )
+      val timeSeries = b.add( Flow[String].via( unmarshalTimeSeriesData ) )
 
-      val limiter = b.add(
-        rateLimitFlow( configuration.parallelism, 25.milliseconds ).watchFlow( WatchPoints.Rate )
-          .map { ts ⇒ log.warn( Map( "@msg" → "#TEST after limiter and to scoring", "ts" → ts.toString ) ); ts }
-      )
+      val limiter = b.add( rateLimitFlow( configuration.parallelism, 25.milliseconds ).watchFlow( WatchPoints.Rate ) )
       val score = b.add( scoring )
 
       //todo remove after working
@@ -280,7 +270,6 @@ object FileBatchExample extends Instrumented with ClassLogging {
 
       val filterOutliers = b.add(
         Flow[Outliers]
-          .map { s ⇒ log.error( Map( "@msg" → "#TEST scored outliers", "outlier" → s.toString ) ); s }
           //        .buffer( 10, OverflowStrategy.backpressure ).watchFlow( 'filterOutliers )
           .collect { case s: SeriesOutliers ⇒ s } //.watchFlow( WatchPoints.Results )
       )
@@ -371,10 +360,7 @@ object FileBatchExample extends Instrumented with ClassLogging {
     Flow[String]
       .mapConcat { s ⇒
         toTimeSeries( s ) match {
-          case \/-( tss ) ⇒ {
-            log.warn( Map( "@msg" → "#TEST toTimeSeries", "tss" → tss.toString(), "orig" → s ) )
-            tss
-          }
+          case \/-( tss ) ⇒ tss
           case -\/( ex ) ⇒ {
             log.error( Map( "@msg" → "Failure: unmarshalTimeSeries.toTimeSeries", "time-series" → s.toString ), ex )
             throw ex

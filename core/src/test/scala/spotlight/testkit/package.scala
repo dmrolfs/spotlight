@@ -70,12 +70,12 @@ package object testkit {
         |}
         |
         |akka {
-        |  loggers = ["akka.event.slf4j.Slf4jLogger", "akka.testkit.TestEventListener"]
-        |  logging-filter = "akka.event.DefaultLoggingFilter"
-        |  loglevel = DEBUG
-        |  stdout-loglevel = "DEBUG"
-        |  log-dead-letters = on
-        |  log-dead-letters-during-shutdown = on
+        |#  loggers = ["akka.event.slf4j.Slf4jLogger", "akka.testkit.TestEventListener"]
+        |#  logging-filter = "akka.event.DefaultLoggingFilter"
+        |#  loglevel = DEBUG
+        |#  stdout-loglevel = "DEBUG"
+        |#  log-dead-letters = on
+        |#  log-dead-letters-during-shutdown = on
         |
         |  actor {
         |#    provider = "akka.cluster.ClusterActorRefProvider"
@@ -103,25 +103,25 @@ package object testkit {
         |  # enable function of Actor.loggable(), which is to log any received message
         |  # at DEBUG level, see the “Testing Actor Systems” section of the Akka
         |  # Documentation at http://akka.io/docs
-        |  receive = on
+        |#  receive = on
         |
         |  # enable DEBUG logging of all AutoReceiveMessages (Kill, PoisonPill et.c.)
-        |  autoreceive = on
+        |#  autoreceive = on
         |
         |  # enable DEBUG logging of actor lifecycle changes
-        |  lifecycle = on
+        |#  lifecycle = on
         |
         |  # enable DEBUG logging of all LoggingFSMs for events, transitions and timers
-        |  fsm = on
+        |#  fsm = on
         |
         |  # enable DEBUG logging of subscription changes on the eventStream
-        |  event-stream = on
+        |#  event-stream = on
         |
         |  # enable DEBUG logging of unhandled messages
-        |  unhandled = on
+        |#  unhandled = on
         |
         |  # enable WARN logging of misconfigured routers
-        |  router-misconfiguration = on
+        |#  router-misconfiguration = on
         |}
         |
         |demesne.register-dispatcher {

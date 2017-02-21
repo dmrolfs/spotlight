@@ -399,23 +399,17 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
 
       override def persistenceIdFromPath(): String = {
         val p = self.path.toStringWithoutAddress
-        log.info( "#TEST algo persistenceIdFromPath: p = {}", p )
         val sepPos = p lastIndexOf '/'
         val aidRep = p drop ( sepPos + 1 )
-        log.info( "#TEST algo persistenceIdFromPath: aidRep = {}", aidRep )
-        val pid = AlgorithmIdentifier.fromAggregateId( aidRep ).disjunction match {
-          case \/-( aid ) ⇒ {
-            log.info( "#TEST algo persistenceIdFromPath: algo-identifier: planName[{}] planId[{}] spanType[{}] span[{}]", aid.planName, aid.planId, aid.spanType, aid.span )
-            algorithmModule.identifying.tag( aid ).toString
-          }
+
+        AlgorithmIdentifier.fromAggregateId( aidRep ).disjunction match {
+          case \/-( aid ) ⇒ algorithmModule.identifying.tag( aid ).toString
 
           case -\/( exs ) ⇒ {
             exs foreach { ex ⇒ log.error( ex, "failed to parse persistenceId from path:[{}]", p ) }
             throw exs.head
           }
         }
-        log.debug( "#TEST algo persistenceIdFromPath: persistenceId:[{}] from path:[{}]", pid, p )
-        pid
       }
 
       override lazy val metricBaseName: MetricName = algorithm.metricBaseName
