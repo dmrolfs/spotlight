@@ -109,14 +109,22 @@ object DetectionAlgorithmRouter extends ClassLogging {
 
     def unsafeRootTypeFor( algorithm: String ): Option[AggregateRootType] = {
       log.debug(
-        Map( "@msg" → "unsafe algorithm root types", "root-types" → algorithmRootTypes.get.keySet.mkString( "[", ", ", "]" ) )
+        Map(
+          "@msg" → "unsafe pull of algorithm root types",
+          "root-types" → algorithmRootTypes.get.keySet.mkString( "[", ", ", "]" )
+        )
       )
       algorithmRootTypes.get() get algorithm
     }
 
     def futureRootTypeFor( algorithm: String )( implicit ec: ExecutionContext ): Future[Option[AggregateRootType]] = {
       algorithmRootTypes.future() map { rootTable ⇒
-        log.debug( Map( "@msg" → "safe algorithm root types", "root-types" → rootTable.keySet.mkString( "[", ", ", "]" ) ) )
+        log.debug(
+          Map(
+            "@msg" → "safe pull of algorithm root types",
+            "root-types" → rootTable.keySet.mkString( "[", ", ", "]" )
+          )
+        )
         rootTable get algorithm
       }
     }
@@ -232,7 +240,13 @@ class DetectionAlgorithmRouter extends Actor with EnvelopingActor with Instrumen
 
   var routingTable: Map[String, AlgorithmRoute] = provider.initialRoutingTable
   def addRoute( algorithm: String, resolver: AlgorithmRoute ): Unit = { routingTable += ( algorithm → resolver ) }
-  log.debug( Map( "@msg" → "created routing-table", "self" → self.path.name, "routing-table" → routingTable.mkString( "[", ", ", "]" ) ) )
+  log.debug(
+    Map(
+      "@msg" → "created routing-table",
+      "self" → self.path.name,
+      "routing-table" → routingTable
+    )
+  )
 
   def contains( algorithm: String ): Boolean = {
     val found = routingTable contains algorithm
@@ -242,7 +256,7 @@ class DetectionAlgorithmRouter extends Actor with EnvelopingActor with Instrumen
         "@msg" → "looking for",
         "self" → self.path.name,
         "algorithm" → algorithm,
-        "routing-table" → routingTable.keys.mkString( "[", ", ", "]" ),
+        "routing-keys" → routingTable.keys.mkString( "[", ", ", "]" ),
         "found" → found
       )
     )
