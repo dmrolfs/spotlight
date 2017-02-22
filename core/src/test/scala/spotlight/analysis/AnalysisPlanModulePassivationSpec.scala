@@ -8,15 +8,14 @@ import omnibus.akka.envelope._
 import omnibus.akka.envelope.pattern.ask
 import akka.actor.{ ActorRef, ActorSystem, Props }
 import com.typesafe.scalalogging.StrictLogging
-import demesne.index.StackableIndexBusPublisher
 import demesne.{ AggregateRootType, DomainModel }
 import demesne.module.{ AggregateEnvironment, LocalAggregate }
-import demesne.module.entity.{ EntityAggregateModule, EntityProtocol }
+import demesne.module.entity.EntityAggregateModule
 import demesne.repository.AggregateRootProps
 import omnibus.akka.publish.StackableStreamPublisher
 import omnibus.archetype.domain.model.core.EntityIdentifying
 import omnibus.commons.TryV
-import omnibus.commons.identifier.{ Identifying, ShortUUID, TaggedID }
+import omnibus.commons.identifier.Identifying
 import omnibus.commons.log.Trace
 import shapeless.Lens
 import spotlight.analysis.AnalysisPlanModule.AggregateRoot.PlanActor
@@ -72,8 +71,7 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[AnalysisPlanSta
         extends PlanActor( model, rootType )
         with WorkerProvider
         with FlowConfigurationProvider
-        with StackableStreamPublisher
-        with StackableIndexBusPublisher {
+        with StackableStreamPublisher {
       override val bufferSize: Int = 10
     }
 

@@ -12,7 +12,7 @@ import akka.stream.{ ActorAttributes, Materializer }
 import akka.stream.scaladsl.Flow
 import akka.stream.Supervision
 import akka.util.Timeout
-import com.persist.logging.{ ActorLogging ⇒ PersistActorLogging, _ }
+import com.persist.logging._
 import shapeless.{ Lens, lens }
 import com.typesafe.config.Config
 import nl.grons.metrics.scala.{ Meter, MetricName }
@@ -23,11 +23,8 @@ import omnibus.archetype.domain.model.core.{ Entity, EntityIdentifying, EntityLe
 import omnibus.commons.identifier.ShortUUID
 import omnibus.akka.supervision.{ IsolatedDefaultSupervisor, OneForOneStrategyFactory }
 import demesne._
-import demesne.index.local.IndexLocalAgent
-import demesne.index.{ Directive, IndexBusSubscription, StackableIndexBusPublisher }
 import demesne.module.LocalAggregate
 import demesne.module.entity.{ EntityAggregateModule, EntityProtocol }
-import demesne.module.entity.EntityAggregateModule.MakeIndexSpec
 import spotlight.model.outlier._
 import spotlight.model.outlier.AnalysisPlan.Scope
 import spotlight.model.timeseries._
@@ -113,7 +110,6 @@ case class AnalysisPlanState( plan: AnalysisPlan ) extends Entity {
   def algorithms: Set[String] = AnalysisPlanState.allAlgorithms( plan.algorithms, plan.algorithmConfig )
 
   def routes( implicit model: DomainModel ): Map[String, AlgorithmRoute] = {
-    //    implicit val ec: scala.concurrent.ExecutionContext = context.dispatcher
     implicit val ec = model.system.dispatcher
 
     def makeRoute( plan: AnalysisPlan )( algorithm: String ): Option[AlgorithmRoute] = {
@@ -170,27 +166,6 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
   override def slugLens: Lens[AnalysisPlanState, String] = AnalysisPlan.slugLens compose planLens
   val isActiveLens: Lens[AnalysisPlanState, Boolean] = AnalysisPlan.isActiveLens compose planLens
 
-  val namedPlanIndex: Symbol = 'NamedPlan
-
-  //  val indexes: MakeIndexSpec = {
-  //    () ⇒
-  //      {
-  //        Seq(
-  //          IndexLocalAgent.spec[String, module.TID, AnalysisPlan.Summary]( specName = namedPlanIndex, IndexBusSubscription ) {
-  //            case P.Added( sid, Some( AnalysisPlanState( p: AnalysisPlan ) ) ) ⇒ Directive.Record( p, sid, p.toSummary )
-  //            case P.Added( sid, Some( p: AnalysisPlan ) ) ⇒ Directive.Record( p.name, sid, p.toSummary )
-  //            case P.Added( sid, info ) ⇒ {
-  //              log.error( Map( "@msg" → "ignoring added event since info was not some AnalysisPlan", "info" → info.toString ) )
-  //              Directive.Ignore
-  //            }
-  //            case P.Disabled( sid, _ ) ⇒ Directive.Withdraw( sid )
-  //            case P.Renamed( sid, oldName, newName ) ⇒ Directive.ReviseKey( oldName, newName )
-  //            case _ ⇒ Directive.Ignore
-  //          }
-  //        )
-  //      }
-  //  }
-
   val module: EntityAggregateModule[AnalysisPlanState] = {
     val b = EntityAggregateModule.builderFor[AnalysisPlanState, AnalysisPlanProtocol.type].make
     import b.P.{ Props ⇒ BProps, _ }
@@ -201,7 +176,6 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
       .set( BProps, AggregateRoot.PlanActor.props( _, _ ) )
       .set( PassivateTimeout, 5.minutes )
       .set( Protocol, AnalysisPlanProtocol )
-      //      .set( Indexes, indexes )
       .set( IdLens, moduleOuter.idLens )
       .set( NameLens, moduleOuter.nameLens )
       .set( IsActiveLens, Some( moduleOuter.isActiveLens ) )
@@ -217,16 +191,10 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
           extends PlanActor( model, rootType )
           with WorkerProvider
           with FlowConfigurationProvider
-          with StackableStreamPublisher
-          with StackableIndexBusPublisher {
+          with StackableStreamPublisher {
         override val bufferSize: Int = 1000
 
         override protected def onPersistRejected( cause: Throwable, event: Any, seqNr: Long ): Unit = {
-          //          log.error(
-          //            cause,
-          //            "persist rejected for event:[{}] aggregateId:[{}] sequenceNr:[{}]",
-          //            event.getClass.getName, persistenceId, seqNr
-          //          )
           altLog.error(
             msg = Map(
               "@msg" → "persist event rejected",
@@ -278,7 +246,6 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
             s"${p.name}-foreman"
           )
           altLog.info( Map( "@msg" → "created plan foreman", "foreman" → foreman.path ) )
-          //          altLog.info( Map("@msg" -> "created plan foreman", "self" -> self.path.toString, "foreman" -> foreman.path.toString) )
 
           val f = {
             for {
@@ -405,13 +372,6 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
         }
 
         case P.Add( targetId, info ) ⇒ {
-          //          log.error(
-          //            "ignoring received Add message with unrecognized " +
-          //              "targetId:[{}] targetId-class:[{}] " +
-          //              "aggregateId:[{}] aggregateId-class:[{}]",
-          //            targetId, targetId.id.getClass.getName,
-          //            aggregateId, aggregateId.id.getClass.getName
-          //          )
           altLog.error(
             Map(
               "@msg" → "ignoring received Add message with unrecognized targetId",
@@ -423,7 +383,6 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
           )
         }
 
-        //        case m ⇒ log.error( "[quiescent] ignoring unrecognized message[{}]", m )
         case m ⇒ altLog.error( Map( "@msg" → "ignoring unrecognized message", "message" → m.toString ) )
       }
 
@@ -462,7 +421,6 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
 
       override def unhandled( message: Any ): Unit = {
         altLog.error( Map( "@msg" → "unhandled message", "aggregateId" → aggregateId.toString, "message" → message.toString ) )
-        //        log.error( "[{}] unhandled message:[{}]", aggregateId, message )
         super.unhandled( message )
       }
 
@@ -533,11 +491,6 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
             ( detector ?+ m )
               .recover {
                 case ex: TimeoutException ⇒ {
-                  //                  log.error(
-                  //                    ex,
-                  //                    "timeout[{}] exceeded waiting for detection for plan:[{}] topic:[{}]",
-                  //                    timeout.duration.toCoarsest, m.plan, m.topic
-                  //                  )
                   altLog.error(
                     Map(
                       "@msg" → "timeout exceeded waiting for detection",

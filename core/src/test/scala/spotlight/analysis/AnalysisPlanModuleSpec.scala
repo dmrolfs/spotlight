@@ -7,15 +7,13 @@ import com.typesafe.config.{ Config, ConfigFactory }
 import omnibus.akka.envelope._
 import omnibus.akka.envelope.pattern.ask
 import akka.actor.{ ActorRef, ActorSystem, Props }
-import demesne.index.StackableIndexBusPublisher
 import demesne.module.{ AggregateEnvironment, LocalAggregate }
 import demesne.{ AggregateRootType, DomainModel }
 import demesne.repository.AggregateRootProps
-import demesne.module.entity.{ EntityAggregateModule, EntityProtocol }
+import demesne.module.entity.EntityAggregateModule
 import org.scalatest.{ OptionValues, Tag }
 import omnibus.akka.publish.StackableStreamPublisher
 import omnibus.commons.{ TryV, V }
-import omnibus.commons.identifier.{ ShortUUID, TaggedID }
 import omnibus.commons.log.Trace
 import shapeless.Lens
 import spotlight.analysis.AnalysisPlanModule.AggregateRoot.PlanActor
@@ -121,8 +119,7 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[AnalysisPlanState] with Op
         extends PlanActor( model, rootType )
         with WorkerProvider
         with FlowConfigurationProvider
-        with StackableStreamPublisher
-        with StackableIndexBusPublisher {
+        with StackableStreamPublisher {
       override val bufferSize: Int = 10
     }
 
@@ -289,7 +286,7 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[AnalysisPlanState] with Op
     //      testProbe.expectNoMsg()
     //    }
 
-    "add AnalysisPlan" taggedAs WIP in { f: Fixture ⇒
+    "add AnalysisPlan" in { f: Fixture ⇒
       import f._
 
       entity ! protocol.Add( tid, Some( plan ) )
@@ -336,7 +333,7 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[AnalysisPlanState] with Op
       actual.appliesTo must be theSameInstanceAs testApplies
     }
 
-    "change algorithms" in { f: Fixture ⇒
+    "change algorithms" taggedAs WIP in { f: Fixture ⇒
       import f._
 
       entity !+ protocol.Add( tid, Some( plan ) )

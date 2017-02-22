@@ -4,7 +4,7 @@ import scala.concurrent.{ Await, ExecutionContext, Future }
 import scala.concurrent.duration._
 import scala.reflect._
 import akka.{ Done, NotUsed }
-import akka.actor.{ Actor, ActorRef, ActorSystem, Props, Stash, Status }
+import akka.actor.{ Actor, ActorRef, ActorSystem, Props, Status }
 import akka.agent.Agent
 import akka.event.LoggingReceive
 import akka.pattern.{ ask, pipe }
@@ -75,7 +75,6 @@ object PlanCatalog extends ClassLogging {
     boundedContext: BoundedContext
   ): Props = {
     Props( new Default( boundedContext, configuration, applicationPlans, maxInFlightCpuFactor, applicationDetectionBudget ) )
-    // .withDispatcher( "spotlight.planCatalog.stash-dispatcher" )
   }
 
   val name: String = "PlanCatalog"
@@ -156,7 +155,7 @@ object PlanCatalog extends ClassLogging {
 }
 
 abstract class PlanCatalog( boundedContext: BoundedContext )
-    extends Actor with Stash with EnvelopingActor with InstrumentedActor with ActorLogging {
+    extends Actor with EnvelopingActor with InstrumentedActor with ActorLogging {
   outer: PlanCatalog.ExecutionProvider with PlanCatalog.PlanProvider ⇒
 
   import spotlight.analysis.{ PlanCatalogProtocol ⇒ P, AnalysisPlanProtocol ⇒ AP }
@@ -230,100 +229,10 @@ abstract class PlanCatalog( boundedContext: BoundedContext )
     planProjection.view.get().map { p ⇒ Map( "name" → p.name, "id" → p.id.id.toString ) }.mkString( "[", ", ", "]" )
   }
 
-  //  var knownPlans: Set[AnalysisPlan.Summary] = Set.empty[AnalysisPlan.Summary]
-  //  private def renderKnownPlans(): String = {
-  //    knownPlans.map { p ⇒ Map( "name" → p.name, "id" → p.id.id.toString ) }.mkString( "[", ", ", "]" )
-  //  }
-
   def updateKnownPlan( pid: AnalysisPlan#TID )( fn: AnalysisPlan.Summary ⇒ AnalysisPlan.Summary ): Plans ⇒ Plans = {
     ( acc: Plans ) ⇒ acc.find { _.id == pid }.map { fn }.map { acc + _ }.getOrElse { acc }
   }
-  //  def updateKnownPlan( pid: AnalysisPlan#TID )( fn: AnalysisPlan.Summary ⇒ AnalysisPlan.Summary ): Unit = {
-  //    knownPlans
-  //      .find { _.id == pid }
-  //      .map { fn }
-  //      .foreach { knownPlans += _ }
-  //  }
-
-  //  def loadCurrentKnownPlans(): Future[Long] = {
-  //    implicit val ec = context.dispatcher
-  //    implicit val materializer = ActorMaterializer( ActorMaterializerSettings( context.system ) )
-  //
-  //    log.info( Map( "@msg" → "query currently known plans...", "known" → renderKnownPlans() ) )
-  //
-  //    val lastSequenceNr = {
-  //      QueryJournal
-  //        .fromSystem( context.system )
-  //        .currentEventsByTag( AnalysisPlanModule.module.rootType.name, NoOffset )
-  //        .via( filterKnownPlansFlow )
-  //        .toMat( knownPlansSink )( Keep.right )
-  //        .run()
-  //    }
-  //
-  //    lastSequenceNr foreach { snr ⇒
-  //      log.info( Map( "@msg" → "... finished query currently known plans", "snr" → snr, "known" → renderKnownPlans() ) )
-  //    }
-  //    lastSequenceNr
-  //  }
-
-  //  def startPlanProjectionFrom( sequenceId: Long ): Unit = {
-  //    implicit val ec = context.dispatcher
-  //    implicit val materializer = ActorMaterializer( ActorMaterializerSettings( context.system ) )
-  //
-  //    log.info( "starting active plan projection source..." )
-  //
-  //    QueryJournal
-  //      .fromSystem( context.system )
-  //      .eventsByTag( AnalysisPlanModule.module.rootType.name, Offset.sequence( sequenceId ) )
-  //      .map { e ⇒ log.error( Map( "@msg" → "#TEST CATALOG NOTIFIED OF NEW PLAN EVENT", "event" → e.toString ) ); e }
-  //      .via( filterKnownPlansFlow )
-  //      .to( knownPlansSink )
-  //      .run()
-  //  }
-
-  //  def knownPlansSink( implicit ec: ExecutionContext ): Sink[( P.PlanDirective, Long ), Future[Long]] = {
-  //    Sink.fold( 0L ) {
-  //      case ( lastSnr, ( d, snr ) ) ⇒
-  //        log.warn( Map( "@msg" → "#TEST sending catalog message to self", "self" → self.path.name, "directive" → d.toString ) )
-  //        self ! d
-  //        math.max( lastSnr, snr )
-  //    }
-  //  }
-
-  //  val planDirectiveForEvent: PartialFunction[AP.Event, P.PlanDirective] = {
-  //    case AP.Added( _, Some( p: AnalysisPlan ) ) ⇒ {
-  //      log.warn( Map( "@msg" → "#TEST directive from AP.Added", "plan" → Map( "name" → p.name, "id" → p.id.id.toString ) ) )
-  //      P.AddPlan( p )
-  //    }
-  //    case AP.Disabled( planId, _ ) ⇒ {
-  //      log.warn( Map( "@msg" → "#TEST READ Plan Disabled", "planId" → planId ) )
-  //      P.DisablePlan( planId )
-  //    }
-  //    case AP.Enabled( planId, _ ) ⇒ {
-  //      log.warn( Map( "@msg" → "#TEST READ Plan Enabled", "planId" → planId ) )
-  //      P.EnablePlan( planId )
-  //    }
-  //    case AP.Renamed( planId, _, newName ) ⇒ {
-  //      log.warn( Map( "@msg" → "#TEST READ Plan Renamed", "planId" → planId, "newName" → newName ) )
-  //      P.RenamePlan( planId, newName )
-  //    }
-  //  }
-
   val EventType = classTag[AP.Event]
-
-  //  val filterKnownPlansFlow: Flow[EventEnvelope2, ( P.PlanDirective, Long ), NotUsed] = {
-  //    Flow[EventEnvelope2]
-  //      .map { e ⇒ log.warn( Map( "@msg" → "#TEST loaded tagged event", "event" → e.toString ) ); e }
-  //      .collect {
-  //        case EventEnvelope2( offset, pid, snr, EventType( event ) ) if planDirectiveForEvent isDefinedAt event ⇒ {
-  //          val directive = planDirectiveForEvent( event )
-  //          log.warn( Map( "@msg" → "#TEST directive for event", "offset" → offset.toString, "pid" → pid, "sequence-nr" → snr, "event" → event.toString, "directive" → directive.toString ) )
-  //          ( directive, snr )
-  //        }
-  //      }
-  //  }
-
-  type PlanIndex = DomainModel.AggregateIndex[String, AnalysisPlanModule.module.TID, AnalysisPlan.Summary]
 
   def collectPlans()( implicit ec: ExecutionContext ): Future[Plans] = {
     for {
@@ -333,39 +242,6 @@ abstract class PlanCatalog( boundedContext: BoundedContext )
       _ = log.debug( Map( "@msg" → "PlanCatalog fromFallback", "fallback" → fromFallback.toString ) )
     } yield fromIndex ++ fromFallback
   }
-
-  //  def applicablePlanExists( ts: TimeSeries )( implicit ec: ExecutionContext ): Boolean = {
-  //    val current = unsafeApplicablePlanExists( ts )
-  //    if ( current ) current
-  //    else {
-  //      val secondary = {
-  //        for {
-  //          futureCheck ← futureApplicablePlanExists( ts )
-  //          fallback ← fallbackIndex.future()
-  //        } yield {
-  //          if ( futureCheck ) {
-  //            log.info(
-  //              Map( "@msg" → "delayed appearance of topic in plan index - removing from fallback", "topic" → ts.topic.toString )
-  //            )
-  //            fallbackIndex send { _ - ts.topic.toString }
-  //            futureCheck
-  //          } else {
-  //            val fallbackResult = fallback contains ts.topic.toString
-  //            if ( fallbackResult ) {
-  //              log.warn(
-  //                Map( "@msg" → "fallback plan found for topic is not yet reflected in plan index", "topic" → ts.topic.toString )
-  //              )
-  //            }
-  //
-  //            fallbackResult
-  //          }
-  //        }
-  //      }
-  //
-  //      scala.concurrent.Await.result( secondary, 30.seconds )
-  //    }
-  //  }
-
   private def doesPlanApply( o: Any )( p: AnalysisPlan.Summary ): Boolean = {
     p.appliesTo map { _.apply( o ) } getOrElse true
   }
@@ -405,49 +281,11 @@ abstract class PlanCatalog( boundedContext: BoundedContext )
 
   override def receive: Receive = LoggingReceive { around( quiescent() ) }
 
-  //  val planDirectives: Receive = {
-  //    case P.AddPlan( p ) ⇒ {
-  //      log.warn( Map( "@msg" → "#TEST adding known plan", "plan" → Map( "id" → p.id.id.toString, "name" → p.name ), "known" → renderKnownPlans() ) )
-  //      knownPlans += p.toSummary
-  //    }
-  //
-  //    case P.EnablePlan( pid ) ⇒ {
-  //      log.warn( Map( "@msg" → "#TEST enabling known plan", "pid" → pid.id.toString, "known" → renderKnownPlans() ) )
-  //      updateKnownPlan( pid ) { _.copy( isActive = true ) }
-  //    }
-  //
-  //    case P.DisablePlan( pid ) ⇒ {
-  //      log.warn( Map( "@msg" → "#TEST disabling known plan", "pid" → pid.id.toString, "known" → renderKnownPlans() ) )
-  //      updateKnownPlan( pid ) { _.copy( isActive = false ) }
-  //    }
-  //
-  //    case P.RenamePlan( pid, newName ) ⇒ {
-  //      log.warn( Map( "@msg" → "#TEST renaming known plan", "pid" → pid.id.toString, "known" → renderKnownPlans() ) )
-  //      updateKnownPlan( pid ) { _.copy( name = newName ) }
-  //    }
-  //  }
-
-  //  def quiescent( waiting: Set[ActorRef] = Set.empty[ActorRef] ): Receive = planDirectives orElse {
   def quiescent( waiting: Set[ActorRef] = Set.empty[ActorRef] ): Receive = {
     case Initialize ⇒ {
       import akka.pattern.pipe
       implicit val ec = context.system.dispatcher //todo: consider moving off actor threadpool
       implicit val timeout = Timeout( 30.seconds )
-
-      //      val init = startPlanProjection() map { ps ⇒
-      //        log.warn( Map( "@msg" → "current plan materialization", "plans" → ps.map { _.name }.mkString( "[", ", ", "]" ) ) )
-      //        InitializeCompleted
-      //      }
-      //      {
-      //        for {
-      //          lastSequenceNr ← loadCurrentKnownPlans()
-      //          _ = log.info( Map( "@msg" → "known current plan loaded", "last-sequence-nr" → lastSequenceNr, "known" → renderKnownPlans() ) )
-      //          _ = startPlanProjectionFrom( lastSequenceNr )
-      //          _ = log.info( Map( "@msg" → "ongoing plan projection started", "known" → renderKnownPlans() ) )
-      //          _ ← initializePlans()
-      //          _ = log.info( Map( "@msg" → "remaining specified plans are initialized", "known" → renderKnownPlans() ) )
-      //        } yield InitializeCompleted
-      //      }
 
       val init = {
         for {
@@ -469,7 +307,6 @@ abstract class PlanCatalog( boundedContext: BoundedContext )
       log.info( Map( "@msg" → "initialization completed - plan catalog activating", "known" → renderKnownPlans() ) )
       waiting foreach { _ ! P.Started }
       context become LoggingReceive { around( active orElse admin ) }
-      //      context become LoggingReceive { around( planDirectives orElse active orElse admin ) }
     }
 
     case P.WaitForStart ⇒ {
@@ -484,70 +321,6 @@ abstract class PlanCatalog( boundedContext: BoundedContext )
       val requester = sender()
       makeFlow( parallelism )( system, timeout, materializer ) map { P.CatalogFlow.apply } pipeTo requester
     }
-
-    //    //todo remove
-    //    case route @ P.Route( ts: TimeSeries, _ ) if applicablePlanExists( ts )( context.dispatcher ) ⇒ {
-    //      log.debug(
-    //        Map(
-    //          "@msg" → "PlanCatalog:ACTIVE dispatching stream message for detection",
-    //          "work-id" → workId.toString,
-    //          "route" → route.toString
-    //        )
-    //      )
-    //      dispatch( route, sender() )( context.dispatcher )
-    //    }
-
-    //    //todo remove
-    //    case ts: TimeSeries if applicablePlanExists( ts )( context.dispatcher ) ⇒ {
-    //      log.debug(
-    //        Map(
-    //          "@msg" → "PlanCatalog:ACTIVE dispatching time series to sender",
-    //          "work-id" → workId,
-    //          "sender" → sender().path.name,
-    //          "topic" → ts.topic.toString
-    //        )
-    //      )
-    //      dispatch( P.Route( ts, Some( correlationId ) ), sender() )( context.dispatcher )
-    //    }
-
-    //    //todo remove
-    //    case r: P.Route ⇒ {
-    //      //todo route unrecogonized ts
-    //      log.warn(
-    //        Map( "@msg" → "PlanCatalog:ACTIVE: no plan on record that applies to topic", "topic" → r.timeSeries.topic.toString )
-    //      )
-    //      sender() !+ P.UnknownRoute( r )
-    //    }
-
-    //    //todo remove
-    //    case ts: TimeSeries ⇒ {
-    //      //todo route unrecogonized ts
-    //      log.warn(
-    //        Map( "@msg" → "PlanCatalog:ACTIVE: no plan on record that applies to topic", "topic" → ts.topic.toString )
-    //      )
-    //      sender() !+ P.UnknownRoute( ts, Some( correlationId ) )
-    //    }
-
-    //    //todo remove
-    //    case result @ DetectionResult( outliers, workIds ) ⇒ {
-    //      if ( 1 < workIds.size ) {
-    //        log.warn(
-    //          Map(
-    //            "@msg" → "received DetectionResult with multiple workIds",
-    //            "nr-work-id" → workIds.size,
-    //            "work-ids" → workIds.mkString( "[", ", ", "]" )
-    //          )
-    //        )
-    //      }
-    //
-    //      workIds find { outstandingWork.contains } foreach { cid ⇒
-    //        val subscriber = outstandingWork( cid )
-    //        log.debug( Map( "@msg" → "FLOW2: sending result to subscriber", "subscriber" → subscriber.path.name, "result" → result.toString ) )
-    //        subscriber !+ result
-    //      }
-    //
-    //      outstandingWork --= workIds
-    //    }
   }
 
   val admin: Receive = {
@@ -751,36 +524,6 @@ abstract class PlanCatalog( boundedContext: BoundedContext )
       }
     )
   }
-
-  //  def loadPlan( planId: AnalysisPlan#TID )( implicit ec: ExecutionContext, to: Timeout ): Future[( String, AnalysisPlan.Summary )] = {
-  //    fetchPlanInfo( planId ) map { summary ⇒ ( summary.info.name, summary.info.toSummary ) }
-  //  }
-
-  //  def fetchPlanInfo( pid: AnalysisPlanModule.module.TID )( implicit ec: ExecutionContext, to: Timeout ): Future[AP.PlanInfo] = {
-  //    def toInfo( message: Any ): Future[AP.PlanInfo] = {
-  //      message match {
-  //        case Envelope( info: AP.PlanInfo, _ ) ⇒ {
-  //          log.info( Map( "@msg" → "fetched plan entity", "plan-id" → info.sourceId.toString ) )
-  //          Future successful info
-  //        }
-  //
-  //        case info: AP.PlanInfo ⇒ Future successful info
-  //
-  //        case m ⇒ {
-  //          val ex = new IllegalStateException( s"unknown response to plan inquiry for id:[${pid}]: ${m}" )
-  //          log.error( Map( "@msg" → "failed to fetch plan for id", "id" → pid.toString ), ex )
-  //          Future failed ex
-  //        }
-  //      }
-  //    }
-  //
-  //    for {
-  //      model ← boundedContext.futureModel
-  //      ref = model( AnalysisPlanModule.module.rootType, pid )
-  //      msg ← ( ref ?+ AP.GetPlan( pid ) ).mapTo[Envelope]
-  //      info ← toInfo( msg )
-  //    } yield info
-  //  }
 }
 
 //def flow2(
