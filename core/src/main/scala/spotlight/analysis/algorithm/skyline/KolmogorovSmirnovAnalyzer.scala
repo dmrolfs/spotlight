@@ -11,8 +11,8 @@ import org.joda.{ time ⇒ joda }
 import com.github.nscala_time.time.Imports._
 import org.apache.commons.math3.stat.inference.TestUtils
 import org.apache.commons.math3.exception.{ InsufficientDataException, MathInternalError }
-import peds.commons.{ KOp, TryV, Valid }
-import peds.commons.util._
+import omnibus.commons.{ KOp, TryV, Valid }
+import omnibus.commons.util._
 import spotlight.analysis.algorithm.AlgorithmActor.AlgorithmContext
 import spotlight.analysis.algorithm.CommonAnalyzer
 import CommonAnalyzer.WrappingContext

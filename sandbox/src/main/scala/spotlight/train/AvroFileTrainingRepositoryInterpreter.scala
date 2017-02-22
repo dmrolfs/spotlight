@@ -12,7 +12,7 @@ import org.apache.avro.mapred.FsInput
 import org.apache.hadoop.conf.{ Configuration => HConfiguration }
 import org.apache.hadoop.fs.{ FileSystem, Path }
 import com.typesafe.config.{ Config, ConfigFactory }
-import peds.commons.log.Trace
+import omnibus.commons.log.Trace
 import spotlight.model.timeseries.{ TimeSeriesCohort, DataPoint }
 
 

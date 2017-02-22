@@ -5,8 +5,8 @@ import scalaz.{ Ordering ⇒ _, _ }, Scalaz._
 import shapeless.Lens
 import org.joda.{ time ⇒ joda }
 import com.github.nscala_time.time.Imports._
-import peds.commons.Valid
-import peds.commons.math.Interpolator
+import omnibus.commons.Valid
+import omnibus.commons.math.Interpolator
 
 trait TimeSeriesCohort extends TimeSeriesBase {
   override def size: Int = data.size

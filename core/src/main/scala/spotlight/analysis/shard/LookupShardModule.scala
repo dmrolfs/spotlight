@@ -5,21 +5,20 @@ import scala.reflect._
 import akka.actor.{ ActorRef, Cancellable, Props }
 import akka.event.LoggingReceive
 import akka.persistence.RecoveryCompleted
-
 import nl.grons.metrics.scala.{ Meter, MetricName }
 import squants.information._
 import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap
-import peds.akka.envelope._
-import peds.akka.metrics.{ Instrumented, InstrumentedActor }
-import peds.akka.publish.{ EventPublisher, StackableStreamPublisher }
-import peds.commons.identifier._
-import peds.commons.util._
-import peds.commons.TryV
+import omnibus.akka.envelope._
+import omnibus.akka.metrics.{ Instrumented, InstrumentedActor }
+import omnibus.akka.publish.{ EventPublisher, StackableStreamPublisher }
+import omnibus.commons.identifier._
+import omnibus.commons.util._
+import omnibus.commons.TryV
 import demesne._
 import demesne.repository.CommonLocalRepository
 import spotlight.analysis.DetectUsing
 import spotlight.analysis.shard.ShardCatalog.ShardCatalogIdentifying
-import spotlight.analysis.algorithm.{ AlgorithmModule, AlgorithmProtocol ⇒ AP }
+import spotlight.analysis.algorithm.{ Algorithm, AlgorithmIdGenerator, AlgorithmProtocol ⇒ AP }
 import spotlight.model.outlier.AnalysisPlan
 import spotlight.model.timeseries._
 
@@ -34,7 +33,7 @@ object LookupShardProtocol extends AggregateProtocol[LookupShardCatalog#ID] {
     algorithmRootType: AggregateRootType,
     expectedNrTopics: Int,
     controlBySize: Information,
-    nextAlgorithmId: () ⇒ AlgorithmModule.TID
+    idGenerator: AlgorithmIdGenerator
   //    control: Option[Control] = None
   ) extends Command
 
@@ -44,7 +43,7 @@ object LookupShardProtocol extends AggregateProtocol[LookupShardCatalog#ID] {
     algorithmRootType: AggregateRootType,
     expectedNrTopics: Int,
     controlBySize: Information,
-    nextAlgorithmId: () ⇒ AlgorithmModule.TID
+    idGenerator: AlgorithmIdGenerator
   //    control: LookupShardCatalog.Control
   ) extends Event
 
@@ -54,7 +53,7 @@ object LookupShardProtocol extends AggregateProtocol[LookupShardCatalog#ID] {
   case class ShardAssigned(
     override val sourceId: ShardAssigned#TID,
     topic: Topic,
-    algorithmId: AlgorithmModule.TID
+    algorithmId: Algorithm.TID
   ) extends Event
 }
 
@@ -62,12 +61,13 @@ case class LookupShardCatalog(
     plan: AnalysisPlan.Summary,
     algorithmRootType: AggregateRootType,
     control: LookupShardCatalog.Control,
-    override val nextAlgorithmId: () ⇒ AlgorithmModule.TID,
+    override val idGenerator: AlgorithmIdGenerator,
     shards: Object2ObjectOpenHashMap[Topic, AlgoTID]
 ) extends ShardCatalog with Equals {
   import LookupShardCatalog.identifying
 
-  override def id: TID = identifying.tag( ShardCatalog.ID( plan.id, algorithmRootType.name ).asInstanceOf[identifying.ID] ).asInstanceOf[TID]
+  override def id: TID = ShardCatalog.idFor[LookupShardCatalog]( plan, algorithmRootType.name )
+  //  override def id: TID = identifying.tag( ShardCatalog.ID( plan.id, algorithmRootType.name ).asInstanceOf[identifying.ID] ).asInstanceOf[TID]
   override def name: String = plan.name
   override def slug: String = plan.slug
 
@@ -117,7 +117,7 @@ case class LookupShardCatalog(
 object LookupShardCatalog {
   def makeShardMap( size: Int ): Object2ObjectOpenHashMap[Topic, AlgoTID] = new Object2ObjectOpenHashMap[Topic, AlgoTID]( size )
 
-  implicit val identifying: Identifying[LookupShardCatalog] = new ShardCatalogIdentifying[LookupShardCatalog] {
+  implicit val identifying: Identifying.Aux[LookupShardCatalog, ShardCatalog.ID] = new ShardCatalogIdentifying[LookupShardCatalog] {
     override val idTag: Symbol = Symbol( "lookup-shard" )
   }
 
@@ -132,16 +132,12 @@ object LookupShardCatalog {
   }
 }
 
-object LookupShardModule extends AggregateRootModule { module ⇒
-  override type ID = LookupShardCatalog#ID
-
-  implicit val identifying: Identifying[LookupShardCatalog] = LookupShardCatalog.identifying
-  override def nextId: TryV[TID] = identifying.nextIdAs[TID]
-
+object LookupShardModule extends AggregateRootModule[LookupShardCatalog, LookupShardCatalog#ID] { module ⇒
   override val rootType: AggregateRootType = AlgorithmShardCatalogRootType
   object AlgorithmShardCatalogRootType extends AggregateRootType {
     override val name: String = module.identifying.idTag.name
-    override val identifying: Identifying[_] = module.identifying
+    override type S = LookupShardCatalog
+    override val identifying: Identifying[S] = module.identifying
     override val snapshotPeriod: Option[FiniteDuration] = None
     override def repositoryProps( implicit model: DomainModel ): Props = {
       CommonLocalRepository.props( model, this, AggregateRoot.ShardingActor.props( _: DomainModel, _: AggregateRootType ) )
@@ -269,7 +265,6 @@ object LookupShardModule extends AggregateRootModule { module ⇒
                     )
                 }
 
-                log.warning( s"#TEST #ShardCatalog[{}]: stripLingeringMetrics removeMatching: name:[{}] TO-REMOVE:[{}] has-${ShardBaseName}:${name contains ShardBaseName} has-${CountName}:${name contains CountName} has-${ActiveShardSizeGaugeName}:${name contains ActiveShardSizeGaugeName} has-${TotalShardSizeGaugeName}:${name contains TotalShardSizeGaugeName}", self.path.name, name, isMatch )
                 isMatch
               }
             }
@@ -287,7 +282,7 @@ object LookupShardModule extends AggregateRootModule { module ⇒
       //      val shards: Lookup = Lookup.apply()
 
       override var state: LookupShardCatalog = _
-      override val evState: ClassTag[LookupShardCatalog] = classTag[LookupShardCatalog]
+      //      override val evState: ClassTag[LookupShardCatalog] = classTag[LookupShardCatalog]
       var availability: Availability = _
 
       override def acceptance: Acceptance = {
@@ -300,7 +295,7 @@ object LookupShardModule extends AggregateRootModule { module ⇒
             plan = p,
             algorithmRootType = rt,
             control = LookupShardCatalog.Control.BySize( bySize ),
-            nextAlgorithmId = nextAlgorithmId,
+            idGenerator = AlgorithmIdGenerator( p.name, p.id, rt ),
             shards = LookupShardCatalog.makeShardMap( nrTopics )
           )
 
@@ -316,11 +311,11 @@ object LookupShardModule extends AggregateRootModule { module ⇒
       def referenceFor( aid: AlgoTID ): ActorRef = model( state.algorithmRootType, aid )
 
       def dispatchEstimateRequests( forCandidates: AlgoTID ⇒ Boolean ): Unit = {
-        import scala.collection.JavaConversions._
+        import scala.collection.JavaConverters._
 
         for {
           s ← Option( state ).toSet[LookupShardCatalog]
-          allShards = s.shards.values.toSet
+          allShards = s.shards.values.asScala.toSet
           candidates = allShards filter forCandidates
           cid ← candidates
           ref = referenceFor( cid )
@@ -408,14 +403,14 @@ object LookupShardModule extends AggregateRootModule { module ⇒
             availability
               .mostAvailable
               .getOrElse {
-                val nid = state.nextAlgorithmId()
+                val nid = state.idGenerator.next()
                 context become active( availability withNewShardId nid )
                 log.info(
                   "ShardCatalog[{}]: creating new shard id: NID[{}]  root-type:[{}] tag:[{}]",
                   self.path.name,
                   nid,
                   state.algorithmRootType,
-                  state.algorithmRootType.identifying.idTag.name
+                  identifying.idTag.name
                 )
                 nid
               }

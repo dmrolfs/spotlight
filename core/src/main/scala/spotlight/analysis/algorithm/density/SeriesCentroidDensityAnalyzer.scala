@@ -5,7 +5,7 @@ import scalaz._
 import Scalaz._
 import akka.actor.{ ActorRef, Props }
 import org.apache.commons.math3.ml.clustering.DoublePoint
-import peds.commons.{ KOp, TryV }
+import omnibus.commons.{ KOp, TryV }
 import spotlight.analysis.algorithm.AlgorithmActor
 import spotlight.analysis.algorithm.density.DBSCANAnalyzer.Clusters
 import spotlight.analysis.{ DetectUsing, HistoricalStatistics }

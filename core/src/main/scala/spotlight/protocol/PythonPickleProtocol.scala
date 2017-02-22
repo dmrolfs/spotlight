@@ -68,7 +68,7 @@ class PythonPickleProtocol extends GraphiteSerializationProtocol with LazyLoggin
   case class Metric( topic: Topic, timestamp: joda.DateTime, value: Double )
 
   override def toTimeSeries( bytes: ByteString ): List[TimeSeries] = {
-    import scala.collection.convert.wrapAll._
+    import scala.collection.JavaConverters._
     import net.razorvine.pickle.Unpickler
 
     if ( bytes.isEmpty ) throw PickleException( part = "all", value = bytes )
@@ -78,7 +78,7 @@ class PythonPickleProtocol extends GraphiteSerializationProtocol with LazyLoggin
       val pickles = pck.asInstanceOf[java.util.ArrayList[Array[AnyRef]]]
 
       val metrics = for {
-        p ← pickles
+        p ← pickles.asScala
       } yield {
         val tuple = p
         val dp = tuple( 1 ).asInstanceOf[Array[AnyRef]]

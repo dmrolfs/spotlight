@@ -8,11 +8,11 @@ import org.scalatest.Outcome
 import org.scalatest.mockito.MockitoSugar
 import org.mockito.Mockito._
 import com.typesafe.config.{ Config, ConfigFactory }
-import peds.akka.envelope.Envelope
-import peds.commons.V
+import omnibus.akka.envelope.Envelope
+import omnibus.commons.V
 import spotlight.model.timeseries.{ ThresholdBoundary, TimeSeries, TimeSeriesBase, Topic }
 import spotlight.testkit.ParallelAkkaSpec
-import peds.commons.log.Trace
+import omnibus.commons.log.Trace
 import spotlight.model.outlier._
 
 /** Created by damonrolfs on 9/18/14.

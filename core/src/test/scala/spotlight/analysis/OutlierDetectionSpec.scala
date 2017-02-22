@@ -7,7 +7,7 @@ import akka.testkit._
 import scalaz.Scalaz.{ when ⇒ _, _ }
 import org.scalatest.mockito.MockitoSugar
 import com.typesafe.config.{ Config, ConfigFactory }
-import peds.akka.envelope.{ Envelope, WorkId }
+import omnibus.akka.envelope.{ Envelope, WorkId }
 import spotlight.model.timeseries._
 import spotlight.model.outlier._
 import spotlight.testkit.{ ParallelAkkaSpec, TestCorrelatedSeries }

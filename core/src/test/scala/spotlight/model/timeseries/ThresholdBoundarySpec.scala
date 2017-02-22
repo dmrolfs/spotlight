@@ -3,7 +3,7 @@ package spotlight.model.timeseries
 import org.apache.commons.math3.stat.descriptive.SummaryStatistics
 import org.scalatest._
 import org.joda.{ time ⇒ joda }
-import peds.commons.log.Trace
+import omnibus.commons.log.Trace
 
 /** Created by rolfsd on 5/27/16.
   */

@@ -2,7 +2,7 @@ package spotlight.analysis.algorithm.skyline.adf
 
 import org.apache.commons.math3.linear.MatrixUtils
 import org.scalatest._
-import peds.commons.log.Trace
+import omnibus.commons.log.Trace
 
 /** Created by rolfsd on 3/6/16.
   */

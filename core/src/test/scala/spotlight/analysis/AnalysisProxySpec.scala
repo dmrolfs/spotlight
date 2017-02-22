@@ -15,8 +15,8 @@
 //import org.scalatest.concurrent.ScalaFutures
 //import org.scalatest.mockito.MockitoSugar
 //import org.mockito.Mockito._
-//import peds.commons.V
-//import peds.akka.envelope._
+//import omnibus.commons.V
+//import omnibus.akka.envelope._
 //import spotlight.analysis.AnalysisPlanProtocol.AcceptTimeSeries
 //import spotlight.analysis.OutlierDetection.DetectionResult
 //import spotlight.model.outlier._

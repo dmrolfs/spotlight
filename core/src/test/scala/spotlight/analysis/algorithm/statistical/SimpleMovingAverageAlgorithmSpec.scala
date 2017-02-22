@@ -3,25 +3,27 @@ package spotlight.analysis.algorithm.statistical
 import scala.annotation.tailrec
 import akka.actor.ActorSystem
 import com.typesafe.config.Config
-import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
+import org.apache.commons.math3.stat.descriptive.{ DescriptiveStatistics, SummaryStatistics }
 import org.mockito.Mockito._
 import org.scalatest.Assertion
-import spotlight.analysis.algorithm.{ AlgorithmModuleSpec, AlgorithmProtocol ⇒ P }
+import spotlight.analysis.algorithm.{ Advancing, AlgorithmSpec, AlgorithmProtocol ⇒ P }
 import spotlight.model.timeseries._
+import spotlight.analysis.algorithm.summaryStatisticsAdvancing
 
 /** Created by rolfsd on 6/9/16.
   */
-class SimpleMovingAverageAlgorithmSpec extends AlgorithmModuleSpec[SimpleMovingAverageAlgorithmSpec] {
+class SimpleMovingAverageAlgorithmSpec extends AlgorithmSpec[SummaryStatistics] {
 
-  override type Module = SimpleMovingAverageAlgorithm.type
-  override val defaultModule: Module = SimpleMovingAverageAlgorithm
+  override type Algo = SimpleMovingAverageAlgorithm.type
+  override val defaultAlgorithm: Algo = SimpleMovingAverageAlgorithm
 
   override def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture = {
     new Fixture( config, system, slug )
   }
 
   class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends AlgorithmFixture( _config, _system, _slug ) {
-    override implicit val shapeOrdering: Ordering[module.Shape] = new Ordering[module.Shape] {
+
+    override implicit val shapeOrdering: Ordering[Shape] = new Ordering[Shape] {
       override def compare( lhs: TestShape, rhs: TestShape ): Int = {
         if ( lhs == rhs ) 0
         else {
@@ -88,16 +90,16 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmModuleSpec[SimpleMovingA
   bootstrapSuite()
   analysisStateSuite()
 
-  s"${defaultModule.algorithm.label} algorithm" should {
+  s"${defaultAlgorithm.label} algorithm" should {
     "step to find anomalies from flat signal" in { f: Fixture ⇒
       import f._
 
       logger.info( "************** TEST NOW ************" )
-      val algorithm = module.algorithm
-      implicit val testContext = mock[module.Context]
-      val testShape: module.Shape = module.shapeCompanion.zero( None )
+      val algorithm = defaultAlgorithm
+      implicit val testContext = mock[defaultAlgorithm.Context]
+      val testShape: Shape = shapeless.the[Advancing[Shape]].zero( None )
 
-      implicit val testState = mock[module.State]
+      implicit val testState = mock[State]
       when( testState.shapes ).thenReturn( Map( scope.topic → testShape ) )
 
       def advanceWith( v: Double ): Unit = testShape addValue v

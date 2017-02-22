@@ -2,6 +2,7 @@ package spotlight.analysis.algorithm.statistical
 
 import scala.annotation.tailrec
 import akka.actor.ActorSystem
+
 import scalaz.{ -\/, \/- }
 import com.typesafe.config.Config
 import org.apache.commons.math3.stat.descriptive.{ DescriptiveStatistics, StatisticalSummary }
@@ -9,22 +10,22 @@ import org.joda.{ time ⇒ joda }
 import org.mockito.Mockito._
 import org.scalatest.Assertion
 import org.typelevel.scalatest.{ DisjunctionMatchers, DisjunctionValues }
-import peds.commons.TryV
-import peds.commons.log.Trace
+import omnibus.commons.TryV
+import omnibus.commons.log.Trace
 import spotlight.analysis.RecentHistory
-import spotlight.analysis.algorithm.{ AlgorithmModule, AlgorithmModuleSpec, AlgorithmProtocol ⇒ P }
+import spotlight.analysis.algorithm.{ Algorithm, AlgorithmSpec, AlgorithmProtocol ⇒ P }
 import spotlight.model.timeseries._
 
 /** Created by rolfsd on 10/7/16.
   */
 class GrubbsAlgorithmSpec
-    extends AlgorithmModuleSpec[GrubbsAlgorithmSpec]
+    extends AlgorithmSpec[GrubbsShape]
     with DisjunctionMatchers
     with DisjunctionValues {
   private val trace = Trace[GrubbsAlgorithmSpec]
 
-  override type Module = GrubbsAlgorithm.type
-  override val defaultModule: Module = GrubbsAlgorithm
+  override type Algo = GrubbsAlgorithm.type
+  override val defaultAlgorithm: Algo = GrubbsAlgorithm
 
   override def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture = {
     logger.debug( "TEST ActorSystem: {}", system.name )
@@ -83,7 +84,7 @@ class GrubbsAlgorithmSpec
 
     val allPoints = lastPoints ++ points
     val shape = shapeFor( allPoints map { _.value } )
-    val score = GrubbsAlgorithm.AlgorithmImpl.grubbsScore( shape ).toOption.get
+    val score = TryV.unsafeGet( GrubbsAlgorithm.grubbsScore( shape ) )
 
     @tailrec def loop( pts: List[DataPoint], history: Array[Double], acc: Seq[ThresholdBoundary] ): Seq[ThresholdBoundary] = {
       pts match {
@@ -127,7 +128,7 @@ class GrubbsAlgorithmSpec
             )
           }
 
-          case -\/( ex: AlgorithmModule.InsufficientDataSize ) ⇒ ThresholdBoundary empty timestamp
+          case -\/( ex: Algorithm.InsufficientDataSize ) ⇒ ThresholdBoundary empty timestamp
 
           case -\/( ex ) ⇒ throw ex
         }
@@ -140,7 +141,7 @@ class GrubbsAlgorithmSpec
 
       val stats = points.foldLeft( new DescriptiveStatistics( RecentHistory.LastN ) ) { ( s, p ) ⇒ s.addValue( p.value ); s }
       val shape = shapeFor( stats )
-      val grubbs = defaultModule.AlgorithmImpl.grubbsScore( shape )
+      val grubbs = GrubbsAlgorithm.grubbsScore( shape )
       logger.info( "TEST: SCORE = [{}]", grubbs )
       Result( underlying = stats, timestamp = points.last.timestamp, tolerance = 3.0, score = grubbs )
     }
@@ -149,7 +150,7 @@ class GrubbsAlgorithmSpec
   bootstrapSuite()
   analysisStateSuite()
 
-  s"${defaultModule.algorithm.label} algorithm" should {
+  s"${defaultAlgorithm.label} algorithm" should {
     //    "change configuration" taggedAs WIP in { f: Fixture =>
     //      import f._
     //      import akka.pattern.ask
@@ -159,7 +160,7 @@ class GrubbsAlgorithmSpec
     //      whenReady(
     //        ( aggregate ? P.GetTopicShapeSnapshot( id, scope.topic ) ).mapTo[P.TopicShapeSnapshot], timeout( 5.seconds.dilated )
     //      ){ actual =>
-    //        actualVsExpectedShape( actual.snapshot.get, defaultModule.shapeCompanion.zero( Some(config) ) )
+    //        actualVsExpectedShape( actual.snapshot.get, defaultAlgorithm.shapeCompanion.zero( Some(config) ) )
     //      }
     //
     //      val c1 = ConfigFactory.parseString( s"${module.algorithm.label.name} { sample-size = 7 }" )
@@ -189,7 +190,7 @@ class GrubbsAlgorithmSpec
         GrubbsShape( new DescriptiveStatistics( d take size ) )
       }
 
-      def score( s: GrubbsShape ): TryV[Double] = defaultModule.AlgorithmImpl.grubbsScore( s )
+      def score( s: GrubbsShape ): TryV[Double] = GrubbsAlgorithm.grubbsScore( s )
 
       for ( i ← 0 until 6 ) score( caller( i ) ).isLeft mustBe true
       score( caller( 7 ) ).value mustBe ( 2.0199684174 +- 0.00001 )

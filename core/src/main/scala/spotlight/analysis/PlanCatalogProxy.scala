@@ -15,8 +15,8 @@ import com.codahale.metrics.{ Metric, MetricFilter }
 import com.typesafe.config.Config
 import com.persist.logging._
 import nl.grons.metrics.scala.{ MetricName, Timer }
-import peds.akka.envelope._
-import peds.akka.metrics.{ Instrumented, InstrumentedActor }
+import omnibus.akka.envelope._
+import omnibus.akka.metrics.{ Instrumented, InstrumentedActor }
 import spotlight.analysis.OutlierDetection.DetectionResult
 import spotlight.analysis.PlanCatalogProtocol.{ Started, WaitForStart }
 import spotlight.model.timeseries._

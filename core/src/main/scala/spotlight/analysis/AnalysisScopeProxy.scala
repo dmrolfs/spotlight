@@ -14,10 +14,10 @@
 //import com.typesafe.config.Config
 //import com.typesafe.scalalogging.LazyLogging
 //import nl.grons.metrics.scala.{Meter, MetricName, Timer}
-//import peds.akka.envelope._
-//import peds.akka.metrics.{Instrumented, InstrumentedActor}
-//import peds.akka.stream._
-//import peds.commons.log.Trace
+//import omnibus.akka.envelope._
+//import omnibus.akka.metrics.{Instrumented, InstrumentedActor}
+//import omnibus.akka.stream._
+//import omnibus.commons.log.Trace
 //import demesne.{AggregateRootType, DomainModel}
 //import spotlight.analysis.algorithm.{AlgorithmModule, AlgorithmProtocol}
 //import spotlight.model.outlier.AnalysisPlan.Scope

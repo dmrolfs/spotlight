@@ -7,9 +7,9 @@ import scalaz.concurrent.Task
 import com.typesafe.scalalogging.Logger
 import org.apache.commons.math3.linear.MatrixUtils
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
-import peds.commons.V
-import peds.commons.log.Trace
-import peds.commons.math.MahalanobisDistance
+import omnibus.commons.V
+import omnibus.commons.log.Trace
+import omnibus.commons.math.MahalanobisDistance
 import spotlight.model.timeseries._
 
 

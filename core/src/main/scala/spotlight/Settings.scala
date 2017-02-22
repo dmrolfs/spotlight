@@ -7,7 +7,7 @@ import scalaz.Scalaz._
 import scalaz._
 import com.typesafe.config._
 import com.typesafe.scalalogging.LazyLogging
-import peds.commons.{ V, Valid }
+import omnibus.commons.{ V, Valid }
 import spotlight.analysis.OutlierDetection
 import spotlight.model.outlier._
 import spotlight.model.timeseries.Topic
@@ -390,12 +390,12 @@ object Settings extends LazyLogging {
 
   object PlanFactory {
     def makePlans( planSpecifications: Config, detectionBudget: Duration ): Set[AnalysisPlan] = {
-      import scala.collection.JavaConversions._
+      import scala.collection.JavaConverters._
 
-      logger.debug( "#TEST settings.makePlans with budget:[{}] specs:[\n{}\n]", detectionBudget, planSpecifications )
       val result = {
         planSpecifications
           .root
+          .asScala
           .collect { case ( n, s: ConfigObject ) ⇒ ( n, s.toConfig ) }
           .toSeq
           .map {
@@ -478,12 +478,11 @@ object Settings extends LazyLogging {
           }
       }
 
-      logger.debug( "#TEST settings.factor.makePlans: [{}]", result.mkString( "\n", "\n", "\n" ) )
       result.flatten.toSet
     }
 
     private def pullCommonPlanFacets( spec: Config, detectionBudget: Duration ): ( Duration, Set[String] ) = {
-      import scala.collection.JavaConversions._
+      import scala.collection.JavaConverters._
 
       def effectiveBudget( budget: Duration, utilization: Double ): Duration = {
         budget match {
@@ -494,7 +493,7 @@ object Settings extends LazyLogging {
 
       val AlgorithmsPath = "algorithms"
       val algorithms: Set[String] = {
-        if ( spec hasPath AlgorithmsPath ) spec.getStringList( AlgorithmsPath ).toSet else Set.empty[String]
+        if ( spec hasPath AlgorithmsPath ) spec.getStringList( AlgorithmsPath ).asScala.toSet else Set.empty[String]
       }
 
       ( effectiveBudget( detectionBudget, 0.8D ), algorithms )

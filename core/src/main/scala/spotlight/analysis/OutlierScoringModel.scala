@@ -10,9 +10,9 @@ import akka.stream.scaladsl._
 import akka.stream.stage._
 import com.typesafe.scalalogging.{ Logger, StrictLogging }
 import org.slf4j.LoggerFactory
-import bloomfilter.mutable.BloomFilter
-import peds.akka.metrics.Instrumented
-import peds.akka.stream.StreamMonitor
+//import bloomfilter.mutable.BloomFilter
+import omnibus.akka.metrics.Instrumented
+import omnibus.akka.stream.StreamMonitor
 import spotlight.Settings
 import spotlight.model.outlier._
 import spotlight.model.timeseries.TimeSeriesBase.Merging
@@ -52,6 +52,7 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
     val parallelism = settings.parallelismFactor
 
     GraphDSL.create() { implicit b ⇒
+      val start = b.add( Flow[TimeSeries].map { identity } )
       val logMetrics = b.add( logMetric( Logger( LoggerFactory getLogger "Metrics" ), settings.plans ) )
       val blockPriors = b.add( Flow[TimeSeries] filter { notReportedBySpotlight } )
       val zipWithInPlan = b.add(
@@ -74,12 +75,12 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
       //      val buffer = b.add( Flow[TimeSeries].buffer( 10, OverflowStrategy.backpressure ).watchFlow( WatchPoints.PlanBuffer ) )
       val detect = b.add( catalogFlow.watchFlow( WatchPoints.Catalog ) )
 
-      logMetrics ~> blockPriors ~> zipWithInPlan ~> broadcast ~> passPlanned ~> regulator /*~> buffer */ ~> detect
+      start ~> logMetrics ~> blockPriors ~> zipWithInPlan ~> broadcast ~> passPlanned ~> regulator /*~> buffer */ ~> detect
       broadcast ~> passUnrecognized
 
       ScoringShape(
         FanOutShape.Ports(
-          inlet = logMetrics.in,
+          inlet = start.in,
           outlets = scala.collection.immutable.Seq( detect.out, passUnrecognized.out )
         )
       )
@@ -93,7 +94,7 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
     new GraphStage[FlowShape[TimeSeries, TimeSeries]] {
       val count = new AtomicInteger( 0 )
       //      var bloom = BloomFilter[Topic]( maxFalsePosProbability = 0.1, 10000000 )
-      val bloom = BloomFilter[Topic]( numberOfItems = 10000000, falsePositiveRate = 0.1 )
+      //      val bloom = BloomFilter[Topic]( numberOfItems = 10000000, falsePositiveRate = 0.1 )
 
       val in = Inlet[TimeSeries]( "logMetric.in" )
       val out = Outlet[TimeSeries]( "logMetric.out" )
@@ -107,21 +108,21 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
             new InHandler {
               override def onPush(): Unit = {
                 val e = grab( in )
-
-                //                if ( !bloom.has_?( e.topic ) ) {
-                if ( !bloom.mightContain( e.topic ) ) {
-                  bloom add e.topic
-                  //                  bloom += e.topic
-                  if ( !e.topic.name.startsWith( OutlierMetricPrefix ) ) {
-                    destination.debug(
-                      "[{}] Plan for {}: {}",
-                      count.incrementAndGet().toString,
-                      e.topic,
-                      plans find { _ appliesTo e } getOrElse "NONE"
-                    )
-                  }
-                }
-
+                //
+                //                //                if ( !bloom.has_?( e.topic ) ) {
+                //                if ( !bloom.mightContain( e.topic ) ) {
+                //                  bloom add e.topic
+                //                  //                  bloom += e.topic
+                //                  if ( !e.topic.name.startsWith( OutlierMetricPrefix ) ) {
+                //                    destination.debug(
+                //                      "[{}] Plan for {}: {}",
+                //                      count.incrementAndGet().toString,
+                //                      e.topic,
+                //                      plans find { _ appliesTo e } getOrElse "NONE"
+                //                    )
+                //                  }
+                //                }
+                //
                 push( out, e )
               }
             }

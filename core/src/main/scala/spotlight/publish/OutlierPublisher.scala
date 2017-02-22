@@ -5,7 +5,7 @@ import scala.concurrent.duration.FiniteDuration
 import akka.actor.ActorLogging
 import akka.stream.actor.{ ActorSubscriber, MaxInFlightRequestStrategy, RequestStrategy }
 import org.joda.{ time ⇒ joda }
-import peds.akka.metrics.InstrumentedActor
+import omnibus.akka.metrics.InstrumentedActor
 import spotlight.model.outlier.{ NoOutliers, Outliers, SeriesOutliers }
 import spotlight.model.timeseries._
 

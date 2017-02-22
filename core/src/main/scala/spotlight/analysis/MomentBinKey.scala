@@ -1,7 +1,7 @@
 package spotlight.analysis
 
 import scalaz.Validation
-import peds.commons.Valid
+import omnibus.commons.Valid
 
 /** Created by rolfsd on 9/21/16.
   */

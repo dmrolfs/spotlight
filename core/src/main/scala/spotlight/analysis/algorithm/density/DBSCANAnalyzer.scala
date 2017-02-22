@@ -9,7 +9,7 @@ import com.typesafe.config.Config
 import org.apache.commons.math3.ml.clustering.{ Cluster, DBSCANClusterer, DoublePoint }
 import org.apache.commons.math3.ml.distance.DistanceMeasure
 import org.slf4j.LoggerFactory
-import peds.commons.{ KOp, TryV }
+import omnibus.commons.{ KOp, TryV }
 import spotlight.analysis.algorithm.AlgorithmActor
 import spotlight.analysis.{ DetectOutliersInSeries, DetectUsing }
 import spotlight.model.outlier.Outliers

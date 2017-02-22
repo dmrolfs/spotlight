@@ -37,3 +37,5 @@ addSbtPlugin("me.lessis" % "bintray-sbt" % "0.3.0")
 addSbtPlugin("com.julianpeeters" % "sbt-avrohugger" % "0.14.0")
 
 addSbtPlugin("org.oedura" % "scavro-plugin" % "1.0.2")
+
+addSbtPlugin("io.get-coursier" % "sbt-coursier" % "1.0.0-M12")
