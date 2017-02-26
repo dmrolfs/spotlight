@@ -199,11 +199,21 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
     algorithm.estimatedAverageShapeSize
       .map { _ * state.shapes.size }
       .getOrElse {
-        log.warn( Map( "@msg" → "algorithm estimateSize relying on serialization - look to optimize", "algorithm" → label ) )
         import akka.serialization.{ SerializationExtension, Serializer }
         val serializer: Serializer = SerializationExtension( system ) findSerializerFor state
         val bytes = akka.util.ByteString( serializer toBinary state )
-        Bytes( bytes.size )
+        val sz = Bytes( bytes.size )
+
+        log.warn(
+          Map(
+            "@msg" → "algorithm estimateSize relying on serialization - look to optimize",
+            "algorithm" → label,
+            "size" → sz.toString,
+            "nr-shapes" → state.shapes.size
+          )
+        )
+
+        sz
       }
   }
 
