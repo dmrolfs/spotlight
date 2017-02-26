@@ -167,8 +167,9 @@ class OutlierDetection extends Actor with EnvelopingActor with InstrumentedActor
       }
     } yield {
       val history = updateHistory( m.source, p )
-      p.algorithms foreach { algo ⇒
-        router.sendEnvelope( DetectUsing( m.plan.id, algo, m, history, p.algorithmConfig ) )( aggregator )
+      p.algorithms foreach {
+        case ( algo, algoConfig ) ⇒
+          router.sendEnvelope( DetectUsing( m.plan.id, algo, m, history, algoConfig ) )( aggregator )
       }
       aggregator
     }

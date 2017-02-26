@@ -58,20 +58,24 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[AnalysisPlanState] with Op
     lazy val plan = makePlan( "TestPlan", None )
     override lazy val tid: TID = plan.id
 
+    val emptyConfig = ConfigFactory.empty()
+
     def makePlan( name: String, g: Option[AnalysisPlan.Grouping] ): AnalysisPlan = {
       AnalysisPlan.default(
         name = name,
-        algorithms = Set( algo ),
+        algorithms = Map(
+          algo →
+            ConfigFactory.parseString(
+              s"""
+            |seedEps: 5.0
+            |minDensityConnectedPoints: 3
+            """.stripMargin
+            )
+        ),
         grouping = g,
         timeout = 500.millis,
         isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = 1, triggerPoint = 1 ),
-        reduce = ReduceOutliers.byCorroborationPercentage( 50 ),
-        planSpecification = ConfigFactory.parseString(
-          s"""
-             |algorithm-config.${algo}.seedEps: 5.0
-             |algorithm-config.${algo}.minDensityConnectedPoints: 3
-          """.stripMargin
-        )
+        reduce = ReduceOutliers.byCorroborationPercentage( 50 )
       )
     }
 
@@ -286,7 +290,7 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[AnalysisPlanState] with Op
     //      testProbe.expectNoMsg()
     //    }
 
-    "add AnalysisPlan" in { f: Fixture ⇒
+    "add AnalysisPlan" taggedAs WIP in { f: Fixture ⇒
       import f._
 
       entity ! protocol.Add( tid, Some( plan ) )
@@ -298,14 +302,14 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[AnalysisPlanState] with Op
           p.info.get mustBe an[AnalysisPlan]
           val actual = p.info.get.asInstanceOf[AnalysisPlan]
           actual.name mustBe "TestPlan"
-          actual.algorithms mustBe Set( algo )
+          actual.algorithmKeys mustBe Set( algo )
         }
       }
     }
 
     "must not respond before add" in { f: Fixture ⇒
       import f._
-      val info = ( entity ?+ P.UseAlgorithms( tid, Set( "foo", "bar" ), ConfigFactory.empty() ) ).mapTo[P.PlanInfo]
+      val info = ( entity ?+ P.UseAlgorithms( tid, Map( "foo" → emptyConfig, "bar" → emptyConfig ) ) ).mapTo[P.PlanInfo]
       bus.expectNoMsg()
     }
 
@@ -333,7 +337,7 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[AnalysisPlanState] with Op
       actual.appliesTo must be theSameInstanceAs testApplies
     }
 
-    "change algorithms" taggedAs WIP in { f: Fixture ⇒
+    "change algorithms" in { f: Fixture ⇒
       import f._
 
       entity !+ protocol.Add( tid, Some( plan ) )
@@ -346,21 +350,22 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[AnalysisPlanState] with Op
         """.stripMargin
       )
 
-      entity !+ AnalysisPlanProtocol.UseAlgorithms( tid, Set( "foo", "bar", "zed" ), testConfig )
+      val expected = Map( "foo" → testConfig, "bar" → emptyConfig, "zed" → testConfig )
+      entity !+ AnalysisPlanProtocol.UseAlgorithms( tid, Map( "foo" → testConfig, "bar" → emptyConfig, "zed" → testConfig ) )
       bus.expectMsgPF( max = 3.seconds.dilated, hint = "use algorithms" ) {
-        case AnalysisPlanProtocol.AlgorithmsChanged( id, algos, config, added, dropped ) ⇒ {
+        case AnalysisPlanProtocol.AlgorithmsChanged( id, algos, added, dropped ) ⇒ {
           id mustBe tid
-          algos mustBe Set( "foo", "bar", "zed" )
+          algos.keySet mustBe Set( "foo", "bar", "zed" )
           dropped mustBe Set( SimpleMovingAverageAlgorithm.label )
           added mustBe Set( "foo", "bar", "zed" )
-          config mustBe testConfig
+          algos foreach { case ( a, c ) ⇒ c mustBe expected( a ) }
         }
       }
 
       val actual = stateFrom( entity, tid )
       actual mustBe plan
-      actual.algorithms mustBe Set( "foo", "bar", "zed" )
-      actual.algorithmConfig mustBe testConfig
+      actual.algorithms.keySet mustBe Set( "foo", "bar", "zed" )
+      actual.algorithms foreach { case ( a, c ) ⇒ c mustBe expected( a ) }
     }
 
     "change resolveVia" in { f: Fixture ⇒

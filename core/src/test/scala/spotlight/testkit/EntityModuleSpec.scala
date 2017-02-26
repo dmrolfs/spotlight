@@ -63,7 +63,7 @@ abstract class EntityModuleSpec[E <: Entity: ClassTag] extends AggregateRootSpec
         window map { w ⇒ AnalysisPlan.Grouping( limit = 10000, w ) }
       }
 
-      AnalysisPlan.default( "", 1.second, isQuorun, reduce, Set.empty[String], grouping ).appliesTo
+      AnalysisPlan.default( "", 1.second, isQuorun, reduce, Map.empty[String, Config], grouping ).appliesTo
     }
 
     implicit val nowTimestamp: joda.DateTime = joda.DateTime.now

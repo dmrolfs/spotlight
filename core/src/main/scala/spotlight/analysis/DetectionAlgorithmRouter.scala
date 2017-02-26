@@ -8,7 +8,7 @@ import com.persist.logging._
 
 import scalaz._
 import Scalaz._
-import com.typesafe.config.{ Config, ConfigValue, ConfigValueType }
+import com.typesafe.config.{ Config, ConfigObject, ConfigValue, ConfigValueType }
 import demesne.{ AggregateRootType, BoundedContext, DomainModel, StartTask }
 import omnibus.akka.envelope._
 import omnibus.akka.metrics.InstrumentedActor
@@ -41,7 +41,7 @@ object DetectionAlgorithmRouter extends ClassLogging {
     StartTask.withBoundTask( "load user algorithms" ) { bc: BoundedContext ⇒
       val t: Future[StartTask.Result] = {
         for {
-          algoRoots ← Registry.loadAlgorithms( bc, configuration )
+          algoRoots ← Registry.loadAlgorithms( bc, configuration.resolve() )
           roots ← Registry.registerWithRouter( algoRoots )
           unknowns = algoRoots.map { case ( _, rt ) ⇒ rt }.toSet
           _ = log.info( Map( "@msg" → "starting with new algorithm routes", "unknowns" → unknowns.mkString( "[", ", ", "]" ) ) )
@@ -134,29 +134,44 @@ object DetectionAlgorithmRouter extends ClassLogging {
         \/ fromTryCatchNonFatal { Class.forName( fqcn, true, getClass.getClassLoader ).asInstanceOf[Class[_ <: Algorithm[_]]] }
       }
 
-      def unwrapAlgorithmFQCN( entry: ( String, ConfigValue ) ): TryV[( String, String )] = {
-        val algorithm = entry._1
-        val value = entry._2.unwrapped()
+      def unwrapAlgorithmFQCN( algorithm: String, cv: ConfigValue ): TryV[( String, String )] = {
+        import scala.reflect._
+        val ConfigObjectType = classTag[ConfigObject]
+        val ClassPath = "class"
+        val value = cv.unwrapped()
+        log.debug(
+          Map(
+            "@msg" → "unwrapping algorithm FQCN",
+            "algorithm" → algorithm,
+            "config-value-type" → cv.valueType,
+            "config-value" → cv.toString,
+            "is-object" → ConfigObjectType.unapply( cv ).isDefined
+          )
+        )
 
-        entry._2.valueType() match {
-          case ConfigValueType.STRING ⇒ ( algorithm, value.asInstanceOf[String] ).right
-          case _ ⇒ InsufficientAlgorithmError( algorithm, value.toString ).left
-        }
+        val algoFQCN = for {
+          algoConfig ← ConfigObjectType.unapply( cv ) map { _.toConfig }
+          fqcn ← if ( algoConfig hasPath ClassPath ) Some( algoConfig getString ClassPath ) else None
+          _ = log.debug( Map( "@msg" → "fqcn from algo config", "algorithm" → algorithm, "fqcn" → fqcn ) )
+        } yield ( algorithm, fqcn ).right
+
+        algoFQCN getOrElse InsufficientAlgorithmError( algorithm, value.toString ).left
       }
 
       val AlgorithmPath = "spotlight.algorithms"
       if ( configuration hasPath AlgorithmPath ) {
         import scala.collection.JavaConverters._
 
-        configuration.getConfig( AlgorithmPath ).entrySet().asScala.toList
+        configuration.getConfig( AlgorithmPath ).root.entrySet().asScala.toList
           .map { entry ⇒ ( entry.getKey, entry.getValue ) }
-          .traverseU { entry ⇒
-            val ac = for {
-              algorithmFqcn ← unwrapAlgorithmFQCN( entry )
-              ( algorithm, fqcn ) = algorithmFqcn
-              clazz ← loadClass( algorithm, fqcn )
-            } yield ( algorithm, clazz )
-            ac.validationNel
+          .traverseU {
+            case ( a, cv ) ⇒
+              val ac = for {
+                algorithmFqcn ← unwrapAlgorithmFQCN( a, cv )
+                ( algorithm, fqcn ) = algorithmFqcn
+                clazz ← loadClass( algorithm, fqcn )
+              } yield ( algorithm, clazz )
+              ac.validationNel
           }
           .map { algorithmClasses ⇒ Map( algorithmClasses: _* ) }
       } else {
@@ -187,9 +202,12 @@ object DetectionAlgorithmRouter extends ClassLogging {
         model.rootTypes contains rootType
       }
 
-      val userAlgos: TryV[Map[String, Class[_ <: Algorithm[_]]]] = userAlgorithms( configuration ).disjunction leftMap { exs ⇒
-        exs foreach { ex ⇒ log.error( "loading user algorithm failed", ex ) }
-        exs.head
+      val userAlgos: TryV[Map[String, Class[_ <: Algorithm[_]]]] = {
+        userAlgorithms( configuration ).disjunction
+          .leftMap { exs ⇒
+            exs foreach { ex ⇒ log.error( "loading user algorithm failed", ex ) }
+            exs.head
+          }
       }
 
       def collectUnknowns(

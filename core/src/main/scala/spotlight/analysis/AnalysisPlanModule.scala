@@ -62,11 +62,7 @@ object AnalysisPlanProtocol extends EntityProtocol[AnalysisPlanState#ID] {
   //      case class AddAlgorithm( override val targetId: AnalysisPlan#TID, algorithm: Symbol ) extends Command with AnalysisPlanMessage
   case class ApplyTo( override val targetId: ApplyTo#TID, appliesTo: AnalysisPlan.AppliesTo ) extends Command
 
-  case class UseAlgorithms(
-    override val targetId: UseAlgorithms#TID,
-    algorithms: Set[String],
-    algorithmConfig: Config
-  ) extends Command
+  case class UseAlgorithms( override val targetId: UseAlgorithms#TID, algorithms: Map[String, Config] ) extends Command
 
   case class ResolveVia(
     override val targetId: ResolveVia#TID,
@@ -80,8 +76,7 @@ object AnalysisPlanProtocol extends EntityProtocol[AnalysisPlanState#ID] {
 
   case class AlgorithmsChanged(
     override val sourceId: AlgorithmsChanged#TID,
-    algorithms: Set[String],
-    algorithmConfig: Config,
+    algorithms: Map[String, Config],
     added: Set[String],
     dropped: Set[String]
   ) extends TaggedEvent
@@ -107,7 +102,7 @@ case class AnalysisPlanState( plan: AnalysisPlan ) extends Entity {
   override def name: String = plan.name
   override def canEqual( that: Any ): Boolean = that.isInstanceOf[AnalysisPlanState]
 
-  def algorithms: Set[String] = AnalysisPlanState.allAlgorithms( plan.algorithms, plan.algorithmConfig )
+  def algorithms: Map[String, Config] = plan.algorithms
 
   def routes( implicit model: DomainModel ): Map[String, AlgorithmRoute] = {
     implicit val ec = model.system.dispatcher
@@ -116,21 +111,21 @@ case class AnalysisPlanState( plan: AnalysisPlan ) extends Entity {
       DetectionAlgorithmRouter.Registry.rootTypeFor( algorithm ).map { rt ⇒ AlgorithmRoute.routeFor( plan, rt )( model ) }
     }
 
-    val routes = algorithms.toSeq.map { a ⇒ ( a, makeRoute( plan )( a ) ) }.collect { case ( a, Some( r ) ) ⇒ ( a, r ) }
+    val routes = algorithms.keySet.toSeq.map { a ⇒ ( a, makeRoute( plan )( a ) ) }.collect { case ( a, Some( r ) ) ⇒ ( a, r ) }
     Map( routes: _* )
   }
 
 }
 
-object AnalysisPlanState {
-  def allAlgorithms( algorithms: Set[String], algorithmSpec: Config ): Set[String] = {
-    import scala.collection.immutable
-    import scala.collection.JavaConverters._
-
-    val inSpec = algorithmSpec.root.entrySet.asScala.to[immutable.Set] map { _.getKey }
-    algorithms ++ inSpec
-  }
-}
+//object AnalysisPlanState {
+//  def allAlgorithms( algorithms: Set[String], algorithmSpec: Config ): Set[String] = {
+//    import scala.collection.immutable
+//    import scala.collection.JavaConverters._
+//
+//    val inSpec = algorithmSpec.root.entrySet.asScala.to[immutable.Set] map { _.getKey }
+//    algorithms ++ inSpec
+//  }
+//}
 
 /** Created by rolfsd on 5/26/16.
   */
@@ -349,8 +344,8 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
           //todo: cast for expediency. my ideal is to define a Lens in the AnalysisPlan trait; minor solace is this module is in the same package
           s.copy(
             plan = s.plan.asInstanceOf[AnalysisPlan.SimpleAnalysisPlan].copy(
-              algorithms = e.algorithms,
-              algorithmConfig = e.algorithmConfig
+              algorithms = e.algorithms //,
+            //              algorithmConfig = e.algorithmConfig
             )
           )
         }
@@ -399,23 +394,23 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
 
         case P.ApplyTo( id, appliesTo ) ⇒ persist( P.ScopeChanged( id, appliesTo ) ) { acceptAndPublish }
 
-        case P.UseAlgorithms( id, algorithms, config ) ⇒ persist( changeAlgorithms( algorithms, config ) ) { acceptAndPublish }
+        case P.UseAlgorithms( id, algorithms ) ⇒ persist( changeAlgorithms( algorithms ) ) { acceptAndPublish }
 
         case P.ResolveVia( id, isQuorum, reduce ) ⇒ {
           persist( P.AnalysisResolutionChanged( id, isQuorum, reduce ) ) { acceptAndPublish }
         }
       }
 
-      def changeAlgorithms( algorithms: Set[String], algorithmSpec: Config ): P.AlgorithmsChanged = {
-        val myAlgorithms = state.algorithms
-        val newAlgorithms = AnalysisPlanState.allAlgorithms( algorithms, algorithmSpec )
+      def changeAlgorithms( algorithms: Map[String, Config] ): P.AlgorithmsChanged = {
+        val myAlgorithms = state.algorithms.keySet
+        //        val newAlgorithms = AnalysisPlanState.allAlgorithms( algorithms, algorithmSpec )
 
         P.AlgorithmsChanged(
           sourceId = aggregateId,
-          algorithms = newAlgorithms,
-          algorithmConfig = algorithmSpec,
-          added = newAlgorithms -- myAlgorithms,
-          dropped = myAlgorithms -- newAlgorithms
+          algorithms = algorithms,
+          //          algorithmConfig = algorithmSpec,
+          added = algorithms.keySet -- myAlgorithms,
+          dropped = myAlgorithms -- algorithms.keySet
         )
       }
 
