@@ -25,20 +25,21 @@ class SkylineAnalyzerSpec extends SkylineBaseSpec {
   }
 
   class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends SkylineFixture( _config, _system, _slug ) {
+    val emptyConfig = ConfigFactory.empty()
     val plan = mock[AnalysisPlan]
     when( plan.id ).thenReturn( TaggedID( 'plan, ShortUUID() ) )
     when( plan.name ).thenReturn( "mock-plan" )
     when( plan.appliesTo ).thenReturn( SkylineFixture.appliesToAll )
     when( plan.algorithms ).thenReturn(
-      Set(
-        FirstHourAverageAnalyzer.Algorithm,
-        MeanSubtractionCumulationAnalyzer.Algorithm,
-        //        SimpleMovingAverageAnalyzer.Algorithm,
-        LeastSquaresAnalyzer.Algorithm,
-        //        GrubbsAnalyzer.Algorithm,
-        HistogramBinsAnalyzer.Algorithm,
-        MedianAbsoluteDeviationAnalyzer.Algorithm,
-        KolmogorovSmirnovAnalyzer.Algorithm
+      Map(
+        FirstHourAverageAnalyzer.Algorithm → emptyConfig,
+        MeanSubtractionCumulationAnalyzer.Algorithm → emptyConfig,
+        //        SimpleMovingAverageAnalyzer.Algorithm -> emptyConfig,
+        LeastSquaresAnalyzer.Algorithm → emptyConfig,
+        //        GrubbsAnalyzer.Algorithm -> emptyConfig,
+        HistogramBinsAnalyzer.Algorithm → emptyConfig,
+        MedianAbsoluteDeviationAnalyzer.Algorithm → emptyConfig,
+        KolmogorovSmirnovAnalyzer.Algorithm → emptyConfig
       )
     )
   }

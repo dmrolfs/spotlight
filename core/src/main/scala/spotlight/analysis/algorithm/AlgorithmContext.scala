@@ -18,7 +18,7 @@ trait AlgorithmContext {
 
   def plan: AnalysisPlan = message.payload.plan
   def source: TimeSeriesBase = message.source
-  def configuration: Config = message.plan.algorithmConfig
+  def configuration: Config = message.properties
 
   def fillData( minimalSize: Int = RecentHistory.LastN ): ( Seq[DoublePoint] ) ⇒ Seq[DoublePoint] = { original ⇒
     if ( minimalSize <= original.size ) original

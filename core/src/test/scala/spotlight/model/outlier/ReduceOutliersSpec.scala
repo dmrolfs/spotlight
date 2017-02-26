@@ -6,9 +6,10 @@ import org.mockito.Mockito._
 import org.mockito.ArgumentMatchers._
 import org.joda.{ time ⇒ joda }
 import com.github.nscala_time.time.Imports._
+import com.typesafe.config.ConfigFactory
 import com.typesafe.scalalogging.LazyLogging
 import omnibus.commons.log.Trace
-import spotlight.model.timeseries.{ ThresholdBoundary, DataPoint, TimeSeries }
+import spotlight.model.timeseries.{ DataPoint, ThresholdBoundary, TimeSeries }
 
 class ReduceOutliersSpec
     extends fixture.WordSpec
@@ -32,8 +33,9 @@ class ReduceOutliersSpec
     val all = mock[AnalysisPlan.AppliesTo]
     when( all.apply( any ) ) thenReturn true
 
+    val emptyConfig = ConfigFactory.empty()
     val plan = mock[AnalysisPlan]
-    when( plan.algorithms ) thenReturn Set( algo1, algo2, algo3 )
+    when( plan.algorithms ) thenReturn Map( algo1 → emptyConfig, algo2 → emptyConfig, algo3 → emptyConfig )
     when( plan.appliesTo ).thenReturn( all )
 
     def makeOutliers( algorithms: Set[String], outlierIndexes: Seq[Int], controls: Map[String, Seq[ThresholdBoundary]] ): Outliers = trace.block( s"""makeOutliers( ${outlierIndexes.mkString( "," )} )""" ) {

@@ -6,10 +6,13 @@ import scala.util.matching.Regex
 import scalaz.{ Ordering ⇒ _, _ }
 import Scalaz._
 import com.typesafe.config.{ Config, ConfigFactory }
+import com.persist.logging._
+import com.typesafe.scalalogging.LazyLogging
 import omnibus.archetype.domain.model.core._
 import omnibus.commons._
 import omnibus.commons.identifier._
 import omnibus.commons.util._
+import spotlight.Settings
 import spotlight.model.timeseries.{ TimeSeriesBase, Topic }
 
 /** Created by rolfsd on 10/4/15.
@@ -19,12 +22,14 @@ sealed trait AnalysisPlan extends Entity with Equals {
 
   override def slug: String = name
   def appliesTo: AnalysisPlan.AppliesTo
-  def algorithms: Set[String]
+  def algorithmKeys: Set[String] = algorithms.keySet
+  def algorithms: Map[String, Config]
+  //  def algorithms: Set[String]
   def grouping: Option[AnalysisPlan.Grouping]
   def timeout: Duration
   def isQuorum: IsQuorum
   def reduce: ReduceOutliers
-  def algorithmConfig: Config
+  //  def algorithmConfig: Config
   def summary: String
   def isActive: Boolean
   def toSummary: AnalysisPlan.Summary = AnalysisPlan summarize this
@@ -50,7 +55,7 @@ sealed trait AnalysisPlan extends Entity with Equals {
   private[outlier] def originLineNumber: Int
 }
 
-object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
+object AnalysisPlan extends EntityLensProvider[AnalysisPlan] with ClassLogging with LazyLogging {
   implicit def summarize( p: AnalysisPlan ): Summary = Summary( p )
 
   case class Summary(
@@ -127,7 +132,7 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
         timeout = p.timeout,
         isQuorum = p.isQuorum,
         reduce = p.reduce,
-        algorithmConfig = p.algorithmConfig,
+        //        algorithmConfig = p.algorithmConfig,
         typeOrder = p.typeOrder,
         originLineNumber = p.originLineNumber,
         isActive = p.isActive
@@ -147,7 +152,7 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
         timeout = p.timeout,
         isQuorum = p.isQuorum,
         reduce = p.reduce,
-        algorithmConfig = p.algorithmConfig,
+        //        algorithmConfig = p.algorithmConfig,
         typeOrder = p.typeOrder,
         originLineNumber = p.originLineNumber,
         isActive = p.isActive
@@ -167,7 +172,7 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
         timeout = p.timeout,
         isQuorum = p.isQuorum,
         reduce = p.reduce,
-        algorithmConfig = p.algorithmConfig,
+        //        algorithmConfig = p.algorithmConfig,
         typeOrder = p.typeOrder,
         originLineNumber = p.originLineNumber,
         isActive = p.isActive
@@ -187,7 +192,7 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
         timeout = p.timeout,
         isQuorum = p.isQuorum,
         reduce = p.reduce,
-        algorithmConfig = p.algorithmConfig,
+        //        algorithmConfig = p.algorithmConfig,
         typeOrder = p.typeOrder,
         originLineNumber = p.originLineNumber,
         isActive = a
@@ -195,9 +200,9 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
     }
   }
 
-  val algorithmsLens: Lens[AnalysisPlan, Set[String]] = new Lens[AnalysisPlan, Set[String]] {
-    override def get( p: AnalysisPlan ): Set[String] = p.algorithms
-    override def set( p: AnalysisPlan )( algos: Set[String] ): AnalysisPlan = {
+  val algorithmsLens: Lens[AnalysisPlan, Map[String, Config]] = new Lens[AnalysisPlan, Map[String, Config]] {
+    override def get( p: AnalysisPlan ): Map[String, Config] = p.algorithms
+    override def set( p: AnalysisPlan )( algos: Map[String, Config] ): AnalysisPlan = {
       SimpleAnalysisPlan(
         id = p.id,
         name = p.name,
@@ -207,7 +212,7 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
         timeout = p.timeout,
         isQuorum = p.isQuorum,
         reduce = p.reduce,
-        algorithmConfig = p.algorithmConfig,
+        //        algorithmConfig = p.algorithmConfig,
         typeOrder = p.typeOrder,
         originLineNumber = p.originLineNumber,
         isActive = p.isActive
@@ -228,7 +233,7 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
     timeout: Duration,
     isQuorum: IsQuorum,
     reduce: ReduceOutliers,
-    algorithms: Set[String],
+    algorithms: Map[String, Config],
     grouping: Option[AnalysisPlan.Grouping],
     planSpecification: Config
   )(
@@ -238,12 +243,12 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
       id = TryV.unsafeGet( analysisPlanIdentifying.nextTID ),
       name = name,
       appliesTo = AppliesTo.function( appliesTo ),
-      algorithms = algorithms ++ getAlgorithms( planSpecification ),
+      algorithms = algorithms,
       grouping = grouping,
       timeout = timeout,
       isQuorum = isQuorum,
       reduce = reduce,
-      algorithmConfig = getAlgorithmConfig( planSpecification ),
+      //      algorithmConfig = getAlgorithmConfig( planSpecification ),
       typeOrder = 3,
       originLineNumber = planSpecification.origin.lineNumber
     )
@@ -254,7 +259,7 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
     timeout: Duration,
     isQuorum: IsQuorum,
     reduce: ReduceOutliers,
-    algorithms: Set[String],
+    algorithms: Map[String, Config],
     grouping: Option[AnalysisPlan.Grouping],
     planSpecification: Config
   )(
@@ -264,12 +269,12 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
       id = TryV.unsafeGet( analysisPlanIdentifying.nextTID ),
       name = name,
       appliesTo = AppliesTo.partialFunction( appliesTo ),
-      algorithms = algorithms ++ getAlgorithms( planSpecification ),
+      algorithms = algorithms,
       grouping = grouping,
       timeout = timeout,
       isQuorum = isQuorum,
       reduce = reduce,
-      algorithmConfig = getAlgorithmConfig( planSpecification ),
+      //      algorithmConfig = getAlgorithmConfig( planSpecification ),
       typeOrder = 3,
       originLineNumber = planSpecification.origin.lineNumber
     )
@@ -280,7 +285,7 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
     timeout: Duration,
     isQuorum: IsQuorum,
     reduce: ReduceOutliers,
-    algorithms: Set[String],
+    algorithms: Map[String, Config],
     grouping: Option[AnalysisPlan.Grouping],
     planSpecification: Config,
     extractTopic: ExtractTopic,
@@ -290,12 +295,12 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
       id = TryV.unsafeGet( analysisPlanIdentifying.nextTID ),
       name = name,
       appliesTo = AppliesTo.topics( topics, extractTopic ),
-      algorithms = algorithms ++ getAlgorithms( planSpecification ),
+      algorithms = algorithms,
       grouping = grouping,
       timeout = timeout,
       isQuorum = isQuorum,
       reduce = reduce,
-      algorithmConfig = getAlgorithmConfig( planSpecification ),
+      //      algorithmConfig = getAlgorithmConfig( planSpecification ),
       typeOrder = 1,
       originLineNumber = planSpecification.origin.lineNumber
     )
@@ -306,7 +311,7 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
     timeout: Duration,
     isQuorum: IsQuorum,
     reduce: ReduceOutliers,
-    algorithms: Set[String],
+    algorithms: Map[String, Config],
     grouping: Option[AnalysisPlan.Grouping],
     planSpecification: Config,
     extractTopic: ExtractTopic,
@@ -316,12 +321,12 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
       id = TryV.unsafeGet( analysisPlanIdentifying.nextTID ),
       name = name,
       appliesTo = AppliesTo.topics( topics.map { Topic( _ ) }.toSet, extractTopic ),
-      algorithms = algorithms ++ getAlgorithms( planSpecification ),
+      algorithms = algorithms,
       grouping = grouping,
       timeout = timeout,
       isQuorum = isQuorum,
       reduce = reduce,
-      algorithmConfig = getAlgorithmConfig( planSpecification ),
+      //      algorithmConfig = getAlgorithmConfig( planSpecification ),
       typeOrder = 1,
       originLineNumber = planSpecification.origin.lineNumber
     )
@@ -332,7 +337,7 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
     timeout: Duration,
     isQuorum: IsQuorum,
     reduce: ReduceOutliers,
-    algorithms: Set[String],
+    algorithms: Map[String, Config],
     grouping: Option[AnalysisPlan.Grouping],
     planSpecification: Config,
     extractTopic: ExtractTopic,
@@ -342,12 +347,12 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
       id = TryV.unsafeGet( analysisPlanIdentifying.nextTID ),
       name = name,
       appliesTo = AppliesTo.regex( regex, extractTopic ),
-      algorithms = algorithms ++ getAlgorithms( planSpecification ),
+      algorithms = algorithms,
       grouping = grouping,
       timeout = timeout,
       isQuorum = isQuorum,
       reduce = reduce,
-      algorithmConfig = getAlgorithmConfig( planSpecification ),
+      //      algorithmConfig = getAlgorithmConfig( planSpecification ),
       typeOrder = 2,
       originLineNumber = planSpecification.origin.lineNumber
     )
@@ -358,7 +363,7 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
     timeout: Duration,
     isQuorum: IsQuorum,
     reduce: ReduceOutliers,
-    algorithms: Set[String],
+    algorithms: Map[String, Config],
     grouping: Option[AnalysisPlan.Grouping],
     planSpecification: Config = ConfigFactory.empty
   ): AnalysisPlan = {
@@ -366,22 +371,22 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
       id = TryV.unsafeGet( analysisPlanIdentifying.nextTID ),
       name = name,
       appliesTo = AppliesTo.all,
-      algorithms = algorithms ++ getAlgorithms( planSpecification ),
+      algorithms = algorithms,
       grouping = grouping,
       timeout = timeout,
       isQuorum = isQuorum,
       reduce = reduce,
-      algorithmConfig = getAlgorithmConfig( planSpecification ),
+      //      algorithmConfig = getAlgorithmConfig( planSpecification ),
       typeOrder = Int.MaxValue,
       originLineNumber = planSpecification.origin.lineNumber
     )
   }
 
-  private def getAlgorithms( spec: Config ): Set[String] = {
-    import scala.collection.JavaConverters._
-    if ( spec hasPath AlgorithmConfig ) spec.getConfig( AlgorithmConfig ).root.keySet.asScala.toSet
-    else Set.empty[String]
-  }
+  //  private def filterAlgorithms( algorithms: Set[String], planSpec: Config ): Map[String, Config] = {
+  //    val global = Settings.PlanFactory.globalAlgorithmConfigurationsFrom( ConfigFactory.load() )
+  //    val available = Settings.PlanFactory.algorithmConfigurationsFrom( planSpec, global )
+  //    available filter { case ( name, _ ) ⇒ algorithms contains name }
+  //  }
 
   private def getAlgorithmConfig( spec: Config ): Config = {
     if ( spec hasPath AlgorithmConfig ) spec getConfig AlgorithmConfig
@@ -392,12 +397,13 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
       override val id: AnalysisPlan#TID,
       override val name: String,
       override val appliesTo: AnalysisPlan.AppliesTo,
-      override val algorithms: Set[String],
+      //      override val algorithms: Set[String],
+      override val algorithms: Map[String, Config],
       override val grouping: Option[AnalysisPlan.Grouping],
       override val timeout: Duration,
       override val isQuorum: IsQuorum,
       override val reduce: ReduceOutliers,
-      override val algorithmConfig: Config,
+      //      override val algorithmConfig: Config,
       override private[outlier] val typeOrder: Int,
       override private[outlier] val originLineNumber: Int,
       override val isActive: Boolean = true
@@ -406,11 +412,11 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] {
 
     override def canEqual( rhs: Any ): Boolean = rhs.isInstanceOf[SimpleAnalysisPlan]
 
-    override val toString: String = {
+    override def toString: String = {
       getClass.safeSimpleName + s"[${id}](" +
         s"""name:[$name], ${appliesTo.toString}, quorum:[${isQuorum}], reduce:[${reduce}] """ +
-        s"""algorithms:[${algorithms.mkString( "," )}], timeout:[${timeout.toCoarsest}], """ +
-        s"""grouping:[${grouping}], algorithm-config:[${algorithmConfig.root}]""" +
+        s"""algorithms-keys:[${algorithmKeys.mkString( ", " )}], timeout:[${timeout.toCoarsest}], """ +
+        s"""grouping:[${grouping}], algorithm-defs:[${algorithms.mapValues { _.root }.mkString( ", " )}]""" +
         ")"
     }
   }

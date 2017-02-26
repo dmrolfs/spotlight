@@ -1,12 +1,15 @@
 package spotlight
 
 import java.net.{ InetAddress, InetSocketAddress }
+
+import akka.util.Timeout
+
 import scala.concurrent.duration._
 import scala.util.matching.Regex
 import scalaz.Scalaz._
 import scalaz._
 import com.typesafe.config._
-import com.typesafe.scalalogging.LazyLogging
+import com.persist.logging._
 import omnibus.commons.{ V, Valid }
 import spotlight.analysis.OutlierDetection
 import spotlight.model.outlier._
@@ -16,7 +19,7 @@ import spotlight.protocol.{ GraphiteSerializationProtocol, MessagePackProtocol, 
 //todo refactor into base required settings and allow for app-specific extension
 /** Created by rolfsd on 1/12/16.
   */
-trait Settings extends LazyLogging {
+trait Settings extends ClassLogging {
   def sourceAddress: InetSocketAddress
   def clusterPort: Int
   def maxFrameLength: Int
@@ -53,7 +56,7 @@ trait Settings extends LazyLogging {
        """.stripMargin
     }
 
-    logger.info( "Settings.toConfig base:[{}]", settingsConfig )
+    log.info( Map( "@msg" → "Settings.toConfig", "base" → settingsConfig ) )
 
     ConfigFactory.parseString( settingsConfig ) withFallback config
   }
@@ -74,7 +77,7 @@ trait Settings extends LazyLogging {
   }
 }
 
-object Settings extends LazyLogging {
+object Settings extends ClassLogging {
   val SettingsPathRoot = "spotlight.settings."
 
   //  def sourceAddressFrom( c: Config ): Option[InetSocketAddress] = {
@@ -144,7 +147,7 @@ object Settings extends LazyLogging {
   def detectionPlansConfigFrom( c: Config ): Config = {
     if ( c hasPath Directory.PLAN_PATH ) c getConfig Directory.PLAN_PATH
     else {
-      logger.warn( "no plan specifications found at expected configuration path:[{}]", Directory.PLAN_PATH )
+      log.warn( Map( "@msg" → "no plan specifications found at expected configuration path", "path" → Directory.PLAN_PATH ) )
       ConfigFactory.empty()
     }
   }
@@ -180,7 +183,7 @@ object Settings extends LazyLogging {
 
   private def checkUsage( args: Array[String] ): Valid[UsageSettings] = {
     val parser = UsageSettings.makeUsageConfig
-    logger.info( "Settings args:[{}]", args )
+    log.info( Map( "@msg" → "Settings args", "args" → args ) )
     parser.parse( args, UsageSettings.zero ) match {
       case Some( settings ) ⇒ settings.successNel
       case None ⇒ Validation.failureNel( UsageConfigurationError( parser.usage ) )
@@ -313,7 +316,7 @@ object Settings extends LazyLogging {
       override val graphiteAddress: Option[InetSocketAddress],
       override val config: Config,
       override val args: Seq[String]
-  ) extends Settings with LazyLogging {
+  ) extends Settings {
     override def clusterPort: Int = config.getInt( SimpleSettings.AkkaRemotePortPath )
 
     override def detectionBudget: Duration = spotlight.analysis.durationFrom( config, Directory.DETECTION_BUDGET ).get
@@ -323,7 +326,13 @@ object Settings extends LazyLogging {
       if ( config hasPath path ) config.getDouble( path ) else 1.0
     }
 
-    override val plans: Set[AnalysisPlan] = PlanFactory.makePlans( detectionPlansConfigFrom( config ), detectionBudget ) //todo support plan reloading
+    override val plans: Set[AnalysisPlan] = {
+      PlanFactory.makePlans(
+        planSpecifications = detectionPlansConfigFrom( config ),
+        globalAlgorithms = PlanFactory.globalAlgorithmConfigurationsFrom( config ),
+        detectionBudget = detectionBudget
+      )
+    } //todo support plan reloading
     override def planOrigin: ConfigOrigin = detectionPlansConfigFrom( config ).origin()
     override def workflowBufferSize: Int = config.getInt( Directory.WORKFLOW_BUFFER_SIZE )
     override def tcpInboundBufferSize: Int = config.getInt( Directory.TCP_INBOUND_BUFFER_SIZE )
@@ -389,8 +398,13 @@ object Settings extends LazyLogging {
   }
 
   object PlanFactory {
-    def makePlans( planSpecifications: Config, detectionBudget: Duration ): Set[AnalysisPlan] = {
+    def makePlans(
+      planSpecifications: Config,
+      globalAlgorithms: Map[String, Config],
+      detectionBudget: Duration
+    ): Set[AnalysisPlan] = {
       import scala.collection.JavaConverters._
+      val budget = effectiveBudget( detectionBudget )
 
       val result = {
         planSpecifications
@@ -400,9 +414,12 @@ object Settings extends LazyLogging {
           .toSeq
           .map {
             case ( name, spec ) ⇒ {
-              logger.info(
-                "Settings making plan from specification[origin:{} @ {}]: [{}]",
-                spec.origin(), spec.origin().lineNumber().toString, spec
+              log.info(
+                Map(
+                  "@msg" → "Settings making plan from specification",
+                  "origin" → Map( "origin" → spec.origin().toString, "line-number" → spec.origin().lineNumber ),
+                  "spec" → spec.toString
+                )
               )
 
               val IS_DEFAULT = "is-default"
@@ -413,7 +430,7 @@ object Settings extends LazyLogging {
                 val GROUP_LIMIT = "group.limit"
                 val GROUP_WITHIN = "group.within"
                 val limit = if ( spec hasPath GROUP_LIMIT ) spec getInt GROUP_LIMIT else 10000
-                logger.info( "CONFIGURATION spec: [{}]", spec )
+                log.info( Map( "@msg" → "grouping spec", "grouping" → spec.toString ) )
                 val window = if ( spec hasPath GROUP_WITHIN ) {
                   Some( FiniteDuration( spec.getDuration( GROUP_WITHIN ).toNanos, NANOSECONDS ) )
                 } else {
@@ -424,14 +441,22 @@ object Settings extends LazyLogging {
               }
 
               //todo: add configuration for at-least and majority
-              val ( timeout, algorithms ) = pullCommonPlanFacets( spec, detectionBudget )
+              //              val ( timeout, algorithms ) = pullCommonPlanFacets( spec, detectionBudget )
+              val algorithms: Map[String, Config] = PlanFactory.algorithmConfigurationsFrom( spec, globalAlgorithms )
 
               if ( spec.hasPath( IS_DEFAULT ) && spec.getBoolean( IS_DEFAULT ) ) {
-                logger info s"topic[$name] default plan origin: ${spec.origin} line:${spec.origin.lineNumber}"
+                log.info(
+                  Map(
+                    "@msg" → "default plan",
+                    "topic" → name,
+                    "origin" → Map( "origin" → spec.origin, "line-number" → spec.origin().lineNumber() )
+                  )
+                )
+
                 Some(
                   AnalysisPlan.default(
                     name = name,
-                    timeout = timeout,
+                    timeout = budget,
                     isQuorum = makeIsQuorum( spec, algorithms.size ),
                     reduce = makeOutlierReducer( spec ),
                     algorithms = algorithms,
@@ -441,12 +466,18 @@ object Settings extends LazyLogging {
                 )
               } else if ( spec hasPath TOPICS ) {
                 import scala.collection.JavaConverters._
-                logger info s"topic[$name] topic plan origin: ${spec.origin} line:${spec.origin.lineNumber}"
+                log.info(
+                  Map(
+                    "@msg" → "topic-specific plan",
+                    "topic" → name,
+                    "origin" → Map( "origin" → spec.origin, "line-number" → spec.origin().lineNumber() )
+                  )
+                )
 
                 Some(
                   AnalysisPlan.forTopics(
                     name = name,
-                    timeout = timeout,
+                    timeout = budget,
                     isQuorum = makeIsQuorum( spec, algorithms.size ),
                     reduce = makeOutlierReducer( spec ),
                     algorithms = algorithms,
@@ -457,11 +488,18 @@ object Settings extends LazyLogging {
                   )
                 )
               } else if ( spec hasPath REGEX ) {
-                logger info s"topic[$name] regex plan origin: ${spec.origin} line:${spec.origin.lineNumber}"
+                log.info(
+                  Map(
+                    "@msg" → "regex plan",
+                    "topic" → name,
+                    "origin" → Map( "origin" → spec.origin, "line-number" → spec.origin().lineNumber() )
+                  )
+                )
+
                 Some(
                   AnalysisPlan.forRegex(
                     name = name,
-                    timeout = timeout,
+                    timeout = budget,
                     isQuorum = makeIsQuorum( spec, algorithms.size ),
                     reduce = makeOutlierReducer( spec ),
                     algorithms = algorithms,
@@ -481,23 +519,90 @@ object Settings extends LazyLogging {
       result.flatten.toSet
     }
 
-    private def pullCommonPlanFacets( spec: Config, detectionBudget: Duration ): ( Duration, Set[String] ) = {
-      import scala.collection.JavaConverters._
-
-      def effectiveBudget( budget: Duration, utilization: Double ): Duration = {
-        budget match {
-          case b if b.isFinite() ⇒ utilization * b
-          case b ⇒ b
-        }
+    private def effectiveBudget( budget: Duration ): Duration = {
+      val utilization = 0.8
+      budget match {
+        case b if b.isFinite() ⇒ utilization * b
+        case b ⇒ b
       }
+    }
+
+    def globalAlgorithmConfigurationsFrom( config: Config ): Map[String, Config] = {
+      val GlobalAlgorithmsPath = "spotlight.algorithms"
+      if ( !config.hasPath( GlobalAlgorithmsPath ) ) Map.empty[String, Config]
+      else {
+        import scala.collection.JavaConverters._
+        import scala.reflect._
+        val ConfigObjectType = classTag[ConfigObject]
+
+        val global = config getConfig GlobalAlgorithmsPath
+        val algos = {
+          global.root().entrySet().asScala.toSeq
+            .map { entry ⇒ ( entry.getKey, entry.getValue ) }
+            .collect { case ( name, ConfigObjectType( cv ) ) ⇒ ( name, cv.toConfig ) }
+        }
+
+        Map( algos: _* )
+      }
+    }
+
+    def algorithmConfigurationsFrom( planSpec: Config, globalAlgorithms: Map[String, Config] ): Map[String, Config] = {
+      def correspondingGlobal( name: String ): Config = globalAlgorithms.getOrElse( name, ConfigFactory.empty )
 
       val AlgorithmsPath = "algorithms"
-      val algorithms: Set[String] = {
-        if ( spec hasPath AlgorithmsPath ) spec.getStringList( AlgorithmsPath ).asScala.toSet else Set.empty[String]
-      }
+      if ( !planSpec.hasPath( AlgorithmsPath ) ) Map.empty[String, Config]
+      else {
+        import scala.collection.JavaConverters._
+        val specAlgorithms = planSpec.getConfig( AlgorithmsPath )
+        val algos = {
+          import scala.reflect._
+          import ConfigValueType.{ BOOLEAN, OBJECT, STRING }
+          val ConfigObjectType = classTag[ConfigObject]
 
-      ( effectiveBudget( detectionBudget, 0.8D ), algorithms )
+          specAlgorithms.root.entrySet.asScala.toSeq
+            .map { e ⇒ ( e.getKey, e.getValue ) }
+            .collect {
+              case ( n, v ) if v.valueType == STRING && specAlgorithms.getBoolean( n ) == true ⇒ ( n, correspondingGlobal( n ) )
+              case ( n, v ) if v.valueType == BOOLEAN ⇒ ( n, correspondingGlobal( n ) )
+              case ( n, ConfigObjectType( v ) ) if v.valueType == OBJECT ⇒ ( n, v.withFallback( correspondingGlobal( n ) ).toConfig )
+
+              //            case ( n, v ) => {
+              //              log.warn(
+              //                Map(
+              //                  "@msg" -> "UNMATCHED algo",
+              //                  "name" -> n
+              //                  "v" -> v
+              //                  "unwrapped" ->  v.unwrapped,
+              //                  "unwrapped-class" -> v.unwrapped.getClass
+              //                )
+              //              )
+              //
+              //              ( n, ConfigFactory.parseString("WILL-BE-REMOVED: yes") )
+              //            }
+            }
+        }
+
+        Map( algos: _* )
+      }
     }
+
+    //    private def pullCommonPlanFacets( spec: Config, detectionBudget: Duration ): ( Duration, Set[String] ) = {
+    //      import scala.collection.JavaConverters._
+    //
+    //      def effectiveBudget( budget: Duration, utilization: Double ): Duration = {
+    //        budget match {
+    //          case b if b.isFinite() ⇒ utilization * b
+    //          case b ⇒ b
+    //        }
+    //      }
+    //
+    //      val AlgorithmsPath = "algorithms"
+    //      val algorithms: Set[String] = {
+    //        if ( spec hasPath AlgorithmsPath ) spec.getStringList( AlgorithmsPath ).asScala.toSet else Set.empty[String]
+    //      }
+    //
+    //      ( effectiveBudget( detectionBudget, 0.8D ), algorithms )
+    //    }
 
     private def makeIsQuorum( spec: Config, algorithmSize: Int ): IsQuorum = {
       val MAJORITY = "majority"

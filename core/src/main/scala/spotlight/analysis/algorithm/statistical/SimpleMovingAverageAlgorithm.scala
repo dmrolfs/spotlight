@@ -1,5 +1,6 @@
 package spotlight.analysis.algorithm.statistical
 
+import com.persist.logging._
 import org.apache.commons.math3.ml.clustering.DoublePoint
 import org.apache.commons.math3.stat.descriptive.SummaryStatistics
 import spotlight.analysis.DetectUsing

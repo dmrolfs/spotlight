@@ -2,13 +2,14 @@ package spotlight.analysis.algorithm
 
 import java.io.Serializable
 import java.util.concurrent.atomic.AtomicInteger
+
 import scala.concurrent.duration._
 import scala.reflect.ClassTag
 import akka.actor.{ ActorRef, ActorSystem }
 import akka.pattern.ask
 import akka.testkit._
 import com.persist.logging._
-import com.typesafe.config.Config
+import com.typesafe.config.{ Config, ConfigFactory }
 import org.scalatest.concurrent.ScalaFutures
 import org.joda.{ time ⇒ joda }
 import demesne.AggregateRootType
@@ -25,6 +26,7 @@ import spotlight.analysis.{ DetectOutliersInSeries, DetectUsing, HistoricalStati
 import spotlight.analysis.algorithm.{ AlgorithmProtocol ⇒ P }
 import spotlight.model.outlier._
 import spotlight.model.timeseries._
+import squants.information.{ Bytes, Information }
 
 /** Created by rolfsd on 6/9/16.
   */
@@ -99,7 +101,7 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
         window map { w ⇒ AnalysisPlan.Grouping( limit = 10000, w ) }
       }
 
-      AnalysisPlan.default( "", 1.second, isQuorun, reduce, Set.empty[String], grouping ).appliesTo
+      AnalysisPlan.default( "", 1.second, isQuorun, reduce, Map.empty[String, Config], grouping ).appliesTo
     }
 
     implicit val nowTimestamp: joda.DateTime = joda.DateTime.now
@@ -108,12 +110,14 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
 
     lazy val id: module.TID = nextId()
 
+    val emptyConfig = ConfigFactory.empty()
+
     val scope = AnalysisPlan.Scope( plan = "TestPlan", topic = "test.topic" )
     val plan = mock[AnalysisPlan]
     when( plan.id ).thenReturn( TryV.unsafeGet( AnalysisPlan.analysisPlanIdentifying.nextTID ) )
     when( plan.name ).thenReturn( scope.plan )
     when( plan.appliesTo ).thenReturn( fixture.appliesToAll )
-    when( plan.algorithms ).thenReturn( Set( defaultAlgorithm.label ) )
+    when( plan.algorithms ).thenReturn( Map( defaultAlgorithm.label → emptyConfig ) )
 
     lazy val aggregate: ActorRef = {
       val r = module aggregateOf id
@@ -517,6 +521,37 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
 
         val actual = shapeless.the[Advancing[S]].advance( zero, adv )
         actualVsExpectedShape( actual, expected )
+      }
+
+      "maintain constant memory per shape" in { f: Fixture ⇒
+        import f._
+        def makeData( i: Int ): P.Advanced = {
+          val pt = DataPoint( nowTimestamp.plusMillis( 10 * i ), 0.14159265353 + 0.0001 * i )
+          val t = ThresholdBoundary( nowTimestamp, Some( 1.1 ), Some( 2.2 ), Some( 3.3 ) )
+          P.Advanced( id, scope.topic, pt, false, t )
+        }
+
+        val advancing: Advancing[S] = shapeless.the[Advancing[S]]
+        val zero = advancing.zero( None )
+
+        import akka.serialization.{ SerializationExtension, Serializer }
+        val serializer: Serializer = SerializationExtension( system ).serializerFor( zero.getClass )
+
+        val first: S = advancing.advance( zero, makeData( 0 ) )
+        //        val firstBytes = serializer.toBinary( first )
+        //        val firstSize: Information = Bytes( firstBytes.size )
+        //        val grossMargin = 0.05
+        //        val incrMargin = 0.01
+        //
+        //        ( 1 to 1000 ).foldLeft( ( first, firstSize ) ) {
+        //          case ( ( acc, accSize ), i ) ⇒
+        //            val next = advancing.advance( acc, makeData( i ) )
+        //            val nextSize = Bytes( akka.util.ByteString( serializer toBinary next ) )
+        //            nextSize mustBe accSize +- ( accSize * incrMargin )
+        //            nextSize mustBe firstSize +- ( firstSize * grossMargin )
+        //            ( ( next, nextSize ), i + 1 )
+        //        }
+        pending
       }
     }
   }

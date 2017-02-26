@@ -31,11 +31,12 @@ class SkylineFirstHourAverageSpec extends SkylineBaseSpec {
     val algoS = FirstHourAverageAnalyzer.Algorithm
     val algProps = ConfigFactory.parseString( s"""${algoS}.tolerance: 3""" )
 
+    val emptyConfig = ConfigFactory.empty()
     val plan = mock[AnalysisPlan]
     when( plan.id ).thenReturn( TaggedID( 'plan, ShortUUID() ) )
     when( plan.name ).thenReturn( "mock-plan" )
     when( plan.appliesTo ).thenReturn( SkylineFixture.appliesToAll )
-    when( plan.algorithms ).thenReturn( Set( algoS ) )
+    when( plan.algorithms ).thenReturn( Map( algoS → emptyConfig ) )
 
     def tailAverageData( data: Seq[DataPoint], last: Seq[DataPoint] = Seq.empty[DataPoint] ): Seq[DataPoint] = {
       val TailLength = CommonAnalyzer.DefaultTailAverageLength

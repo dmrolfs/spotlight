@@ -190,22 +190,22 @@ abstract class PlanCatalog( boundedContext: BoundedContext )
           log
             .warn(
               Map(
-                "@msg" → "#TEST directive from AP.Added",
+                "@msg" → "#TEST:info: directive from AP.Added",
                 "plan" → Map( "name" → p.name, "id" → p.id.id.toString )
               )
             )
           ( acc: Plans ) ⇒ acc + p.toSummary
         }
         case AP.Disabled( pid, _ ) ⇒ {
-          log.warn( Map( "@msg" → "#TEST READ Plan Disabled", "planId" → pid ) )
+          log.warn( Map( "@msg" → "#TEST:info: READ Plan Disabled", "planId" → pid ) )
           updateKnownPlan( pid ) { _.copy( isActive = false ) }
         }
         case AP.Enabled( pid, _ ) ⇒ {
-          log.warn( Map( "@msg" → "#TEST READ Plan Enabled", "planId" → pid ) )
+          log.warn( Map( "@msg" → "#TEST:info: READ Plan Enabled", "planId" → pid ) )
           updateKnownPlan( pid ) { _.copy( isActive = true ) }
         }
         case AP.Renamed( pid, _, newName ) ⇒ {
-          log.warn( Map( "@msg" → "#TEST READ Plan Renamed", "planId" → pid, "newName" → newName ) )
+          log.warn( Map( "@msg" → "#TEST:info: READ Plan Renamed", "planId" → pid, "newName" → newName ) )
           updateKnownPlan( pid ) { _.copy( name = newName ) }
         }
       }
@@ -214,9 +214,9 @@ abstract class PlanCatalog( boundedContext: BoundedContext )
 
   def startPlanProjection(): Future[Plans] = {
     planProjection.start() map { ps ⇒
-      log.warn(
+      log.info(
         Map(
-          "@msg" → "#TEST:INFO: start analysis plan projection",
+          "@msg" → "start analysis plan projection",
           "initial" → ps.map { p ⇒ p.name + '@' + p.id.id.toString }.mkString( "[", ", ", "]" )
         )
       )

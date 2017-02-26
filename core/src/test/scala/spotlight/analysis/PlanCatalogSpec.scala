@@ -156,6 +156,7 @@ class PlanCatalogSpec extends ParallelAkkaSpec with ScalaFutures with StrictLogg
       import f._
       import akka.pattern.ask
 
+      val globalAlgorithms = Settings.PlanFactory.globalAlgorithmConfigurationsFrom( config )
       val planSpecs = Settings.detectionPlansConfigFrom( config )
       assert( planSpecs.hasPath( "foo" ) )
       logger.debug( "#TEST planSpecs.foo = [{}]", planSpecs.getConfig("foo") )
@@ -166,7 +167,7 @@ class PlanCatalogSpec extends ParallelAkkaSpec with ScalaFutures with StrictLogg
       val catalog = system.actorOf(
         PlanCatalog.props(
           config,
-          applicationPlans = Settings.PlanFactory.makePlans( planSpecs, 30.seconds )
+          applicationPlans = Settings.PlanFactory.makePlans( planSpecs, globalAlgorithms, 30.seconds )
         )(
           boundedContext
         )
@@ -242,8 +243,7 @@ object PlanCatalogSpec extends StrictLogging {
         |
         |  dbscan-plan = {
         |    timeout: 100ms
-        |    algorithms: [dbscan]
-        |    algorithm-config {
+        |    algorithms {
         |      dbscan {
         |        tolerance: 3
         |        seedEps: 5

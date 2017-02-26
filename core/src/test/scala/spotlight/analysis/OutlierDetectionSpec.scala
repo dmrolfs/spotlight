@@ -47,12 +47,14 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
       window map { w ⇒ AnalysisPlan.Grouping( limit = 10000, w ) }
     }
 
+    val emptyConfig = ConfigFactory.empty()
+
     val plan = AnalysisPlan.forTopics(
       name = "plan-a",
       timeout = 2.seconds,
       isQuorum = isQuorumA,
       reduce = reduceA,
-      algorithms = Set( "foo", "bar" ),
+      algorithms = Map( "foo" → emptyConfig, "bar" → emptyConfig ),
       grouping = grouping,
       planSpecification = ConfigFactory.empty,
       extractTopic = OutlierDetection.extractOutlierDetectionTopic,
@@ -89,7 +91,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
       val defaultPlan = AnalysisPlan.default(
         name = "DEFAULT_PLAN",
         timeout = 2.seconds,
-        algorithms = Set( "foo", "bar" ),
+        algorithms = Map( "foo" → emptyConfig, "bar" → emptyConfig ),
         grouping = grouping,
         isQuorum = isQuorumA,
         reduce = reduceA
@@ -139,9 +141,8 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
         timeout = 2.seconds,
         isQuorum = isQuorumA,
         reduce = reduceA,
-        algorithms = Set( "foo", "bar" ),
-        grouping = grouping,
-        planSpecification = ConfigFactory.empty
+        algorithms = Map( "foo" → emptyConfig, "bar" → emptyConfig ),
+        grouping = grouping
       )
 
       val msg = OutlierDetectionMessage(
@@ -183,7 +184,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
 
       val defaultPlan = AnalysisPlan.default(
         name = "DEFAULT_PLAN",
-        algorithms = Set( "zed" ),
+        algorithms = Map( "zed" → emptyConfig ),
         grouping = grouping,
         timeout = 2.seconds,
         isQuorum = isQuorumA,
@@ -303,7 +304,7 @@ class OutlierDetectionSpec extends ParallelAkkaSpec with MockitoSugar {
         timeout = 2.seconds,
         isQuorum = isQuorumA,
         reduce = reduceA,
-        algorithms = Set( "foo", "bar" ),
+        algorithms = Map( "foo" → emptyConfig, "bar" → emptyConfig ),
         grouping = grouping,
         planSpecification = ConfigFactory.empty
       )
