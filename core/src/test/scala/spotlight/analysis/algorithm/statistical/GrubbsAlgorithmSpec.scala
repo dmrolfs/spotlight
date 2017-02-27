@@ -27,9 +27,9 @@ class GrubbsAlgorithmSpec
   override type Algo = GrubbsAlgorithm.type
   override val defaultAlgorithm: Algo = GrubbsAlgorithm
 
-  override val memoryPlateauNr: Int = 6 * 60
+  override val memoryPlateauNr: Int = 60 * 100
 
-  override val memoryAllowedMargin: Double = 5
+  //  override val memoryAllowedMargin: Double = .05
 
   override def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture = {
     logger.debug( "TEST ActorSystem: {}", system.name )
