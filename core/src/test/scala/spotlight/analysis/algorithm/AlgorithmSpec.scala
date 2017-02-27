@@ -14,6 +14,7 @@ import org.scalatest.concurrent.ScalaFutures
 import org.joda.{ time ⇒ joda }
 import demesne.AggregateRootType
 import demesne.testkit.AggregateRootSpec
+import demesne.testkit.concurrent.CountDownFunction
 import org.apache.commons.math3.random.RandomDataGenerator
 import org.apache.commons.math3.stat.descriptive.{ DescriptiveStatistics, StatisticalSummary }
 import org.mockito.Mockito._
@@ -31,7 +32,7 @@ import squants.information.{ Bytes, Information }
 /** Created by rolfsd on 6/9/16.
   */
 abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
-    extends AggregateRootSpec[S] with ScalaFutures with OptionValues {
+    extends AggregateRootSpec[S] with ScalaFutures with OptionValues with ClassLogging {
   outer ⇒
 
   private val trace = Trace[AlgorithmSpec[S]]
@@ -45,6 +46,10 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
   type State = defaultAlgorithm.State
   type Shape = defaultAlgorithm.Shape
   lazy val identifying: Identifying.Aux[defaultAlgorithm.State, Algorithm.ID] = defaultAlgorithm.identifying
+
+  val memoryPlateauNr: Int
+  lazy val memoryStepsToValidate: Int = memoryPlateauNr * 100
+  val memoryAllowedMargin: Double = 0.05
 
   override def testSlug( test: OneArgTest ): String = {
     s"Test-${defaultAlgorithm.label}-${testPosition.incrementAndGet()}"
@@ -459,7 +464,7 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
 
   def bootstrapSuite(): Unit = {
     s"${defaultAlgorithm.label} entity" should {
-      "have zero shape before advance" taggedAs WIP in { f: Fixture ⇒
+      "have zero shape before advance" in { f: Fixture ⇒
         import f._
 
         logger.debug( "aggregate = [{}]", aggregate )
@@ -523,7 +528,7 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
         actualVsExpectedShape( actual, expected )
       }
 
-      "maintain constant memory per shape" in { f: Fixture ⇒
+      "maintain constant memory per shape" taggedAs WIP in { f: Fixture ⇒
         import f._
         def makeData( i: Int ): P.Advanced = {
           val pt = DataPoint( nowTimestamp.plusMillis( 10 * i ), 0.14159265353 + 0.0001 * i )
@@ -537,20 +542,74 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
         import akka.serialization.{ SerializationExtension, Serializer }
         val serializer: Serializer = SerializationExtension( system ).serializerFor( zero.getClass )
 
+        val zeroSize = Bytes( serializer.toBinary( zero.asInstanceOf[AnyRef] ).size )
         val first: S = advancing.advance( zero, makeData( 0 ) )
-        //        val firstBytes = serializer.toBinary( first )
-        //        val firstSize: Information = Bytes( firstBytes.size )
-        //        val grossMargin = 0.05
-        //        val incrMargin = 0.01
-        //
-        //        ( 1 to 1000 ).foldLeft( ( first, firstSize ) ) {
-        //          case ( ( acc, accSize ), i ) ⇒
-        //            val next = advancing.advance( acc, makeData( i ) )
-        //            val nextSize = Bytes( akka.util.ByteString( serializer toBinary next ) )
-        //            nextSize mustBe accSize +- ( accSize * incrMargin )
-        //            nextSize mustBe firstSize +- ( firstSize * grossMargin )
-        //            ( ( next, nextSize ), i + 1 )
-        //        }
+        val firstBytes = serializer.toBinary( first.asInstanceOf[AnyRef] )
+        val firstSize = Bytes( firstBytes.size )
+
+        val plateauNr = math.max( 1, memoryPlateauNr )
+        val ( plateauState, plateauSize ) = ( 2 to plateauNr ).foldLeft( first, firstSize ) {
+          case ( ( acc, accSize ), i ) ⇒ {
+            val next = advancing.advance( acc, makeData( i ) )
+            val nextSize = Bytes( serializer.toBinary( next.asInstanceOf[AnyRef] ).size )
+            log.debug(
+              Map(
+                "@msg" → "advancing to expected plateau size",
+                "step" → i,
+                "plateau-nr" → plateauNr,
+                "zero-size" → zeroSize.toString(),
+                "accumulated" → Map(
+                  "size" → accSize.toString,
+                  "nr-shapes" → i,
+                  "average-increment" → ( ( accSize - zeroSize ) / i ).toString
+                )
+              )
+            )
+
+            ( next, nextSize )
+          }
+        }
+
+        log.debug(
+          Map(
+            "@msg" → "memory at expected plateau",
+            "zero-size" → zeroSize.toString(),
+            "plateau" → Map(
+              "plateau-size" → plateauSize.toString,
+              "plateau-nr-shapes" → plateauNr,
+              "plateau-average-increment" → ( ( plateauSize - zeroSize ) / plateauNr ).toString
+            )
+          )
+        )
+
+        ( ( plateauNr + 1 ) to memoryStepsToValidate ).foldLeft( ( first, firstSize ) ) {
+          case ( ( acc, accSize ), i ) ⇒ {
+            val next = advancing.advance( acc, makeData( i ) )
+            val nextSize = Bytes( serializer.toBinary( next.asInstanceOf[AnyRef] ).size )
+
+            log.debug(
+              Map(
+                "@msg" → "checking memory impact on advance",
+                "step" → i,
+                "zero-size" → zeroSize.toString,
+                "plateau-size" → plateauSize.toString,
+                "accumulated" → Map(
+                  "size" → accSize.toString,
+                  "nr-shapes" → i,
+                  "average-increment" → ( ( accSize - zeroSize ) / i ).toString
+                ),
+                "next-size" → nextSize.toString
+              )
+            )
+
+            val countDownAdd = new CountDownFunction[String]
+            countDownAdd await 5.millis.dilated
+
+            nextSize mustBe <( plateauSize * ( 1 + memoryAllowedMargin ) )
+
+            ( next, nextSize )
+          }
+        }
         pending
       }
     }

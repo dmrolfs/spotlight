@@ -4,6 +4,7 @@ import com.persist.logging._
 import spotlight.analysis.{ DetectUsing, Moment }
 import spotlight.analysis.algorithm.{ Algorithm, CommonContext }
 import spotlight.model.timeseries._
+import squants.information.{ Bytes, Information }
 
 /** Created by rolfsd on 11/12/16.
   */
@@ -32,4 +33,9 @@ object ExponentialMovingAverageAlgorithm extends Algorithm[Moment]( label = "ewm
 
   override type Context = CommonContext
   override def makeContext( message: DetectUsing, state: Option[State] ): Context = new CommonContext( message )
+
+  /** Optimization available for algorithms to more efficiently respond to size estimate requests for algorithm sharding.
+    * @return blended average size for the algorithm shape
+    */
+  override def estimatedAverageShapeSize: Option[Information] = Some( Bytes( 354 ) )
 }

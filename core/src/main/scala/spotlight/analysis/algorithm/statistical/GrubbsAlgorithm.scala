@@ -19,7 +19,7 @@ import spotlight.model.timeseries._
   *
   * Created by rolfsd on 10/5/16.
   */
-case class GrubbsShape( movingStatistics: DescriptiveStatistics, sampleSize: Int = RecentHistory.LastN ) extends Equals {
+case class GrubbsShape( movingStatistics: DescriptiveStatistics, sampleSize: Int = 6 * 60 ) extends Equals {
   override def canEqual( that: Any ): Boolean = that.isInstanceOf[GrubbsShape]
 
   override def equals( rhs: Any ): Boolean = {

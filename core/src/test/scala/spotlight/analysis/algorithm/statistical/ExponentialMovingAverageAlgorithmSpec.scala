@@ -15,6 +15,7 @@ import spotlight.model.timeseries._
 class ExponentialMovingAverageAlgorithmSpec extends AlgorithmSpec[Moment] {
   override type Algo = ExponentialMovingAverageAlgorithm.type
   override val defaultAlgorithm: Algo = ExponentialMovingAverageAlgorithm
+  override val memoryPlateauNr: Int = 1
 
   override def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture = {
     new Fixture( config, system, slug )
@@ -93,7 +94,7 @@ class ExponentialMovingAverageAlgorithmSpec extends AlgorithmSpec[Moment] {
   analysisStateSuite()
 
   s"${defaultAlgorithm.label} algorithm" should {
-    "find outliers across two batches" taggedAs WIP in { f: Fixture ⇒
+    "find outliers across two batches" in { f: Fixture ⇒
       import f._
       val dp1 = makeDataPoints( values = Seq.fill( 5 )( 1.0 ), timeWiggle = ( 0.97, 1.03 ) )
       val s1 = spike( scope.topic, dp1 )()

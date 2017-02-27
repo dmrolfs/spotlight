@@ -17,6 +17,8 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmSpec[SummaryStatistics] 
   override type Algo = SimpleMovingAverageAlgorithm.type
   override val defaultAlgorithm: Algo = SimpleMovingAverageAlgorithm
 
+  override val memoryPlateauNr: Int = 70
+
   override def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture = {
     new Fixture( config, system, slug )
   }
