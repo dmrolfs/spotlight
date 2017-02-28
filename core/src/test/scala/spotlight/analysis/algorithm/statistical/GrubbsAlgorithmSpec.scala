@@ -2,7 +2,6 @@ package spotlight.analysis.algorithm.statistical
 
 import scala.annotation.tailrec
 import akka.actor.ActorSystem
-
 import scalaz.{ -\/, \/- }
 import com.typesafe.config.Config
 import org.apache.commons.math3.stat.descriptive.{ DescriptiveStatistics, StatisticalSummary }
@@ -12,7 +11,6 @@ import org.scalatest.Assertion
 import org.typelevel.scalatest.{ DisjunctionMatchers, DisjunctionValues }
 import omnibus.commons.TryV
 import omnibus.commons.log.Trace
-import spotlight.analysis.RecentHistory
 import spotlight.analysis.algorithm.{ Algorithm, AlgorithmSpec, AlgorithmProtocol ⇒ P }
 import spotlight.model.timeseries._
 
@@ -27,9 +25,7 @@ class GrubbsAlgorithmSpec
   override type Algo = GrubbsAlgorithm.type
   override val defaultAlgorithm: Algo = GrubbsAlgorithm
 
-  override val memoryPlateauNr: Int = 60 * 100
-
-  //  override val memoryAllowedMargin: Double = .05
+  override val memoryPlateauNr: Int = GrubbsShape.DefaultSampleSize
 
   override def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture = {
     logger.debug( "TEST ActorSystem: {}", system.name )
@@ -39,17 +35,15 @@ class GrubbsAlgorithmSpec
   class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends AlgorithmFixture( _config, _system, _slug ) {
     override implicit val shapeOrdering: Ordering[TestShape] = new Ordering[TestShape] {
       override def compare( lhs: TestShape, rhs: TestShape ): Int = {
-        val l = lhs.movingStatistics
-        val r = rhs.movingStatistics
-        if ( l.getN == r.getN && l.getMean == r.getMean && l.getStandardDeviation == r.getStandardDeviation ) 0
-        else ( r.getN - l.getN ).toInt
+        if ( lhs.N == rhs.N && lhs.mean == rhs.mean && lhs.standardDeviation == rhs.standardDeviation ) 0
+        else ( rhs.N - lhs.N ).toInt
       }
     }
 
     override def expectedUpdatedShape( shape: TestShape, event: P.Advanced ): TestShape = {
-      val newStats = shape.movingStatistics.copy()
-      newStats addValue event.point.value
-      shape.copy( movingStatistics = newStats )
+      val expected = shape.copy()
+      expected.window add event.point.value
+      expected
     }
 
     def assertShape( result: Option[CalculationMagnetResult], topic: Topic )( s: TestShape ): Assertion = {
@@ -59,24 +53,21 @@ class GrubbsAlgorithmSpec
 
       expectedStats match {
         case None ⇒ {
-          assert( s.movingStatistics.getMean.isNaN )
-          assert( s.movingStatistics.getStandardDeviation.isNaN )
+          assert( s.mean.isNaN )
+          assert( s.standardDeviation.isNaN )
         }
 
         case Some( ( size, mean, standardDeviation ) ) ⇒ {
-          s.movingStatistics.getN mustBe size
-          s.movingStatistics.getMean mustBe mean
-          s.movingStatistics.getStandardDeviation mustBe standardDeviation
+          s.N mustBe size
+          s.mean mustBe mean
+          s.standardDeviation mustBe standardDeviation
         }
       }
     }
   }
 
-  def shapeFor( stats: DescriptiveStatistics ): GrubbsShape = GrubbsShape( stats )
-  def shapeFor( values: Seq[Double] ): GrubbsShape = {
-    val stats = values.foldLeft( new DescriptiveStatistics( RecentHistory.LastN ) ) { ( acc, v ) ⇒ acc.addValue( v ); acc }
-    shapeFor( stats )
-  }
+  //  def shapeFor( stats: DescriptiveStatistics ): GrubbsShape = GrubbsShape( stats )
+  def shapeFor( values: Seq[Double] ): GrubbsShape = values.foldLeft( GrubbsShape() ) { ( acc, v ) ⇒ acc.window.add( v ); acc }
 
   override def calculateControlBoundaries(
     points: Seq[DataPoint],
@@ -143,8 +134,8 @@ class GrubbsAlgorithmSpec
       implicit val context = mock[GrubbsAlgorithm.Context]
       when( context.alpha ) thenReturn alpha
 
-      val stats = points.foldLeft( new DescriptiveStatistics( RecentHistory.LastN ) ) { ( s, p ) ⇒ s.addValue( p.value ); s }
-      val shape = shapeFor( stats )
+      val stats = points.foldLeft( new DescriptiveStatistics( GrubbsShape.DefaultSampleSize ) ) { ( s, p ) ⇒ s.addValue( p.value ); s }
+      val shape = shapeFor( points.map { _.value } )
       val grubbs = GrubbsAlgorithm.grubbsScore( shape )
       logger.info( "TEST: SCORE = [{}]", grubbs )
       Result( underlying = stats, timestamp = points.last.timestamp, tolerance = 3.0, score = grubbs )
@@ -191,7 +182,9 @@ class GrubbsAlgorithmSpec
 
       def caller( size: Int ): GrubbsShape = {
         val d = Array( 199.31, 199.53, 200.19, 200.82, 201.92, 201.95, 202.18, 245.57 )
-        GrubbsShape( new DescriptiveStatistics( d take size ) )
+        val shape = GrubbsShape()
+        d.take( size ).foreach { v ⇒ shape.window.add( v ) }
+        shape
       }
 
       def score( s: GrubbsShape ): TryV[Double] = GrubbsAlgorithm.grubbsScore( s )
