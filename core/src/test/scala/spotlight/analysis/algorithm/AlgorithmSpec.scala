@@ -16,9 +16,9 @@ import demesne.AggregateRootType
 import demesne.testkit.AggregateRootSpec
 import demesne.testkit.concurrent.CountDownFunction
 import org.apache.commons.math3.random.RandomDataGenerator
-import org.apache.commons.math3.stat.descriptive.{ DescriptiveStatistics, StatisticalSummary }
+import org.apache.commons.math3.stat.descriptive.{ StatisticalSummary, SummaryStatistics }
 import org.mockito.Mockito._
-import org.scalatest.{ Assertion, OptionValues }
+import org.scalatest.{ Assertion, OptionValues, Tag }
 import omnibus.akka.envelope._
 import omnibus.commons.{ TryV, V }
 import omnibus.commons.identifier.Identifying
@@ -27,7 +27,7 @@ import spotlight.analysis.{ DetectOutliersInSeries, DetectUsing, HistoricalStati
 import spotlight.analysis.algorithm.{ AlgorithmProtocol ⇒ P }
 import spotlight.model.outlier._
 import spotlight.model.timeseries._
-import squants.information.{ Bytes, Information }
+import squants.information.Bytes
 
 /** Created by rolfsd on 6/9/16.
   */
@@ -69,8 +69,11 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
     fixture ⇒
     private val trace = Trace[AlgorithmFixture]
 
+    val tol = 1E-11
     val sender = TestProbe()
     val subscriber = TestProbe()
+
+    val countDown = new CountDownFunction[String]
 
     var loggingSystem: LoggingSystem = LoggingSystem( _system, s"Test:${defaultAlgorithm.label}", "1", "localhost" )
     logger.info( "#TEST #############  logging system: [{}]", loggingSystem )
@@ -196,6 +199,16 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
       assert( ordering.equiv( expected, actual ) )
     }
 
+    def assertOption( actual: Option[Double], expected: Option[Double], tolerance: Double, hint: String ): Assertion = {
+      logger.info( "assertOption[{}]: actual:[{}]  expected:[{}] +- {}", hint, actual, expected, tolerance.toString )
+      if ( expected.isDefined ) {
+        assert( actual.isDefined )
+        actual.get mustBe ( expected.get +- tolerance )
+      } else {
+        assert( actual.isEmpty )
+      }
+    }
+
     def evaluate(
       hint: String,
       algorithmAggregateId: Algorithm.TID,
@@ -206,6 +219,8 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
     ): Unit = {
       import scala.concurrent.duration._
       logger.info( "TEST: ShortUUID id:[{}] aggregate.path:[{}]", id, aggregate.path )
+      logger.info( "#TEST: series-size:[{}] expectedResults.size:[{}]", series.points.size.toString, expectedResults.size.toString )
+
       aggregate.sendEnvelope(
         DetectUsing(
           targetId = algorithmAggregateId,
@@ -228,11 +243,12 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
           o mustBe Seq( series.points.last )
 
           t( defaultAlgorithm.label ).zip( expectedResults ).zipWithIndex foreach {
-            case ( ( ( actual, expected ), i ) ) ⇒
+            case ( ( ( actual, expected ), i ) ) ⇒ {
               logger.info( "evaluate[{}]: actual:[{}]  expected:[{}]", i.toString, actual, expected )
-              ( i, actual.floor ) mustBe ( i, expected.floor )
-              ( i, actual.expected ) mustBe ( i, expected.expected )
-              ( i, actual.ceiling ) mustBe ( i, expected.ceiling )
+              assertOption( actual.floor, expected.floor, tol, s"$i floor" )
+              assertOption( actual.expected, expected.expected, tol, s"$i expected" )
+              assertOption( actual.ceiling, expected.ceiling, tol, s"$i ceiling" )
+            }
           }
         }
 
@@ -374,7 +390,7 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
 
     override def apply( points: Seq[DataPoint] ): Result = {
       Result(
-        underlying = new DescriptiveStatistics( points.map { _.value }.toArray ),
+        underlying = points.foldLeft( new SummaryStatistics() ) { ( s, p ) ⇒ s.addValue( p.value ); s },
         timestamp = points.last.timestamp,
         tolerance = 3.0
       )
@@ -491,11 +507,14 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
           timeout( 15.seconds.dilated )
         ) { s1 ⇒
             val zero = shapeless.the[Advancing[Shape]].zero( None )
+            countDown await 25.millis.dilated
             actualVsExpectedShape( s1.snapshot.get.asInstanceOf[TestShape], expectedUpdatedShape( zero, adv ) )
           }
       }
     }
   }
+
+  object MEMORY extends Tag( "memory" )
 
   def analysisStateSuite(): Unit = {
     s"${defaultAlgorithm.label}" should {
@@ -525,10 +544,11 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
         logger.debug( "TEST: expectedShape=[{}]", expected )
 
         val actual = shapeless.the[Advancing[S]].advance( zero, adv )
+        countDown await 25.millis.dilated
         actualVsExpectedShape( actual, expected )
       }
 
-      "maintain constant memory per shape" taggedAs WIP in { f: Fixture ⇒
+      "maintain constant memory per shape" taggedAs MEMORY in { f: Fixture ⇒
         import f._
         def makeData( i: Int ): P.Advanced = {
           val pt = DataPoint( nowTimestamp.plusMillis( 10 * i ), 0.14159265353 + 0.0001 * i )
@@ -602,15 +622,13 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
               )
             )
 
-            val countDownAdd = new CountDownFunction[String]
-            countDownAdd await 5.millis.dilated
+            countDown await 5.millis.dilated
 
             nextSize mustBe <( plateauSize * ( 1 + memoryAllowedMargin ) )
 
             ( next, nextSize )
           }
         }
-        pending
       }
     }
   }
