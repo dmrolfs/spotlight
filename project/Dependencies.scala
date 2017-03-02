@@ -110,6 +110,7 @@ object Dependencies {
   }
 
   object facility {
+    val guava = "com.google.guava" % "guava" % "21.0"
     val offheap = "sh.den" % "scala-offheap_2.11" % "0.1"
     val fastutil = "it.unimi.dsi" % "fastutil" % "7.1.0" withSources() withJavadoc()
     val bloomFilter = "com.github.alexandrnikitin" % "bloom-filter_2.11" % "0.8.0" withSources() withJavadoc()

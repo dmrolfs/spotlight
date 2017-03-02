@@ -7,20 +7,34 @@ import com.persist.logging._
 import org.apache.commons.lang3.ClassUtils
 import org.apache.commons.math3.distribution.TDistribution
 import org.apache.commons.math3.ml.clustering.DoublePoint
-import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import omnibus.commons.TryV
-import spotlight.analysis.algorithm.{ Advancing, Algorithm, CommonContext }
+import spotlight.analysis.algorithm.{ Advancing, Algorithm, CommonContext, mutable }
 import spotlight.analysis.algorithm.AlgorithmProtocol.Advanced
-import spotlight.analysis.{ DetectUsing, RecentHistory }
+import spotlight.analysis.DetectUsing
 import spotlight.model.timeseries._
+import squants.information.{ Bytes, Information }
 
 /** Grubbs' test is used to detect a single outlier in a univariate data set that follows an approximately normal distribution.
   * This implementation applies Grubbs to each point individually considering its prior neighbors.
   *
+  * This shape is not immutable as defined.
   * Created by rolfsd on 10/5/16.
   */
-case class GrubbsShape( movingStatistics: DescriptiveStatistics, sampleSize: Int = 60 ) extends Equals {
+case class GrubbsShape( underlying: mutable.MovingStatistics ) extends Equals {
   override def canEqual( that: Any ): Boolean = that.isInstanceOf[GrubbsShape]
+
+  //  val underlying: mutable.MovingStatistics = new mutable.MovingStatistics( sampleSize )
+  def :+( value: Double ): GrubbsShape = {
+    val newUnderlying = underlying.copy()
+    newUnderlying :+ value
+    copy( newUnderlying )
+  }
+  def capacity: Int = underlying.capacity
+  def N: Long = underlying.N
+  def mean: Double = underlying.mean
+  def standardDeviation: Double = underlying.standardDeviation
+  def minimum: Double = underlying.minimum
+  def maximum: Double = underlying.maximum
 
   override def equals( rhs: Any ): Boolean = {
     def optionalNaN( d: Double ): Option[Double] = if ( d.isNaN ) None else Some( d )
@@ -31,10 +45,7 @@ case class GrubbsShape( movingStatistics: DescriptiveStatistics, sampleSize: Int
         else {
           ( that.## == this.## ) &&
             ( that canEqual this ) &&
-            ( this.movingStatistics.getN == that.movingStatistics.getN ) &&
-            ( optionalNaN( this.movingStatistics.getMean ) == optionalNaN( that.movingStatistics.getMean ) ) &&
-            ( optionalNaN( this.movingStatistics.getStandardDeviation ) == optionalNaN( that.movingStatistics.getStandardDeviation ) ) &&
-            ( this.sampleSize == that.sampleSize )
+            ( this.underlying == that.underlying )
         }
       }
 
@@ -42,39 +53,23 @@ case class GrubbsShape( movingStatistics: DescriptiveStatistics, sampleSize: Int
     }
   }
 
-  override def hashCode: Int = {
-    41 * (
-      41 * (
-        41 * (
-          41 + sampleSize.##
-        ) + movingStatistics.getN.##
-      ) + movingStatistics.getMean.##
-    ) + movingStatistics.getStandardDeviation.##
-  }
-
-  override def toString: String = {
-    s"${ClassUtils.getAbbreviatedName( getClass, 15 )}( " +
-      s"sampleSize:[${sampleSize}] " +
-      s"movingStatistics:[N:${movingStatistics.getN} m:${movingStatistics.getMean} sd:${movingStatistics.getStandardDeviation} " +
-      s"range:[${movingStatistics.getMin} - ${movingStatistics.getMax}]] " +
-      ")"
-  }
+  override def hashCode: Int = { 41 + underlying.## }
+  override def toString: String = s"${ClassUtils.getAbbreviatedName( getClass, 15 )}( ${underlying} )"
 }
 
-object GrubbsShape {
-  val SampleSizePath = "sample-size"
+object GrubbsShape extends ClassLogging {
+  def apply( capacity: Int = DefaultCapacity ): GrubbsShape = GrubbsShape( mutable.MovingStatistics( capacity ) )
+
+  val SampleSizePath = "capacity"
+  val DefaultCapacity: Int = 60
 
   implicit val advancing = new Advancing[GrubbsShape] {
     override def zero( configuration: Option[Config] ): GrubbsShape = {
-      val sampleSize = valueFrom( configuration, SampleSizePath ) { _.getInt( SampleSizePath ) } getOrElse RecentHistory.LastN
-      GrubbsShape( new DescriptiveStatistics( sampleSize ), sampleSize )
+      val capacity = valueFrom( configuration, SampleSizePath ) { _.getInt( SampleSizePath ) } getOrElse DefaultCapacity
+      GrubbsShape( capacity )
     }
 
-    override def advance( original: GrubbsShape, advanced: Advanced ): GrubbsShape = {
-      val newStats = original.movingStatistics.copy()
-      newStats addValue advanced.point.value
-      original.copy( movingStatistics = newStats )
-    }
+    override def advance( original: GrubbsShape, advanced: Advanced ): GrubbsShape = { original :+ advanced.point.value }
   }
 }
 
@@ -87,8 +82,8 @@ object GrubbsAlgorithm extends Algorithm[GrubbsShape]( label = "grubbs" ) { algo
     val result = grubbsScore( shape ) map { grubbs ⇒
       val threshold = ThresholdBoundary.fromExpectedAndDistance(
         timestamp = point.timestamp.toLong,
-        expected = shape.movingStatistics.getMean,
-        distance = c.tolerance * grubbs * shape.movingStatistics.getStandardDeviation
+        expected = shape.mean,
+        distance = c.tolerance * grubbs * shape.standardDeviation
       )
 
       ( threshold isOutlier point.value, threshold )
@@ -112,11 +107,11 @@ object GrubbsAlgorithm extends Algorithm[GrubbsShape]( label = "grubbs" ) { algo
 
   def grubbsScore( shape: Shape )( implicit c: Context ): TryV[Double] = {
     for {
-      size ← checkSize( shape.movingStatistics.getN )
+      size ← checkSize( shape.N )
       critical ← criticalValue( shape )
     } yield {
-      val mean = shape.movingStatistics.getMean
-      val sd = shape.movingStatistics.getStandardDeviation
+      val mean = shape.mean
+      val sd = shape.standardDeviation
       val thresholdSquared = math.pow( critical, 2 )
       ( ( size - 1 ) / math.sqrt( size ) ) * math.sqrt( thresholdSquared / ( size - 2 + thresholdSquared ) )
     }
@@ -131,7 +126,7 @@ object GrubbsAlgorithm extends Algorithm[GrubbsShape]( label = "grubbs" ) { algo
     }
 
     for {
-      size ← checkSize( shape.movingStatistics.getN )
+      size ← checkSize( shape.N )
       critical ← calculateCritical( size )
     } yield critical
   }
@@ -160,4 +155,10 @@ object GrubbsAlgorithm extends Algorithm[GrubbsShape]( label = "grubbs" ) { algo
   override def makeContext( message: DetectUsing, state: Option[State] ): Context = {
     TryV unsafeGet { Context.getAlpha( message.properties ) map { alpha ⇒ Context( message, alpha ) } }
   }
+
+  /** Optimization available for algorithms to more efficiently respond to size estimate requests for algorithm sharding.
+    *
+    * @return blended average size for the algorithm shape
+    */
+  override val estimatedAverageShapeSize: Option[Information] = Some( Bytes( 1352 ) )
 }
