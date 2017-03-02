@@ -3,6 +3,7 @@ package spotlight.analysis.algorithm.statistical
 import scala.annotation.tailrec
 import akka.actor.ActorSystem
 import com.typesafe.config.Config
+import com.persist.logging._
 import org.apache.commons.math3.stat.descriptive.{ DescriptiveStatistics, SummaryStatistics }
 import org.mockito.Mockito._
 import org.scalatest.Assertion
@@ -124,6 +125,29 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmSpec[SummaryStatistics] 
         algorithm.step( ( ts.getMillis.toDouble, value ), testShape ) mustBe expected.stepResult( i )
         advanceWith( value )
       }
+    }
+
+    "verify points case from OutlierScoringModel spec" taggedAs WIP in { f: Fixture ⇒
+      import f._
+      val points: Seq[Double] = Seq(
+        9.46, 9.9, 11.6, 14.5, 17.3, 19.2, 18.4, 14.5, 12.2, 10.8, 8.58,
+        8.36, 8.58, 7.5, 7.1, 7.3, 7.71, 8.14, 8.14, 7.1, 7.5,
+        7.1, 7.1, 7.3, 7.71, 8.8, 9.9, 14.2, 18.8, 25.2, 31.5,
+        22, 24.1, 39.2
+      )
+
+      val ts = TimeSeries( "foo.bar", makeDataPoints( points ) )
+      log.debug( Map( "@msg" → "timeseries", "values" → ts.points.map { _.value }.mkString( "[", ", ", "]" ) ) )
+      val h = historyWith( None, ts )
+      val ( e, r ) = makeExpected( NoHint )( ts.points, explodeOutlierIdentifiers( points.size, Set( 1, 30 ) ) )
+      evaluate(
+        hint = "scoring model test",
+        algorithmAggregateId = id,
+        series = ts,
+        history = h,
+        expectedResults = e,
+        assertShapeFn = assertShape( r, ts.topic )( _: TestShape )
+      )
     }
 
     "happy path process two batches" in { f: Fixture ⇒

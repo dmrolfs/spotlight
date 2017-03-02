@@ -216,11 +216,12 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
       history: HistoricalStatistics,
       expectedResults: Seq[Expected],
       assertShapeFn: ( TestShape ) ⇒ Assertion = ( _: TestShape ) ⇒ succeed
-    ): Unit = {
+    ): Assertion = {
       import scala.concurrent.duration._
       logger.info( "TEST: ShortUUID id:[{}] aggregate.path:[{}]", id, aggregate.path )
       logger.info( "#TEST: series-size:[{}] expectedResults.size:[{}]", series.points.size.toString, expectedResults.size.toString )
 
+      val expectedAnomalies = series.points.zipWithIndex.collect { case ( dp, i ) if expectedResults( i ).isOutlier ⇒ dp }
       aggregate.sendEnvelope(
         DetectUsing(
           targetId = algorithmAggregateId,
@@ -232,15 +233,13 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
           sender.ref
         )
 
-      val expectedAnomalies = expectedResults.exists { e ⇒ e.isOutlier }
-
       sender.expectMsgPF( 500.millis.dilated, hint ) {
-        case m @ Envelope( SeriesOutliers( a, s, p, o, t ), _ ) if expectedAnomalies ⇒ {
+        case m @ Envelope( SeriesOutliers( a, s, p, o, t ), _ ) if expectedAnomalies.nonEmpty ⇒ {
           logger.info( "evaluate EXPECTED ANOMALIES..." )
           a mustBe Set( defaultAlgorithm.label )
           s mustBe series
-          o.size mustBe 1
-          o mustBe Seq( series.points.last )
+          o mustBe expectedAnomalies
+          o.size mustBe expectedAnomalies.size
 
           t( defaultAlgorithm.label ).zip( expectedResults ).zipWithIndex foreach {
             case ( ( ( actual, expected ), i ) ) ⇒ {
@@ -252,7 +251,7 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
           }
         }
 
-        case m @ Envelope( NoOutliers( a, s, p, t ), _ ) if !expectedAnomalies ⇒ {
+        case m @ Envelope( NoOutliers( a, s, p, t ), _ ) if expectedAnomalies.isEmpty ⇒ {
           logger.info( "evaluate EXPECTED normal..." )
           a mustBe Set( defaultAlgorithm.label )
           s mustBe series
@@ -300,6 +299,8 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
         assertShapeFn( sas )
       }
     }
+
+    def explodeOutlierIdentifiers( size: Int, positions: Set[Int] ): Seq[Boolean] = { ( 0 until size ).map { positions.contains } }
   }
 
   case class Expected( isOutlier: Boolean, floor: Option[Double], expected: Option[Double], ceiling: Option[Double] ) {

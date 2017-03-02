@@ -4,7 +4,6 @@ import com.google.common.collect.EvictingQueue
 import org.apache.commons.lang3.ClassUtils
 import org.apache.commons.math3.stat.descriptive.StatisticalSummary
 
-
 object MovingStatistics {
   def apply( capacity: Int ): MovingStatistics = new MovingStatistics( EvictingQueue.create[Double]( capacity ) )
 }

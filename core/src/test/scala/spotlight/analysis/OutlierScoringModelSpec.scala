@@ -405,7 +405,8 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
       val algos = Map(
         algo → ConfigFactory.parseString(
           s"""
-          |tolerance: 1.043822701 // eps:0.75
+          |#tolerance: 1.043822701 // eps:0.75
+          |tolerance: 3
           |seedEps: 0.75
           |minDensityConnectedPoints: 3
           |distance: Mahalanobis // Euclidean
@@ -432,7 +433,8 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
                 logger.warn( "a:[{}]", a )
                 s"""
                |algorithms.${a} {
-               |  tolerance: 1.043822701 // eps:0.75
+               |#  tolerance: 1.043822701 // eps:0.75
+               |  tolerance: 3.0
                |  seedEps: 0.75
                |  minDensityConnectedPoints: 3
                |  distance: Mahalanobis // Euclidean
@@ -468,6 +470,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
       //      val dp2 = makeDataPoints( pointsA, start = joda.DateTime.now )
       //      val dp3 = makeDataPoints( pointsB, start = joda.DateTime.now )
 
+      //      val expectedPoints = Seq( 1, 30 ).map { dp1.apply }.sortBy { _.timestamp }
       val expectedPoints = Seq( 1, 30 ).map { dp1.apply }.sortBy { _.timestamp }
 
       val expected = SeriesOutliers(

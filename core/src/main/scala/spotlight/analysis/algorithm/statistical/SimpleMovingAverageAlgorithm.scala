@@ -22,6 +22,15 @@ object SimpleMovingAverageAlgorithm extends Algorithm[SummaryStatistics]( label 
       distance = c.tolerance * stddev
     )
 
+    log.debug(
+      Map(
+        "@msg" → "#TEST Step",
+        "point" → Map( "timestamp" → point.dateTime.toString, "value" → f"${point.value}%2.5f" ),
+        "threshold" → Map( "1_floor" → threshold.floor.toString, "2_expected" → threshold.expected.toString, "3_ceiling" → threshold.ceiling.toString ),
+        "is-anomaly" → threshold.isOutlier( point.value )
+      )
+    )
+
     Some( ( threshold isOutlier point.value, threshold ) )
   }
 
