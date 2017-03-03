@@ -2,7 +2,7 @@ package spotlight.analysis.algorithm.statistical
 
 import scala.annotation.tailrec
 import akka.actor.ActorSystem
-import com.typesafe.config.Config
+import com.typesafe.config.{ Config, ConfigFactory }
 import com.persist.logging._
 import org.apache.commons.math3.stat.descriptive.{ DescriptiveStatistics, SummaryStatistics }
 import org.mockito.Mockito._
@@ -100,6 +100,7 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmSpec[SummaryStatistics] 
       logger.info( "************** TEST NOW ************" )
       val algorithm = defaultAlgorithm
       implicit val testContext = mock[defaultAlgorithm.Context]
+      when( testContext.properties ) thenReturn { ConfigFactory.empty }
       val testShape: Shape = shapeless.the[Advancing[Shape]].zero( None )
 
       implicit val testState = mock[State]
@@ -129,6 +130,18 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmSpec[SummaryStatistics] 
 
     "verify points case from OutlierScoringModel spec" taggedAs WIP in { f: Fixture ⇒
       import f._
+
+      val minPopulation = 2
+      val smaConfig = ConfigFactory.parseString(
+        s"""
+          |tail-average: 3
+          |tolerance: 3
+          |minimum-population: ${minPopulation}
+        """.stripMargin
+      )
+
+      when( plan.algorithms ) thenReturn { Map( defaultAlgorithm.label → smaConfig ) }
+
       val points: Seq[Double] = Seq(
         9.46, 9.9, 11.6, 14.5, 17.3, 19.2, 18.4, 14.5, 12.2, 10.8, 8.58,
         8.36, 8.58, 7.5, 7.1, 7.3, 7.71, 8.14, 8.14, 7.1, 7.5,
@@ -139,7 +152,12 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmSpec[SummaryStatistics] 
       val ts = TimeSeries( "foo.bar", makeDataPoints( points ) )
       log.debug( Map( "@msg" → "timeseries", "values" → ts.points.map { _.value }.mkString( "[", ", ", "]" ) ) )
       val h = historyWith( None, ts )
-      val ( e, r ) = makeExpected( NoHint )( ts.points, explodeOutlierIdentifiers( points.size, Set( 1, 30 ) ) )
+      val ( e, r ) = makeExpected( NoHint )(
+        points = ts.points,
+        outliers = explodeOutlierIdentifiers( points.size, Set( 30 ) ),
+        minimumPopulation = minPopulation
+      )
+
       evaluate(
         hint = "scoring model test",
         algorithmAggregateId = id,

@@ -2,8 +2,9 @@ package spotlight.analysis.algorithm.statistical
 
 import scala.annotation.tailrec
 import akka.actor.ActorSystem
+
 import scalaz.{ -\/, \/- }
-import com.typesafe.config.Config
+import com.typesafe.config.{ Config, ConfigFactory }
 import org.apache.commons.math3.stat.descriptive.{ DescriptiveStatistics, StatisticalSummary }
 import org.joda.{ time ⇒ joda }
 import org.mockito.Mockito._
@@ -140,6 +141,7 @@ class GrubbsAlgorithmSpec
     override def apply( points: Seq[DataPoint] ): Result = {
       implicit val context = mock[GrubbsAlgorithm.Context]
       when( context.alpha ) thenReturn alpha
+      when( context.properties ) thenReturn ConfigFactory.empty
 
       val stats = points.foldLeft( new DescriptiveStatistics( GrubbsShape.DefaultCapacity ) ) { ( s, p ) ⇒ s.addValue( p.value ); s }
       val shape = shapeFor( points.map { _.value } )
@@ -184,8 +186,18 @@ class GrubbsAlgorithmSpec
 
     //todo define and use smaller fixture
     "calculate grubbs score" taggedAs WIP in { f: Fixture ⇒
+      val minPopulation = 8
+      val grubbsConfig = ConfigFactory.parseString(
+        s"""
+          |tail-average: 3
+          |tolerance: 3
+          |minimum-population: ${minPopulation}
+        """.stripMargin
+      )
+
       implicit val ctx = mock[GrubbsAlgorithm.Context]
       when( ctx.alpha ) thenReturn 0.05
+      when( ctx.properties ) thenReturn grubbsConfig
 
       def caller( size: Int ): GrubbsShape = {
         val d = Array( 199.31, 199.53, 200.19, 200.82, 201.92, 201.95, 202.18, 245.57 )
@@ -194,8 +206,13 @@ class GrubbsAlgorithmSpec
 
       def score( s: GrubbsShape ): TryV[Double] = GrubbsAlgorithm.grubbsScore( s )
 
-      for ( i ← 0 until 7 ) score( caller( i ) ).isLeft mustBe true
-      score( caller( 7 ) ).value mustBe ( 2.0199684174 +- 0.00001 )
+      for ( i ← 0 until minPopulation ) {
+        val s = score( caller( i ) )
+        log.info( Map( "@msg" → "grubbs score", "i" → i, "score" → s.toString ) )
+        s.isLeft mustBe true
+      }
+      //      for ( i ← 0 until 7 ) score( caller( i ) ).value mustBe true
+      //      score( caller( 7 ) ).value mustBe ( 2.0199684174 +- 0.00001 )
       score( caller( 8 ) ).value mustBe ( 2.1266465543 +- 0.00001 )
     }
 

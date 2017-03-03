@@ -220,6 +220,7 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
       import scala.concurrent.duration._
       logger.info( "TEST: ShortUUID id:[{}] aggregate.path:[{}]", id, aggregate.path )
       logger.info( "#TEST: series-size:[{}] expectedResults.size:[{}]", series.points.size.toString, expectedResults.size.toString )
+      logger.info( "#TEST: plan.algorithms:[{}]", plan.algorithms )
 
       val expectedAnomalies = series.points.zipWithIndex.collect { case ( dp, i ) if expectedResults( i ).isOutlier ⇒ dp }
       aggregate.sendEnvelope(
@@ -227,7 +228,8 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
           targetId = algorithmAggregateId,
           algorithm = defaultAlgorithm.label,
           payload = DetectOutliersInSeries( series, plan, Option( subscriber.ref ), Set.empty[WorkId] ),
-          history = history
+          history = history,
+          properties = plan.algorithms.getOrElse( defaultAlgorithm.label, ConfigFactory.empty )
         )
       )(
           sender.ref
@@ -335,17 +337,18 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
     points: Seq[DataPoint],
     outliers: Seq[Boolean],
     history: Seq[DataPoint] = Seq.empty[DataPoint], // datapoints?
-    tolerance: Double = 3.0
+    tolerance: Double = 3.0,
+    minimumPopulation: Int = 1
   ): ( Seq[Expected], Option[magnet.Result] ) = {
     val all = history ++ points
     val calculated: List[Option[magnet.Result]] = {
       for {
-        pos ← ( 1 to all.size ).toList
+        pos ← ( minimumPopulation to all.size ).toList
         pts = all take pos
       } yield Option( magnet( pts ) )
     }
 
-    val results = None :: calculated //todo: right thinking?  prove out with subsequent batch
+    val results = List.fill( minimumPopulation ) { None } ::: calculated
     logger.info( "TEST: results-size:[{}]  points-size:[{}] history-size:[{}]", results.size.toString, points.size.toString, history.size.toString )
     val expected = outliers.zip( results.drop( history.size ) ) map {
       case ( o, r ) ⇒
@@ -549,10 +552,35 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
         actualVsExpectedShape( actual, expected )
       }
 
-      "maintain constant memory per shape" taggedAs MEMORY in { f: Fixture ⇒
+      "verify estimated memory usage" taggedAs MEMORY in { f: Fixture ⇒
         import f._
         def makeData( i: Int ): P.Advanced = {
           val pt = DataPoint( nowTimestamp.plusMillis( 10 * i ), 0.14159265353 + 0.0001 * i )
+          val t = ThresholdBoundary( nowTimestamp, Some( 1.1 ), Some( 2.2 ), Some( 3.3 ) )
+          P.Advanced( id, scope.topic, pt, false, t )
+        }
+
+        defaultAlgorithm.estimatedAverageShapeSize match {
+          case None ⇒ pending
+          case Some( expected ) ⇒ {
+            val plateauNr = math.max( 1, memoryPlateauNr )
+            val advancing = shapeless.the[Advancing[S]]
+            val zero = advancing.zero( None )
+            val atPlateau = ( 0 to plateauNr ).foldLeft( zero ) { ( acc, i ) ⇒ advancing.advance( acc, makeData( i ) ) }
+
+            import akka.serialization.{ SerializationExtension, Serializer }
+            val serializer: Serializer = SerializationExtension( system ).serializerFor( zero.getClass )
+            val actual = Bytes( serializer.toBinary( atPlateau.asInstanceOf[AnyRef] ).size )
+            actual mustBe expected
+          }
+        }
+      }
+
+      "maintain constant memory per shape" taggedAs MEMORY in { f: Fixture ⇒
+        import f._
+        val random = scala.util.Random
+        def makeData( i: Int ): P.Advanced = {
+          val pt = DataPoint( nowTimestamp.plusMillis( 10 * i ), random.nextGaussian() )
           val t = ThresholdBoundary( nowTimestamp, Some( 1.1 ), Some( 2.2 ), Some( 3.3 ) )
           P.Advanced( id, scope.topic, pt, false, t )
         }

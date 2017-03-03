@@ -140,6 +140,8 @@ object PastPeriod extends ClassLogging {
         Shape( resize = applyWindow( window ) )
       }
 
+      override def N( shape: Shape ): Long = shape.stats map { _.getN } getOrElse 0L
+
       override def advance( original: Shape, advanced: Advanced ): Shape = {
         val ( p, v ) = Period assign advanced.point
         log.debug( Map( "@msg" → "#TEST ASSIGNING point to period", "timestamp" → advanced.point.timestamp, "period" → p ) )
@@ -152,7 +154,8 @@ object PastPeriod extends ClassLogging {
 /** Created by rolfsd on 10/14/16.
   */
 object PastPeriodAverageAlgorithm extends Algorithm[PastPeriod.Shape]( label = "past-period" ) { algorithm ⇒
-  override def prepareData( c: Context ): Seq[DoublePoint] = c.tailAverage()( c.data )
+  override type Context = CommonContext
+  override def makeContext( message: DetectUsing, state: Option[State] ): Context = new CommonContext( message )
 
   override def step( point: PointT, shape: Shape )( implicit s: State, c: Context ): Option[( Boolean, ThresholdBoundary )] = {
     for {
@@ -169,7 +172,4 @@ object PastPeriodAverageAlgorithm extends Algorithm[PastPeriod.Shape]( label = "
       ( isOutlier, threshold )
     }
   }
-
-  override type Context = CommonContext
-  override def makeContext( message: DetectUsing, state: Option[State] ): Context = new CommonContext( message )
 }

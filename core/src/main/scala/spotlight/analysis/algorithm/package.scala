@@ -11,6 +11,9 @@ import spotlight.analysis.algorithm.AlgorithmProtocol.Advanced
 package object algorithm {
   implicit val summaryStatisticsAdvancing = new Advancing[SummaryStatistics] {
     override def zero( configuration: Option[Config] ): SummaryStatistics = new SummaryStatistics()
+
+    override def N( shape: SummaryStatistics ): Long = shape.getN
+
     override def advance( original: SummaryStatistics, advanced: Advanced ): SummaryStatistics = {
       val result = original.copy()
       result addValue advanced.point.value

@@ -9,6 +9,9 @@ import squants.information.{ Bytes, Information }
 /** Created by rolfsd on 11/12/16.
   */
 object ExponentialMovingAverageAlgorithm extends Algorithm[Moment]( label = "ewma" ) { algorithm ⇒
+  override type Context = CommonContext
+  override def makeContext( message: DetectUsing, state: Option[State] ): Context = new CommonContext( message )
+
   override def step( point: PointT, shape: Shape )( implicit s: State, c: Context ): Option[( Boolean, ThresholdBoundary )] = {
     shape.statistics map { stats ⇒
       log.debug(
@@ -30,9 +33,6 @@ object ExponentialMovingAverageAlgorithm extends Algorithm[Moment]( label = "ewm
       ( threshold isOutlier point.value, threshold )
     }
   }
-
-  override type Context = CommonContext
-  override def makeContext( message: DetectUsing, state: Option[State] ): Context = new CommonContext( message )
 
   /** Optimization available for algorithms to more efficiently respond to size estimate requests for algorithm sharding.
     * @return blended average size for the algorithm shape

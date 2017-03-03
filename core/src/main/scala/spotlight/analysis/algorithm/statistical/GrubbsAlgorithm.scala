@@ -69,14 +69,37 @@ object GrubbsShape extends ClassLogging {
       GrubbsShape( capacity )
     }
 
+    override def N( shape: GrubbsShape ): Long = shape.N
     override def advance( original: GrubbsShape, advanced: Advanced ): GrubbsShape = { original :+ advanced.point.value }
   }
 }
 
 object GrubbsAlgorithm extends Algorithm[GrubbsShape]( label = "grubbs" ) { algorithm ⇒
-  val minimumDataPoints: Int = 7
+  import Algorithm.ConfigurationProvider.MinimalPopulationPath
 
-  override def prepareData( c: Context ): Seq[DoublePoint] = c.tailAverage()( c.data )
+  def minimumDataPoints( implicit c: Context ): Int = {
+    val grubbsRequirement = 7
+
+    if ( c.properties hasPath MinimalPopulationPath ) {
+      math.max( grubbsRequirement, c.properties getInt MinimalPopulationPath )
+    } else {
+      grubbsRequirement
+    }
+  }
+
+  case class Context( override val message: DetectUsing, alpha: Double ) extends CommonContext( message )
+
+  object Context {
+    val AlphaPath = "alpha"
+    def getAlpha( c: Config ): TryV[Double] = {
+      val alpha = if ( c hasPath AlphaPath ) c getDouble AlphaPath else 0.05
+      alpha.right
+    }
+  }
+
+  override def makeContext( message: DetectUsing, state: Option[State] ): Context = {
+    TryV unsafeGet { Context.getAlpha( message.properties ) map { alpha ⇒ Context( message, alpha ) } }
+  }
 
   override def step( point: PointT, shape: Shape )( implicit s: State, c: Context ): Option[( Boolean, ThresholdBoundary )] = {
     val result = grubbsScore( shape ) map { grubbs ⇒
@@ -135,30 +158,16 @@ object GrubbsAlgorithm extends Algorithm[GrubbsShape]( label = "grubbs" ) { algo
     * @param size
     * @return
     */
-  private def checkSize( size: Long ): TryV[Long] = {
+  private def checkSize( size: Long )( implicit c: Context ): TryV[Long] = {
     size match {
       case s if s < minimumDataPoints ⇒ Algorithm.InsufficientDataSize( label, s, minimumDataPoints ).left
       case s ⇒ s.right
     }
   }
 
-  case class Context( override val message: DetectUsing, alpha: Double ) extends CommonContext( message )
-
-  object Context {
-    val AlphaPath = "alpha"
-    def getAlpha( c: Config ): TryV[Double] = {
-      val alpha = if ( c hasPath AlphaPath ) c getDouble AlphaPath else 0.05
-      alpha.right
-    }
-  }
-
-  override def makeContext( message: DetectUsing, state: Option[State] ): Context = {
-    TryV unsafeGet { Context.getAlpha( message.properties ) map { alpha ⇒ Context( message, alpha ) } }
-  }
-
   /** Optimization available for algorithms to more efficiently respond to size estimate requests for algorithm sharding.
     *
     * @return blended average size for the algorithm shape
     */
-  override val estimatedAverageShapeSize: Option[Information] = Some( Bytes( 1352 ) )
+  override val estimatedAverageShapeSize: Option[Information] = Some( Bytes( 1318 ) )
 }

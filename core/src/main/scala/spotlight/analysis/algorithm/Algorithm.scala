@@ -84,13 +84,20 @@ object Algorithm extends ClassLogging {
   type ID = AlgorithmIdentifier
   type TID = TaggedID[ID]
 
+  object ConfigurationProvider {
+    val MinimalPopulationPath = "minimum-population"
+    val TailAveragePath = "tail-average"
+    val MaxClusterNodesNrPath = "max-cluster-nodes-nr"
+    val ApproxPointsPerDayPath = "approximate-points-per-day"
+  }
+
   trait ConfigurationProvider {
     /** approximate number of points in a one day window size @ 1 pt per 10s
       */
     val ApproximateDayWindow: Int = 6 * 60 * 24
 
     //todo: provide a link to global algorithm configuration
-    def maximumNrClusterNodes: Int = 6
+    val maximumNrClusterNodes: Int = 6
   }
 
   private[algorithm] val gitterFactor: Random = new Random()
@@ -173,7 +180,11 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
   type Context <: AlgorithmContext
   def makeContext( message: DetectUsing, state: Option[State] ): Context
 
-  def prepareData( c: Context ): Seq[DoublePoint] = c.data
+  def prepareData( c: Context ): Seq[DoublePoint] = {
+    import Algorithm.ConfigurationProvider.TailAveragePath
+    val tail = if ( c.properties hasPath TailAveragePath ) c.properties getInt TailAveragePath else 1
+    if ( 1 < tail ) { c.tailAverage( tail )( c.data ) } else c.data
+  }
   def step( point: PointT, shape: Shape )( implicit s: State, c: Context ): Option[( Boolean, ThresholdBoundary )]
 
   implicit lazy val identifying: Identifying.Aux[State, Algorithm.ID] = new Identifying[State] {
@@ -689,20 +700,54 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
 
       case class Accumulation( topic: Topic, shape: Shape, advances: Seq[Advanced] = Seq.empty[Advanced] )
 
+      /** The test should not be used for sample sizes of six or fewer since it frequently tags most of the points as outliers.
+        * @return
+        */
+      private def checkSize( shape: S )( implicit analysisContext: Context ): TryV[Long] = {
+        import Algorithm.ConfigurationProvider.MinimalPopulationPath
+        val minimumDataPoints = if ( analysisContext.properties hasPath MinimalPopulationPath ) {
+          analysisContext.properties getInt MinimalPopulationPath
+        } else {
+          0
+        }
+
+        the[Advancing[S]].N( shape ) match {
+          case s if s < minimumDataPoints ⇒ Algorithm.InsufficientDataSize( label, s, minimumDataPoints ).left
+          case s ⇒ s.right
+        }
+      }
+
       private def collectOutlierPoints( points: Seq[DoublePoint] ): KOp[Context, Seq[Advanced]] = {
         kleisli[TryV, Context, Seq[Advanced]] { implicit analysisContext ⇒
           def tryStep( pt: PointT, shape: Shape ): TryV[( Boolean, ThresholdBoundary )] = {
-            \/ fromTryCatchNonFatal {
+            val attempt = \/ fromTryCatchNonFatal {
               algorithm
                 .step( pt, shape )( state, analysisContext )
-                .getOrElse {
-                  //              logger.debug(
-                  //                "skipping point[{}] per insufficient history for algorithm {}",
-                  //                s"(${pt.dateTime}:${pt.timestamp.toLong}, ${pt.value})", algorithm.label
-                  //              )
+                .getOrElse { ( false, ThresholdBoundary empty pt.timestamp.toLong ) }
+            }
 
-                  ( false, ThresholdBoundary empty pt.timestamp.toLong )
-                }
+            val anomaly = {
+              for {
+                _ ← checkSize( shape )
+                result ← attempt
+              } yield result
+            }
+
+            anomaly match {
+              case \/-( a ) ⇒ a.right
+
+              case -\/( ex: Algorithm.InsufficientDataSize ) ⇒ {
+                log.info(
+                  "skipping point[({}, {})] due to insufficient history for algorithm {}",
+                  s"${pt.dateTime}:${pt.timestamp.toLong}",
+                  pt.value.toString,
+                  algorithm.label
+                )
+
+                ( false, ThresholdBoundary empty pt.timestamp.toLong ).right
+              }
+
+              case ex ⇒ ex
             }
           }
 
@@ -758,7 +803,7 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
             accumulation = Accumulation(
               topic = analysisContext.topic,
               shape = state.shapes.get( analysisContext.topic ) getOrElse {
-              the[Advancing[Shape]].zero( Option( analysisContext.configuration ) )
+              the[Advancing[Shape]].zero( Option( analysisContext.properties ) )
             }
             ).right
           )

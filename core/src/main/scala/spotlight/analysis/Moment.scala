@@ -49,6 +49,8 @@ object Moment extends ClassLogging {
       }
     }
 
+    override def N( shape: Moment ): Long = shape.statistics.map { _.N } getOrElse 0L
+
     override def advance( original: Moment, advanced: Advanced ): Moment = original :+ advanced.point.value
   }
 
@@ -63,7 +65,7 @@ object Moment extends ClassLogging {
   }
 
   final case class Statistics private[analysis] (
-      N: Long = 1,
+      N: Long = 1L,
       alpha: Double,
       sum: Double,
       movingMax: Double,

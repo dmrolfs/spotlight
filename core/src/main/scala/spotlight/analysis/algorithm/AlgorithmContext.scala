@@ -1,7 +1,6 @@
 package spotlight.analysis.algorithm
 
-import com.typesafe.config.Config
-
+import com.typesafe.config.{ Config, ConfigFactory }
 import org.apache.commons.math3.ml.clustering.DoublePoint
 import spotlight.analysis.{ DetectUsing, RecentHistory }
 import spotlight.model.outlier.AnalysisPlan
@@ -18,7 +17,13 @@ trait AlgorithmContext {
 
   def plan: AnalysisPlan = message.payload.plan
   def source: TimeSeriesBase = message.source
-  def configuration: Config = message.properties
+
+  /** Properties supplied for with the currently processing request, such as Algorithm-specific configuration group found in
+    * the algorithm definition.
+    * Some common algorithm properties include "tolerance" and "tail-average"
+    * @return algorithm-specific config
+    */
+  def properties: Config = message.properties
 
   def fillData( minimalSize: Int = RecentHistory.LastN ): ( Seq[DoublePoint] ) ⇒ Seq[DoublePoint] = { original ⇒
     if ( minimalSize <= original.size ) original
@@ -76,6 +81,7 @@ object AlgorithmContext {
 class CommonContext( override val message: DetectUsing ) extends AlgorithmContext {
   override def data: Seq[DoublePoint] = message.payload.source.points
   override def recent: RecentHistory = message.recent
+
   override def tolerance: Double = {
     import AlgorithmContext.TolerancePath
     if ( message.properties hasPath TolerancePath ) message.properties.getDouble( TolerancePath ) else 3.0

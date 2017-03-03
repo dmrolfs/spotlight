@@ -8,6 +8,7 @@ import com.typesafe.config.Config
   */
 trait Advancing[S <: Serializable] {
   def zero( configuration: Option[Config] ): S
+  def N( shape: S ): Long
   def advance( original: S, advanced: AlgorithmProtocol.Advanced ): S
 
   //todo: there's a functional way to achieve this :-)
