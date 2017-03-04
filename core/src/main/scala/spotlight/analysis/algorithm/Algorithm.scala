@@ -14,7 +14,6 @@ import akka.persistence._
 import scalaz._
 import Scalaz._
 import scalaz.Kleisli.{ ask, kleisli }
-import shapeless.the
 //import bloomfilter.mutable.BloomFilter
 import bloomfilter.CanGenerateHashFrom
 import bloomfilter.CanGenerateHashFrom.CanGenerateHashFromString
@@ -176,6 +175,8 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
   type Shape = S
   type State = AlgorithmState[S]
 
+  val advancing: Advancing[Shape] = shapeless.the[Advancing[Shape]]
+
   //todo: pull into type parameter with TypeClass for make
   type Context <: AlgorithmContext
   def makeContext( message: DetectUsing, state: Option[State] ): Context
@@ -185,6 +186,7 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
     val tail = if ( c.properties hasPath TailAveragePath ) c.properties getInt TailAveragePath else 1
     if ( 1 < tail ) { c.tailAverage( tail )( c.data ) } else c.data
   }
+
   def step( point: PointT, shape: Shape )( implicit s: State, c: Context ): Option[( Boolean, ThresholdBoundary )]
 
   implicit lazy val identifying: Identifying.Aux[State, Algorithm.ID] = new Identifying[State] {
@@ -268,7 +270,7 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
 
     import AlgorithmProtocol.Advanced
 
-    override def toString: String = s"AlgorithmModule( ${the[Identifying[State]].idTag.name} )"
+    override def toString: String = s"AlgorithmModule( ${shapeless.the[Identifying[State]].idTag.name} )"
 
     override lazy val shardName: String = algorithm.label
 
@@ -321,7 +323,7 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
     }
 
     class Repository( model: DomainModel )
-        extends EnvelopingAggregateRootRepository( model, algorithmModule.rootType ) {
+        extends EnvelopingAggregateRootRepository( model, algorithmModule.rootType ) with AltActorLogging {
       actor: AggregateRootRepository.AggregateContext ⇒
 
       override def aggregateProps: Props = AlgorithmActor.props( model, rootType )
@@ -346,7 +348,13 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
 
       override def aggregateFor( command: Any ): ActorRef = {
         if ( !rootType.aggregateIdFor.isDefinedAt( command ) ) {
-          log.warning( "AggregateRootType[{}] does not recognize command[{}]", rootType.name, command )
+          altLog.warn(
+            Map(
+              "@msg" → "aggregate root type does not recognize command",
+              "root-type" → rootType.name,
+              "command" → command.toString
+            )
+          )
         }
         val ( id, _ ) = rootType aggregateIdFor command
         AlgorithmIdentifier.fromAggregateId( id ).disjunction match {
@@ -357,7 +365,16 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
           }
 
           case -\/( exs ) ⇒ {
-            exs foreach { ex ⇒ log.error( ex, "failed to parse aggregateId:[{}] from rootType:[{}]", id, rootType.name ) }
+            exs foreach { ex ⇒
+              altLog.error(
+                Map(
+                  "@msg" → "failed to parse aggregateId via root type",
+                  "aggregateId" → id.toString,
+                  "root-type" → rootType.name
+                ),
+                ex
+              )
+            }
             throw exs.head
           }
         }
@@ -379,7 +396,8 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
         with Passivating
         with EnvelopingActor
         with AggregateRoot.Provider
-        with InstrumentedActor {
+        with InstrumentedActor
+        with AltActorLogging {
       publisher: EventPublisher ⇒
 
       setInactivityTimeout( inactivity = rootType.passivation.inactivityTimeout, message = ReceiveTimeout /*StopAggregateRoot(aggregateId)*/ )
@@ -387,9 +405,13 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
       override val journalPluginId: String = "akka.persistence.algorithm.journal.plugin"
       override val snapshotPluginId: String = "akka.persistence.algorithm.snapshot.plugin"
 
-      log.info(
-        "{} AlgorithmActor instantiated: [{}] with inactivity timeout:[{}]",
-        algorithm.label, aggregateId, rootType.passivation.inactivityTimeout
+      altLog.info(
+        Map(
+          "@msg" → "AlgorithmActor instantiated",
+          "algorithm" → algorithm.label,
+          "id" → aggregateId.toString,
+          "inactivity-timeout" → rootType.passivation.inactivityTimeout.toString
+        )
       )
 
       override def preStart(): Unit = {
@@ -399,7 +421,7 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
 
       override def postStop(): Unit = {
         clearInactivityTimeout()
-        log.info( "AlgorithmModule[{}]: actor stopped with {} shapes", self.path.name, state.shapes.size )
+        altLog.info( Map( "@msg" → "actor stopped", "actor" → self.path.name, "shapes-nr" → state.shapes.size ) )
         super.postStop()
       }
 
@@ -408,11 +430,11 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
         if ( isRedundantSnapshot ) {
           import PassivationSaga.Complete
           context become LoggingReceive { around( active orElse passivating( PassivationSaga( snapshot = Complete ) ) ) }
-          log.info( "AlgorithmModule[{}] passivation started with current snapshot...", self.path.name )
+          altLog.info( Map( "@msg" → "passivation started with current snapshot", "actor" → self.path.name ) )
           postSnapshot( lastSequenceNr - 1L, true )
         } else {
           context become LoggingReceive { around( active orElse passivating() ) }
-          log.info( "AlgorithmModule[{}] passivation started with old snapshot...", self.path.name )
+          altLog.info( Map( "@msg" → "passivation started with old snapshot", "actor" → self.path.name ) )
           startPassivationTimer()
           saveSnapshot( state )
         }
@@ -427,7 +449,7 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
           case \/-( aid ) ⇒ algorithmModule.identifying.tag( aid ).toString
 
           case -\/( exs ) ⇒ {
-            exs foreach { ex ⇒ log.error( ex, "failed to parse persistenceId from path:[{}]", p ) }
+            exs foreach { ex ⇒ altLog.error( Map( "@msg" → "failed to parse persistenceId from path", "path" → p.toString ), ex ) }
             throw exs.head
           }
         }
@@ -447,12 +469,15 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
 
       override val acceptance: Acceptance = {
         case ( AdvancedType( event ), cs ) ⇒ {
-          val s = cs.shapes.get( event.topic ) getOrElse the[Advancing[Shape]].zero( None )
+          val s = cs.shapes.get( event.topic ) getOrElse advancing.zero( None )
           _advances += 1
-          val newState = cs.withTopicShape( event.topic, the[Advancing[Shape]].advance( s, event ) )
+          val newShape = advancing.advance( s, event )
+          val newState = cs.withTopicShape( event.topic, newShape )
+
+          altLog.debug( Map( "@msg" → "#TEST acceptance", "before" → s.toString, "advanced" → newShape.toString, "advances" → _advances ) )
 
           if ( AdvanceLimit < _advances ) {
-            log.debug( "advance limit exceed before snapshot time - taking snapshot with sweeps.." )
+            altLog.debug( "advance limit exceed before snapshot time - taking snapshot with sweeps.." )
             _advances = 0
             saveSnapshot( newState )
           }
@@ -481,9 +506,15 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
 
             case -\/( ex: Algorithm.InsufficientDataSize ) ⇒ {
               stopTimer( start )
-              log.info(
-                "[{}] skipped [{}] analysis on [{}] @ [{}] due to insufficient data - no outliers marked for interval",
-                workId, algo, payload.plan.name + "][" + payload.topic, payload.source.interval
+              altLog.info(
+                Map(
+                  "@msg" → "skipped algorithm analysis due to insufficient data - no outliers marked for interval",
+                  "work-id" → workId.toString,
+                  "algorithm" → algo,
+                  "scope" → Map( "plan" → payload.plan.name, "topic" → payload.topic.toString ),
+                  "interval" → payload.source.interval.toString
+                ),
+                id = requestId
               )
 
               // don't let aggregator time out just due to error in algorithm
@@ -497,10 +528,16 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
 
             case -\/( ex ) ⇒ {
               stopTimer( start )
-              log.error(
+              altLog.error(
+                Map(
+                  "@msg" → "failed algorithm analysis - no outliers marked for interval",
+                  "work-id" → workId.toString,
+                  "algorithm" → algo,
+                  "scope" → Map( "plan" → payload.plan.name, "topic" → payload.topic.toString ),
+                  "interval" → payload.source.interval.toString
+                ),
                 ex,
-                "[{}] failed [{}] analysis on [{}] @ [{}] - no outliers marked for interval",
-                workId, algo, payload.plan.name + "][" + payload.topic, payload.source.interval
+                id = requestId
               )
               // don't let aggregator time out just due to error in algorithm
               aggregator !+ NoOutliers(
@@ -540,37 +577,63 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
         case StopMessageType( m ) ⇒ passivate() // not used in normal case as handled by AggregateRoot
 
         case e: SaveSnapshotSuccess ⇒ {
-          log.debug(
-            "[{}] save snapshot successful to:[{}]. deleting old snapshots before and journals -- meta:[{}]",
-            self.path.name, e.metadata.sequenceNr, e.metadata
+          altLog.debug(
+            Map(
+              "@msg" → "save snapshot successful. deleting old snapshots and journals",
+              "actor" → self.path.name,
+              "sequence-nr" → e.metadata.sequenceNr,
+              "meta" → e.metadata.toString
+            ),
+            id = requestId
           )
 
           postSnapshot( e.metadata.sequenceNr, true )
         }
 
         case e @ SaveSnapshotFailure( meta, ex ) ⇒ {
-          log.warning( "[{}] failed to save snapshot. meta:[{}] cause:[{}]", self.path.name, meta, ex )
+          altLog.warn(
+            Map( "@msg" → "failed to save snapshot", "actor" → self.path.name, "meta" → e.metadata.toString ),
+            ex,
+            id = requestId
+          )
           postSnapshot( lastSequenceNr - 1L, false )
         }
 
         case e: DeleteSnapshotsSuccess ⇒ {
           stopSnapshotSweepTimer( e )
-          log.debug( "[{}] successfully cleared snapshots up to: [{}]", self.path.name, e.criteria )
+          altLog.debug(
+            Map( "@msg" → "successfully cleared snapshots", "actor" → self.path.name, "to" → e.criteria.toString ),
+            id = requestId
+          )
         }
 
         case e @ DeleteSnapshotsFailure( criteria, cause ) ⇒ {
           stopSnapshotSweepTimer( e )
-          log.warning( "[{}] failed to clear snapshots. meta:[{}] cause:[{}]", self.path.name, criteria, cause )
+          altLog.warn(
+            Map( "@msg" → "failed to clear snapshots", "actor" → self.path.name, "criteria" → e.criteria.toString ),
+            cause,
+            id = requestId
+          )
         }
 
         case e: DeleteMessagesSuccess ⇒ {
           stopJournalSweepTimer( e )
-          log.debug( "[{}] successfully cleared journal: [{}]", self.path.name, e )
+          altLog.debug(
+            Map( "@msg" → "successfully cleared journal", "actor" → self.path.name, "event" → e.toString ),
+            id = requestId
+          )
         }
 
         case e: DeleteMessagesFailure ⇒ {
           stopJournalSweepTimer( e )
-          log.warning( "[{}] FAILED to clear journal will attempt to clear on subsequent snapshot: [{}]", self.path.name, e )
+          altLog.warn(
+            Map(
+              "@msg" → "failed to clear journal. will try again on subsequent snapshot",
+              "actor" → self.path.name,
+              "event" → e.toString
+            ),
+            id = requestId
+          )
         }
       }
 
@@ -585,7 +648,7 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
           snapshot: PassivationSaga.Status = PassivationSaga.Pending,
           snapshotSweep: PassivationSaga.Status = PassivationSaga.Pending,
           journalSweep: PassivationSaga.Status = PassivationSaga.Pending
-      ) {
+      ) extends ClassLogging {
         def isComplete: Boolean = {
           val result = {
             ( snapshot != PassivationSaga.Pending ) &&
@@ -593,7 +656,20 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
               ( journalSweep != PassivationSaga.Pending )
           }
 
-          log.debug( "AlgorithmModule[{}] passivation saga status: is-complete:[{}] saga:[{}]", self.path.name, result, this )
+          log.debug(
+            Map(
+              "@msg" → "passivation saga status",
+              "actor" → self.path.name,
+              "is-complete" → result.toString,
+              "status" → Map(
+                "snapshot" → snapshot.toString,
+                "snapshot-sweep" → snapshotSweep.toString,
+                "journal-sweep" → journalSweep.toString
+              )
+            ),
+            id = requestId
+          )
+
           result
         }
 
@@ -604,10 +680,30 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
 
       def passivationStep( saga: PassivationSaga ): Unit = {
         if ( saga.isComplete ) {
-          log.debug( "AlgorithmModule[{}] passivation completed. stopping actor with shapes:[{}]", self.path.name, state.shapes.size )
+          altLog.debug(
+            Map(
+              "@msg" → "passivation completed. stopping actor with shapes",
+              "actor" → self.path.name,
+              "shapes-nr" → state.shapes.size
+            ),
+            id = requestId
+          )
+
           context stop self
         } else {
-          log.debug( "AlgorithmModule[{}] passivation progressing but not complete: [{}]", self.path.name, saga )
+          altLog.debug(
+            Map(
+              "@msg" → "passivation progressing but not complete",
+              "actor" → self.path.name,
+              "status" → Map(
+                "snapshot" → saga.snapshot.toString,
+                "snapshot-sweep" → saga.snapshotSweep.toString,
+                "journal-sweep" → saga.journalSweep.toString
+              )
+            ),
+            id = requestId
+          )
+
           context become LoggingReceive { around( passivating( saga ) ) }
         }
       }
@@ -615,14 +711,24 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
       def passivating( saga: PassivationSaga = PassivationSaga() ): Receive = {
         case StopMessageType( e ) ⇒ {
           stopPassivationTimer( e )
-          log.warning( "AlgorithmModule[{}] immediate passivation upon repeat stop command", self.path.name )
+
+          altLog.warn(
+            Map( "@msg" → "immediate passivation upon repeat stop command", "actor" → self.path.name ),
+            id = requestId
+          )
+
           context stop self
         }
 
         case e: SaveSnapshotSuccess ⇒ {
-          log.debug(
-            "[{}] save passivation snapshot successful to:[{}]. deleting old snapshots before and journals -- meta:[{}]",
-            self.path.name, e.metadata.sequenceNr, e.metadata
+          altLog.debug(
+            Map(
+              "@msg" → "save passivation snapshot successful. deleting old snapshots and journals",
+              "actor" → self.path.name,
+              "sequence-nr" → e.metadata.sequenceNr,
+              "metadata" → e.metadata
+            ),
+            id = requestId
           )
 
           passivationStep( saga.copy( snapshot = PassivationSaga.Complete ) )
@@ -630,36 +736,53 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
         }
 
         case e @ SaveSnapshotFailure( meta, ex ) ⇒ {
-          log.warning( "[{}] failed to save passivation snapshot. meta:[{}] cause:[{}]", self.path.name, meta, ex )
+          altLog.warn(
+            Map( "@msg" → "failed to save passivation snapshot", "actor" → self.path.name, "metadata" → meta.toString ),
+            ex,
+            id = requestId
+          )
           postSnapshot( lastSequenceNr - 1L, false )
           passivationStep( saga.copy( snapshot = PassivationSaga.Failed ) )
         }
 
         case e: DeleteSnapshotsSuccess ⇒ {
           stopSnapshotSweepTimer( e )
-          log.debug( "AlgorithmModule[{}] on passivation successfully cleared snapshots up to: [{}]", self.path.name, e.criteria )
+          altLog.debug(
+            Map( "@msg" → "passivation successfully cleared snapshots", "actor" → self.path.name, "to" → e.criteria.toString ),
+            id = requestId
+          )
           passivationStep( saga.copy( snapshotSweep = PassivationSaga.Complete ) )
         }
 
         case e @ DeleteSnapshotsFailure( criteria, cause ) ⇒ {
           stopSnapshotSweepTimer( e )
-          log.warning( "AlgorithmModule[{}] on passivation failed to clear snapshots. meta:[{}] cause:[{}]", self.path.name, criteria, cause )
+          altLog.warn(
+            Map( "@msg" → "passivation failed to clear snapshots", "actor" → self.path.name, "criteria" → criteria.toString ),
+            cause,
+            id = requestId
+          )
           passivationStep( saga.copy( snapshotSweep = PassivationSaga.Failed ) )
         }
 
         case e: DeleteMessagesSuccess ⇒ {
           stopJournalSweepTimer( e )
-          log.debug( "AlgorithmModule[{}] on passivation successfully cleared journal: [{}]", self.path.name, e )
+          altLog.debug(
+            Map( "@msg" → "passivation successfully cleared journal", "actor" → self.path.name, "event" → e.toString ),
+            id = requestId
+          )
           stopPassivationTimer( e )
           passivationStep( saga.copy( journalSweep = PassivationSaga.Complete ) )
         }
 
         case e: DeleteMessagesFailure ⇒ {
           stopJournalSweepTimer( e )
-          log.warning(
-            "[{}] on passivation FAILED to clear journal will attempt to clear on subsequent snapshot: [{}]",
-            self.path.name,
-            e
+          altLog.warn(
+            Map(
+              "@msg" → "passivation FAILED to clear journal will attempt to clear on subsequent snapshot",
+              "actor" → self.path.name,
+              "event" → e.toString
+            ),
+            id = requestId
           )
 
           stopPassivationTimer( e )
@@ -670,7 +793,14 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
       override def unhandled( message: Any ): Unit = {
         message match {
           case m: DetectUsing ⇒ {
-            log.error( "[{}] algorithm [{}] does not recognize requested payload: [{}]", self.path.name, algorithm, m )
+            altLog.error(
+              Map(
+                "@msg" → "algorithm does not recognize requested payload",
+                "actor" → self.path.name,
+                "algorithm" → algorithm,
+                "payload" → m.toString
+              )
+            )
             sender() !+ UnrecognizedPayload( algorithm.label, m )
           }
 
@@ -711,7 +841,7 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
           0
         }
 
-        the[Advancing[S]].N( shape ) match {
+        advancing.N( shape ) match {
           case s if s < minimumDataPoints ⇒ Algorithm.InsufficientDataSize( label, s, minimumDataPoints ).left
           case s ⇒ s.right
         }
@@ -737,11 +867,17 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
               case \/-( a ) ⇒ a.right
 
               case -\/( ex: Algorithm.InsufficientDataSize ) ⇒ {
-                log.info(
-                  "skipping point[({}, {})] due to insufficient history for algorithm {}",
-                  s"${pt.dateTime}:${pt.timestamp.toLong}",
-                  pt.value.toString,
-                  algorithm.label
+                altLog.info(
+                  Map(
+                    "@msg" → "skipping point due to insufficient history for algorithm",
+                    "point" → Map(
+                      "datetime" → pt.dateTime.toString,
+                      "timestamp" → pt.timestamp.toLong,
+                      "value" → f"${pt.value}%2.5f"
+                    ),
+                    "algorithm" → algorithm.label
+                  ),
+                  id = requestId
                 )
 
                 ( false, ThresholdBoundary empty pt.timestamp.toLong ).right
@@ -773,21 +909,49 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
                           threshold = threshold
                         )
 
-                        //                    log.debug(
-                        //                      "{} STEP:{} [{}]: AnalysisState.Advanced:[{}]",
-                        //                      algorithm.label.name,
-                        //                      if ( isOutlier ) "ANOMALY" else "regular",
-                        //                      s"ts:[${pt.dateTime}:${pt._1.toLong}] eff-value:[${pt.value}] orig-value:[${original.value}]",
-                        //                      event
-                        //                    )
+                        altLog.debug(
+                          Map(
+                            "@msg" → "STEP",
+                            "properties" → analysisContext.properties.toString,
+                            "algorithm" → algorithm.label,
+                            "assessment" → ( if ( isOutlier ) "ANOMALY" else "normal" ),
+                            "point" → Map(
+                              "datetime" → pt.dateTime.toString,
+                              "timestamp" → pt.timestamp.toLong,
+                              "tail-averaged-value" → f"${pt.value}%2.5f",
+                              "original-value" → f"${original.value}%2.5f"
+                            ),
+                            "event" → Map(
+                              "topic" → event.topic.toString,
+                              "tags" → event.tags.toString,
+                              "threshold" → Map(
+                                "floor" → event.threshold.floor.map( v ⇒ f"${v}%2.5f" ).toString,
+                                "expected" → event.threshold.expected.map( v ⇒ f"${v}%2.5f" ).toString,
+                                "ceiling" → event.threshold.ceiling.map( v ⇒ f"${v}%2.5f" ).toString
+                              )
+                            )
+                          ),
+                          id = requestId
+                        )
 
                         acc.copy(
-                          shape = the[Advancing[Shape]].advance( acc.shape, event ),
+                          shape = advancing.advance( acc.shape, event ),
                           advances = acc.advances :+ event
                         )
                       }
                       .getOrElse {
-                        log.error( "NOT ORIGINAL PT:[{}]", ( pt._1.toLong, pt._2 ) )
+                        altLog.error(
+                          Map(
+                            "@msg" → "NOT ORIGINAL",
+                            "point" → Map(
+                              "datetime" → pt.dateTime.toString,
+                              "timestamp" → pt.timestamp.toLong,
+                              "value" → f"${pt.value}%2.5f"
+                            )
+                          ),
+                          id = requestId
+                        )
+
                         acc
                       }
                   }
@@ -798,15 +962,12 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
             }
           }
 
-          loop(
-            points = points.toList,
-            accumulation = Accumulation(
-              topic = analysisContext.topic,
-              shape = state.shapes.get( analysisContext.topic ) getOrElse {
-              the[Advancing[Shape]].zero( Option( analysisContext.properties ) )
-            }
-            ).right
-          )
+          val workingShape = state.shapes.get( analysisContext.topic ) match {
+            case None ⇒ advancing zero Option( analysisContext.properties )
+            case Some( shape ) ⇒ advancing copy shape
+          }
+
+          loop( points.toList, Accumulation( analysisContext.topic, workingShape ).right )
         }
       }
 
@@ -886,7 +1047,10 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
 
         event match {
           case e: demesne.PassivationSpecification.StopAggregateRoot[_] ⇒ {
-            log.info( "[{}] received repeated passivation message: [{}]", self.path.name, e )
+            altLog.info(
+              Map( "@msg" → "received repeated passivation message", "actor" → self.path.name, "event" → e.toString ),
+              id = requestId
+            )
           }
 
           case _ ⇒ {}
@@ -899,7 +1063,10 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
       }
 
       def postSnapshot( snapshotSequenceNr: Long, success: Boolean ): Unit = {
-        log.debug( "[{}] postSnapshot event:[{}] success:[{}]", self.path.name, snapshotSequenceNr, success )
+        altLog.debug(
+          Map( "@msg" → "postSnapshot", "actor" → self.path.name, "sequence-nr" → snapshotSequenceNr, "success" → success ),
+          id = requestId
+        )
         stopSnapshotTimer( success )
 
         startSnapshotSweepTimer()
@@ -910,12 +1077,19 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
       }
 
       override protected def onPersistFailure( cause: Throwable, event: Any, seqNr: Long ): Unit = {
-        log.error( "AlgorithmModule[{}] onPersistFailure cause:[{}] event:[{}] seqNr:[{}]", self.path.name, cause, event, seqNr )
-        super.onPersistFailure( cause, event, seqNr )
+        altLog.error(
+          Map( "@msg" → "onPersistFailure", "actor" → self.path.name, "event" → event.toString, "sequence-nr" → seqNr ),
+          cause,
+          id = requestId
+        )
       }
 
       override protected def onRecoveryFailure( cause: Throwable, event: Option[Any] ): Unit = {
-        log.error( "AlgorithmModule[{}] onRecoveryFailure cause:[{}] event:[{}]", self.path.name, cause, event )
+        altLog.error(
+          Map( "@msg" → "onRecoveryFailure", "actor" → self.path.name, "event" → event.toString ),
+          cause,
+          id = requestId
+        )
         super.onRecoveryFailure( cause, event )
       }
     }

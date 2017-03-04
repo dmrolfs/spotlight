@@ -1,19 +1,23 @@
 package spotlight.analysis.algorithm.statistical
 
+import scala.concurrent.Await
+import scala.concurrent.duration._
 import scala.annotation.tailrec
 import akka.actor.ActorSystem
+import akka.pattern.ask
 import com.typesafe.config.{ Config, ConfigFactory }
 import com.persist.logging._
+import omnibus.akka.envelope._
 import org.apache.commons.math3.stat.descriptive.{ DescriptiveStatistics, SummaryStatistics }
 import org.mockito.Mockito._
 import org.scalatest.Assertion
-import spotlight.analysis.algorithm.{ Advancing, AlgorithmSpec, AlgorithmProtocol ⇒ P }
+import spotlight.analysis.{ DetectOutliersInSeries, DetectUsing }
+import spotlight.analysis.algorithm.{ Advancing, AlgorithmSpec, AlgorithmProtocol ⇒ AP }
 import spotlight.model.timeseries._
-import spotlight.analysis.algorithm.summaryStatisticsAdvancing
 
 /** Created by rolfsd on 6/9/16.
   */
-class SimpleMovingAverageAlgorithmSpec extends AlgorithmSpec[SummaryStatistics] {
+class SimpleMovingAverageAlgorithmSpec extends AlgorithmSpec[SimpleMovingAverageShape] {
 
   override type Algo = SimpleMovingAverageAlgorithm.type
   override val defaultAlgorithm: Algo = SimpleMovingAverageAlgorithm
@@ -32,32 +36,41 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmSpec[SummaryStatistics] 
         else {
           val l = lhs.asInstanceOf[SimpleMovingAverageAlgorithm.Shape]
           val r = rhs.asInstanceOf[SimpleMovingAverageAlgorithm.Shape]
-          ( l.getN - r.getN ).toInt
+          ( l.N - r.N ).toInt
         }
       }
     }
 
-    override def expectedUpdatedShape( shape: TestShape, event: P.Advanced ): TestShape = {
+    override def expectedUpdatedShape( shape: TestShape, event: AP.Advanced ): TestShape = {
       val newShape = shape.copy()
-      newShape addValue event.point.value
+      newShape :+ event.point.value
       newShape
     }
 
     def assertShape( result: Option[CalculationMagnetResult], topic: Topic )( s: TestShape ): Assertion = {
-      logger.info( "assertState result:[{}]", result )
-
       val expectedStats = for { r ← result; s ← r.statistics } yield ( s.getN, s.getMean, s.getStandardDeviation )
+
+      log.info(
+        Map(
+          "@msg" → "assertState",
+          "expected" → result.toString,
+          "shape" → s.toString,
+          "N" → Map( "actual" → s.N.toString, "expected" → expectedStats.map { _._1 }.toString ),
+          "mean" → Map( "actual" → s.mean.toString, "expected" → expectedStats.map { _._2 }.toString ),
+          "stdev" → Map( "actual" → s.standardDeviation.toString, "expected" → expectedStats.map { _._3 }.toString )
+        )
+      )
 
       expectedStats match {
         case None ⇒ {
-          assert( s.getMean.isNaN )
-          assert( s.getStandardDeviation.isNaN )
+          assert( s.mean.isNaN )
+          assert( s.standardDeviation.isNaN )
         }
 
         case Some( ( size, mean, standardDeviation ) ) ⇒ {
-          s.getN mustBe size
-          s.getMean mustBe mean
-          s.getStandardDeviation mustBe standardDeviation
+          s.N mustBe size
+          s.mean mustBe mean
+          s.standardDeviation mustBe standardDeviation
         }
       }
     }
@@ -106,7 +119,7 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmSpec[SummaryStatistics] 
       implicit val testState = mock[State]
       when( testState.shapes ).thenReturn( Map( scope.topic → testShape ) )
 
-      def advanceWith( v: Double ): Unit = testShape addValue v
+      def advanceWith( v: Double ): Unit = testShape :+ v
 
       val data = Seq[Double]( 1, 1, 1, 1, 1000 )
       val expected = Seq(
@@ -121,14 +134,14 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmSpec[SummaryStatistics] 
       for {
         ( ( value, expected ), i ) ← dataAndExpected.zipWithIndex
       } {
-        testShape.getN mustBe i
+        testShape.N mustBe i
         val ts = nowTimestamp.plusSeconds( 10 * i )
         algorithm.step( ( ts.getMillis.toDouble, value ), testShape ) mustBe expected.stepResult( i )
         advanceWith( value )
       }
     }
 
-    "verify points case from OutlierScoringModel spec" taggedAs WIP in { f: Fixture ⇒
+    "verify points case from OutlierScoringModel spec" in { f: Fixture ⇒
       import f._
 
       val minPopulation = 2
@@ -177,6 +190,7 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmSpec[SummaryStatistics] 
       val s1 = spike( scope.topic, dp1 )()
       val h1 = historyWith( None, s1 )
       val ( e1, r1 ) = makeExpected( NoHint )( points = s1.points, outliers = Seq( false, false, false, false, true ) )
+
       evaluate(
         hint = "first",
         algorithmAggregateId = id,
@@ -184,6 +198,13 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmSpec[SummaryStatistics] 
         history = h1,
         expectedResults = e1,
         assertShapeFn = assertShape( r1, scope.topic )( _: TestShape )
+      )
+
+      log.info(
+        Map(
+          "@msg" → "#TEST: after run 1",
+          "shape" → Await.result( ( aggregate ? AP.GetTopicShapeSnapshot( id, scope.topic ) ).mapTo[AP.TopicShapeSnapshot], 5.seconds ).toString
+        )
       )
 
       val dp2 = makeDataPoints(
@@ -198,6 +219,18 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmSpec[SummaryStatistics] 
         outliers = Seq( false, false, false, false, false ),
         history = h2.lastPoints map { _.toDataPoint }
       )
+
+      log.info(
+        Map(
+          "@msg" → "#TEST: before run 2",
+          "shape" → Await.result( ( aggregate ? AP.GetTopicShapeSnapshot( id, scope.topic ) ).mapTo[AP.TopicShapeSnapshot], 5.seconds ).toString,
+          "history-size" → h2.N,
+          "series-size" → s2.size,
+          "expected-size" → e2.size,
+          "magnet-results" → r2.toString
+        )
+      )
+
       evaluate(
         hint = "second",
         algorithmAggregateId = id,
@@ -206,6 +239,71 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmSpec[SummaryStatistics] 
         expectedResults = e2,
         assertShapeFn = assertShape( r2, scope.topic )( _: TestShape )
       )
+
+      log.info(
+        Map(
+          "@msg" → "#TEST: after run 2",
+          "shape" → Await.result( ( aggregate ? AP.GetTopicShapeSnapshot( id, scope.topic ) ).mapTo[AP.TopicShapeSnapshot], 5.seconds ).toString
+        )
+      )
+    }
+
+    "validate size after two calls" taggedAs WIP in { f: Fixture ⇒
+      import f._
+      val size = 1
+      log.info( "---------  BUILDING REQUEST 1..." )
+      val dp1 = makeDataPoints( values = Seq.fill( size ) { 1.0 }, timeWiggle = ( 0.97, 1.03 ) )
+      val s1 = spike( scope.topic, dp1 )()
+      val h1 = historyWith( None, s1 )
+
+      log.info( "---------  SENDING REQUEST 1..." )
+      aggregate.sendEnvelope(
+        DetectUsing(
+          targetId = id,
+          algorithm = defaultAlgorithm.label,
+          payload = DetectOutliersInSeries( s1, plan, Option( subscriber.ref ), Set.empty[WorkId] ),
+          history = h1,
+          properties = plan.algorithms.getOrElse( defaultAlgorithm.label, emptyConfig )
+        )
+      )(
+          sender.ref
+        )
+
+      countDown.await( 3.seconds )
+
+      log.info( "----------  CHECKING SNAPSHOT 1..." )
+      val ss1 = Await.result( ( aggregate ? AP.GetTopicShapeSnapshot( id, scope.topic ) ).mapTo[AP.TopicShapeSnapshot], 5.seconds )
+      ss1.snapshot.value.asInstanceOf[SimpleMovingAverageShape].N mustBe size
+
+      log.info( "----------  BUILDING REQUEST 2..." )
+      val dp2 = makeDataPoints(
+        values = Seq.fill( size ) { 1.0 },
+        start = dp1.last.timestamp.plusSeconds( 10 ),
+        timeWiggle = ( 0.97, 1.03 )
+      )
+      val s2 = spike( scope.topic, dp2 )( 0 )
+      val h2 = historyWith( Option( h1.recordLastPoints( s1.points ) ), s2 )
+
+      log.info( "---------  SENDING REQUEST 2..." )
+      aggregate.sendEnvelope(
+        DetectUsing(
+          targetId = id,
+          algorithm = defaultAlgorithm.label,
+          payload = DetectOutliersInSeries( s2, plan, Option( subscriber.ref ), Set.empty[WorkId] ),
+          history = h2,
+          properties = plan.algorithms.getOrElse( defaultAlgorithm.label, emptyConfig )
+        )
+      )(
+          sender.ref
+        )
+
+      countDown.await( 3.seconds )
+
+      log.info( "---------  CHECKING SNASHOT 2..." )
+      val ss2 = Await.result( ( aggregate ? AP.GetTopicShapeSnapshot( id, scope.topic ) ).mapTo[AP.TopicShapeSnapshot], 5.seconds )
+      ss2.snapshot.value.asInstanceOf[SimpleMovingAverageShape].N mustBe ( 2 * size )
+
+      log.info( "---------- TEST DONE -----------" )
     }
   }
 }

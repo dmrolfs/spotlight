@@ -10,6 +10,7 @@ trait Advancing[S <: Serializable] {
   def zero( configuration: Option[Config] ): S
   def N( shape: S ): Long
   def advance( original: S, advanced: AlgorithmProtocol.Advanced ): S
+  def copy( shape: S ): S
 
   //todo: there's a functional way to achieve this :-)
   def valueFrom[V]( configuration: Option[Config], path: String )( fn: Config ⇒ V ): Option[V] = {

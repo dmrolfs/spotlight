@@ -19,6 +19,8 @@ package object algorithm {
       result addValue advanced.point.value
       result
     }
+
+    override def copy( shape: SummaryStatistics ): SummaryStatistics = shape.copy()
   }
 
   trait OutlierAlgorithmError

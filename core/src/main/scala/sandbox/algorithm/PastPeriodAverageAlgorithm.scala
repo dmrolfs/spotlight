@@ -147,6 +147,8 @@ object PastPeriod extends ClassLogging {
         log.debug( Map( "@msg" → "#TEST ASSIGNING point to period", "timestamp" → advanced.point.timestamp, "period" → p ) )
         original.withPeriodValue( p, v )
       }
+
+      override def copy( shape: Shape ): Shape = shape
     }
   }
 }

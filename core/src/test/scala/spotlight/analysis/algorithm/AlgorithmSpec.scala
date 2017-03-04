@@ -45,6 +45,7 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
   val defaultAlgorithm: Algo
   type State = defaultAlgorithm.State
   type Shape = defaultAlgorithm.Shape
+
   lazy val identifying: Identifying.Aux[defaultAlgorithm.State, Algorithm.ID] = defaultAlgorithm.identifying
 
   val memoryPlateauNr: Int
@@ -57,8 +58,15 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
 
   override def testConfiguration( test: OneArgTest, slug: String ): Config = {
     val c = spotlight.testkit.config( systemName = slug )
+
     import scala.collection.JavaConverters._
-    logger.debug( "Test Config: akka.cluster.seed-nodes=[{}]", c.getStringList( "akka.cluster.seed-nodes" ).asScala.mkString( ", " ) )
+    log.debug(
+      Map(
+        "@msg" → "Test Config",
+        "akka.cluster.seed-nodes" → c.getStringList( "akka.cluster.seed-nodes" ).asScala.mkString( ", " )
+      )
+    )
+
     c
   }
 
@@ -70,21 +78,22 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
     private val trace = Trace[AlgorithmFixture]
 
     val tol = 1E-11
+    val emptyConfig: Config = ConfigFactory.empty
     val sender = TestProbe()
     val subscriber = TestProbe()
 
     val countDown = new CountDownFunction[String]
 
     var loggingSystem: LoggingSystem = LoggingSystem( _system, s"Test:${defaultAlgorithm.label}", "1", "localhost" )
-    logger.info( "#TEST #############  logging system: [{}]", loggingSystem )
+    log.info( Map( "@msg" → "#TEST #############  logging system", "logging" → loggingSystem.toString ) )
 
     override def after( test: OneArgTest ): Unit = {
       Option( loggingSystem ) foreach { ls ⇒
-        logger.warn( "#TEST stopping persist logger..." )
+        log.warn( "#TEST stopping persist logger..." )
         //        Await.ready( ls.stop, 15.seconds )
       }
 
-      logger.warn( "#TEST STOPPED PERSIST LOGGER" )
+      log.warn( "#TEST STOPPED PERSIST LOGGER" )
       super.after( test )
     }
 
@@ -118,8 +127,6 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
 
     lazy val id: module.TID = nextId()
 
-    val emptyConfig = ConfigFactory.empty()
-
     val scope = AnalysisPlan.Scope( plan = "TestPlan", topic = "test.topic" )
     val plan = mock[AnalysisPlan]
     when( plan.id ).thenReturn( TryV.unsafeGet( AnalysisPlan.analysisPlanIdentifying.nextTID ) )
@@ -129,7 +136,7 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
 
     lazy val aggregate: ActorRef = {
       val r = module aggregateOf id
-      logger.info( "TEST: AGGREGATE id:[{}] from module ref:[{}]", id, r )
+      log.info( Map( "@msg" → "#TEST: AGGREGATE", "id" → id.toString, "module ref" → r.toString() ) )
       r
     }
 
@@ -148,9 +155,9 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
     override val module: Module = {
       if ( 1 < moduleCounter.incrementAndGet() ) throw new IllegalStateException( "#TEST infinite loop" )
 
-      logger.debug( "#TEST getting module from defaultAlgorithm:[{}]", defaultAlgorithm )
+      log.debug( Map( "@msg" → "#TEST getting module", "defaultAlgorithm" → defaultAlgorithm ) )
       val m: Module = defaultAlgorithm.module
-      logger.debug( "#TEST:module: result:[{}]", m )
+      log.debug( Map( "@msg" → "#TEST:module", "result" → m.toString ) )
       m
     }
 
@@ -172,7 +179,7 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
         a ← actual
         e ← expected
       } {
-        logger.debug( "TEST: actualVsExpected STATE:\n  Actual:[{}]\nExpected:[{}]", a, e )
+        log.debug( Map( "@msg" → "#TEST: actualVsExpected STATE", "actual" → a.toString, "expected" → e ) )
         a.id.id mustBe e.id.id
         a.name mustBe e.name
         a.name mustBe e.name
@@ -194,13 +201,13 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
       implicit
       ordering: Ordering[TestShape]
     ): Unit = {
-      logger.debug( "TEST: actualVsExpected SHAPE:\n  Actual:[{}]\nExpected:[{}]", actual.toString, expected.toString )
+      log.debug( Map( "@msg" → "#TEST: actualVsExpected SHAPE", "actual" → actual.toString, "expected" → expected.toString ) )
       assert( ordering.equiv( actual, expected ) )
       assert( ordering.equiv( expected, actual ) )
     }
 
     def assertOption( actual: Option[Double], expected: Option[Double], tolerance: Double, hint: String ): Assertion = {
-      logger.info( "assertOption[{}]: actual:[{}]  expected:[{}] +- {}", hint, actual, expected, tolerance.toString )
+      log.info( Map( "@msg" → "assertOption", "hint" → hint, "actual" → actual.toString, "expected" → expected.toString, "within" → tolerance.toString ) )
       if ( expected.isDefined ) {
         assert( actual.isDefined )
         actual.get mustBe ( expected.get +- tolerance )
@@ -218,9 +225,16 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
       assertShapeFn: ( TestShape ) ⇒ Assertion = ( _: TestShape ) ⇒ succeed
     ): Assertion = {
       import scala.concurrent.duration._
-      logger.info( "TEST: ShortUUID id:[{}] aggregate.path:[{}]", id, aggregate.path )
-      logger.info( "#TEST: series-size:[{}] expectedResults.size:[{}]", series.points.size.toString, expectedResults.size.toString )
-      logger.info( "#TEST: plan.algorithms:[{}]", plan.algorithms )
+      log.info(
+        Map(
+          "@msg" → "#TEST: evaluate",
+          "id" → id.toString,
+          "aggregate.path" → aggregate.path.toString,
+          "series-size" → series.points.size,
+          "expectedResults.size" → expectedResults.size,
+          "plan.algorithms" → plan.algorithms
+        )
+      )
 
       val expectedAnomalies = series.points.zipWithIndex.collect { case ( dp, i ) if expectedResults( i ).isOutlier ⇒ dp }
       aggregate.sendEnvelope(
@@ -237,7 +251,7 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
 
       sender.expectMsgPF( 500.millis.dilated, hint ) {
         case m @ Envelope( SeriesOutliers( a, s, p, o, t ), _ ) if expectedAnomalies.nonEmpty ⇒ {
-          logger.info( "evaluate EXPECTED ANOMALIES..." )
+          log.info( "evaluate EXPECTED ANOMALIES..." )
           a mustBe Set( defaultAlgorithm.label )
           s mustBe series
           o mustBe expectedAnomalies
@@ -245,7 +259,7 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
 
           t( defaultAlgorithm.label ).zip( expectedResults ).zipWithIndex foreach {
             case ( ( ( actual, expected ), i ) ) ⇒ {
-              logger.info( "evaluate[{}]: actual:[{}]  expected:[{}]", i.toString, actual, expected )
+              log.info( Map( "@msg" → "evaluate", "i" → i, "actual" → actual.toString, "expected" → expected.toString ) )
               assertOption( actual.floor, expected.floor, tol, s"$i floor" )
               assertOption( actual.expected, expected.expected, tol, s"$i expected" )
               assertOption( actual.ceiling, expected.ceiling, tol, s"$i ceiling" )
@@ -254,13 +268,22 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
         }
 
         case m @ Envelope( NoOutliers( a, s, p, t ), _ ) if expectedAnomalies.isEmpty ⇒ {
-          logger.info( "evaluate EXPECTED normal..." )
+          log.info( "evaluate EXPECTED normal..." )
           a mustBe Set( defaultAlgorithm.label )
           s mustBe series
 
           t( defaultAlgorithm.label ).zip( expectedResults ).zipWithIndex foreach {
-            case ( ( ( actual, expected ), i ) ) ⇒
-              logger.debug( "evaluating expectation: {}", i.toString )
+            case ( ( ( actual, expected ), i ) ) ⇒ {
+              log.debug(
+                Map(
+                  "@msg" → "evaluating expectation",
+                  "i" → i,
+                  "floor" → Map( "actual" → actual.floor.toString, "expected" → expected.floor.toString ),
+                  "expected" → Map( "actual" → actual.expected.toString, "expected" → expected.expected.toString ),
+                  "ceiling" → Map( "actual" → actual.ceiling.toString, "expected" → expected.ceiling.toString )
+                )
+              )
+
               actual.floor.isDefined mustBe expected.floor.isDefined
               for {
                 af ← actual.floor
@@ -278,26 +301,27 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
                 ac ← actual.ceiling
                 ec ← expected.ceiling
               } { ac mustBe ec +- 0.000001 }
+            }
           }
         }
       }
 
-      logger.info( "TEST: --- AFTER DETECTUSING ---" )
+      log.info( "TEST: --- AFTER DETECTUSING ---" )
 
       import akka.pattern.ask
 
-      logger.info( "TEST: --  GETTING SNAPSHOT ---" )
+      log.info( "TEST: --  GETTING SNAPSHOT ---" )
 
       val actual = ( aggregate ? P.GetTopicShapeSnapshot( id, series.topic ) ).mapTo[P.TopicShapeSnapshot]
       whenReady( actual, timeout( 15.seconds.dilated ) ) { a ⇒
         val as = a.snapshot
-        logger.info( "{}: ACTUAL = [{}]", hint, as )
+        log.info( Map( "@msg" → hint, "ACTUAL" → as.toString ) )
         as mustBe defined
         as.value mustBe an[TestShape]
         val sas = as.value.asInstanceOf[TestShape]
         a.sourceId.id mustBe id.id
         a.algorithm mustBe defaultAlgorithm.label
-        logger.info( "asserting shape: {}", sas )
+        log.info( Map( "@msg" → "asserting shape", "shape" → sas.toString ) )
         assertShapeFn( sas )
       }
     }
@@ -349,12 +373,25 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
     }
 
     val results = List.fill( minimumPopulation ) { None } ::: calculated
-    logger.info( "TEST: results-size:[{}]  points-size:[{}] history-size:[{}]", results.size.toString, points.size.toString, history.size.toString )
+    log.info(
+      Map(
+        "@msg" → "#TEST: makeExpected",
+        "results-size" → results.size,
+        "points-size" → points.size,
+        "history-size" → history.size
+      )
+    )
     val expected = outliers.zip( results.drop( history.size ) ) map {
-      case ( o, r ) ⇒
-        Expected.fromStatistics( isOutlier = o, tolerance = tolerance, result = r )
+      case ( o, r ) ⇒ Expected.fromStatistics( isOutlier = o, tolerance = tolerance, result = r )
     }
-    logger.info( "makeExpected: calculated result:[{}] expected:[{}]", results.last, expected.mkString( "\n", "\n", "\n" ) )
+    log.info(
+      Map(
+        "@msg" → "makeExpected",
+        "calculated-result" → results.last.toString,
+        "expected" → expected.mkString( "\n", "\n", "\n" )
+      )
+    )
+
     ( expected, results.last )
   }
 
@@ -439,13 +476,12 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
   }
 
   def historyWith( prior: Option[HistoricalStatistics], series: TimeSeries ): HistoricalStatistics = trace.block( "historyWith" ) {
-    logger.info( "series:{}", series )
-    logger.info( "prior={}", prior )
+    log.info( Map( "@msg" → "historyWith", "series" → series.toString, "prior" → prior ) )
     prior map { h ⇒
-      logger.info( "Adding series to prior shape" )
+      log.info( "Adding series to prior shape" )
       series.points.foldLeft( h ) { _ :+ _ }
     } getOrElse {
-      logger.info( "Creating new shape from series" )
+      log.info( "Creating new history from series" )
       HistoricalStatistics.fromActivePoints( series.points, false )
     }
   }
@@ -501,11 +537,11 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
         val pt = DataPoint( nowTimestamp, 3.14159 )
         val t = ThresholdBoundary( nowTimestamp, Some( 1.1 ), Some( 2.2 ), Some( 3.3 ) )
         val adv = P.Advanced( id, scope.topic, pt, true, t )
-        logger.debug( "TEST: Advancing: [{}] for id:[{}]", adv, id )
+        log.debug( Map( "@msg" → "#TEST: Advancing", "advancing" → adv.toString, "id" → id.toString ) )
         aggregate ! adv
 
         Thread.sleep( 1000 )
-        logger.debug( "TEST: getting current shape of id:[{}]...", id )
+        log.debug( Map( "@msg" → "#TEST: getting current shape", "id" → id ) )
         whenReady(
           ( aggregate ? P.GetTopicShapeSnapshot( id, adv.topic ) ).mapTo[P.TopicShapeSnapshot],
           timeout( 15.seconds.dilated )
@@ -540,12 +576,11 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
       "advance shape" in { f: Fixture ⇒
         import f._
         val zero = shapeless.the[Advancing[S]].zero( None )
-        logger.debug( "TEST: zero=[{}]", zero )
         val pt = DataPoint( nowTimestamp, 3.14159 )
         val t = ThresholdBoundary( nowTimestamp, Some( 1.1 ), Some( 2.2 ), Some( 3.3 ) )
         val adv = P.Advanced( id, scope.topic, pt, false, t )
         val expected = expectedUpdatedShape( zero, adv )
-        logger.debug( "TEST: expectedShape=[{}]", expected )
+        log.debug( Map( "@msg" → "#TEST advance shape", "zero" → zero.toString, "expected" → expected.toString ) )
 
         val actual = shapeless.the[Advancing[S]].advance( zero, adv )
         countDown await 25.millis.dilated
@@ -571,7 +606,7 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
             import akka.serialization.{ SerializationExtension, Serializer }
             val serializer: Serializer = SerializationExtension( system ).serializerFor( zero.getClass )
             val actual = Bytes( serializer.toBinary( atPlateau.asInstanceOf[AnyRef] ).size )
-            actual mustBe expected
+            actual mustBe <=( expected )
           }
         }
       }

@@ -60,17 +60,18 @@ case class GrubbsShape( underlying: mutable.MovingStatistics ) extends Equals {
 object GrubbsShape extends ClassLogging {
   def apply( capacity: Int = DefaultCapacity ): GrubbsShape = GrubbsShape( mutable.MovingStatistics( capacity ) )
 
-  val SampleSizePath = "capacity"
+  val CapacityPath = "capacity"
   val DefaultCapacity: Int = 60
 
   implicit val advancing = new Advancing[GrubbsShape] {
     override def zero( configuration: Option[Config] ): GrubbsShape = {
-      val capacity = valueFrom( configuration, SampleSizePath ) { _.getInt( SampleSizePath ) } getOrElse DefaultCapacity
+      val capacity = valueFrom( configuration, CapacityPath ) { _ getInt CapacityPath } getOrElse DefaultCapacity
       GrubbsShape( capacity )
     }
 
     override def N( shape: GrubbsShape ): Long = shape.N
     override def advance( original: GrubbsShape, advanced: Advanced ): GrubbsShape = { original :+ advanced.point.value }
+    override def copy( shape: GrubbsShape ): GrubbsShape = shape.copy( underlying = shape.underlying.copy() )
   }
 }
 

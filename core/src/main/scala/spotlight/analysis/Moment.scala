@@ -12,7 +12,7 @@ import spotlight.analysis.algorithm.AlgorithmProtocol.Advanced
 
 /** Created by rolfsd on 1/26/16.
   */
-trait Moment extends Serializable {
+sealed trait Moment extends Serializable {
   def alpha: Double
   def centerOfMass: Double
   //    def halfLife: Double
@@ -52,6 +52,8 @@ object Moment extends ClassLogging {
     override def N( shape: Moment ): Long = shape.statistics.map { _.N } getOrElse 0L
 
     override def advance( original: Moment, advanced: Advanced ): Moment = original :+ advanced.point.value
+
+    override def copy( shape: Moment ): Moment = shape
   }
 
   object Statistics {
