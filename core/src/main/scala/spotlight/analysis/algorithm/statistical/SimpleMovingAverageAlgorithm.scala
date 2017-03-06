@@ -75,13 +75,7 @@ object SimpleMovingAverageShape extends ClassLogging {
 
   implicit val advancing = new Advancing[SimpleMovingAverageShape] {
     override def zero( configuration: Option[Config] ): SimpleMovingAverageShape = {
-      val window = valueFrom( configuration, SlidingWindowPath ) { c =>
-        val sliding = c getInt SlidingWindowPath
-        if ( 0 < sliding ) sliding else DefaultSlidingWindow
-      } getOrElse {
-        DefaultSlidingWindow
-      }
-
+      val window = slidingWindowFrom( configuration )
       log.debug( Map( "@msg" → "creating zero shape", "window" → window, "is-inf" → ( Int.MaxValue == window ) ) )
       SimpleMovingAverageShape( window )
     }
@@ -98,6 +92,19 @@ object SimpleMovingAverageShape extends ClassLogging {
         case s: MovingStatistics ⇒ s.copy()
       }
       shape.copy( underlying = newUnderlying )
+    }
+  }
+
+  def slidingWindowFrom( configuration: Option[Config] ): Int = {
+    configuration map { c ⇒
+      if ( c hasPath SlidingWindowPath ) {
+        val sliding = c getInt SlidingWindowPath
+        if ( 0 < sliding ) sliding else DefaultSlidingWindow
+      } else {
+        DefaultSlidingWindow
+      }
+    } getOrElse {
+      DefaultSlidingWindow
     }
   }
 }
@@ -136,5 +143,14 @@ object SimpleMovingAverageAlgorithm extends Algorithm[SimpleMovingAverageShape](
   /** Optimization available for algorithms to more efficiently respond to size estimate requests for algorithm sharding.
     * @return blended average size for the algorithm shape
     */
-  override val estimatedAverageShapeSize: Option[Information] = Some( Bytes( 2230 ) )
+  override def estimatedAverageShapeSize( properties: Option[Config] ): Option[Information] = {
+    SimpleMovingAverageShape.slidingWindowFrom( properties ) match {
+      case SimpleMovingAverageShape.DefaultSlidingWindow ⇒ Some( Bytes( 2230 ) )
+      case window if window <= 32 ⇒ Some( Bytes( 716 + ( window * 13 ) ) ) // identified through observation
+      case window if window <= 42 ⇒ Some( Bytes( 798 + ( window * 13 ) ) )
+      case window if window <= 73 ⇒ Some( Bytes( 839 + ( window * 13 ) ) )
+      case window if window <= 105 ⇒ Some( Bytes( 880 + ( window * 13 ) ) )
+      case _ ⇒ None
+    }
+  }
 }

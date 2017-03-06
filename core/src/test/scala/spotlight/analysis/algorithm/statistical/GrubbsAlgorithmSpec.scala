@@ -143,7 +143,7 @@ class GrubbsAlgorithmSpec
       when( context.alpha ) thenReturn alpha
       when( context.properties ) thenReturn ConfigFactory.empty
 
-      val stats = points.foldLeft( new DescriptiveStatistics( GrubbsShape.DefaultSlidingWindow ) ) { (s, p ) ⇒
+      val stats = points.foldLeft( new DescriptiveStatistics( GrubbsShape.DefaultSlidingWindow ) ) { ( s, p ) ⇒
         s.addValue( p.value )
         s
       }
@@ -188,7 +188,7 @@ class GrubbsAlgorithmSpec
     //    }
 
     //todo define and use smaller fixture
-    "calculate grubbs score" taggedAs WIP in { f: Fixture ⇒
+    "calculate grubbs score" in { f: Fixture ⇒
       val minPopulation = 8
       val grubbsConfig = ConfigFactory.parseString(
         s"""

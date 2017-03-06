@@ -17,6 +17,7 @@ import scalaz.Kleisli.{ ask, kleisli }
 //import bloomfilter.mutable.BloomFilter
 import bloomfilter.CanGenerateHashFrom
 import bloomfilter.CanGenerateHashFrom.CanGenerateHashFromString
+import com.typesafe.config.Config
 import com.typesafe.config.ConfigException.BadValue
 import org.apache.commons.math3.ml.clustering.DoublePoint
 import com.codahale.metrics.{ Metric, MetricFilter }
@@ -208,8 +209,8 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
     * the EstimatedSize message reports on the average shape size to help determine this factor.
     * @return Information byte size
     */
-  def estimateSize( state: State )( implicit system: ActorSystem ): Information = {
-    algorithm.estimatedAverageShapeSize
+  def estimateSize( state: State, properties: Option[Config] )( implicit system: ActorSystem ): Information = {
+    algorithm.estimatedAverageShapeSize( properties )
       .map { _ * state.shapes.size }
       .getOrElse {
         import akka.serialization.{ SerializationExtension, Serializer }
@@ -233,7 +234,7 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
   /** Optimization available for algorithms to more efficiently respond to size estimate requests for algorithm sharding.
     * @return blended average size for the algorithm shape
     */
-  def estimatedAverageShapeSize: Option[Information] = None
+  def estimatedAverageShapeSize( properties: Option[Config] ): Option[Information] = None
 
   initializeMetrics()
 
@@ -469,7 +470,7 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
 
       override val acceptance: Acceptance = {
         case ( AdvancedType( event ), cs ) ⇒ {
-          val s = cs.shapes.get( event.topic ) getOrElse advancing.zero( None )
+          val s = cs.shapes.get( event.topic ) getOrElse advancing.zero( Option( algorithmContext ) map { ctx ⇒ ctx.properties } )
           _advances += 1
           val newShape = advancing.advance( s, event )
           val newState = cs.withTopicShape( event.topic, newShape )
@@ -562,7 +563,7 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
           sender() !+ AP.EstimatedSize(
             sourceId = aggregateId,
             nrShapes = state.shapes.size,
-            size = estimateSize( state )( context.system )
+            size = estimateSize( state, Option( algorithmContext ).map( _.properties ) )( context.system )
           )
         }
 

@@ -43,9 +43,7 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmSpec[SimpleMovingAverage
     }
 
     override def expectedUpdatedShape( shape: TestShape, event: AP.Advanced ): TestShape = {
-      val newShape = shape.copy()
-      newShape :+ event.point.value
-      newShape
+      shape :+ event.point.value
     }
 
     def assertShape( result: Option[CalculationMagnetResult], topic: Topic )( s: TestShape ): Assertion = {
@@ -115,12 +113,14 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmSpec[SimpleMovingAverage
       val algorithm = defaultAlgorithm
       implicit val testContext = mock[defaultAlgorithm.Context]
       when( testContext.properties ) thenReturn { ConfigFactory.empty }
-      val testShape: Shape = shapeless.the[Advancing[Shape]].zero( None )
+      var testShape: Shape = shapeless.the[Advancing[Shape]].zero( None )
 
       implicit val testState = mock[State]
       when( testState.shapes ).thenReturn( Map( scope.topic → testShape ) )
 
-      def advanceWith( v: Double ): Unit = testShape :+ v
+      def advanceWith( v: Double ): Unit = {
+        testShape = testShape :+ v
+      }
 
       val data = Seq[Double]( 1, 1, 1, 1, 1000 )
       val expected = Seq(
@@ -239,7 +239,7 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmSpec[SimpleMovingAverage
       }
     }
 
-    "verify points case from OutlierScoringModel spec and small window" taggedAs WIP in { f: Fixture ⇒
+    "verify points case from OutlierScoringModel spec and small window" in { f: Fixture ⇒
       import f._
 
       val minPopulation = 2
@@ -261,17 +261,17 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmSpec[SimpleMovingAverage
             tolerance = 3.0
           )
 
-          log.debug(
-            Map(
-              "@msg" → "SLIDING MAGNET",
-              "points" → points.map( p ⇒ f"${p.value}%2.5f" ),
-              "result" → Map(
-                "N" → r.statistics.map( _.getN ),
-                "mean" → r.statistics.map( s ⇒ f"${s.getMean}%2.5f" ),
-                "stdev" → r.statistics.map( s ⇒ f"${s.getStandardDeviation}%2.5f" )
-              )
-            )
-          )
+          //          log.debug(
+          //            Map(
+          //              "@msg" → "SLIDING MAGNET",
+          //              "points" → points.map( p ⇒ f"${p.value}%2.5f" ),
+          //              "result" → Map(
+          //                "N" → r.statistics.map( _.getN ),
+          //                "mean" → r.statistics.map( s ⇒ f"${s.getMean}%2.5f" ),
+          //                "stdev" → r.statistics.map( s ⇒ f"${s.getStandardDeviation}%2.5f" )
+          //              )
+          //            )
+          //          )
 
           r
         }

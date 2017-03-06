@@ -540,7 +540,8 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
         log.debug( Map( "@msg" → "#TEST: Advancing", "advancing" → adv.toString, "id" → id.toString ) )
         aggregate ! adv
 
-        Thread.sleep( 1000 )
+        countDown await 1.second.dilated
+
         log.debug( Map( "@msg" → "#TEST: getting current shape", "id" → id ) )
         whenReady(
           ( aggregate ? P.GetTopicShapeSnapshot( id, adv.topic ) ).mapTo[P.TopicShapeSnapshot],
@@ -587,7 +588,7 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
         actualVsExpectedShape( actual, expected )
       }
 
-      "verify estimated memory usage" taggedAs MEMORY in { f: Fixture ⇒
+      "verify estimated memory usage" taggedAs ( WIP, MEMORY ) in { f: Fixture ⇒
         import f._
         def makeData( i: Int ): P.Advanced = {
           val pt = DataPoint( nowTimestamp.plusMillis( 10 * i ), 0.14159265353 + 0.0001 * i )
@@ -595,17 +596,19 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
           P.Advanced( id, scope.topic, pt, false, t )
         }
 
-        defaultAlgorithm.estimatedAverageShapeSize match {
+        val config = Some( ConfigFactory.parseString( "sliding-window: 102" ) )
+        defaultAlgorithm.estimatedAverageShapeSize( config ) match {
           case None ⇒ pending
           case Some( expected ) ⇒ {
             val plateauNr = math.max( 1, memoryPlateauNr )
             val advancing = shapeless.the[Advancing[S]]
-            val zero = advancing.zero( None )
+            val zero = advancing.zero( config )
             val atPlateau = ( 0 to plateauNr ).foldLeft( zero ) { ( acc, i ) ⇒ advancing.advance( acc, makeData( i ) ) }
 
             import akka.serialization.{ SerializationExtension, Serializer }
             val serializer: Serializer = SerializationExtension( system ).serializerFor( zero.getClass )
             val actual = Bytes( serializer.toBinary( atPlateau.asInstanceOf[AnyRef] ).size )
+            log.info( Map( "@msg" → "memory for shape", "shape" → atPlateau.toString, "actual" → actual.toString, "expected" → expected.toString ) )
             actual mustBe <=( expected )
           }
         }

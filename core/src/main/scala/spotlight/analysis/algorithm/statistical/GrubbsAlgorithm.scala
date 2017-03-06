@@ -59,19 +59,23 @@ object GrubbsShape extends ClassLogging {
   val DefaultSlidingWindow: Int = 60
 
   implicit val advancing = new Advancing[GrubbsShape] {
-    override def zero( configuration: Option[Config] ): GrubbsShape = {
-      val width = valueFrom( configuration, SlidingWindowPath ) { c =>
-        val sliding = c getInt SlidingWindowPath
-        if ( 0 < sliding ) sliding else DefaultSlidingWindow
-      } getOrElse {
-        DefaultSlidingWindow
-      }
-      GrubbsShape( width )
-    }
-
+    override def zero( configuration: Option[Config] ): GrubbsShape = GrubbsShape( slidingWindowFrom( configuration ) )
     override def N( shape: GrubbsShape ): Long = shape.N
     override def advance( original: GrubbsShape, advanced: Advanced ): GrubbsShape = { original :+ advanced.point.value }
     override def copy( shape: GrubbsShape ): GrubbsShape = shape.copy( underlying = shape.underlying.copy() )
+  }
+
+  def slidingWindowFrom( configuration: Option[Config] ): Int = {
+    configuration map { c ⇒
+      if ( c hasPath SlidingWindowPath ) {
+        val sliding = c getInt SlidingWindowPath
+        if ( 0 < sliding ) sliding else DefaultSlidingWindow
+      } else {
+        DefaultSlidingWindow
+      }
+    } getOrElse {
+      DefaultSlidingWindow
+    }
   }
 }
 
@@ -170,5 +174,17 @@ object GrubbsAlgorithm extends Algorithm[GrubbsShape]( label = "grubbs" ) { algo
     *
     * @return blended average size for the algorithm shape
     */
-  override val estimatedAverageShapeSize: Option[Information] = Some( Bytes( 1318 ) )
+  override def estimatedAverageShapeSize( properties: Option[Config] ): Option[Information] = {
+    // these numbers were taken from SMA -- actuals differ
+    GrubbsShape.slidingWindowFrom( properties ) match {
+      case GrubbsShape.DefaultSlidingWindow ⇒ Some( Bytes( 1589.0 ) )
+      case window if window <= 32 ⇒ Some( Bytes( 716 + ( window * 13 ) ) ) // identified through observation
+      case window if window <= 42 ⇒ Some( Bytes( 798 + ( window * 13 ) ) )
+      case window if window <= 73 ⇒ Some( Bytes( 839 + ( window * 13 ) ) )
+      case window if window <= 105 ⇒ Some( Bytes( 880 + ( window * 13 ) ) )
+      case _ ⇒ None
+    }
+
+  }
+
 }
