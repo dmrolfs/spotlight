@@ -27,7 +27,7 @@ class GrubbsAlgorithmSpec
   override type Algo = GrubbsAlgorithm.type
   override val defaultAlgorithm: Algo = GrubbsAlgorithm
 
-  override val memoryPlateauNr: Int = GrubbsShape.DefaultCapacity
+  override val memoryPlateauNr: Int = GrubbsShape.DefaultSlidingWindow
 
   override def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture = {
     logger.debug( "TEST ActorSystem: {}", system.name )
@@ -143,7 +143,10 @@ class GrubbsAlgorithmSpec
       when( context.alpha ) thenReturn alpha
       when( context.properties ) thenReturn ConfigFactory.empty
 
-      val stats = points.foldLeft( new DescriptiveStatistics( GrubbsShape.DefaultCapacity ) ) { ( s, p ) ⇒ s.addValue( p.value ); s }
+      val stats = points.foldLeft( new DescriptiveStatistics( GrubbsShape.DefaultSlidingWindow ) ) { (s, p ) ⇒
+        s.addValue( p.value )
+        s
+      }
       val shape = shapeFor( points.map { _.value } )
       val grubbs = GrubbsAlgorithm.grubbsScore( shape )
       logger.info( "TEST: SCORE = [{}]", grubbs )
