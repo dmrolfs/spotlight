@@ -8,7 +8,9 @@ import squants.information.{ Bytes, Information }
 import omnibus.commons.util._
 import spotlight.analysis.DetectUsing
 import spotlight.analysis.algorithm.AlgorithmProtocol.Advanced
-import spotlight.analysis.algorithm.{ Advancing, Algorithm, CommonContext, mutable }
+import spotlight.analysis.algorithm.{ Advancing, Algorithm, CommonContext }
+import spotlight.model.statistics
+import spotlight.model.statistics.MovingStatistics
 import spotlight.model.timeseries._
 
 case class SimpleMovingAverageShape( underlying: StatisticalSummary ) extends Equals {
@@ -16,15 +18,12 @@ case class SimpleMovingAverageShape( underlying: StatisticalSummary ) extends Eq
 
   def :+( value: Double ): SimpleMovingAverageShape = {
     underlying match {
-      case u: mutable.MovingStatistics ⇒ {
-        val newUnderlying = u.copy()
-        newUnderlying :+ value
-        copy( newUnderlying )
-      }
+      case u: MovingStatistics ⇒ copy( underlying = u :+ value )
 
       case s: SummaryStatistics ⇒ {
-        s addValue value
-        this
+        val newUnderlying = s.copy()
+        newUnderlying addValue value
+        copy( underlying = newUnderlying )
       }
     }
   }
@@ -57,28 +56,28 @@ case class SimpleMovingAverageShape( underlying: StatisticalSummary ) extends Eq
     s"${ClassUtils.getAbbreviatedName( getClass, 15 )}( " +
       s"underlying-type:${underlying.getClass.safeSimpleName} " +
       s"N:${N} mean:${mean} stdev:${standardDeviation} range:[${minimum} : ${maximum}] " +
-      ")"
+      s"): underlying:[${underlying}]"
   }
 }
 
 object SimpleMovingAverageShape extends ClassLogging {
-  def apply( capacity: Int ): SimpleMovingAverageShape = {
-    val u = capacity match {
+  def apply( width: Int ): SimpleMovingAverageShape = {
+    val u = width match {
       case Int.MaxValue ⇒ new SummaryStatistics()
-      case c ⇒ mutable.MovingStatistics( c )
+      case w ⇒ statistics.MovingStatistics( w )
     }
 
     SimpleMovingAverageShape( underlying = u )
   }
 
-  val CapacityPath = "capacity"
-  val DefaultCapacity = Int.MaxValue
+  val SlidingWindowPath = "sliding-window"
+  val DefaultSlidingWindow = Int.MaxValue
 
   implicit val advancing = new Advancing[SimpleMovingAverageShape] {
     override def zero( configuration: Option[Config] ): SimpleMovingAverageShape = {
-      val capacity = valueFrom( configuration, CapacityPath ) { _ getInt CapacityPath } getOrElse DefaultCapacity
-      log.debug( Map( "@msg" → "creating zero shape", "capacity" → capacity, "is-inf" → ( Int.MaxValue == capacity ) ) )
-      SimpleMovingAverageShape( capacity )
+      val window = slidingWindowFrom( configuration )
+      log.debug( Map( "@msg" → "creating zero shape", "window" → window, "is-inf" → ( Int.MaxValue == window ) ) )
+      SimpleMovingAverageShape( window )
     }
 
     override def N( shape: SimpleMovingAverageShape ): Long = shape.N
@@ -90,9 +89,22 @@ object SimpleMovingAverageShape extends ClassLogging {
     override def copy( shape: SimpleMovingAverageShape ): SimpleMovingAverageShape = {
       val newUnderlying = shape.underlying match {
         case s: SummaryStatistics ⇒ s.copy()
-        case s: mutable.MovingStatistics ⇒ s.copy()
+        case s: MovingStatistics ⇒ s.copy()
       }
       shape.copy( underlying = newUnderlying )
+    }
+  }
+
+  def slidingWindowFrom( configuration: Option[Config] ): Int = {
+    configuration map { c ⇒
+      if ( c hasPath SlidingWindowPath ) {
+        val sliding = c getInt SlidingWindowPath
+        if ( 0 < sliding ) sliding else DefaultSlidingWindow
+      } else {
+        DefaultSlidingWindow
+      }
+    } getOrElse {
+      DefaultSlidingWindow
     }
   }
 }
@@ -131,5 +143,14 @@ object SimpleMovingAverageAlgorithm extends Algorithm[SimpleMovingAverageShape](
   /** Optimization available for algorithms to more efficiently respond to size estimate requests for algorithm sharding.
     * @return blended average size for the algorithm shape
     */
-  override val estimatedAverageShapeSize: Option[Information] = Some( Bytes( 2230 ) )
+  override def estimatedAverageShapeSize( properties: Option[Config] ): Option[Information] = {
+    SimpleMovingAverageShape.slidingWindowFrom( properties ) match {
+      case SimpleMovingAverageShape.DefaultSlidingWindow ⇒ Some( Bytes( 2230 ) )
+      case window if window <= 32 ⇒ Some( Bytes( 716 + ( window * 13 ) ) ) // identified through observation
+      case window if window <= 42 ⇒ Some( Bytes( 798 + ( window * 13 ) ) )
+      case window if window <= 73 ⇒ Some( Bytes( 839 + ( window * 13 ) ) )
+      case window if window <= 105 ⇒ Some( Bytes( 880 + ( window * 13 ) ) )
+      case _ ⇒ None
+    }
+  }
 }

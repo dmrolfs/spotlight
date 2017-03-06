@@ -1,4 +1,4 @@
-package spotlight.analysis.algorithm.mutable
+package spotlight.model.statistics
 
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import org.scalatest._

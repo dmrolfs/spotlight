@@ -6,11 +6,11 @@ import com.typesafe.config.Config
 import com.persist.logging._
 import org.apache.commons.lang3.ClassUtils
 import org.apache.commons.math3.distribution.TDistribution
-import org.apache.commons.math3.ml.clustering.DoublePoint
 import omnibus.commons.TryV
-import spotlight.analysis.algorithm.{ Advancing, Algorithm, CommonContext, mutable }
+import spotlight.analysis.algorithm.{ Advancing, Algorithm, CommonContext }
 import spotlight.analysis.algorithm.AlgorithmProtocol.Advanced
 import spotlight.analysis.DetectUsing
+import spotlight.model.statistics.MovingStatistics
 import spotlight.model.timeseries._
 import squants.information.{ Bytes, Information }
 
@@ -20,16 +20,11 @@ import squants.information.{ Bytes, Information }
   * This shape is not immutable as defined.
   * Created by rolfsd on 10/5/16.
   */
-case class GrubbsShape( underlying: mutable.MovingStatistics ) extends Equals {
+case class GrubbsShape( underlying: MovingStatistics ) extends Equals {
   override def canEqual( that: Any ): Boolean = that.isInstanceOf[GrubbsShape]
 
-  //  val underlying: mutable.MovingStatistics = new mutable.MovingStatistics( sampleSize )
-  def :+( value: Double ): GrubbsShape = {
-    val newUnderlying = underlying.copy()
-    newUnderlying :+ value
-    copy( newUnderlying )
-  }
-  def capacity: Int = underlying.capacity
+  def :+( value: Double ): GrubbsShape = copy( underlying = underlying :+ value )
+  def width: Int = underlying.width
   def N: Long = underlying.N
   def mean: Double = underlying.mean
   def standardDeviation: Double = underlying.standardDeviation
@@ -58,20 +53,29 @@ case class GrubbsShape( underlying: mutable.MovingStatistics ) extends Equals {
 }
 
 object GrubbsShape extends ClassLogging {
-  def apply( capacity: Int = DefaultCapacity ): GrubbsShape = GrubbsShape( mutable.MovingStatistics( capacity ) )
+  def apply( width: Int = DefaultSlidingWindow ): GrubbsShape = GrubbsShape( MovingStatistics( width ) )
 
-  val CapacityPath = "capacity"
-  val DefaultCapacity: Int = 60
+  val SlidingWindowPath = "sliding-window"
+  val DefaultSlidingWindow: Int = 60
 
   implicit val advancing = new Advancing[GrubbsShape] {
-    override def zero( configuration: Option[Config] ): GrubbsShape = {
-      val capacity = valueFrom( configuration, CapacityPath ) { _ getInt CapacityPath } getOrElse DefaultCapacity
-      GrubbsShape( capacity )
-    }
-
+    override def zero( configuration: Option[Config] ): GrubbsShape = GrubbsShape( slidingWindowFrom( configuration ) )
     override def N( shape: GrubbsShape ): Long = shape.N
     override def advance( original: GrubbsShape, advanced: Advanced ): GrubbsShape = { original :+ advanced.point.value }
     override def copy( shape: GrubbsShape ): GrubbsShape = shape.copy( underlying = shape.underlying.copy() )
+  }
+
+  def slidingWindowFrom( configuration: Option[Config] ): Int = {
+    configuration map { c ⇒
+      if ( c hasPath SlidingWindowPath ) {
+        val sliding = c getInt SlidingWindowPath
+        if ( 0 < sliding ) sliding else DefaultSlidingWindow
+      } else {
+        DefaultSlidingWindow
+      }
+    } getOrElse {
+      DefaultSlidingWindow
+    }
   }
 }
 
@@ -170,5 +174,17 @@ object GrubbsAlgorithm extends Algorithm[GrubbsShape]( label = "grubbs" ) { algo
     *
     * @return blended average size for the algorithm shape
     */
-  override val estimatedAverageShapeSize: Option[Information] = Some( Bytes( 1318 ) )
+  override def estimatedAverageShapeSize( properties: Option[Config] ): Option[Information] = {
+    // these numbers were taken from SMA -- actuals differ
+    GrubbsShape.slidingWindowFrom( properties ) match {
+      case GrubbsShape.DefaultSlidingWindow ⇒ Some( Bytes( 1589.0 ) )
+      case window if window <= 32 ⇒ Some( Bytes( 716 + ( window * 13 ) ) ) // identified through observation
+      case window if window <= 42 ⇒ Some( Bytes( 798 + ( window * 13 ) ) )
+      case window if window <= 73 ⇒ Some( Bytes( 839 + ( window * 13 ) ) )
+      case window if window <= 105 ⇒ Some( Bytes( 880 + ( window * 13 ) ) )
+      case _ ⇒ None
+    }
+
+  }
+
 }

@@ -1,6 +1,7 @@
 package spotlight.analysis.algorithm.statistical
 
 import com.persist.logging._
+import com.typesafe.config.Config
 import spotlight.analysis.{ DetectUsing, Moment }
 import spotlight.analysis.algorithm.{ Algorithm, CommonContext }
 import spotlight.model.timeseries._
@@ -37,5 +38,5 @@ object ExponentialMovingAverageAlgorithm extends Algorithm[Moment]( label = "ewm
   /** Optimization available for algorithms to more efficiently respond to size estimate requests for algorithm sharding.
     * @return blended average size for the algorithm shape
     */
-  override val estimatedAverageShapeSize: Option[Information] = Some( Bytes( 354 ) )
+  override def estimatedAverageShapeSize( properties: Option[Config] ): Option[Information] = Some( Bytes( 354 ) )
 }
