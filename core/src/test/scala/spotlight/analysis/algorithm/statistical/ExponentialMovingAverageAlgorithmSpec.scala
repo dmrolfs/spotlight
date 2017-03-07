@@ -7,14 +7,15 @@ import org.joda.{ time ⇒ joda }
 import org.apache.commons.math3.stat.descriptive.StatisticalSummary
 import org.scalatest.Assertion
 import spotlight.analysis.Moment
-import spotlight.analysis.algorithm.{ AlgorithmModuleSpec, AlgorithmProtocol ⇒ P }
+import spotlight.analysis.algorithm.{ AlgorithmSpec, AlgorithmProtocol ⇒ P }
 import spotlight.model.timeseries._
 
 /** Created by rolfsd on 11/28/16.
   */
-class ExponentialMovingAverageAlgorithmSpec extends AlgorithmModuleSpec[ExponentialMovingAverageAlgorithmSpec] {
-  override type Module = ExponentialMovingAverageAlgorithm.type
-  override val defaultModule: Module = ExponentialMovingAverageAlgorithm
+class ExponentialMovingAverageAlgorithmSpec extends AlgorithmSpec[Moment] {
+  override type Algo = ExponentialMovingAverageAlgorithm.type
+  override val defaultAlgorithm: Algo = ExponentialMovingAverageAlgorithm
+  override val memoryPlateauNr: Int = 1
 
   override def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture = {
     new Fixture( config, system, slug )
@@ -23,7 +24,7 @@ class ExponentialMovingAverageAlgorithmSpec extends AlgorithmModuleSpec[Exponent
   class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends AlgorithmFixture( _config, _system, _slug ) {
     fixture ⇒
 
-    override implicit val shapeOrdering: Ordering[module.Shape] = new Ordering[module.Shape] {
+    override implicit val shapeOrdering: Ordering[Shape] = new Ordering[Shape] {
       override def compare( lhs: TestShape, rhs: TestShape ): Int = {
         if ( lhs == rhs ) 0
         else {
@@ -92,8 +93,8 @@ class ExponentialMovingAverageAlgorithmSpec extends AlgorithmModuleSpec[Exponent
   bootstrapSuite()
   analysisStateSuite()
 
-  s"${defaultModule.algorithm.label} algorithm" should {
-    "find outliers across two batches" taggedAs WIP in { f: Fixture ⇒
+  s"${defaultAlgorithm.label} algorithm" should {
+    "find outliers across two batches" in { f: Fixture ⇒
       import f._
       val dp1 = makeDataPoints( values = Seq.fill( 5 )( 1.0 ), timeWiggle = ( 0.97, 1.03 ) )
       val s1 = spike( scope.topic, dp1 )()

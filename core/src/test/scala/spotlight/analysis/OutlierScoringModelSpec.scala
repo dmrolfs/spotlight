@@ -23,7 +23,7 @@ import org.joda.{ time ⇒ joda }
 import org.scalatest.Tag
 import org.scalatest.mockito.MockitoSugar
 import org.mockito.Mockito._
-import peds.commons.log.Trace
+import omnibus.commons.log.Trace
 import spotlight.analysis.shard.{ CellShardModule, LookupShardModule }
 import spotlight.analysis.{ AnalysisPlanProtocol ⇒ AP }
 import spotlight.analysis.algorithm.statistical.SimpleMovingAverageAlgorithm
@@ -48,18 +48,17 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
         |spotlight.source.host: "0.0.0.0"
         |spotlight.source.port: 2004
         |spotlight.detection-plans {
-        | skyline {
-        |   majority: 50
-        |   default: on
-        |   algorithms: [ simple-moving-average ]
-        |   algorithm-config.simple-moving-average.publish-threshold: yes
-        | }
+        |  skyline {
+        |    majority: 50
+        |    default: on
+        |    algorithms.simple-moving-average.publish-threshold: yes
+        |  }
         |}
       """.stripMargin
     )
     val c = spotlight.testkit.config( systemName = slug )
-    import scala.collection.JavaConversions._
-    logger.debug( "Test Config: akka.cluster.seed-nodes=[{}]", c.getStringList( "akka.cluster.seed-nodes" ).mkString( ", " ) )
+    import scala.collection.JavaConverters._
+    logger.debug( "Test Config: akka.cluster.seed-nodes=[{}]", c.getStringList( "akka.cluster.seed-nodes" ).asScala.mkString( ", " ) )
     tc withFallback c
   }
 
@@ -109,7 +108,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
     //    val configurationReloader = Settings.reloader( Array.empty[String] )()()
 
     //    val algo = SeriesDensityAnalyzer.Algorithm
-    val algo = SimpleMovingAverageAlgorithm.algorithm.label
+    val algo = SimpleMovingAverageAlgorithm.label
     val algoRef = TestProbe()
     val routingTable = Map( algo → algoRef.ref )
 
@@ -118,17 +117,27 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
       window map { w ⇒ AnalysisPlan.Grouping( limit = 10000, w ) }
     }
 
+    val emptyConfig = ConfigFactory.empty()
+
     val plan = AnalysisPlan.default(
       name = "DEFAULT_PLAN",
-      algorithms = Set( algo ),
+      algorithms = Map(
+        algo →
+          ConfigFactory.parseString(
+            s"""
+          |seedEps: 5.0
+          |minDensityConnectedPoints: 3
+          """.stripMargin
+          )
+      ),
       grouping = grouping,
       timeout = 500.millis,
       isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = 1, triggerPoint = 1 ),
       reduce = ReduceOutliers.byCorroborationPercentage( 50 ),
       planSpecification = ConfigFactory.parseString(
         s"""
-          |algorithm-config.${algo}.seedEps: 5.0
-          |algorithm-config.${algo}.minDensityConnectedPoints: 3
+          |algorithms.${algo}.seedEps: 5.0
+          |algorithms.${algo}.minDensityConnectedPoints: 3
         """.stripMargin
       )
     )
@@ -137,7 +146,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
       AnalysisPlanModule.module.rootType,
       LookupShardModule.rootType,
       CellShardModule.module.rootType,
-      SimpleMovingAverageAlgorithm.rootType
+      SimpleMovingAverageAlgorithm.module.rootType
     )
 
     lazy val boundedContext: BoundedContext = trace.block( "boundedContext" ) {
@@ -157,15 +166,23 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
     def makePlan( name: String, g: Option[AnalysisPlan.Grouping] ): AnalysisPlan = {
       AnalysisPlan.default(
         name = name,
-        algorithms = Set( algo ),
+        algorithms = Map(
+          algo →
+            ConfigFactory.parseString(
+              s"""
+            |seedEps: 5.0
+            |minDensityConnectedPoints: 3
+            """.stripMargin
+            )
+        ),
         grouping = g,
         timeout = 500.millis,
         isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = 1, triggerPoint = 1 ),
         reduce = ReduceOutliers.byCorroborationPercentage( 50 ),
         planSpecification = ConfigFactory.parseString(
           s"""
-             |algorithm-config.${algo}.seedEps: 5.0
-             |algorithm-config.${algo}.minDensityConnectedPoints: 3
+             |algorithms.${algo}.seedEps: 5.0
+             |algorithms.${algo}.minDensityConnectedPoints: 3
           """.stripMargin
         )
       )
@@ -383,9 +400,22 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
       import com.github.nscala_time.time.OrderingImplicits._
       import f._
       import system.dispatcher
-      import peds.akka.envelope._
+      import omnibus.akka.envelope._
 
-      val algos = Set( algo )
+      val algos = Map(
+        algo → ConfigFactory.parseString(
+          s"""
+          |#tolerance: 1.043822701 // eps:0.75
+          |tolerance: 3
+          |tail-average: 3
+          |minimum-population: 2
+          |seedEps: 0.75
+          |minDensityConnectedPoints: 3
+          |distance: Mahalanobis // Euclidean
+          """.stripMargin
+        )
+      )
+
       val grouping: Option[AnalysisPlan.Grouping] = {
         val window = None
         window map { w ⇒ AnalysisPlan.Grouping( limit = 10000, w ) }
@@ -400,10 +430,15 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
         reduce = ReduceOutliers.byCorroborationPercentage( 50 ),
         planSpecification = ConfigFactory.parseString(
           algos
-            .map { a ⇒
-              s"""
-               |algorithm-config.${a} {
-               |  tolerance: 1.043822701 // eps:0.75
+            .map {
+              case ( a, _ ) ⇒
+                logger.warn( "a:[{}]", a )
+                s"""
+               |algorithms.${a} {
+               |#  tolerance: 1.043822701 // eps:0.75
+               |  tolerance: 3
+               |  tail-average: 3
+               |  minimum-population: 2
                |  seedEps: 0.75
                |  minDensityConnectedPoints: 3
                |  distance: Mahalanobis // Euclidean
@@ -439,10 +474,11 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
       //      val dp2 = makeDataPoints( pointsA, start = joda.DateTime.now )
       //      val dp3 = makeDataPoints( pointsB, start = joda.DateTime.now )
 
-      val expectedPoints = Seq( 1, 30 ).map { dp1.apply }.sortBy { _.timestamp }
+      //      val expectedPoints = Seq( 1, 30 ).map { dp1.apply }.sortBy { _.timestamp }
+      val expectedPoints = Seq( 30 ).map { dp1.apply }.sortBy { _.timestamp }
 
       val expected = SeriesOutliers(
-        algorithms = algos,
+        algorithms = algos.keySet,
         source = TimeSeries( "foo", dp1 ),
         outliers = expectedPoints,
         plan = defaultPlan

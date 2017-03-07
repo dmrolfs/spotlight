@@ -5,10 +5,10 @@ import akka.actor.ActorRef
 import scalaz.{ Scalaz, Validation }
 import Scalaz._
 import com.typesafe.config.{ Config, ConfigFactory }
-import peds.commons.Valid
-import peds.commons.identifier.TaggedID
+import omnibus.commons.Valid
+import omnibus.commons.identifier.TaggedID
 import demesne.CommandLike
-import peds.akka.envelope.WorkId
+import omnibus.akka.envelope.WorkId
 import spotlight.model.outlier.{ CorrelatedSeries, AnalysisPlan }
 import spotlight.model.timeseries.{ TimeSeries, TimeSeriesBase, Topic }
 import spotlight.model.outlier.AnalysisPlan.Scope

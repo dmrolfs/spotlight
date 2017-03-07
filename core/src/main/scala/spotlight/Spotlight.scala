@@ -16,11 +16,11 @@ import com.typesafe.scalalogging.{ Logger, StrictLogging }
 import demesne.{ AggregateRootType, BoundedContext, DomainModel, StartTask }
 import nl.grons.metrics.scala.{ Meter, MetricName }
 import org.slf4j.LoggerFactory
-import peds.akka.metrics.{ Instrumented, Reporter }
-import peds.akka.supervision.IsolatedLifeCycleSupervisor.{ ChildStarted, StartChild }
-import peds.akka.supervision.{ IsolatedLifeCycleSupervisor, OneForOneStrategyFactory }
-import peds.commons.builder.HasBuilder
-import peds.commons.util._
+import omnibus.akka.metrics.{ Instrumented, Reporter }
+import omnibus.akka.supervision.IsolatedLifeCycleSupervisor.{ ChildStarted, StartChild }
+import omnibus.akka.supervision.{ IsolatedLifeCycleSupervisor, OneForOneStrategyFactory }
+import omnibus.commons.builder.HasBuilder
+import omnibus.commons.util._
 import shapeless.{ Generic, HNil }
 import spotlight.analysis._
 import spotlight.analysis.{ PlanCatalogProtocol ⇒ CP }
@@ -84,9 +84,9 @@ object Spotlight extends Instrumented with StrictLogging {
       AnalysisPlanModule.module.rootType,
       LookupShardModule.rootType,
       CellShardModule.module.rootType,
-      SimpleMovingAverageAlgorithm.rootType,
-      GrubbsAlgorithm.rootType,
-      ExponentialMovingAverageAlgorithm.rootType
+      SimpleMovingAverageAlgorithm.module.rootType,
+      GrubbsAlgorithm.module.rootType,
+      ExponentialMovingAverageAlgorithm.module.rootType
     )
   }
 
@@ -245,7 +245,7 @@ object Spotlight extends Instrumented with StrictLogging {
 
     Flow
       .fromGraph( graph )
-      .named( "Spotlight" )
+      .named( "SpotlightScoringModel" )
       .withAttributes( ActorAttributes supervisionStrategy supervisionDecider )
   }
 

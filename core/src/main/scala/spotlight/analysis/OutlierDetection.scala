@@ -11,10 +11,10 @@ import akka.stream.actor.ActorSubscriberMessage
 import scalaz.{ -\/, \/, \/- }
 import nl.grons.metrics.scala.{ Meter, MetricName, Timer }
 import com.persist.logging._
-import peds.akka.envelope._
-import peds.akka.metrics.{ Instrumented, InstrumentedActor }
-import peds.commons.TryV
-import peds.commons.identifier.ShortUUID
+import omnibus.akka.envelope._
+import omnibus.akka.metrics.{ Instrumented, InstrumentedActor }
+import omnibus.commons.TryV
+import omnibus.commons.identifier.ShortUUID
 import spotlight.model.timeseries._
 import spotlight.model.outlier.{ CorrelatedData, AnalysisPlan, Outliers }
 
@@ -167,8 +167,9 @@ class OutlierDetection extends Actor with EnvelopingActor with InstrumentedActor
       }
     } yield {
       val history = updateHistory( m.source, p )
-      p.algorithms foreach { algo ⇒
-        router.sendEnvelope( DetectUsing( m.plan.id, algo, m, history, p.algorithmConfig ) )( aggregator )
+      p.algorithms foreach {
+        case ( algo, algoConfig ) ⇒
+          router.sendEnvelope( DetectUsing( m.plan.id, algo, m, history, algoConfig ) )( aggregator )
       }
       aggregator
     }

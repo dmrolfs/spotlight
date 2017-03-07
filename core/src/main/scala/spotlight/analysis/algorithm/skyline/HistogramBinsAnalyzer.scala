@@ -5,7 +5,7 @@ import akka.actor.{ ActorRef, Props }
 
 import scalaz._
 import Scalaz._
-import peds.commons.{ KOp, Valid }
+import omnibus.commons.{ KOp, Valid }
 import spotlight.analysis.algorithm.AlgorithmActor.AlgorithmContext
 import spotlight.analysis.algorithm.CommonAnalyzer
 import CommonAnalyzer.WrappingContext

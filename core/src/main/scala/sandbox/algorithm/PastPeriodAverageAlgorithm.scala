@@ -1,20 +1,18 @@
 package sandbox.algorithm
 
-import scala.reflect.ClassTag
 import com.typesafe.config.Config
 import org.apache.commons.math3.ml.clustering.DoublePoint
 import org.joda.{ time ⇒ joda }
 import com.github.nscala_time.time.Imports._
+import com.persist.logging._
+import omnibus.commons.identifier.Identifying
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import spotlight.analysis.DetectUsing
-import spotlight.analysis.algorithm.AlgorithmModule
-import spotlight.analysis.algorithm.AlgorithmModule.ShapeCompanion
+import spotlight.analysis.algorithm.{ Advancing, Algorithm, AlgorithmState, CommonContext }
 import spotlight.analysis.algorithm.AlgorithmProtocol.Advanced
 import spotlight.model.timeseries._
 
-/** Created by rolfsd on 10/14/16.
-  */
-object PastPeriodAverageAlgorithm extends AlgorithmModule with AlgorithmModule.ModuleConfiguration { outer ⇒
+object PastPeriod extends ClassLogging {
   sealed abstract class Period extends Equals {
     def descriptor: Int
     def timestamp: joda.DateTime
@@ -44,14 +42,19 @@ object PastPeriodAverageAlgorithm extends AlgorithmModule with AlgorithmModule.M
     def assign( timestamp: joda.DateTime ): Period = PeriodImpl( descriptor = timestamp.getMonthOfYear, timestamp )
 
     def isCandidateMoreRecent( p: Period, candidate: Period ): Boolean = {
-      logger.debug( "TEST: p.desciptor[{}] == candidate.descriptor[{}]: {}", p.descriptor.toString, candidate.descriptor.toString, ( p.descriptor == candidate.descriptor ).toString )
-      logger.debug( "TEST: p.timestamp[{}] < candidate.timestamp[{}]: {}", p.timestamp, candidate.timestamp, ( p.timestamp < candidate.timestamp ).toString )
+      log.debug(
+        Map(
+          "@msg" → "#TEST isCandidateMoreRecent",
+          "descriptors" → Map( "p" → p.descriptor, "candidate" → candidate.descriptor, "is-same" → ( p.descriptor == candidate.descriptor ) ),
+          "timestamps" → Map( "p" → p.timestamp, "candidate" → candidate.timestamp, "more-recent" → ( p.timestamp < candidate.timestamp ) )
+        )
+      )
       ( p.descriptor == candidate.descriptor ) && ( p.timestamp < candidate.timestamp )
     }
 
     implicit val periodOrdering: Ordering[Period] = Ordering by { _.descriptor }
 
-    final case class PeriodImpl private[PastPeriodAverageAlgorithm] (
+    final case class PeriodImpl private[PastPeriod] (
         override val descriptor: Int,
         override val timestamp: joda.DateTime
     ) extends Period {
@@ -74,7 +77,7 @@ object PastPeriodAverageAlgorithm extends AlgorithmModule with AlgorithmModule.M
       if ( inCurrentPeriod( period ) ) withCurrentPeriod( period, value )
       else {
         val i = priorPeriods indexWhere { case ( p, _ ) ⇒ p.descriptor == period.descriptor }
-        logger.debug( "TEST: prior period index for [{}] = [{}]", period, i.toString )
+        log.debug( Map( "@msg" → "#TEST: prior period index", "period" → period.toString, "index" → i ) )
         if ( i == -1 ) this.withNewPriorPeriod( period, value )
         else if ( Period.isCandidateMoreRecent( priorPeriods( i )._1, period ) ) this.withUpdatedPriorPeriod( period, value, i )
         else this
@@ -84,8 +87,9 @@ object PastPeriodAverageAlgorithm extends AlgorithmModule with AlgorithmModule.M
     def withCurrentPeriod( p: Period, v: Double ): Shape = {
       currentPeriodValue
         .map {
-          case ( current, _ ) ⇒
+          case ( current, _ ) ⇒ {
             if ( Period.isCandidateMoreRecent( current, p ) ) this.copy( currentPeriodValue = Some( ( p, v ) ) ) else this
+          }
         }
         .getOrElse { this.copy( currentPeriodValue = Some( ( p, v ) ) ) }
     }
@@ -93,7 +97,14 @@ object PastPeriodAverageAlgorithm extends AlgorithmModule with AlgorithmModule.M
     def withUpdatedPriorPeriod( p: Period, v: Double, index: Int ): Shape = {
       val ( h, c :: t ) = priorPeriods splitAt index
       val newPriors = h ::: ( ( p, v ) :: t )
-      logger.debug( "TEST: priorPeriods=[{}] newPriors:[{}]", priorPeriods, newPriors )
+      log.debug(
+        Map(
+          "@msg" → "#TEST: withUpdatedPriorPeriod",
+          "prior" → priorPeriods.toString,
+          "new" → newPriors.mkString( "[", ", ", "]" )
+        )
+      )
+
       this.copy( priorPeriods = newPriors )
     }
 
@@ -119,48 +130,48 @@ object PastPeriodAverageAlgorithm extends AlgorithmModule with AlgorithmModule.M
     }
   }
 
-  object Shape extends ShapeCompanion[Shape] {
+  object Shape {
     val WindowPath = "window"
-
     def applyWindow[T]( window: Int )( periods: List[T] ): List[T] = periods drop ( periods.size - window )
 
-    override def zero( configuration: Option[Config] ): Shape = {
-      val window = valueFrom( configuration, WindowPath ) { _ getInt WindowPath } getOrElse 3
-      Shape( resize = applyWindow( window ) )
-    }
-
-    override def advance( original: Shape, advanced: Advanced ): Shape = {
-      val ( p, v ) = Period assign advanced.point
-      logger.debug( "TEST: ASSIGNING point:[{}] to period:{}", advanced.point.timestamp, p )
-      original.withPeriodValue( p, v )
-    }
-  }
-
-  override def evShape: ClassTag[Shape] = ClassTag( classOf[Shape] )
-  override val shapeCompanion: ShapeCompanion[Shape] = Shape
-
-  override def algorithm: Algorithm = new Algorithm {
-    override val label: String = "past-period"
-
-    override def prepareData( c: Context ): Seq[DoublePoint] = c.tailAverage()( c.data )
-
-    override def step( point: PointT, shape: Shape )( implicit s: State, c: Context ): Option[( Boolean, ThresholdBoundary )] = {
-      for {
-        m ← shape.mean
-        sd ← shape.standardDeviation
-      } yield {
-        val threshold = ThresholdBoundary.fromExpectedAndDistance(
-          timestamp = point.timestamp.toLong,
-          expected = m,
-          distance = c.tolerance * sd
-        )
-
-        val isOutlier = shape.inCurrentPeriod( point.dateTime ) && threshold.isOutlier( point.value )
-        ( isOutlier, threshold )
+    implicit val advancing = new Advancing[Shape] {
+      override def zero( configuration: Option[Config] ): Shape = {
+        val window = valueFrom( configuration, WindowPath ) { _ getInt WindowPath } getOrElse 3
+        Shape( resize = applyWindow( window ) )
       }
+
+      override def N( shape: Shape ): Long = shape.stats map { _.getN } getOrElse 0L
+
+      override def advance( original: Shape, advanced: Advanced ): Shape = {
+        val ( p, v ) = Period assign advanced.point
+        log.debug( Map( "@msg" → "#TEST ASSIGNING point to period", "timestamp" → advanced.point.timestamp, "period" → p ) )
+        original.withPeriodValue( p, v )
+      }
+
+      override def copy( shape: Shape ): Shape = shape
     }
   }
+}
 
+/** Created by rolfsd on 10/14/16.
+  */
+object PastPeriodAverageAlgorithm extends Algorithm[PastPeriod.Shape]( label = "past-period" ) { algorithm ⇒
   override type Context = CommonContext
   override def makeContext( message: DetectUsing, state: Option[State] ): Context = new CommonContext( message )
+
+  override def step( point: PointT, shape: Shape )( implicit s: State, c: Context ): Option[( Boolean, ThresholdBoundary )] = {
+    for {
+      m ← shape.mean
+      sd ← shape.standardDeviation
+    } yield {
+      val threshold = ThresholdBoundary.fromExpectedAndDistance(
+        timestamp = point.timestamp.toLong,
+        expected = m,
+        distance = c.tolerance * sd
+      )
+
+      val isOutlier = shape.inCurrentPeriod( point.dateTime ) && threshold.isOutlier( point.value )
+      ( isOutlier, threshold )
+    }
+  }
 }

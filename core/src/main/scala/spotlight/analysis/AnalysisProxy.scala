@@ -11,11 +11,11 @@
 //import com.typesafe.config.Config
 //import com.typesafe.scalalogging.LazyLogging
 //import nl.grons.metrics.scala.{Meter, MetricName, Timer}
-//import peds.akka.envelope._
-//import peds.akka.metrics.{Instrumented, InstrumentedActor}
-//import peds.commons.log.Trace
+//import omnibus.akka.envelope._
+//import omnibus.akka.metrics.{Instrumented, InstrumentedActor}
+//import omnibus.commons.log.Trace
 //import demesne.DomainModel
-//import peds.akka.stream.StreamIngress
+//import omnibus.akka.stream.StreamIngress
 //import spotlight.model.outlier.{CorrelatedData, CorrelatedSeries, AnalysisPlan, Outliers}
 //import spotlight.model.timeseries.TimeSeriesBase.Merging
 //import spotlight.model.timeseries._

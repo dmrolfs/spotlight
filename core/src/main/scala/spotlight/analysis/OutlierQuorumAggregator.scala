@@ -8,8 +8,8 @@ import scalaz.{ -\/, \/- }
 import com.typesafe.scalalogging.Logger
 import org.slf4j.LoggerFactory
 import nl.grons.metrics.scala.{ Meter, MetricName, Timer }
-import peds.akka.envelope._
-import peds.akka.metrics.InstrumentedActor
+import omnibus.akka.envelope._
+import omnibus.akka.metrics.InstrumentedActor
 import spotlight.analysis.OutlierQuorumAggregator.ConfigurationProvider
 import spotlight.model.outlier._
 import spotlight.model.timeseries.{ TimeSeriesBase, Topic }

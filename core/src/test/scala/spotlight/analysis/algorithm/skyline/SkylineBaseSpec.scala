@@ -15,7 +15,7 @@ import org.joda.{ time ⇒ joda }
 import org.mockito.Mockito._
 import org.scalatest.Tag
 import org.scalatest.mockito.MockitoSugar
-import peds.commons.V
+import omnibus.commons.V
 import spotlight.analysis.algorithm.CommonAnalyzer
 
 /** Created by rolfsd on 2/15/16.
@@ -39,7 +39,7 @@ abstract class SkylineBaseSpec extends ParallelAkkaSpec with MockitoSugar {
         window map { w ⇒ AnalysisPlan.Grouping( limit = 10000, w ) }
       }
 
-      AnalysisPlan.default( "", 1.second, isQuorun, reduce, Set.empty[String], grouping ).appliesTo
+      AnalysisPlan.default( "", 1.second, isQuorun, reduce, Map.empty[String, Config], grouping ).appliesTo
     }
   }
 

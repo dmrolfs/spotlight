@@ -16,8 +16,8 @@ import com.typesafe.config.{ Config, ConfigFactory }
 import com.typesafe.scalalogging.{ LazyLogging, StrictLogging }
 import demesne.testkit.concurrent.CountDownFunction
 import org.scalatest.{ MustMatchers, Outcome, ParallelTestExecution, Tag, fixture }
-import peds.commons.log.Trace
-import peds.commons.util._
+import omnibus.commons.log.Trace
+import omnibus.commons.util._
 
 /** Created by rolfsd on 10/28/15.
   */

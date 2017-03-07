@@ -1,6 +1,6 @@
 package spotlight.model.outlier
 
-import peds.commons.util._
+import omnibus.commons.util._
 
 trait IsQuorum extends Serializable {
   def apply( results: OutlierAlgorithmResults ): Boolean

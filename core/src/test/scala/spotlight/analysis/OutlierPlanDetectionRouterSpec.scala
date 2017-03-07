@@ -16,7 +16,7 @@
 //import org.joda.{time => joda}
 //import com.github.nscala_time.time.Imports.{richDateTime, richSDuration}
 //import demesne.{AggregateRootType, BoundedContext, DomainModel}
-//import peds.commons.log.Trace
+//import omnibus.commons.log.Trace
 //import spotlight.analysis.OutlierDetection.DetectionResult
 //import spotlight.analysis.algorithm.skyline.SimpleMovingAverageAnalyzer
 //import spotlight.testkit.ParallelAkkaSpec

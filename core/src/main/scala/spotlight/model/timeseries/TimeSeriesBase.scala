@@ -4,7 +4,7 @@ import org.joda.{ time ⇒ joda }
 import com.github.nscala_time.time.Imports._
 import scalaz.Scalaz._
 import scalaz.Validation
-import peds.commons._
+import omnibus.commons._
 
 trait TimeSeriesBase {
   def topic: Topic

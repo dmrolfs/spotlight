@@ -8,11 +8,11 @@ import org.scalatest.Outcome
 import org.scalatest.mockito.MockitoSugar
 import org.mockito.Mockito._
 import com.typesafe.config.{ Config, ConfigFactory }
-import peds.akka.envelope.Envelope
-import peds.commons.V
+import omnibus.akka.envelope.Envelope
+import omnibus.commons.V
 import spotlight.model.timeseries.{ ThresholdBoundary, TimeSeries, TimeSeriesBase, Topic }
 import spotlight.testkit.ParallelAkkaSpec
-import peds.commons.log.Trace
+import omnibus.commons.log.Trace
 import spotlight.model.outlier._
 
 /** Created by damonrolfs on 9/18/14.
@@ -31,13 +31,13 @@ class OutlierQuorumAggregatorSpec extends ParallelAkkaSpec with MockitoSugar {
     val none = mock[NoOutliers]
     when( none.plan ) thenReturn defaultPlan
     when( none.topic ) thenReturn Topic( "metric.none" )
-    when( none.algorithms ) thenReturn defaultPlan.algorithms.take( 1 )
+    when( none.algorithms ) thenReturn defaultPlan.algorithmKeys.take( 1 )
     when( none.thresholdBoundaries ) thenReturn Map.empty[String, Seq[ThresholdBoundary]]
 
     val some = mock[SeriesOutliers]
     when( some.plan ) thenReturn defaultPlan
     when( some.topic ) thenReturn Topic( "metric.some" )
-    when( some.algorithms ) thenReturn defaultPlan.algorithms.take( 1 )
+    when( some.algorithms ) thenReturn defaultPlan.algorithmKeys.take( 1 )
     when( some.thresholdBoundaries ) thenReturn Map.empty[String, Seq[ThresholdBoundary]]
 
     val demoReduce = new ReduceOutliers {
@@ -60,7 +60,7 @@ class OutlierQuorumAggregatorSpec extends ParallelAkkaSpec with MockitoSugar {
         timeout = to,
         isQuorum = IsQuorum.AtLeastQuorumSpecification( 1, 1 ),
         reduce = demoReduce,
-        algorithms = Set( "foobar" ),
+        algorithms = Map( "foobar" → ConfigFactory.empty() ),
         grouping = grouping,
         planSpecification = ConfigFactory.empty
       )
@@ -97,7 +97,7 @@ class OutlierQuorumAggregatorSpec extends ParallelAkkaSpec with MockitoSugar {
       val outliers = mock[Outliers]
       when( outliers.plan ) thenReturn p
       when( outliers.topic ) thenReturn Topic( "metric.specific" )
-      when( outliers.algorithms ) thenReturn p.algorithms.take( 1 )
+      when( outliers.algorithms ) thenReturn p.algorithmKeys.take( 1 )
       when( outliers.thresholdBoundaries ) thenReturn Map.empty[String, Seq[ThresholdBoundary]]
 
       log.info( "outliers = [{}]", outliers )

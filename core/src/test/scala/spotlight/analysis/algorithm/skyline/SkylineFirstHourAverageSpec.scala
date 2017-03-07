@@ -10,8 +10,8 @@ import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import org.mockito.Mockito._
 import org.joda.{ time ⇒ joda }
 import com.github.nscala_time.time.JodaImplicits._
-import peds.akka.envelope.WorkId
-import peds.commons.identifier.{ ShortUUID, TaggedID }
+import omnibus.akka.envelope.WorkId
+import omnibus.commons.identifier.{ ShortUUID, TaggedID }
 import spotlight.analysis.algorithm.CommonAnalyzer
 import spotlight.analysis.{ DetectOutliersInSeries, DetectUsing, DetectionAlgorithmRouter }
 import spotlight.model.outlier.{ AnalysisPlan, SeriesOutliers }
@@ -31,11 +31,12 @@ class SkylineFirstHourAverageSpec extends SkylineBaseSpec {
     val algoS = FirstHourAverageAnalyzer.Algorithm
     val algProps = ConfigFactory.parseString( s"""${algoS}.tolerance: 3""" )
 
+    val emptyConfig = ConfigFactory.empty()
     val plan = mock[AnalysisPlan]
     when( plan.id ).thenReturn( TaggedID( 'plan, ShortUUID() ) )
     when( plan.name ).thenReturn( "mock-plan" )
     when( plan.appliesTo ).thenReturn( SkylineFixture.appliesToAll )
-    when( plan.algorithms ).thenReturn( Set( algoS ) )
+    when( plan.algorithms ).thenReturn( Map( algoS → emptyConfig ) )
 
     def tailAverageData( data: Seq[DataPoint], last: Seq[DataPoint] = Seq.empty[DataPoint] ): Seq[DataPoint] = {
       val TailLength = CommonAnalyzer.DefaultTailAverageLength

@@ -7,8 +7,8 @@ import scalaz._
 import Scalaz._
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import org.apache.commons.math3.stat.regression.MillerUpdatingRegression
-import peds.commons.{ KOp, Valid }
-import peds.commons.util._
+import omnibus.commons.{ KOp, Valid }
+import omnibus.commons.util._
 import spotlight.analysis.algorithm.AlgorithmActor.AlgorithmContext
 import spotlight.analysis.algorithm.CommonAnalyzer
 import CommonAnalyzer.WrappingContext

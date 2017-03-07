@@ -9,7 +9,7 @@ import akka.util.Timeout
 
 import scalaz.concurrent.Task
 import com.typesafe.scalalogging.{ Logger, StrictLogging }
-import peds.commons.concurrent._
+import omnibus.commons.concurrent._
 import demesne.{ BoundedContext, StartTask }
 
 /** Created by rolfsd on 10/25/16.

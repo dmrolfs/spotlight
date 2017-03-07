@@ -2,29 +2,32 @@ package spotlight.analysis.algorithm.statistical
 
 import scala.annotation.tailrec
 import akka.actor.ActorSystem
+
 import scalaz.{ -\/, \/- }
-import com.typesafe.config.Config
+import com.typesafe.config.{ Config, ConfigFactory }
 import org.apache.commons.math3.stat.descriptive.{ DescriptiveStatistics, StatisticalSummary }
 import org.joda.{ time ⇒ joda }
 import org.mockito.Mockito._
 import org.scalatest.Assertion
 import org.typelevel.scalatest.{ DisjunctionMatchers, DisjunctionValues }
-import peds.commons.TryV
-import peds.commons.log.Trace
-import spotlight.analysis.RecentHistory
-import spotlight.analysis.algorithm.{ AlgorithmModule, AlgorithmModuleSpec, AlgorithmProtocol ⇒ P }
+import com.persist.logging._
+import omnibus.commons.TryV
+import omnibus.commons.log.Trace
+import spotlight.analysis.algorithm.{ Algorithm, AlgorithmSpec, AlgorithmProtocol ⇒ P }
 import spotlight.model.timeseries._
 
 /** Created by rolfsd on 10/7/16.
   */
 class GrubbsAlgorithmSpec
-    extends AlgorithmModuleSpec[GrubbsAlgorithmSpec]
+    extends AlgorithmSpec[GrubbsShape]
     with DisjunctionMatchers
     with DisjunctionValues {
   private val trace = Trace[GrubbsAlgorithmSpec]
 
-  override type Module = GrubbsAlgorithm.type
-  override val defaultModule: Module = GrubbsAlgorithm
+  override type Algo = GrubbsAlgorithm.type
+  override val defaultAlgorithm: Algo = GrubbsAlgorithm
+
+  override val memoryPlateauNr: Int = GrubbsShape.DefaultSlidingWindow
 
   override def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture = {
     logger.debug( "TEST ActorSystem: {}", system.name )
@@ -34,44 +37,45 @@ class GrubbsAlgorithmSpec
   class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends AlgorithmFixture( _config, _system, _slug ) {
     override implicit val shapeOrdering: Ordering[TestShape] = new Ordering[TestShape] {
       override def compare( lhs: TestShape, rhs: TestShape ): Int = {
-        val l = lhs.movingStatistics
-        val r = rhs.movingStatistics
-        if ( l.getN == r.getN && l.getMean == r.getMean && l.getStandardDeviation == r.getStandardDeviation ) 0
-        else ( r.getN - l.getN ).toInt
+        if ( lhs.N == rhs.N && lhs.mean == rhs.mean && lhs.standardDeviation == rhs.standardDeviation ) 0
+        else ( rhs.N - lhs.N ).toInt
       }
     }
 
     override def expectedUpdatedShape( shape: TestShape, event: P.Advanced ): TestShape = {
-      val newStats = shape.movingStatistics.copy()
-      newStats addValue event.point.value
-      shape.copy( movingStatistics = newStats )
+      val expected = shape.copy()
+      expected :+ event.point.value
     }
 
     def assertShape( result: Option[CalculationMagnetResult], topic: Topic )( s: TestShape ): Assertion = {
-      logger.info( "assertState result:[{}]", result )
+      logger.info( "assertState: \nresult:[{}]\ns:[{}]", result, s.toString )
 
       val expectedStats = for { r ← result; rs ← r.statistics } yield { ( rs.getN, rs.getMean, rs.getStandardDeviation ) }
 
       expectedStats match {
         case None ⇒ {
-          assert( s.movingStatistics.getMean.isNaN )
-          assert( s.movingStatistics.getStandardDeviation.isNaN )
+          assert( s.mean.isNaN )
+          assert( s.standardDeviation.isNaN )
         }
 
         case Some( ( size, mean, standardDeviation ) ) ⇒ {
-          s.movingStatistics.getN mustBe size
-          s.movingStatistics.getMean mustBe mean
-          s.movingStatistics.getStandardDeviation mustBe standardDeviation
+          log.info(
+            Map(
+              "@msg" → "assertState",
+              "actual" → Map( "size" → s.N, "mean" → s.mean, "stddev" → s.standardDeviation ),
+              "expected" → Map( "size" → size, "mean" → mean, "stddev" → standardDeviation )
+            )
+          )
+          s.N mustBe size
+          s.mean mustBe ( mean +- tol )
+          s.standardDeviation mustBe ( standardDeviation +- tol )
         }
       }
     }
   }
 
-  def shapeFor( stats: DescriptiveStatistics ): GrubbsShape = GrubbsShape( stats )
-  def shapeFor( values: Seq[Double] ): GrubbsShape = {
-    val stats = values.foldLeft( new DescriptiveStatistics( RecentHistory.LastN ) ) { ( acc, v ) ⇒ acc.addValue( v ); acc }
-    shapeFor( stats )
-  }
+  //  def shapeFor( stats: DescriptiveStatistics ): GrubbsShape = GrubbsShape( stats )
+  def shapeFor( values: Seq[Double] ): GrubbsShape = values.foldLeft( GrubbsShape() ) { _ :+ _ }
 
   override def calculateControlBoundaries(
     points: Seq[DataPoint],
@@ -83,7 +87,7 @@ class GrubbsAlgorithmSpec
 
     val allPoints = lastPoints ++ points
     val shape = shapeFor( allPoints map { _.value } )
-    val score = GrubbsAlgorithm.AlgorithmImpl.grubbsScore( shape ).toOption.get
+    val score = TryV.unsafeGet( GrubbsAlgorithm.grubbsScore( shape ) )
 
     @tailrec def loop( pts: List[DataPoint], history: Array[Double], acc: Seq[ThresholdBoundary] ): Seq[ThresholdBoundary] = {
       pts match {
@@ -127,7 +131,7 @@ class GrubbsAlgorithmSpec
             )
           }
 
-          case -\/( ex: AlgorithmModule.InsufficientDataSize ) ⇒ ThresholdBoundary empty timestamp
+          case -\/( ex: Algorithm.InsufficientDataSize ) ⇒ ThresholdBoundary empty timestamp
 
           case -\/( ex ) ⇒ throw ex
         }
@@ -137,10 +141,14 @@ class GrubbsAlgorithmSpec
     override def apply( points: Seq[DataPoint] ): Result = {
       implicit val context = mock[GrubbsAlgorithm.Context]
       when( context.alpha ) thenReturn alpha
+      when( context.properties ) thenReturn ConfigFactory.empty
 
-      val stats = points.foldLeft( new DescriptiveStatistics( RecentHistory.LastN ) ) { ( s, p ) ⇒ s.addValue( p.value ); s }
-      val shape = shapeFor( stats )
-      val grubbs = defaultModule.AlgorithmImpl.grubbsScore( shape )
+      val stats = points.foldLeft( new DescriptiveStatistics( GrubbsShape.DefaultSlidingWindow ) ) { ( s, p ) ⇒
+        s.addValue( p.value )
+        s
+      }
+      val shape = shapeFor( points.map { _.value } )
+      val grubbs = GrubbsAlgorithm.grubbsScore( shape )
       logger.info( "TEST: SCORE = [{}]", grubbs )
       Result( underlying = stats, timestamp = points.last.timestamp, tolerance = 3.0, score = grubbs )
     }
@@ -149,7 +157,7 @@ class GrubbsAlgorithmSpec
   bootstrapSuite()
   analysisStateSuite()
 
-  s"${defaultModule.algorithm.label} algorithm" should {
+  s"${defaultAlgorithm.label} algorithm" should {
     //    "change configuration" taggedAs WIP in { f: Fixture =>
     //      import f._
     //      import akka.pattern.ask
@@ -159,7 +167,7 @@ class GrubbsAlgorithmSpec
     //      whenReady(
     //        ( aggregate ? P.GetTopicShapeSnapshot( id, scope.topic ) ).mapTo[P.TopicShapeSnapshot], timeout( 5.seconds.dilated )
     //      ){ actual =>
-    //        actualVsExpectedShape( actual.snapshot.get, defaultModule.shapeCompanion.zero( Some(config) ) )
+    //        actualVsExpectedShape( actual.snapshot.get, defaultAlgorithm.shapeCompanion.zero( Some(config) ) )
     //      }
     //
     //      val c1 = ConfigFactory.parseString( s"${module.algorithm.label.name} { sample-size = 7 }" )
@@ -181,18 +189,33 @@ class GrubbsAlgorithmSpec
 
     //todo define and use smaller fixture
     "calculate grubbs score" in { f: Fixture ⇒
+      val minPopulation = 8
+      val grubbsConfig = ConfigFactory.parseString(
+        s"""
+          |tail-average: 3
+          |tolerance: 3
+          |minimum-population: ${minPopulation}
+        """.stripMargin
+      )
+
       implicit val ctx = mock[GrubbsAlgorithm.Context]
       when( ctx.alpha ) thenReturn 0.05
+      when( ctx.properties ) thenReturn grubbsConfig
 
       def caller( size: Int ): GrubbsShape = {
         val d = Array( 199.31, 199.53, 200.19, 200.82, 201.92, 201.95, 202.18, 245.57 )
-        GrubbsShape( new DescriptiveStatistics( d take size ) )
+        d.take( size ).foldLeft( GrubbsShape() ) { _ :+ _ }
       }
 
-      def score( s: GrubbsShape ): TryV[Double] = defaultModule.AlgorithmImpl.grubbsScore( s )
+      def score( s: GrubbsShape ): TryV[Double] = GrubbsAlgorithm.grubbsScore( s )
 
-      for ( i ← 0 until 6 ) score( caller( i ) ).isLeft mustBe true
-      score( caller( 7 ) ).value mustBe ( 2.0199684174 +- 0.00001 )
+      for ( i ← 0 until minPopulation ) {
+        val s = score( caller( i ) )
+        log.info( Map( "@msg" → "grubbs score", "i" → i, "score" → s.toString ) )
+        s.isLeft mustBe true
+      }
+      //      for ( i ← 0 until 7 ) score( caller( i ) ).value mustBe true
+      //      score( caller( 7 ) ).value mustBe ( 2.0199684174 +- 0.00001 )
       score( caller( 8 ) ).value mustBe ( 2.1266465543 +- 0.00001 )
     }
 
@@ -248,6 +271,7 @@ class GrubbsAlgorithmSpec
       val s1 = spike( scope.topic, dp1 )()
       val h1 = historyWith( None, s1 )
       val ( e1, r1 ) = makeExpected( 0.05 )( points = s1.points, outliers = Seq.fill( s1.size - 1 ) { false } :+ true )
+      s1.size mustBe 10
       evaluate(
         hint = "first",
         algorithmAggregateId = id,
@@ -269,6 +293,7 @@ class GrubbsAlgorithmSpec
         outliers = Seq.fill( s2.size ) { false },
         history = h2.lastPoints map { _.toDataPoint }
       )
+      s2.size mustBe 10
       evaluate(
         hint = "second",
         algorithmAggregateId = id,

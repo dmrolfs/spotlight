@@ -5,7 +5,7 @@ import akka.util.ByteString
 import org.python.core.{ PyTuple, PyList }
 import org.scalatest._
 import org.scalatest.mockito.MockitoSugar
-import peds.commons.log.Trace
+import omnibus.commons.log.Trace
 import spotlight.model.timeseries._
 
 /** Created by rolfsd on 12/30/15.

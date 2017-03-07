@@ -4,19 +4,19 @@ import scala.concurrent.Await
 import scala.concurrent.duration._
 import akka.testkit._
 import com.typesafe.config.{ Config, ConfigFactory }
-import peds.akka.envelope._
-import peds.akka.envelope.pattern.ask
+import omnibus.akka.envelope._
+import omnibus.akka.envelope.pattern.ask
 import akka.actor.{ ActorRef, ActorSystem, Props }
 import com.typesafe.scalalogging.StrictLogging
-import demesne.index.StackableIndexBusPublisher
 import demesne.{ AggregateRootType, DomainModel }
 import demesne.module.{ AggregateEnvironment, LocalAggregate }
-import demesne.module.entity.{ EntityAggregateModule, EntityProtocol }
+import demesne.module.entity.EntityAggregateModule
 import demesne.repository.AggregateRootProps
-import peds.akka.publish.StackableStreamPublisher
-import peds.archetype.domain.model.core.EntityIdentifying
-import peds.commons.identifier.{ ShortUUID, TaggedID }
-import peds.commons.log.Trace
+import omnibus.akka.publish.StackableStreamPublisher
+import omnibus.archetype.domain.model.core.EntityIdentifying
+import omnibus.commons.TryV
+import omnibus.commons.identifier.Identifying
+import omnibus.commons.log.Trace
 import shapeless.Lens
 import spotlight.analysis.AnalysisPlanModule.AggregateRoot.PlanActor
 import spotlight.analysis.AnalysisPlanModule.AggregateRoot.PlanActor.{ FlowConfigurationProvider, WorkerProvider }
@@ -31,11 +31,10 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[AnalysisPlanSta
 
   val trace = Trace[AnalysisPlanModulePassivationSpec]
 
-  override type ID = AnalysisPlanState#ID
   override type Protocol = AnalysisPlanProtocol.type
   override val protocol: Protocol = AnalysisPlanProtocol
 
-  implicit val moduleIdentifying = AnalysisPlanModule.identifying
+  implicit val moduleIdentifying: Identifying.Aux[AnalysisPlanState, AnalysisPlanState#ID] = AnalysisPlanModule.identifying
 
   override def testConfiguration( test: OneArgTest, slug: String ): Config = {
     AnalysisPlanModulePassivationSpec.config( systemName = slug )
@@ -72,30 +71,33 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[AnalysisPlanSta
         extends PlanActor( model, rootType )
         with WorkerProvider
         with FlowConfigurationProvider
-        with StackableStreamPublisher
-        with StackableIndexBusPublisher {
+        with StackableStreamPublisher {
       override val bufferSize: Int = 10
     }
 
     override val identifying: EntityIdentifying[AnalysisPlanState] = AnalysisPlanModule.identifying
-    override def nextId(): module.TID = identifying.safeNextId
+    override def nextId(): module.TID = TryV.unsafeGet( identifying.nextTID )
 
-    val algo: String = SimpleMovingAverageAlgorithm.algorithm.label
+    val algo: String = SimpleMovingAverageAlgorithm.label
+
+    val emptyConfig = ConfigFactory.empty()
 
     def makePlan( name: String, g: Option[AnalysisPlan.Grouping] ): AnalysisPlan = {
       AnalysisPlan.default(
         name = name,
-        algorithms = Set( algo ),
+        algorithms = Map(
+          algo →
+            ConfigFactory.parseString(
+              s"""
+            |seedEps: 5.0
+            |minDensityConnectedPoints: 3
+            """.stripMargin
+            )
+        ),
         grouping = g,
         timeout = 500.millis,
         isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = 1, triggerPoint = 1 ),
-        reduce = ReduceOutliers.byCorroborationPercentage( 50 ),
-        planSpecification = ConfigFactory.parseString(
-          s"""
-          |algorithm-config.${algo}.seedEps: 5.0
-          |algorithm-config.${algo}.minDensityConnectedPoints: 3
-          """.stripMargin
-        )
+        reduce = ReduceOutliers.byCorroborationPercentage( 50 )
       )
     }
 
@@ -123,14 +125,14 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[AnalysisPlanSta
           p.info.get mustBe an[AnalysisPlan]
           val actual = p.info.get.asInstanceOf[AnalysisPlan]
           actual.name mustBe "TestPlan"
-          actual.algorithms mustBe Set( algo )
+          actual.algorithmKeys mustBe Set( algo )
         }
       }
     }
 
-    "must not respond before add" taggedAs WIP in { f: Fixture ⇒
+    "must not respond before add" in { f: Fixture ⇒
       import f._
-      val info = ( entity ?+ P.UseAlgorithms( tid, Set( "foo", "bar" ), ConfigFactory.empty() ) ).mapTo[P.PlanInfo]
+      val info = ( entity ?+ P.UseAlgorithms( tid, Map( "foo" → emptyConfig, "bar" → emptyConfig ) ) ).mapTo[P.PlanInfo]
       bus.expectNoMsg()
     }
 
@@ -151,19 +153,19 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[AnalysisPlanSta
 
       stateFrom( entity, planTid ) mustBe p1
 
-      entity !+ P.UseAlgorithms( planTid, Set( "stella", "otis", "apollo" ), ConfigFactory.empty() )
+      entity !+ P.UseAlgorithms( planTid, Map( "stella" → emptyConfig, "otis" → emptyConfig, "apollo" → emptyConfig ) )
       bus.expectMsgPF( 1.second.dilated, "change algos" ) {
-        case P.AlgorithmsChanged( pid, algos, c, added, dropped ) ⇒ {
+        case P.AlgorithmsChanged( pid, algos, added, dropped ) ⇒ {
           pid mustBe planTid
-          algos mustBe Set( "stella", "otis", "apollo" )
+          algos.keySet mustBe Set( "stella", "otis", "apollo" )
           added mustBe Set( "stella", "otis", "apollo" )
-          dropped mustBe Set( SimpleMovingAverageAlgorithm.algorithm.label )
-          assert( c.isEmpty )
+          dropped mustBe Set( SimpleMovingAverageAlgorithm.label )
+          assert( algos forall { _._2.isEmpty } )
         }
       }
     }
 
-    "take and recover from snapshots" in { f: Fixture ⇒
+    "take and recover from snapshots" taggedAs WIP in { f: Fixture ⇒
       import f._
 
       val p1 = makePlan( "TestPlan", None )
@@ -173,18 +175,32 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[AnalysisPlanSta
 
       logger.info( "TEST:taking Snapshot..." )
 
-      EventFilter.debug( start = "aggregate snapshot successfully saved:", occurrences = 1 ) intercept {
-        module.rootType.snapshot foreach { ss ⇒ entity !+ ss.saveSnapshotCommand( p1.id ) }
+      //      EventFilter.debug( pattern = """Using serializer \[.+\] for message \[demesne.module.entity.EntityProtocol$Added\]""" ) intercept {
+      //        intercept {
+      //          logger.warn( "In snapshot intercept..." )
+      //          module.rootType.snapshot foreach { ss ⇒
+      //            logger.warn( "commanding entity:[{}] to save snapshot: [{}]", entity.path.name, ss.saveSnapshotCommand( p1.id ).toString )
+      //            entity !+ ss.saveSnapshotCommand( p1.id )
+      //          }
+      //        }
+      //      }
+      //      EventFilter.debug( start = "aggregate snapshot successfully saved:", occurrences = 1 ) intercept {
+      EventFilter.debug( start = "saving snapshot for pid:[AnalysisPlan:", occurrences = 1 ) intercept {
+        logger.warn( "In snapshot intercept..." )
+        module.rootType.snapshot foreach { ss ⇒
+          logger.warn( "commanding entity:[{}] to save snapshot: [{}]", entity.path.name, ss.saveSnapshotCommand( p1.id ).toString )
+          entity !+ ss.saveSnapshotCommand( p1.id )
+        }
       }
 
-      entity !+ P.UseAlgorithms( p1.id, Set( "stella", "otis", "apollo" ), ConfigFactory.empty() )
+      entity !+ P.UseAlgorithms( p1.id, Map( "stella" → emptyConfig, "otis" → emptyConfig, "apollo" → emptyConfig ) )
       bus.expectMsgPF( 1.second.dilated, "change algos" ) {
-        case P.AlgorithmsChanged( pid, algos, c, added, dropped ) ⇒ {
+        case P.AlgorithmsChanged( pid, algos, added, dropped ) ⇒ {
           pid mustBe p1.id
-          algos mustBe Set( "stella", "otis", "apollo" )
+          algos.keySet mustBe Set( "stella", "otis", "apollo" )
           added mustBe Set( "stella", "otis", "apollo" )
-          dropped mustBe Set( SimpleMovingAverageAlgorithm.algorithm.label )
-          assert( c.isEmpty )
+          dropped mustBe Set( SimpleMovingAverageAlgorithm.label )
+          assert( algos forall { _._2.isEmpty } )
         }
       }
 

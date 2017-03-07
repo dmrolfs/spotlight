@@ -16,13 +16,13 @@ import spotlight.protocol.PythonPickleProtocol
 import spotlight.testkit.ParallelAkkaSpec
 import org.joda.{ time ⇒ joda }
 import org.mockito.Mockito._
-import org.mockito.Matchers._
+import org.mockito.ArgumentMatchers._
 import org.mockito.invocation.InvocationOnMock
 import org.mockito.stubbing.Answer
 import org.python.core.{ PyList, PyTuple }
 import org.scalatest.Tag
 import org.scalatest.mockito.MockitoSugar
-import peds.commons.log.Trace
+import omnibus.commons.log.Trace
 
 /** Created by rolfsd on 12/31/15.
   */
@@ -290,11 +290,11 @@ class GraphitePublisherSpec
     "write past full batch with threshold boundaries" taggedAs ( WIP ) in { f: Fixture ⇒
       import f._
 
-      val algos = Set( "dbscan", "x", "y" )
-      val algConfig = ConfigFactory.parseString( algos.map { a ⇒ s"${a}.publish-threshold: yes" }.mkString( "\n" ) )
-      when( plan.algorithmConfig ) thenReturn algConfig
+      val algConfig = ConfigFactory.parseString( "publish-threshold: yes" )
+      val algos = Map( "dbscan" → algConfig, "x" → algConfig, "y" → algConfig )
+      when( plan.algorithms ) thenReturn algos
 
-      algos foreach { a ⇒ plan.algorithmConfig.getBoolean( s"${a}.publish-threshold" ) mustBe true }
+      algos foreach { case ( a, c ) ⇒ c.getBoolean( s"publish-threshold" ) mustBe true }
 
       val graphite2 = TestActorRef[GraphitePublisher](
         Props(
@@ -329,7 +329,7 @@ class GraphitePublisherSpec
       )
 
       val outliers = SeriesOutliers(
-        algorithms = algos,
+        algorithms = algos.keySet,
         source = TimeSeries( "foo", Seq( dp1, dp2, dp3 ) ),
         outliers = Seq( dp1 ),
         plan = plan,

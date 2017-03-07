@@ -3,10 +3,12 @@ package spotlight.analysis.algorithm
 import scalaz._
 import Scalaz._
 import com.persist.logging._
-import peds.commons.Valid
+import omnibus.commons.Valid
 import AlgorithmIdentifier.SpanType
 import bloomfilter.CanGenerateHashFrom
-import peds.commons.identifier.ShortUUID
+import demesne.AggregateRootType
+import omnibus.commons.identifier.{ Identifying, ShortUUID }
+import spotlight.model.outlier.AnalysisPlan
 
 /** Created by rolfsd on 2/1/17.
   */
@@ -122,5 +124,23 @@ object AlgorithmIdentifier extends ClassLogging {
         ) + CanGenerateHashFromString.generateHash( from.spanType.label )
       ) + CanGenerateHashFromString.generateHash( from.span )
     }
+  }
+}
+
+case class AlgorithmIdGenerator( planName: String, planId: AnalysisPlan#TID, algorithmRootType: AggregateRootType ) {
+  import scala.language.existentials
+  @transient private val identifying: Identifying.Aux[_, Algorithm.ID] = {
+    algorithmRootType.identifying.asInstanceOf[Identifying.Aux[_, Algorithm.ID]]
+  }
+
+  def next(): Algorithm.TID = {
+    identifying.tag(
+      AlgorithmIdentifier(
+        planName = planName,
+        planId = planId.id.toString(),
+        spanType = AlgorithmIdentifier.GroupSpan,
+        span = ShortUUID().toString()
+      )
+    )
   }
 }

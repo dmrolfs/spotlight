@@ -4,19 +4,17 @@ import scala.concurrent.Await
 import scala.concurrent.duration._
 import akka.testkit._
 import com.typesafe.config.{ Config, ConfigFactory }
-import peds.akka.envelope._
-import peds.akka.envelope.pattern.ask
+import omnibus.akka.envelope._
+import omnibus.akka.envelope.pattern.ask
 import akka.actor.{ ActorRef, ActorSystem, Props }
-import demesne.index.StackableIndexBusPublisher
 import demesne.module.{ AggregateEnvironment, LocalAggregate }
 import demesne.{ AggregateRootType, DomainModel }
 import demesne.repository.AggregateRootProps
-import demesne.module.entity.{ EntityAggregateModule, EntityProtocol }
+import demesne.module.entity.EntityAggregateModule
 import org.scalatest.{ OptionValues, Tag }
-import peds.akka.publish.StackableStreamPublisher
-import peds.commons.V
-import peds.commons.identifier.{ ShortUUID, TaggedID }
-import peds.commons.log.Trace
+import omnibus.akka.publish.StackableStreamPublisher
+import omnibus.commons.{ TryV, V }
+import omnibus.commons.log.Trace
 import shapeless.Lens
 import spotlight.analysis.AnalysisPlanModule.AggregateRoot.PlanActor
 import spotlight.analysis.AnalysisPlanModule.AggregateRoot.PlanActor.{ FlowConfigurationProvider, WorkerProvider }
@@ -29,7 +27,6 @@ import spotlight.model.timeseries._
 /** Created by rolfsd on 6/15/16.
   */
 class AnalysisPlanModuleSpec extends EntityModuleSpec[AnalysisPlanState] with OptionValues { outer ⇒
-  override type ID = AnalysisPlanModule.module.ID
   override type Protocol = AnalysisPlanProtocol.type
   override val protocol: Protocol = AnalysisPlanProtocol
 
@@ -57,32 +54,41 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[AnalysisPlanState] with Op
     protected val trace: Trace[_]
 
     val identifying = AnalysisPlanModule.identifying
-    override def nextId(): module.TID = identifying.safeNextId
+    override def nextId(): module.TID = TryV.unsafeGet( identifying.nextTID )
     lazy val plan = makePlan( "TestPlan", None )
     override lazy val tid: TID = plan.id
+
+    val emptyConfig = ConfigFactory.empty()
 
     def makePlan( name: String, g: Option[AnalysisPlan.Grouping] ): AnalysisPlan = {
       AnalysisPlan.default(
         name = name,
-        algorithms = Set( algo ),
+        algorithms = Map(
+          algo →
+            ConfigFactory.parseString(
+              s"""
+            |seedEps: 5.0
+            |minDensityConnectedPoints: 3
+            """.stripMargin
+            )
+        ),
         grouping = g,
         timeout = 500.millis,
         isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = 1, triggerPoint = 1 ),
-        reduce = ReduceOutliers.byCorroborationPercentage( 50 ),
-        planSpecification = ConfigFactory.parseString(
-          s"""
-             |algorithm-config.${algo}.seedEps: 5.0
-             |algorithm-config.${algo}.minDensityConnectedPoints: 3
-          """.stripMargin
-        )
+        reduce = ReduceOutliers.byCorroborationPercentage( 50 )
       )
     }
 
     override def rootTypes: Set[AggregateRootType] = trace.block( "rootTypes" ) {
-      super.rootTypes ++ Set( SimpleMovingAverageAlgorithm.rootType )
+      val srt = super.rootTypes
+      logger.info( "super root-types: [{}]", srt )
+      val sma = SimpleMovingAverageAlgorithm.module.rootType
+      logger.info( "sma root-type: [{}]", sma )
+      srt ++ Set( sma )
+      //      super.rootTypes ++ Set( SimpleMovingAverageAlgorithm.module.rootType )
     }
 
-    lazy val algo: String = SimpleMovingAverageAlgorithm.algorithm.label
+    lazy val algo: String = SimpleMovingAverageAlgorithm.label
 
     def stateFrom( ar: ActorRef, tid: module.TID ): AnalysisPlan = {
       import scala.concurrent.ExecutionContext.Implicits.global
@@ -117,8 +123,7 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[AnalysisPlanState] with Op
         extends PlanActor( model, rootType )
         with WorkerProvider
         with FlowConfigurationProvider
-        with StackableStreamPublisher
-        with StackableIndexBusPublisher {
+        with StackableStreamPublisher {
       override val bufferSize: Int = 10
     }
 
@@ -285,7 +290,7 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[AnalysisPlanState] with Op
     //      testProbe.expectNoMsg()
     //    }
 
-    "add AnalysisPlan" in { f: Fixture ⇒
+    "add AnalysisPlan" taggedAs WIP in { f: Fixture ⇒
       import f._
 
       entity ! protocol.Add( tid, Some( plan ) )
@@ -297,14 +302,14 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[AnalysisPlanState] with Op
           p.info.get mustBe an[AnalysisPlan]
           val actual = p.info.get.asInstanceOf[AnalysisPlan]
           actual.name mustBe "TestPlan"
-          actual.algorithms mustBe Set( algo )
+          actual.algorithmKeys mustBe Set( algo )
         }
       }
     }
 
     "must not respond before add" in { f: Fixture ⇒
       import f._
-      val info = ( entity ?+ P.UseAlgorithms( tid, Set( "foo", "bar" ), ConfigFactory.empty() ) ).mapTo[P.PlanInfo]
+      val info = ( entity ?+ P.UseAlgorithms( tid, Map( "foo" → emptyConfig, "bar" → emptyConfig ) ) ).mapTo[P.PlanInfo]
       bus.expectNoMsg()
     }
 
@@ -345,21 +350,22 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[AnalysisPlanState] with Op
         """.stripMargin
       )
 
-      entity !+ AnalysisPlanProtocol.UseAlgorithms( tid, Set( "foo", "bar", "zed" ), testConfig )
+      val expected = Map( "foo" → testConfig, "bar" → emptyConfig, "zed" → testConfig )
+      entity !+ AnalysisPlanProtocol.UseAlgorithms( tid, Map( "foo" → testConfig, "bar" → emptyConfig, "zed" → testConfig ) )
       bus.expectMsgPF( max = 3.seconds.dilated, hint = "use algorithms" ) {
-        case AnalysisPlanProtocol.AlgorithmsChanged( id, algos, config, added, dropped ) ⇒ {
+        case AnalysisPlanProtocol.AlgorithmsChanged( id, algos, added, dropped ) ⇒ {
           id mustBe tid
-          algos mustBe Set( "foo", "bar", "zed" )
-          dropped mustBe Set( SimpleMovingAverageAlgorithm.algorithm.label )
+          algos.keySet mustBe Set( "foo", "bar", "zed" )
+          dropped mustBe Set( SimpleMovingAverageAlgorithm.label )
           added mustBe Set( "foo", "bar", "zed" )
-          config mustBe testConfig
+          algos foreach { case ( a, c ) ⇒ c mustBe expected( a ) }
         }
       }
 
       val actual = stateFrom( entity, tid )
       actual mustBe plan
-      actual.algorithms mustBe Set( "foo", "bar", "zed" )
-      actual.algorithmConfig mustBe testConfig
+      actual.algorithms.keySet mustBe Set( "foo", "bar", "zed" )
+      actual.algorithms foreach { case ( a, c ) ⇒ c mustBe expected( a ) }
     }
 
     "change resolveVia" in { f: Fixture ⇒

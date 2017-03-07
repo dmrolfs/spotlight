@@ -7,8 +7,8 @@ import scala.concurrent.duration.SECONDS
 import org.scalatest._
 import org.joda.{ time ⇒ joda }
 import com.github.nscala_time.time.Imports._
-import peds.commons.log.Trace
-import peds.commons.math.Interpolator
+import omnibus.commons.log.Trace
+import omnibus.commons.math.Interpolator
 
 class TimeSeriesCohortSpec
     extends fixture.WordSpec

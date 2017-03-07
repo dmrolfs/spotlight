@@ -8,11 +8,11 @@ import org.joda.{ time ⇒ joda }
 import org.apache.commons.math3.random.RandomDataGenerator
 import org.scalatest.concurrent.ScalaFutures
 import com.persist.logging._
-import peds.archetype.domain.model.core.{ Entity, EntityIdentifying }
-import peds.commons.V
-import peds.commons.log.Trace
+import omnibus.archetype.domain.model.core.{ Entity, EntityIdentifying }
+import omnibus.commons.{ TryV, V }
+import omnibus.commons.log.Trace
 import demesne.AggregateRootType
-import demesne.module.entity.{ EntityAggregateModule }
+import demesne.module.entity.EntityAggregateModule
 import demesne.testkit.AggregateRootSpec
 import spotlight.analysis.HistoricalStatistics
 import spotlight.analysis.shard.CellShardModule
@@ -24,6 +24,7 @@ import spotlight.model.timeseries._
 abstract class EntityModuleSpec[E <: Entity: ClassTag] extends AggregateRootSpec[E] with ScalaFutures {
   private val trace = Trace[EntityModuleSpec[E]]
 
+  override type State = E
   override type ID = E#ID
 
   override def testConfiguration( test: OneArgTest, slug: String ): Config = spotlight.testkit.config( "core", slug )
@@ -62,7 +63,7 @@ abstract class EntityModuleSpec[E <: Entity: ClassTag] extends AggregateRootSpec
         window map { w ⇒ AnalysisPlan.Grouping( limit = 10000, w ) }
       }
 
-      AnalysisPlan.default( "", 1.second, isQuorun, reduce, Set.empty[String], grouping ).appliesTo
+      AnalysisPlan.default( "", 1.second, isQuorun, reduce, Map.empty[String, Config], grouping ).appliesTo
     }
 
     implicit val nowTimestamp: joda.DateTime = joda.DateTime.now
@@ -72,7 +73,7 @@ abstract class EntityModuleSpec[E <: Entity: ClassTag] extends AggregateRootSpec
 
     val identifying: EntityIdentifying[E]
 
-    override def nextId(): TID = identifying.safeNextId
+    override def nextId(): TID = TryV.unsafeGet( identifying.nextTID )
     override lazy val tid: TID = nextId()
     lazy val entity: ActorRef = trace.block( "entity" ) {
       module aggregateOf tid

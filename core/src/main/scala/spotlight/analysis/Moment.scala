@@ -2,14 +2,17 @@ package spotlight.analysis
 
 import scalaz._
 import Scalaz._
-import com.typesafe.scalalogging.LazyLogging
+import com.typesafe.config.Config
+import com.persist.logging._
 import org.apache.commons.math3.stat.descriptive.StatisticalSummary
-import peds.commons.Valid
-import peds.commons.util._
+import omnibus.commons.Valid
+import omnibus.commons.util._
+import spotlight.analysis.algorithm.Advancing
+import spotlight.analysis.algorithm.AlgorithmProtocol.Advanced
 
 /** Created by rolfsd on 1/26/16.
   */
-trait Moment extends Serializable {
+sealed trait Moment extends Serializable {
   def alpha: Double
   def centerOfMass: Double
   //    def halfLife: Double
@@ -18,7 +21,7 @@ trait Moment extends Serializable {
   def :+( value: Double ): Moment
 }
 
-object Moment extends LazyLogging {
+object Moment extends ClassLogging {
   def withAlpha( alpha: Double ): Valid[Moment] = {
     checkAlpha( alpha ) map { a ⇒ SimpleMoment( alpha ) }
   }
@@ -32,6 +35,27 @@ object Moment extends LazyLogging {
     else alpha.successNel
   }
 
+  implicit val advancing: Advancing[Moment] = new Advancing[Moment] {
+    val AlphaPath = "alpha"
+
+    override def zero( configuration: Option[Config] ): Moment = {
+      val alpha = valueFrom( configuration, AlphaPath ) { _ getDouble AlphaPath } getOrElse 0.05
+      Moment.withAlpha( alpha ).disjunction match {
+        case \/-( m ) ⇒ m
+        case -\/( exs ) ⇒ {
+          exs foreach { ex ⇒ log.error( "failed to create moment shape", ex ) }
+          throw exs.head
+        }
+      }
+    }
+
+    override def N( shape: Moment ): Long = shape.statistics.map { _.N } getOrElse 0L
+
+    override def advance( original: Moment, advanced: Advanced ): Moment = original :+ advanced.point.value
+
+    override def copy( shape: Moment ): Moment = shape
+  }
+
   object Statistics {
     def apply( alpha: Double, values: Double* ): Statistics = {
       values.foldLeft(
@@ -43,7 +67,7 @@ object Moment extends LazyLogging {
   }
 
   final case class Statistics private[analysis] (
-      N: Long = 1,
+      N: Long = 1L,
       alpha: Double,
       sum: Double,
       movingMax: Double,

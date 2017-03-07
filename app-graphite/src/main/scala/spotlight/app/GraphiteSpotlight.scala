@@ -13,10 +13,10 @@ import akka.util.{ ByteString, Timeout }
 import org.slf4j.LoggerFactory
 import com.typesafe.scalalogging.{ Logger, StrictLogging }
 import demesne.BoundedContext
-import kamon.Kamon
+//import kamon.Kamon
 import nl.grons.metrics.scala.MetricName
-import peds.akka.metrics.Instrumented
-import peds.akka.stream.StreamMonitor
+import omnibus.akka.metrics.Instrumented
+import omnibus.akka.stream.StreamMonitor
 import spotlight.analysis.OutlierScoringModel
 import spotlight.{ Settings, Spotlight, SpotlightContext }
 import spotlight.model.outlier._
@@ -27,7 +27,7 @@ import spotlight.publish.{ GraphitePublisher, LogPublisher }
   */
 object GraphiteSpotlight extends Instrumented with StrictLogging {
   override lazy val metricBaseName: MetricName = {
-    import peds.commons.util._
+    import omnibus.commons.util._
     MetricName( getClass.getPackage.getName, getClass.safeSimpleName )
   }
 
@@ -56,7 +56,7 @@ object GraphiteSpotlight extends Instrumented with StrictLogging {
             case Failure( ex ) ⇒ {
               logger.error( "Server could not bind to source", ex )
               boundedContext.shutdown()
-              Kamon.shutdown()
+              //              Kamon.shutdown()
             }
           }
       }

@@ -5,28 +5,26 @@ import java.util.concurrent.atomic.AtomicInteger
 
 import scala.concurrent.Future
 import scala.concurrent.duration._
-import scala.util.{ Failure, Success, Try }
+import scala.util.{ Failure, Success }
 import akka.NotUsed
 import akka.actor.{ Actor, ActorSystem, DeadLetter, Props }
 import akka.event.LoggingReceive
-import akka.stream.scaladsl.{ FileIO, Flow, Framing, GraphDSL, Keep, Sink, Source }
+import akka.stream.scaladsl.{ FileIO, Flow, Framing, GraphDSL, Sink, Source }
 import akka.stream._
 import akka.util.ByteString
 import com.persist.logging._
 import com.persist.logging.LoggingLevels.{ DEBUG, Level, WARN }
-import spotlight.analysis.{ AnalysisPlanModule, PlanCatalog }
 
 import scalaz.{ -\/, \/, \/- }
 import nl.grons.metrics.scala.MetricName
 import org.joda.time.DateTime
-import org.slf4j.LoggerFactory
 import org.json4s._
 import org.json4s.jackson.JsonMethods
-import peds.akka.metrics.Instrumented
-import peds.akka.stream.StreamMonitor
+import omnibus.akka.metrics.Instrumented
+import omnibus.akka.stream.StreamMonitor
 import demesne.BoundedContext
-import peds.akka.stream.Limiter
-import peds.commons.TryV
+import omnibus.akka.stream.Limiter
+import omnibus.commons.TryV
 import spotlight.{ Settings, Spotlight, SpotlightContext }
 import spotlight.analysis.DetectFlow
 import spotlight.model.outlier._
@@ -90,18 +88,48 @@ object FileBatchExample extends Instrumented with ClassLogging {
       java.net.InetAddress.getLocalHost.getHostName
     )
 
-    val watched = Set( "PlanCatalog", "AnalysisPlan", "shard", "algorithm", "spotlight" )
-    def inWatched( fqn: String ): Boolean = watched exists { fqn.contains }
+    activateLoggingFilter( loggingSystem, system )
+  }
 
-    def filter( fields: Map[String, RichMsg], level: Level ): Boolean = {
-      fields
-        .get( "class" )
-        .collect { case fqn: String if inWatched( fqn ) ⇒ DEBUG <= level }
-        .getOrElse { WARN <= level }
+  def activateLoggingFilter( loggingSystem: LoggingSystem, system: ActorSystem ): Unit = {
+    val systemConfig = system.settings.config
+
+    val ActivePath = "spotlight.logging.filter.active"
+    if ( systemConfig.hasPath( ActivePath ) && systemConfig.getBoolean( ActivePath ) == true ) {
+      val IncludeClassnameSegmentsPath = "spotlight.logging.filter.include-classname-segments"
+
+      val watched = {
+        if ( systemConfig.hasPath( IncludeClassnameSegmentsPath ) ) {
+          import scala.collection.JavaConverters._
+          systemConfig.getStringList( IncludeClassnameSegmentsPath ).asScala.toSet
+        } else {
+          Set.empty[String]
+        }
+      }
+
+      log.warn(
+        Map(
+          "@msg" → "logging started",
+          "loglevel" → loggingSystem.logLevel.toString,
+          "log-debug-for" → watched.mkString( "[", ", ", "]" )
+        )
+      )
+
+      if ( watched.nonEmpty ) {
+        val loggingLevel = loggingSystem.logLevel
+        def inWatched( fqn: String ): Boolean = watched exists { fqn.contains }
+
+        def filter( fields: Map[String, RichMsg], level: Level ): Boolean = {
+          fields
+            .get( "class" )
+            .collect { case fqn: String if inWatched( fqn ) ⇒ level >= DEBUG }
+            .getOrElse { level >= loggingLevel }
+        }
+
+        loggingSystem.setFilter( Some( filter ) )
+        loggingSystem.setLevel( DEBUG )
+      }
     }
-
-    loggingSystem.setFilter( Some( filter ) )
-    loggingSystem.setLevel( DEBUG )
   }
 
   //  case class OutlierInfo( metricName: String, metricWebId: String, metricSegment: String )
@@ -137,7 +165,7 @@ object FileBatchExample extends Instrumented with ClassLogging {
   }
 
   override lazy val metricBaseName: MetricName = {
-    import peds.commons.util._
+    import omnibus.commons.util._
     MetricName( getClass.getPackage.getName, getClass.safeSimpleName )
   }
 
@@ -248,7 +276,7 @@ object FileBatchExample extends Instrumented with ClassLogging {
 
     val graph = GraphDSL.create() { implicit b ⇒
       import GraphDSL.Implicits._
-      import peds.akka.stream.StreamMonitor._
+      import omnibus.akka.stream.StreamMonitor._
 
       def watch[T]( label: String ): Flow[T, T, NotUsed] = Flow[T].map { e ⇒ log.info( Map( label → e.toString ) ); e }
 
@@ -258,10 +286,7 @@ object FileBatchExample extends Instrumented with ClassLogging {
           .watchFlow( WatchPoints.Intake )
       )
 
-      val timeSeries = b.add(
-        Flow[String]
-          .via( unmarshalTimeSeriesData )
-      )
+      val timeSeries = b.add( Flow[String].via( unmarshalTimeSeriesData ) )
 
       val limiter = b.add( rateLimitFlow( configuration.parallelism, 25.milliseconds ).watchFlow( WatchPoints.Rate ) )
       val score = b.add( scoring )

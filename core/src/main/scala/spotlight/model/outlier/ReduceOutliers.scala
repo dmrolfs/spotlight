@@ -5,7 +5,7 @@ import Scalaz._
 import com.typesafe.scalalogging.{ LazyLogging, Logger }
 import org.slf4j.LoggerFactory
 import org.joda.{ time ⇒ joda }
-import peds.commons.{ V, Valid }
+import omnibus.commons.{ V, Valid }
 import shapeless.syntax.typeable._
 import spotlight.model.outlier.ReduceOutliers.CorroboratedReduceOutliers.Check
 import spotlight.model.timeseries.{ ThresholdBoundary, DataPoint, TimeSeriesBase, Topic }

@@ -8,7 +8,7 @@ import demesne.{ AggregateRootType, DomainModel }
 import org.joda.{ time ⇒ joda }
 import org.scalatest.mockito.MockitoSugar
 import org.mockito.Mockito._
-import peds.akka.envelope.{ Envelope, WorkId }
+import omnibus.akka.envelope.{ Envelope, WorkId }
 import spotlight.analysis.shard._
 import spotlight.model.outlier.{ IsQuorum, AnalysisPlan, ReduceOutliers }
 import spotlight.model.timeseries.{ DataPoint, TimeSeries }
@@ -26,7 +26,7 @@ class DetectionAlgorithmRouterSpec extends ParallelAkkaSpec with MockitoSugar {
     val algorithm = TestProbe()
     val algorithmRootType = mock[AggregateRootType]
     when( algorithmRootType.name ).thenReturn { algo }
-    implicit val shardIdentifying = CellShardModule.identifying
+    implicit val shardIdentifying = CellShardModule.module.identifying
     val catalogId = ShardCatalog.idFor( plan, algo )
     val catalog = TestProbe()
     val catalogRootType = CellShardModule.module.rootType
@@ -39,17 +39,19 @@ class DetectionAlgorithmRouterSpec extends ParallelAkkaSpec with MockitoSugar {
     def makePlan( name: String, g: Option[AnalysisPlan.Grouping] ): AnalysisPlan = {
       AnalysisPlan.default(
         name = name,
-        algorithms = Set( algo ),
+        algorithms = Map(
+          algo →
+            ConfigFactory.parseString(
+              s"""
+            |seedEps: 5.0
+            |minDensityConnectedPoints: 3
+            """.stripMargin
+            )
+        ),
         grouping = g,
         timeout = 500.millis,
         isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = 1, triggerPoint = 1 ),
-        reduce = ReduceOutliers.byCorroborationPercentage( 50 ),
-        planSpecification = ConfigFactory.parseString(
-          s"""
-             |algorithm-config.${algo}.seedEps: 5.0
-             |algorithm-config.${algo}.minDensityConnectedPoints: 3
-          """.stripMargin
-        )
+        reduce = ReduceOutliers.byCorroborationPercentage( 50 )
       )
     }
 

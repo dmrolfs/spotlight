@@ -9,12 +9,12 @@ import org.apache.commons.math3.linear.EigenDecomposition
 import scalaz._
 import Scalaz._
 import scalaz.Kleisli.{ ask, kleisli }
-import peds.commons.{ KOp, TryV, Valid }
-import peds.commons.util._
+import omnibus.commons.{ KOp, TryV, Valid }
+import omnibus.commons.util._
 import org.apache.commons.math3.ml.clustering.{ Cluster, DBSCANClusterer, DoublePoint }
 import org.apache.commons.math3.ml.distance.{ DistanceMeasure, EuclideanDistance }
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
-import peds.commons.math.MahalanobisDistance
+import omnibus.commons.math.MahalanobisDistance
 import spotlight.analysis.HistoricalStatistics
 import spotlight.analysis.algorithm.AlgorithmActor.AlgorithmContext
 import spotlight.analysis.algorithm.CommonAnalyzer

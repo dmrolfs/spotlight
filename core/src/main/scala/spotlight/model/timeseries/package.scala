@@ -4,7 +4,7 @@ import bloomfilter.CanGenerateHashFrom
 import bloomfilter.CanGenerateHashFrom.CanGenerateHashFromString
 import org.joda.{ time ⇒ joda }
 import org.apache.commons.math3.ml.clustering.DoublePoint
-import peds.akka.envelope.WorkId
+import omnibus.akka.envelope.WorkId
 
 package object timeseries {
   //  type IdentifiedTimeSeries = (TimeSeries, Set[WorkId])

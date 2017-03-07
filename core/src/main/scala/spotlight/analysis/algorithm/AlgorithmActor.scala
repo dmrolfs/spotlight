@@ -11,9 +11,9 @@ import nl.grons.metrics.scala.{ MetricName, Timer }
 import org.apache.commons.math3.linear.{ EigenDecomposition, MatrixUtils }
 import org.apache.commons.math3.ml.distance.{ DistanceMeasure, EuclideanDistance }
 import org.apache.commons.math3.ml.clustering.DoublePoint
-import peds.akka.metrics.InstrumentedActor
-import peds.commons.{ KOp, TryV }
-import peds.commons.math.MahalanobisDistance
+import omnibus.akka.metrics.InstrumentedActor
+import omnibus.commons.{ KOp, TryV }
+import omnibus.commons.math.MahalanobisDistance
 import spotlight.analysis.{ DetectUsing, DetectionAlgorithmRouter, HistoricalStatistics, RecentHistory, UnrecognizedPayload }
 import spotlight.model.outlier.AnalysisPlan
 import spotlight.model.timeseries._

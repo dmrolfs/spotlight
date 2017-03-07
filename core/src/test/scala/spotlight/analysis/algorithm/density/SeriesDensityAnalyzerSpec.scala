@@ -15,9 +15,9 @@ import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import org.joda.{ time ⇒ joda }
 import org.mockito.Mockito._
 import org.scalatest.mockito.MockitoSugar
-import peds.akka.envelope.WorkId
-import peds.commons.V
-import peds.commons.identifier.{ ShortUUID, TaggedID }
+import omnibus.akka.envelope.WorkId
+import omnibus.commons.V
+import omnibus.commons.identifier.{ ShortUUID, TaggedID }
 import shapeless._
 import spotlight.analysis._
 import spotlight.analysis.algorithm.{ AlgorithmActor, CommonAnalyzer }
@@ -52,7 +52,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
         window map { w ⇒ AnalysisPlan.Grouping( limit = 10000, w ) }
       }
 
-      AnalysisPlan.default( "", 1.second, isQuorun, reduce, Set.empty[String], grouping ).appliesTo
+      AnalysisPlan.default( "", 1.second, isQuorun, reduce, Map.empty[String, Config], grouping ).appliesTo
     }
   }
 
@@ -60,10 +60,11 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
     val metric = Topic( "metric.a" )
     val algoS = SeriesDensityAnalyzer.Algorithm
     //    val algoC = CohortDensityAnalyzer.Algorithm
+    val emptyConfig = ConfigFactory.empty()
     val plan = mock[AnalysisPlan]
     when( plan.id ).thenReturn( TaggedID( 'plan, ShortUUID() ) )
     when( plan.appliesTo ).thenReturn( Fixture.appliesToAll )
-    when( plan.algorithms ) thenReturn Set( algoS )
+    when( plan.algorithms ) thenReturn Map( algoS → emptyConfig )
 
     val router = TestProbe()
     val aggregator = TestProbe()

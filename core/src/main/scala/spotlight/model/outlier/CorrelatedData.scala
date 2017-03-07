@@ -1,6 +1,6 @@
 package spotlight.model.outlier
 
-import peds.akka.envelope.WorkId
+import omnibus.akka.envelope.WorkId
 import shapeless.Lens
 import spotlight.model.outlier.AnalysisPlan.Scope
 

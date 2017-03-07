@@ -8,12 +8,12 @@ import com.persist.logging._
 
 import scalaz._
 import Scalaz._
-import com.typesafe.config.{ Config, ConfigValue, ConfigValueType }
+import com.typesafe.config.{ Config, ConfigObject, ConfigValue, ConfigValueType }
 import demesne.{ AggregateRootType, BoundedContext, DomainModel, StartTask }
-import peds.akka.envelope._
-import peds.akka.metrics.InstrumentedActor
-import peds.commons.{ TryV, Valid }
-import peds.commons.concurrent._
+import omnibus.akka.envelope._
+import omnibus.akka.metrics.InstrumentedActor
+import omnibus.commons.{ TryV, Valid }
+import omnibus.commons.concurrent._
 import spotlight.analysis.algorithm._
 import spotlight.analysis.algorithm.statistical._
 import spotlight.model.outlier.AnalysisPlan
@@ -41,10 +41,10 @@ object DetectionAlgorithmRouter extends ClassLogging {
     StartTask.withBoundTask( "load user algorithms" ) { bc: BoundedContext ⇒
       val t: Future[StartTask.Result] = {
         for {
-          algoRoots ← Registry.loadAlgorithms( bc, configuration )
+          algoRoots ← Registry.loadAlgorithms( bc, configuration.resolve() )
           roots ← Registry.registerWithRouter( algoRoots )
           unknowns = algoRoots.map { case ( _, rt ) ⇒ rt }.toSet
-          _ = log.info( Map( "@msg" → "#TEST unknown algorithm routes", "unknowns" → unknowns.mkString( "[", ", ", "]" ) ) )
+          _ = log.info( Map( "@msg" → "starting with new algorithm routes", "unknowns" → unknowns.mkString( "[", ", ", "]" ) ) )
         } yield {
           log
             .info( Map( "@msg" → "DetectionAlgorithmRouter routing table", "routing-table" → roots.mkString( "[", ", ", "]" ) ) )
@@ -91,9 +91,9 @@ object DetectionAlgorithmRouter extends ClassLogging {
           //        MeanSubtractionCumulationAnalyzer.Algorithm -> ???, // MeanSubtractionCumulationAnalyzer.props( router ),
           //        MedianAbsoluteDeviationAnalyzer.Algorithm -> ???, // MedianAbsoluteDeviationAnalyzer.props( router ),
           //        SeasonalExponentialMovingAverageAnalyzer.Algorithm -> ??? // SeasonalExponentialMovingAverageAnalyzer.props( router )
-          ExponentialMovingAverageAlgorithm.algorithm.label → ExponentialMovingAverageAlgorithm.rootType,
-          GrubbsAlgorithm.algorithm.label → GrubbsAlgorithm.rootType,
-          SimpleMovingAverageAlgorithm.algorithm.label → SimpleMovingAverageAlgorithm.rootType
+          ExponentialMovingAverageAlgorithm.label → ExponentialMovingAverageAlgorithm.module.rootType,
+          GrubbsAlgorithm.label → GrubbsAlgorithm.module.rootType,
+          SimpleMovingAverageAlgorithm.label → SimpleMovingAverageAlgorithm.module.rootType
         )
       )
     }
@@ -109,50 +109,73 @@ object DetectionAlgorithmRouter extends ClassLogging {
 
     def unsafeRootTypeFor( algorithm: String ): Option[AggregateRootType] = {
       log.debug(
-        Map( "@msg" → "unsafe algorithm root types", "root-types" → algorithmRootTypes.get.keySet.mkString( "[", ", ", "]" ) )
+        Map(
+          "@msg" → "unsafe pull of algorithm root types",
+          "root-types" → algorithmRootTypes.get.keySet.mkString( "[", ", ", "]" )
+        )
       )
       algorithmRootTypes.get() get algorithm
     }
 
     def futureRootTypeFor( algorithm: String )( implicit ec: ExecutionContext ): Future[Option[AggregateRootType]] = {
       algorithmRootTypes.future() map { rootTable ⇒
-        log.debug( Map( "@msg" → "safe algorithm root types", "root-types" → rootTable.keySet.mkString( "[", ", ", "]" ) ) )
+        log.debug(
+          Map(
+            "@msg" → "safe pull of algorithm root types",
+            "root-types" → rootTable.keySet.mkString( "[", ", ", "]" )
+          )
+        )
         rootTable get algorithm
       }
     }
 
-    def userAlgorithms( configuration: Config ): Valid[Map[String, Class[_ <: AlgorithmModule]]] = {
-      def loadClass( algorithm: String, fqcn: String ): TryV[Class[_ <: AlgorithmModule]] = {
-        \/ fromTryCatchNonFatal { Class.forName( fqcn, true, getClass.getClassLoader ).asInstanceOf[Class[_ <: AlgorithmModule]] }
+    def userAlgorithms( configuration: Config ): Valid[Map[String, Class[_ <: Algorithm[_]]]] = {
+      def loadClass( algorithm: String, fqcn: String ): TryV[Class[_ <: Algorithm[_]]] = {
+        \/ fromTryCatchNonFatal { Class.forName( fqcn, true, getClass.getClassLoader ).asInstanceOf[Class[_ <: Algorithm[_]]] }
       }
 
-      def unwrapAlgorithmFQCN( entry: ( String, ConfigValue ) ): TryV[( String, String )] = {
-        val algorithm = entry._1
-        val value = entry._2.unwrapped()
+      def unwrapAlgorithmFQCN( algorithm: String, cv: ConfigValue ): TryV[( String, String )] = {
+        import scala.reflect._
+        val ConfigObjectType = classTag[ConfigObject]
+        val ClassPath = "class"
+        val value = cv.unwrapped()
+        log.debug(
+          Map(
+            "@msg" → "unwrapping algorithm FQCN",
+            "algorithm" → algorithm,
+            "config-value-type" → cv.valueType,
+            "config-value" → cv.toString,
+            "is-object" → ConfigObjectType.unapply( cv ).isDefined
+          )
+        )
 
-        entry._2.valueType() match {
-          case ConfigValueType.STRING ⇒ ( algorithm, value.asInstanceOf[String] ).right
-          case _ ⇒ InsufficientAlgorithmModuleError( algorithm, value.toString ).left
-        }
+        val algoFQCN = for {
+          algoConfig ← ConfigObjectType.unapply( cv ) map { _.toConfig }
+          fqcn ← if ( algoConfig hasPath ClassPath ) Some( algoConfig getString ClassPath ) else None
+          _ = log.debug( Map( "@msg" → "fqcn from algo config", "algorithm" → algorithm, "fqcn" → fqcn ) )
+        } yield ( algorithm, fqcn ).right
+
+        algoFQCN getOrElse InsufficientAlgorithmError( algorithm, value.toString ).left
       }
 
       val AlgorithmPath = "spotlight.algorithms"
       if ( configuration hasPath AlgorithmPath ) {
-        import scala.collection.JavaConversions._
+        import scala.collection.JavaConverters._
 
-        configuration.getConfig( AlgorithmPath ).entrySet().toList
+        configuration.getConfig( AlgorithmPath ).root.entrySet().asScala.toList
           .map { entry ⇒ ( entry.getKey, entry.getValue ) }
-          .traverseU { entry ⇒
-            val ac = for {
-              algorithmFqcn ← unwrapAlgorithmFQCN( entry )
-              ( algorithm, fqcn ) = algorithmFqcn
-              clazz ← loadClass( algorithm, fqcn )
-            } yield ( algorithm, clazz )
-            ac.validationNel
+          .traverseU {
+            case ( a, cv ) ⇒
+              val ac = for {
+                algorithmFqcn ← unwrapAlgorithmFQCN( a, cv )
+                ( algorithm, fqcn ) = algorithmFqcn
+                clazz ← loadClass( algorithm, fqcn )
+              } yield ( algorithm, clazz )
+              ac.validationNel
           }
           .map { algorithmClasses ⇒ Map( algorithmClasses: _* ) }
       } else {
-        Map.empty[String, Class[_ <: AlgorithmModule]].successNel
+        Map.empty[String, Class[_ <: Algorithm[_]]].successNel
       }
     }
 
@@ -163,15 +186,15 @@ object DetectionAlgorithmRouter extends ClassLogging {
       implicit
       ec: ExecutionContext
     ): Future[List[( String, AggregateRootType )]] = {
-      def algorithmRootTypeFor( clazz: Class[_ <: AlgorithmModule] ): TryV[AggregateRootType] = {
+      def algorithmRootTypeFor( clazz: Class[_ <: Algorithm[_]] ): TryV[AggregateRootType] = {
         \/ fromTryCatchNonFatal {
           import scala.reflect.runtime.{ universe ⇒ ru }
           val loader = getClass.getClassLoader
           val mirror = ru runtimeMirror loader
-          val moduleSymbol = mirror moduleSymbol clazz
-          val moduleMirror = mirror reflectModule moduleSymbol
-          val module = moduleMirror.instance.asInstanceOf[AlgorithmModule]
-          module.rootType
+          val algorithmSymbol = mirror moduleSymbol clazz
+          val algorithmMirror = mirror reflectModule algorithmSymbol
+          val algorithm = algorithmMirror.instance.asInstanceOf[Algorithm[_]]
+          algorithm.module.rootType
         }
       }
 
@@ -179,13 +202,16 @@ object DetectionAlgorithmRouter extends ClassLogging {
         model.rootTypes contains rootType
       }
 
-      val userAlgos: TryV[Map[String, Class[_ <: AlgorithmModule]]] = userAlgorithms( configuration ).disjunction leftMap { exs ⇒
-        exs foreach { ex ⇒ log.error( "loading user algorithm failed", ex ) }
-        exs.head
+      val userAlgos: TryV[Map[String, Class[_ <: Algorithm[_]]]] = {
+        userAlgorithms( configuration ).disjunction
+          .leftMap { exs ⇒
+            exs foreach { ex ⇒ log.error( "loading user algorithm failed", ex ) }
+            exs.head
+          }
       }
 
       def collectUnknowns(
-        algoClasses: Map[String, Class[_ <: AlgorithmModule]]
+        algoClasses: Map[String, Class[_ <: Algorithm[_]]]
       )(
         implicit
         model: DomainModel
@@ -232,7 +258,13 @@ class DetectionAlgorithmRouter extends Actor with EnvelopingActor with Instrumen
 
   var routingTable: Map[String, AlgorithmRoute] = provider.initialRoutingTable
   def addRoute( algorithm: String, resolver: AlgorithmRoute ): Unit = { routingTable += ( algorithm → resolver ) }
-  log.debug( Map( "@msg" → "created routing-table", "self" → self.path.name, "routing-table" → routingTable.mkString( "[", ", ", "]" ) ) )
+  log.debug(
+    Map(
+      "@msg" → "created routing-table",
+      "self" → self.path.name,
+      "routing-table" → routingTable
+    )
+  )
 
   def contains( algorithm: String ): Boolean = {
     val found = routingTable contains algorithm
@@ -242,7 +274,7 @@ class DetectionAlgorithmRouter extends Actor with EnvelopingActor with Instrumen
         "@msg" → "looking for",
         "self" → self.path.name,
         "algorithm" → algorithm,
-        "routing-table" → routingTable.keys.mkString( "[", ", ", "]" ),
+        "routing-keys" → routingTable.keys.mkString( "[", ", ", "]" ),
         "found" → found
       )
     )

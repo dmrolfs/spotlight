@@ -4,17 +4,14 @@ import scala.reflect._
 import scalaz.{ Lens ⇒ _, _ }
 import Scalaz._
 import shapeless._
-import peds.commons.Valid
-import peds.archetype.domain.model.core.Entity
-import peds.commons.identifier.TaggedID
+import omnibus.commons.Valid
+import omnibus.archetype.domain.model.core.Entity
+import omnibus.commons.identifier.TaggedID
 import spotlight.model.timeseries.Topic
 
 //todo remove with stateful algo?
 trait OutlierHistory extends Entity {
   override type ID = Topic
-  override val evID: ClassTag[ID] = classTag[Topic]
-  override val evTID: ClassTag[TID] = classTag[TaggedID[Topic]]
-
   def outlierAnnotations: Seq[OutlierAnnotation]
 }
 
