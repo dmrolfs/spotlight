@@ -218,7 +218,7 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
         val bytes = akka.util.ByteString( serializer toBinary state )
         val sz = Bytes( bytes.size )
 
-        log.warn(
+        log.info(
           Map(
             "@msg" → "algorithm estimateSize relying on serialization - look to optimize",
             "algorithm" → label,

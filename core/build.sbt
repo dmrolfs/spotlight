@@ -24,7 +24,7 @@ libraryDependencies ++=
 //    facility.suanshu, // don't want to use due to $$$
     facility.scopt,
     demesne.core,
-    facility.guava,
+//    facility.guava,
     facility.offheap,
     facility.lang,
     facility.parboiled,
