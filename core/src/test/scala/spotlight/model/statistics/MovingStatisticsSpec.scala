@@ -26,12 +26,15 @@ class MovingStatisticsSpec extends fixture.WordSpec with MustMatchers with Paral
   "MovingStatistics" should {
     "test summary" in { f: Fixture ⇒
       import f._
-      val stats: MovingStatistics = ( 0 until 20 ).foldLeft( MovingStatistics( window ) ) { ( s, v ) ⇒
+
+      val DataSize = 20
+      val stats: MovingStatistics = ( 0 until DataSize ).foldLeft( MovingStatistics( window ) ) { ( s, v ) ⇒
         dstats.addValue( v )
         s :+ v
       }
 
-      stats.N mustBe dstats.getN
+      stats.N mustBe DataSize
+      stats.window.size mustBe dstats.getN
       stats.sum mustBe dstats.getSum
       stats.minimum mustBe dstats.getMin
       stats.maximum mustBe dstats.getMax
