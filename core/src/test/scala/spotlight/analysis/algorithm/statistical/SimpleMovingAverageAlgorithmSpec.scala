@@ -253,29 +253,15 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmSpec[SimpleMovingAverage
       )
       when( plan.algorithms ) thenReturn { Map( defaultAlgorithm.label → smaConfig ) }
 
-      val slidingMagent = new CommonCalculationMagnet {
-        override def apply( points: Seq[DataPoint] ): Result = {
-          val r = Result(
-            underlying = points.foldLeft( MovingStatistics( 3 ) ) { ( s, p ) ⇒ s :+ p.value },
-            timestamp = points.last.timestamp,
-            tolerance = 3.0
-          )
-
-          //          log.debug(
-          //            Map(
-          //              "@msg" → "SLIDING MAGNET",
-          //              "points" → points.map( p ⇒ f"${p.value}%2.5f" ),
-          //              "result" → Map(
-          //                "N" → r.statistics.map( _.getN ),
-          //                "mean" → r.statistics.map( s ⇒ f"${s.getMean}%2.5f" ),
-          //                "stdev" → r.statistics.map( s ⇒ f"${s.getStandardDeviation}%2.5f" )
-          //              )
-          //            )
-          //          )
-
-          r
-        }
-      }
+      //      val slidingMagent = new CommonCalculationMagnet {
+      //        override def apply( points: Seq[DataPoint] ): Result = {
+      //          Result(
+      //            underlying = points.foldLeft( MovingStatistics( 3 ) ) { ( s, p ) ⇒ s :+ p.value },
+      //            timestamp = points.last.timestamp,
+      //            tolerance = 3.0
+      //          )
+      //        }
+      //      }
 
       val points: Seq[Double] = Seq(
         9.46, 9.9, 11.6, 14.5, 17.3, 19.2, 18.4, 14.5, 12.2, 10.8, 8.58,
@@ -324,7 +310,7 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmSpec[SimpleMovingAverage
       val ts = TimeSeries( "foo.bar", makeDataPoints( points ) )
       log.debug( Map( "@msg" → "timeseries", "values" → ts.points.map { _.value }.mkString( "[", ", ", "]" ) ) )
       val h = historyWith( None, ts )
-      val ( e, r ) = makeExpected( slidingMagent )(
+      val ( e, r ) = makeExpected( CalculationMagnet.sliding( 3 ) )(
         points = ts.points,
         outliers = explodeOutlierIdentifiers( points.size, Set() ),
         minimumPopulation = minPopulation

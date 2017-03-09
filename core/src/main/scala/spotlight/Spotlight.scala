@@ -11,20 +11,20 @@ import akka.util.Timeout
 import scalaz.Kleisli.kleisli
 import scalaz.Scalaz._
 import scalaz._
+import shapeless.{ Generic, HNil }
 import com.typesafe.config.{ Config, ConfigFactory }
-import com.typesafe.scalalogging.{ Logger, StrictLogging }
-import demesne.{ AggregateRootType, BoundedContext, DomainModel, StartTask }
+import com.persist.logging._
 import nl.grons.metrics.scala.{ Meter, MetricName }
 import org.slf4j.LoggerFactory
+import com.typesafe.scalalogging.Logger
 import omnibus.akka.metrics.{ Instrumented, Reporter }
 import omnibus.akka.supervision.IsolatedLifeCycleSupervisor.{ ChildStarted, StartChild }
 import omnibus.akka.supervision.{ IsolatedLifeCycleSupervisor, OneForOneStrategyFactory }
 import omnibus.commons.builder.HasBuilder
 import omnibus.commons.util._
-import shapeless.{ Generic, HNil }
+import demesne.{ AggregateRootType, BoundedContext, DomainModel, StartTask }
 import spotlight.analysis._
 import spotlight.analysis.{ PlanCatalogProtocol ⇒ CP }
-import spotlight.analysis.algorithm._
 import spotlight.analysis.shard.{ CellShardModule, LookupShardModule }
 import spotlight.analysis.algorithm.statistical._
 
@@ -61,9 +61,11 @@ object SpotlightContext extends HasBuilder[SpotlightContext] {
   )
 }
 
-object Spotlight extends Instrumented with StrictLogging {
+object Spotlight extends Instrumented with ClassLogging {
   override lazy val metricBaseName: MetricName = MetricName( getClass.getPackage.getName, getClass.safeSimpleName )
   lazy val workflowFailuresMeter: Meter = metrics meter "workflow.failures"
+
+  val SystemCategory = "system"
 
   type SystemSettings = ( ActorSystem, Settings )
   type BoundedSettings = ( BoundedContext, Settings )
@@ -76,6 +78,25 @@ object Spotlight extends Instrumented with StrictLogging {
     implicit
     ec: ExecutionContext
   ): Kleisli[Future, Array[String], SpotlightModel] = {
+    log.alternative(
+      SystemCategory,
+      Map(
+        "@msg" → "build info",
+        "spotlight" → Map(
+          "name" → spotlight.BuildInfo.name,
+          "version" → spotlight.BuildInfo.version,
+          "scala-version" → spotlight.BuildInfo.scalaVersion,
+          "sbt-version" → spotlight.BuildInfo.sbtVersion
+        ),
+        "demesne" → Map(
+          "name" → demesne.BuildInfo.name,
+          "version" → demesne.BuildInfo.version,
+          "scala-version" → demesne.BuildInfo.scalaVersion,
+          "sbt-version" → demesne.BuildInfo.sbtVersion
+        )
+      )
+    )
+
     systemConfiguration( context ) >=> startBoundedContext( context ) >=> makeFlow( finishSubscriberOnComplete )
   }
 
@@ -102,11 +123,14 @@ object Spotlight extends Instrumented with StrictLogging {
 
     if ( config hasPath MetricsPath ) {
       val metricsConfig = config getConfig MetricsPath
-      logger.info( "starting metric reporting with config: [{}]", metricsConfig )
       val reporter = Reporter startReporter metricsConfig
-      logger.info( "metric reporter: [{}]", reporter )
+      log.alternative(
+        SystemCategory,
+        Map( "@msg" → "starting metric reporting", "config" → metricsConfig, "reporter" → reporter.toString )
+      )
     } else {
-      logger.warn( """metric report configuration missing at "spotlight.metrics"""" )
+      log.alternative( SystemCategory, Map( "@msg" → """metric report configuration missing at "spotlight.metrics"""" ) )
+      log.warn( """metric report configuration missing at "spotlight.metrics"""" )
     }
 
     Done
@@ -116,20 +140,23 @@ object Spotlight extends Instrumented with StrictLogging {
     kleisli[Future, Array[String], SystemSettings] { args ⇒
       def spotlightConfig: String = Option( System getProperty "spotlight.config" ) getOrElse { "application.conf" }
 
-      logger.info(
-        "spotlight.config: [{}] @ URL:[{}]",
-        spotlightConfig,
-        scala.util.Try { Thread.currentThread.getContextClassLoader.getResource( spotlightConfig ) }
+      log.alternative(
+        SystemCategory,
+        Map(
+          "@msg" → "spotlight config",
+          "config" → spotlightConfig.toString,
+          "url" → scala.util.Try { Thread.currentThread.getContextClassLoader.getResource( spotlightConfig ) }
+        )
       )
 
       Settings( args, config = ConfigFactory.load() ).disjunction map { settings ⇒
-        logger info settings.usage
+        log.alternative( SystemCategory, Map( "@msg" → "Settings", "usage" → settings.usage ) )
         val system = context.system getOrElse ActorSystem( context.name, settings.config )
         ( system, settings )
       } match {
         case \/-( systemConfiguration ) ⇒ Future successful systemConfiguration
         case -\/( exs ) ⇒ {
-          exs foreach { ex ⇒ logger.error( "failed to create system configuration", ex ) }
+          exs foreach { ex ⇒ log.error( "failed to create system configuration", ex ) }
           Future failed exs.head
         }
       }
@@ -171,7 +198,7 @@ object Spotlight extends Instrumented with StrictLogging {
           ActorMaterializerSettings( system ) withSupervisionStrategy supervisionDecider
         )
 
-        logger.info( "TEST:BOOTSTRAP:BEFORE BoundedContext roottypes = [{}]", boundedContext.unsafeModel.rootTypes )
+        //        logger.info( "TEST:BOOTSTRAP:BEFORE BoundedContext roottypes = [{}]", boundedContext.unsafeModel.rootTypes )
 
         for {
           catalog ← makeCatalog( settings )
@@ -210,10 +237,10 @@ object Spotlight extends Instrumented with StrictLogging {
 
     for {
       ChildStarted( catalog ) ← ( catalogSupervisor ? StartChild( catalogProps, PlanCatalog.name ) ).mapTo[ChildStarted]
-      _ = logger.info( "catalog initialization started: [{}]", catalog )
+      _ = log.info( Map( "@msg" → "catalog initialization started", "catalog" → catalog.toString ) )
       _ ← ( catalog ? CP.WaitForStart ).mapTo[CP.Started.type]
     } yield {
-      logger.debug( "catalog initialization completed" )
+      log.debug( "catalog initialization completed" )
       catalog
     }
   }
@@ -251,7 +278,7 @@ object Spotlight extends Instrumented with StrictLogging {
 
   val supervisionDecider: Supervision.Decider = {
     case ex ⇒ {
-      logger.error( "Error caught by Supervisor:", ex )
+      log.error( "Error caught by Supervisor:", ex )
       workflowFailuresMeter.mark()
       Supervision.Restart
     }

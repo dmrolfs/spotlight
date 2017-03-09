@@ -26,6 +26,7 @@ import omnibus.commons.log.Trace
 import spotlight.analysis.{ DetectOutliersInSeries, DetectUsing, HistoricalStatistics }
 import spotlight.analysis.algorithm.{ AlgorithmProtocol ⇒ P }
 import spotlight.model.outlier._
+import spotlight.model.statistics.MovingStatistics
 import spotlight.model.timeseries._
 import squants.information.Bytes
 
@@ -409,7 +410,7 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
 
   trait CalculationMagnet {
     type Result <: CalculationMagnetResult
-    def apply( points: Seq[DataPoint] ): Result
+    def apply( points: Seq[DataPoint], tolerance: Double = 3.0 ): Result
   }
 
   abstract class CommonCalculationMagnet extends CalculationMagnet {
@@ -429,17 +430,27 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
       }
     }
 
-    override def apply( points: Seq[DataPoint] ): Result = {
+    override def apply( points: Seq[DataPoint], tolerance: Double = 3.0 ): Result = {
       Result(
         underlying = points.foldLeft( new SummaryStatistics() ) { ( s, p ) ⇒ s.addValue( p.value ); s },
         timestamp = points.last.timestamp,
-        tolerance = 3.0
+        tolerance = tolerance
       )
     }
   }
 
   object CalculationMagnet {
     implicit def fromNoHint( noHint: NoHint ): CalculationMagnet = new CommonCalculationMagnet {}
+
+    def sliding( width: Int = 3, tolerance: Double = 3.0 ) = new CommonCalculationMagnet {
+      override def apply( points: Seq[DataPoint], tolerance: Double = 3.0 ): Result = {
+        Result(
+          underlying = points.foldLeft( MovingStatistics( width ) ) { ( s, p ) ⇒ s :+ p.value },
+          timestamp = points.last.timestamp,
+          tolerance = tolerance
+        )
+      }
+    }
   }
 
   def makeDataPoints(
@@ -468,6 +479,8 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
       DataPoint( timestamp = ts, value = ( v * vadj ) )
     }
   }
+
+  def assemble[T]( collection: Seq[T], positions: Seq[Int] ): Seq[T] = positions map collection
 
   def spike( topic: Topic, data: Seq[DataPoint], value: Double = 1000D )( position: Int = data.size - 1 ): TimeSeries = {
     val ( front, last ) = data.sortBy { _.timestamp.getMillis }.splitAt( position )
@@ -588,7 +601,7 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
         actualVsExpectedShape( actual, expected )
       }
 
-      "verify estimated memory usage" taggedAs ( WIP, MEMORY ) in { f: Fixture ⇒
+      "verify estimated memory usage" taggedAs ( MEMORY ) in { f: Fixture ⇒
         import f._
         def makeData( i: Int ): P.Advanced = {
           val pt = DataPoint( nowTimestamp.plusMillis( 10 * i ), 0.14159265353 + 0.0001 * i )

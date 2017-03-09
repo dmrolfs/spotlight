@@ -1,24 +1,28 @@
 package spotlight.model.statistics
 
-import scala.collection.immutable
 import org.apache.commons.lang3.ClassUtils
 import org.apache.commons.math3.stat.descriptive.StatisticalSummary
 import com.persist.logging._
 
 object MovingStatistics {
-  def apply( width: Int ): MovingStatistics = new MovingStatistics( CircularBuffer.empty[Double], width )
+  /** Makes an empty MovingStatistics object with moving window of width
+    * @param width width of moving window
+    * @return MovingStatistics
+    */
+  def apply( width: Int ): MovingStatistics = MovingStatistics( window = CircularBuffer.empty[Double], width = width )
 
-  type CircularBuffer[A] = immutable.Vector[A]
-  object CircularBuffer {
-    def addTo[A]( capacity: Int )( buffer: CircularBuffer[A], elem: A ): CircularBuffer[A] = {
-      if ( capacity > 0 ) { buffer.drop( buffer.size - capacity + 1 ) :+ elem } else { buffer }
-    }
-
-    def empty[A]: CircularBuffer[A] = immutable.Vector.empty[A]
+  /** Makes and populates an MovingStatistics object with moving window of width.
+    * Regadless of whether values remain in the moving window, they will be counted in the total size seen, N.
+    *
+    * @param width width of moving window
+    * @param values values to be added to moving window. Depending on width values may or may not remain in the moving statistics
+    *            but will be counted in count of values seen, N
+    * @return MovingStatistics
+    */
+  def apply( width: Int, values: Double* ): MovingStatistics = {
+    MovingStatistics( width = width, window = values.foldLeft( CircularBuffer.empty[Double] ) { _ :+ _ } )
   }
 }
-
-import spotlight.model.statistics.MovingStatistics.CircularBuffer
 
 /** Computes moving statistics for a stream of data values added using the :+ operator. The class calculates statistics over a
   * window of data defined by sampleSize property.
@@ -41,14 +45,6 @@ case class MovingStatistics(
     * dropped.
     */
   //  def :++( values: Double* ): MovingStatistics = { values.foreach { window.add }; this }
-
-  //  def copy(): MovingStatistics = {
-  //    val newWindow = EvictingQueue.create[Double]( capacity )
-  //    newWindow.addAll( window )
-  //    new MovingStatistics( newWindow )
-  //  }
-
-  //  def capacity: Int = window.size + window.remainingCapacity
 
   /** StatisticalSummary interface. Returns the number of available values
     * @return number of available values

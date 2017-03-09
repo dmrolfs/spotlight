@@ -57,11 +57,11 @@ class ExponentialMovingAverageAlgorithmSpec extends AlgorithmSpec[Moment] {
   }
 
   implicit def fromAlpha( alpha: Double ): CalculationMagnet = new CommonCalculationMagnet {
-    override def apply( points: Seq[DataPoint] ): Result = {
+    override def apply( points: Seq[DataPoint], tolerance: Double = 3.0 ): Result = {
       Result(
         underlying = Moment.Statistics( 0.05, points.map { _.value }: _* ),
         timestamp = points.last.timestamp,
-        tolerance = 3.0
+        tolerance = tolerance
       )
     }
   }

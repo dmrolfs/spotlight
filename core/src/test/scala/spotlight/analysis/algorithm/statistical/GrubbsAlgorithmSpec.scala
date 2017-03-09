@@ -138,7 +138,7 @@ class GrubbsAlgorithmSpec
       }
     }
 
-    override def apply( points: Seq[DataPoint] ): Result = {
+    override def apply( points: Seq[DataPoint], tolerance: Double = 3.0 ): Result = {
       implicit val context = mock[GrubbsAlgorithm.Context]
       when( context.alpha ) thenReturn alpha
       when( context.properties ) thenReturn ConfigFactory.empty
@@ -150,7 +150,7 @@ class GrubbsAlgorithmSpec
       val shape = shapeFor( points.map { _.value } )
       val grubbs = GrubbsAlgorithm.grubbsScore( shape )
       logger.info( "TEST: SCORE = [{}]", grubbs )
-      Result( underlying = stats, timestamp = points.last.timestamp, tolerance = 3.0, score = grubbs )
+      Result( underlying = stats, timestamp = points.last.timestamp, tolerance = tolerance, score = grubbs )
     }
   }
 

@@ -40,8 +40,6 @@ object FileBatchExample extends Instrumented with ClassLogging {
     implicit val actorSystem = ActorSystem( "Spotlight" )
     startLogging( actorSystem )
     log.info( "Starting Application Up" )
-    log.info( Map( "@msg" → "spotlight build info", "build" → spotlight.BuildInfo.toString ) )
-    log.info( Map( "@msg" → "demesne build info", "build" → demesne.BuildInfo.toString ) )
 
     val deadListener = actorSystem.actorOf( DeadListenerActor.props, "dead-listener" )
     actorSystem.eventStream.subscribe( deadListener, classOf[DeadLetter] )
