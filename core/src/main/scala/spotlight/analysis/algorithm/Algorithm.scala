@@ -878,6 +878,7 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
                     ),
                     "algorithm" → algorithm.label
                   ),
+                  ex,
                   id = requestId
                 )
 

@@ -1,16 +1,15 @@
 package sandbox.algorithm
 
 import com.typesafe.config.Config
-import org.apache.commons.math3.ml.clustering.DoublePoint
 import org.joda.{ time ⇒ joda }
 import com.github.nscala_time.time.Imports._
 import com.persist.logging._
-import omnibus.commons.identifier.Identifying
-import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
+import org.apache.commons.math3.stat.descriptive.StatisticalSummary
 import spotlight.analysis.DetectUsing
-import spotlight.analysis.algorithm.{ Advancing, Algorithm, AlgorithmState, CommonContext }
+import spotlight.analysis.algorithm.{ Advancing, Algorithm, CommonContext }
 import spotlight.analysis.algorithm.AlgorithmProtocol.Advanced
 import spotlight.model.timeseries._
+import spotlight.model.statistics.{ CircularBuffer, MovingStatistics }
 
 object PastPeriod extends ClassLogging {
   sealed abstract class Period extends Equals {
@@ -52,7 +51,12 @@ object PastPeriod extends ClassLogging {
       ( p.descriptor == candidate.descriptor ) && ( p.timestamp < candidate.timestamp )
     }
 
-    implicit val periodOrdering: Ordering[Period] = Ordering by { _.descriptor }
+    implicit val periodOrdering: Ordering[Period] = new Ordering[Period] {
+      override def compare( lhs: Period, rhs: Period ): Int = {
+        if ( lhs.descriptor != rhs.descriptor ) lhs.descriptor - rhs.descriptor
+        else ( lhs.timestamp.getMillis - rhs.timestamp.getMillis ).toInt
+      }
+    }
 
     final case class PeriodImpl private[PastPeriod] (
         override val descriptor: Int,
@@ -66,25 +70,27 @@ object PastPeriod extends ClassLogging {
   /** Shape represents the culminated value of applying the algorithm over the time series data for this ID.
     */
   case class Shape(
+      window: Int,
       currentPeriodValue: Option[PeriodValue] = None,
-      priorPeriods: List[PeriodValue] = List.empty[PeriodValue],
-      resize: List[PeriodValue] ⇒ List[PeriodValue]
+      priorPeriods: CircularBuffer[PeriodValue] = CircularBuffer.empty[PeriodValue]
   ) {
     def inCurrentPeriod( ts: joda.DateTime ): Boolean = ts.getMonthOfYear == joda.DateTime.now.getMonthOfYear
     def inCurrentPeriod( period: Period ): Boolean = period.descriptor == joda.DateTime.now.getMonthOfYear
 
-    def withPeriodValue( period: Period, value: Double ): Shape = {
-      if ( inCurrentPeriod( period ) ) withCurrentPeriod( period, value )
+    def addPeriodValue(period: Period, value: Double ): Shape = {
+      if ( inCurrentPeriod( period ) ) addAsCurrentPeriod( period, value )
       else {
-        val i = priorPeriods indexWhere { case ( p, _ ) ⇒ p.descriptor == period.descriptor }
-        log.debug( Map( "@msg" → "#TEST: prior period index", "period" → period.toString, "index" → i ) )
-        if ( i == -1 ) this.withNewPriorPeriod( period, value )
-        else if ( Period.isCandidateMoreRecent( priorPeriods( i )._1, period ) ) this.withUpdatedPriorPeriod( period, value, i )
-        else this
+        val index = priorPeriods indexWhere { case ( p, _ ) ⇒ p.descriptor == period.descriptor }
+        log.debug( Map( "@msg" → "#TEST: prior period index", "period" → period.toString, "index" → index ) )
+        index match {
+          case -1 ⇒ addPriorPeriod( period, value )
+          case i if ( Period.isCandidateMoreRecent( priorPeriods( i )._1, period ) ) ⇒ updatePriorPeriod( period, value, i )
+          case _ ⇒ this
+        }
       }
     }
 
-    def withCurrentPeriod( p: Period, v: Double ): Shape = {
+    private[this] def addAsCurrentPeriod( p: Period, v: Double ): Shape = {
       currentPeriodValue
         .map {
           case ( current, _ ) ⇒ {
@@ -94,12 +100,11 @@ object PastPeriod extends ClassLogging {
         .getOrElse { this.copy( currentPeriodValue = Some( ( p, v ) ) ) }
     }
 
-    def withUpdatedPriorPeriod( p: Period, v: Double, index: Int ): Shape = {
-      val ( h, c :: t ) = priorPeriods splitAt index
-      val newPriors = h ::: ( ( p, v ) :: t )
+    private[this] def updatePriorPeriod( p: Period, v: Double, index: Int ): Shape = {
+      val newPriors = priorPeriods.updated( index, ( p, v ) )
       log.debug(
         Map(
-          "@msg" → "#TEST: withUpdatedPriorPeriod",
+          "@msg" → "#TEST: updatePriorPeriod",
           "prior" → priorPeriods.toString,
           "new" → newPriors.mkString( "[", ", ", "]" )
         )
@@ -108,14 +113,13 @@ object PastPeriod extends ClassLogging {
       this.copy( priorPeriods = newPriors )
     }
 
-    def withNewPriorPeriod( p: Period, v: Double ): Shape = {
-      val newPriors = resize( ( ( p, v ) :: priorPeriods ) sortBy { _._1 } )
-      this.copy( priorPeriods = newPriors )
+    private[this] def addPriorPeriod( p: Period, v: Double ): Shape = {
+      this.copy( priorPeriods = CircularBuffer.addTo( window )( priorPeriods, ( p, v ) ) )
     }
 
-    private val stats: Option[DescriptiveStatistics] = {
-      val values = resize( priorPeriods ) map { _._2 }
-      if ( values.isEmpty ) None else Option( new DescriptiveStatistics( values.toArray ) )
+    private val stats: Option[StatisticalSummary] = {
+      val values = priorPeriods map { _._2 } // resize( priorPeriods ) map { _._2 }
+      if ( values.isEmpty ) None else Option( MovingStatistics( window, values: _* ) )
     }
 
     val mean: Option[Double] = stats map { _.getMean }
@@ -137,7 +141,7 @@ object PastPeriod extends ClassLogging {
     implicit val advancing = new Advancing[Shape] {
       override def zero( configuration: Option[Config] ): Shape = {
         val window = valueFrom( configuration, WindowPath ) { _ getInt WindowPath } getOrElse 3
-        Shape( resize = applyWindow( window ) )
+        Shape( window )
       }
 
       override def N( shape: Shape ): Long = shape.stats map { _.getN } getOrElse 0L
@@ -145,7 +149,7 @@ object PastPeriod extends ClassLogging {
       override def advance( original: Shape, advanced: Advanced ): Shape = {
         val ( p, v ) = Period assign advanced.point
         log.debug( Map( "@msg" → "#TEST ASSIGNING point to period", "timestamp" → advanced.point.timestamp, "period" → p ) )
-        original.withPeriodValue( p, v )
+        original.addPeriodValue( p, v )
       }
 
       override def copy( shape: Shape ): Shape = shape
