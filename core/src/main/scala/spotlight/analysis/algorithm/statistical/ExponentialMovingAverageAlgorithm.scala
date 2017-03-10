@@ -2,7 +2,7 @@ package spotlight.analysis.algorithm.statistical
 
 import com.persist.logging._
 import com.typesafe.config.Config
-import spotlight.analysis.{ DetectUsing, Moment }
+import spotlight.analysis.{ AnomalyScore, DetectUsing, Moment }
 import spotlight.analysis.algorithm.{ Algorithm, CommonContext }
 import spotlight.model.timeseries._
 import squants.information.{ Bytes, Information }
@@ -13,7 +13,7 @@ object ExponentialMovingAverageAlgorithm extends Algorithm[Moment]( label = "ewm
   override type Context = CommonContext
   override def makeContext( message: DetectUsing, state: Option[State] ): Context = new CommonContext( message )
 
-  override def step( point: PointT, shape: Shape )( implicit s: State, c: Context ): Option[( Boolean, ThresholdBoundary )] = {
+  override def score( point: PointT, shape: Shape )( implicit s: State, c: Context ): Option[AnomalyScore] = {
     shape.statistics map { stats ⇒
       log.debug(
         Map(
@@ -31,7 +31,7 @@ object ExponentialMovingAverageAlgorithm extends Algorithm[Moment]( label = "ewm
         distance = math.abs( c.tolerance * stats.ewmsd )
       )
 
-      ( threshold isOutlier point.value, threshold )
+      AnomalyScore( threshold isOutlier point.value, threshold )
     }
   }
 

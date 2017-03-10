@@ -137,7 +137,7 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmSpec[SimpleMovingAverage
       } {
         testShape.N mustBe i
         val ts = nowTimestamp.plusSeconds( 10 * i )
-        algorithm.step( ( ts.getMillis.toDouble, value ), testShape ) mustBe expected.stepResult( i )
+        algorithm.score( ( ts.getMillis.toDouble, value ), testShape ) mustBe expected.stepResult( i )
         advanceWith( value )
       }
     }

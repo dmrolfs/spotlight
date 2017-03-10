@@ -13,7 +13,7 @@ import org.typelevel.scalatest.{ DisjunctionMatchers, DisjunctionValues }
 import com.persist.logging._
 import omnibus.commons.TryV
 import omnibus.commons.log.Trace
-import spotlight.analysis.algorithm.{ Algorithm, AlgorithmSpec, AlgorithmProtocol ⇒ P }
+import spotlight.analysis.algorithm.{ Algorithm, AlgorithmSpec, InsufficientDataSize, AlgorithmProtocol ⇒ P }
 import spotlight.model.timeseries._
 
 /** Created by rolfsd on 10/7/16.
@@ -131,7 +131,7 @@ class GrubbsAlgorithmSpec
             )
           }
 
-          case -\/( ex: Algorithm.InsufficientDataSize ) ⇒ ThresholdBoundary empty timestamp
+          case -\/( ex: InsufficientDataSize ) ⇒ ThresholdBoundary empty timestamp
 
           case -\/( ex ) ⇒ throw ex
         }
