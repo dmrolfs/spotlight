@@ -7,9 +7,9 @@ import com.persist.logging._
 import org.apache.commons.lang3.ClassUtils
 import org.apache.commons.math3.distribution.TDistribution
 import omnibus.commons.TryV
-import spotlight.analysis.algorithm.{ Advancing, Algorithm, CommonContext }
+import spotlight.analysis.algorithm.{ Advancing, Algorithm, CommonContext, InsufficientDataSize }
 import spotlight.analysis.algorithm.AlgorithmProtocol.Advanced
-import spotlight.analysis.DetectUsing
+import spotlight.analysis.{ AnomalyScore, DetectUsing }
 import spotlight.model.statistics.MovingStatistics
 import spotlight.model.timeseries._
 import squants.information.{ Bytes, Information }
@@ -106,7 +106,7 @@ object GrubbsAlgorithm extends Algorithm[GrubbsShape]( label = "grubbs" ) { algo
     TryV unsafeGet { Context.getAlpha( message.properties ) map { alpha ⇒ Context( message, alpha ) } }
   }
 
-  override def step( point: PointT, shape: Shape )( implicit s: State, c: Context ): Option[( Boolean, ThresholdBoundary )] = {
+  override def score( point: PointT, shape: Shape )( implicit s: State, c: Context ): Option[AnomalyScore] = {
     val result = grubbsScore( shape ) map { grubbs ⇒
       val threshold = ThresholdBoundary.fromExpectedAndDistance(
         timestamp = point.timestamp.toLong,
@@ -114,18 +114,18 @@ object GrubbsAlgorithm extends Algorithm[GrubbsShape]( label = "grubbs" ) { algo
         distance = c.tolerance * grubbs * shape.standardDeviation
       )
 
-      ( threshold isOutlier point.value, threshold )
+      AnomalyScore( threshold isOutlier point.value, threshold )
     }
 
     result match {
       case \/-( r ) ⇒ Some( r )
-
-      case -\/( ex: Algorithm.InsufficientDataSize ) ⇒ {
-        import spotlight.model.timeseries._
-        log.info( Map( "@msg" → "skipping point until sufficient history is establish", "point" → point ), ex )
-        Some( ( false, ThresholdBoundary empty point.timestamp.toLong ) )
-      }
-
+      //
+      //      case -\/( ex: Algorithm.InsufficientDataSize ) ⇒ {
+      //        import spotlight.model.timeseries._
+      //        log.info( Map( "@msg" → "skipping point until sufficient history is establish", "point" → point ), ex )
+      //        Some( ( false, ThresholdBoundary empty point.timestamp.toLong ) )
+      //      }
+      //
       case -\/( ex ) ⇒ {
         log.warn( Map( "@msg" → "exception raised in algorithm step calculation", "algorithm" → label ), ex )
         throw ex
@@ -165,7 +165,7 @@ object GrubbsAlgorithm extends Algorithm[GrubbsShape]( label = "grubbs" ) { algo
     */
   private def checkSize( size: Long )( implicit c: Context ): TryV[Long] = {
     size match {
-      case s if s < minimumDataPoints ⇒ Algorithm.InsufficientDataSize( label, s, minimumDataPoints ).left
+      case s if s < minimumDataPoints ⇒ InsufficientDataSize( label, s, minimumDataPoints ).left
       case s ⇒ s.right
     }
   }

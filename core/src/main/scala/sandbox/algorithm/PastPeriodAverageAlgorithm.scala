@@ -5,18 +5,19 @@ import org.joda.{ time ⇒ joda }
 import com.github.nscala_time.time.Imports._
 import com.persist.logging._
 import org.apache.commons.math3.stat.descriptive.StatisticalSummary
-import spotlight.analysis.DetectUsing
-import spotlight.analysis.algorithm.{ Advancing, Algorithm, CommonContext }
+import spotlight.analysis.{ AnomalyScore, DetectUsing }
+import spotlight.analysis.algorithm.{ Advancing, Algorithm, AlgorithmShapeCompanion, CommonContext }
 import spotlight.analysis.algorithm.AlgorithmProtocol.Advanced
 import spotlight.model.timeseries._
 import spotlight.model.statistics.{ CircularBuffer, MovingStatistics }
+import squants.information.{ Bytes, Information }
 
 object PastPeriod extends ClassLogging {
   sealed abstract class Period extends Equals {
-    def descriptor: Int
+    def qualifier: Int
     def timestamp: joda.DateTime
 
-    override def hashCode(): Int = 41 * ( 41 + descriptor.## )
+    override def hashCode(): Int = 41 * ( 41 + qualifier.## )
 
     override def equals( rhs: Any ): Boolean = {
       rhs match {
@@ -25,7 +26,7 @@ object PastPeriod extends ClassLogging {
           else {
             ( that.## == this.## ) &&
               ( that canEqual this ) &&
-              ( this.descriptor == that.descriptor )
+              ( this.qualifier == that.qualifier )
           }
         }
 
@@ -37,33 +38,36 @@ object PastPeriod extends ClassLogging {
   type PeriodValue = ( Period, Double )
 
   object Period {
-    def assign( dp: DataPoint ): PeriodValue = ( Period.assign( dp.timestamp ), dp.value )
-    def assign( timestamp: joda.DateTime ): Period = PeriodImpl( descriptor = timestamp.getMonthOfYear, timestamp )
+    def fromDataPoint( dp: DataPoint ): PeriodValue = ( Period.fromTimestamp( dp.timestamp ), dp.value )
+    def fromTimestamp( timestamp: joda.DateTime ): Period = PeriodImpl( toQualifier( timestamp.toLocalDate ), timestamp )
+    def fromLocalDate( date: joda.LocalDate ): Period = PeriodImpl( toQualifier( date ), date.toDateTimeAtStartOfDay )
+
+    private[algorithm] def toQualifier( date: joda.LocalDate ): Int = date.year.get * 100 + date.month.get
 
     def isCandidateMoreRecent( p: Period, candidate: Period ): Boolean = {
-      log.debug(
-        Map(
-          "@msg" → "#TEST isCandidateMoreRecent",
-          "descriptors" → Map( "p" → p.descriptor, "candidate" → candidate.descriptor, "is-same" → ( p.descriptor == candidate.descriptor ) ),
-          "timestamps" → Map( "p" → p.timestamp, "candidate" → candidate.timestamp, "more-recent" → ( p.timestamp < candidate.timestamp ) )
-        )
-      )
-      ( p.descriptor == candidate.descriptor ) && ( p.timestamp < candidate.timestamp )
+      //      log.debug(
+      //        Map(
+      //          "@msg" → "#TEST isCandidateMoreRecent",
+      //          "qualifiers" → Map( "p" → p.qualifier, "candidate" → candidate.qualifier, "is-same" → ( p.qualifier == candidate.qualifier ) ),
+      //          "timestamps" → Map( "p" → p.timestamp, "candidate" → candidate.timestamp, "more-recent" → ( p.timestamp < candidate.timestamp ) )
+      //        )
+      //      )
+      ( p.qualifier == candidate.qualifier ) && ( p.timestamp < candidate.timestamp )
     }
 
     implicit val periodOrdering: Ordering[Period] = new Ordering[Period] {
       override def compare( lhs: Period, rhs: Period ): Int = {
-        if ( lhs.descriptor != rhs.descriptor ) lhs.descriptor - rhs.descriptor
+        if ( lhs.qualifier != rhs.qualifier ) lhs.qualifier - rhs.qualifier
         else ( lhs.timestamp.getMillis - rhs.timestamp.getMillis ).toInt
       }
     }
 
     final case class PeriodImpl private[PastPeriod] (
-        override val descriptor: Int,
+        override val qualifier: Int,
         override val timestamp: joda.DateTime
     ) extends Period {
       override def canEqual( rhs: Any ): Boolean = rhs.isInstanceOf[PeriodImpl]
-      override def toString: String = s"Period(${descriptor}: ${timestamp}:${timestamp.getMillis})"
+      override def toString: String = s"Period(${qualifier}: ${timestamp}[${timestamp.getMillis}])"
     }
   }
 
@@ -71,84 +75,109 @@ object PastPeriod extends ClassLogging {
     */
   case class Shape(
       window: Int,
-      currentPeriodValue: Option[PeriodValue] = None,
-      priorPeriods: CircularBuffer[PeriodValue] = CircularBuffer.empty[PeriodValue]
+      history: Int,
+      N: Long = 0L,
+      periods: CircularBuffer[PeriodValue] = CircularBuffer.empty[PeriodValue]
   ) {
-    def inCurrentPeriod( ts: joda.DateTime ): Boolean = ts.getMonthOfYear == joda.DateTime.now.getMonthOfYear
-    def inCurrentPeriod( period: Period ): Boolean = period.descriptor == joda.DateTime.now.getMonthOfYear
+    //    private val addPeriod = CircularBuffer.addTo[Period]( window )
 
-    def addPeriodValue(period: Period, value: Double ): Shape = {
-      if ( inCurrentPeriod( period ) ) addAsCurrentPeriod( period, value )
-      else {
-        val index = priorPeriods indexWhere { case ( p, _ ) ⇒ p.descriptor == period.descriptor }
-        log.debug( Map( "@msg" → "#TEST: prior period index", "period" → period.toString, "index" → index ) )
-        index match {
-          case -1 ⇒ addPriorPeriod( period, value )
-          case i if ( Period.isCandidateMoreRecent( priorPeriods( i )._1, period ) ) ⇒ updatePriorPeriod( period, value, i )
-          case _ ⇒ this
-        }
+    def pastPeriodsFromNow: Seq[PeriodValue] = pastPeriodsFromTimestamp( joda.DateTime.now )
+    def pastPeriodsFromLocalDate( date: joda.LocalDate ): Seq[PeriodValue] = pastPeriodsFrom( Period fromLocalDate date )
+    def pastPeriodsFromTimestamp( timestamp: joda.DateTime ): Seq[PeriodValue] = pastPeriodsFrom( Period fromTimestamp timestamp )
+
+    def pastPeriodsFrom( period: Period ): Seq[PeriodValue] = {
+      val current = currentPeriodValue map { _._1.qualifier } getOrElse Int.MaxValue
+      val past = periods.takeWhile { case ( p, _ ) ⇒ p.qualifier < period.qualifier && p.qualifier < current }
+      val r = past.drop( past.size - window )
+      //      log.debug(
+      //        Map(
+      //          "@msg" → "pastPeriodsFrom",
+      //          "period" → period.toString,
+      //          "periods" → periods.toString,
+      //          "current" → current,
+      //          "past" → past.toString,
+      //          "result" → r.toString
+      //        )
+      //      )
+      r
+    }
+
+    def currentPeriodValue: Option[PeriodValue] = {
+      periods.lastOption flatMap { pv ⇒ if ( inCurrentPeriod( pv._1 ) ) Some( pv ) else None }
+    }
+
+    def inCurrentPeriod( ts: joda.DateTime ): Boolean = ts.getMonthOfYear == joda.DateTime.now.getMonthOfYear
+    def inCurrentPeriod( period: Period ): Boolean = period.qualifier == Period.toQualifier( joda.LocalDate.now )
+
+    def addPeriodValue( period: Period, value: Double ): Shape = {
+      val index = periods indexWhere { case ( p, _ ) ⇒ p.qualifier == period.qualifier }
+      //      log.debug( Map( "@msg" → "#TEST: period index", "period" → period.toString, "index" → index ) )
+      index match {
+        case -1 ⇒ addPeriod( period, value )
+        case i if ( Period.isCandidateMoreRecent( periods( i )._1, period ) ) ⇒ updatePeriod( period, value, i )
+        case _ ⇒ copy( N = this.N + 1 )
       }
     }
 
-    private[this] def addAsCurrentPeriod( p: Period, v: Double ): Shape = {
-      currentPeriodValue
-        .map {
-          case ( current, _ ) ⇒ {
-            if ( Period.isCandidateMoreRecent( current, p ) ) this.copy( currentPeriodValue = Some( ( p, v ) ) ) else this
-          }
-        }
-        .getOrElse { this.copy( currentPeriodValue = Some( ( p, v ) ) ) }
+    private val wholeWindow = window + 1 // to include current period at end of buffer
+
+    private val addToPeriods = CircularBuffer.addTo( wholeWindow )( periods, _: PeriodValue )
+    private[this] def addPeriod( p: Period, v: Double ): Shape = this.copy( N = this.N + 1, periods = addToPeriods( p, v ) )
+
+    private[this] def updatePeriod( p: Period, v: Double, index: Int ): Shape = {
+      val newPeriods = periods.updated( index, ( p, v ) )
+      //      log.debug(
+      //        Map(
+      //          "@msg" → "#TEST: updatePeriod",
+      //          "prior" → periods.toString,
+      //          "new" → newPeriods.mkString( "[", ", ", "]" )
+      //        )
+      //      )
+
+      this.copy( N = this.N + 1, periods = newPeriods )
     }
 
-    private[this] def updatePriorPeriod( p: Period, v: Double, index: Int ): Shape = {
-      val newPriors = priorPeriods.updated( index, ( p, v ) )
-      log.debug(
-        Map(
-          "@msg" → "#TEST: updatePriorPeriod",
-          "prior" → priorPeriods.toString,
-          "new" → newPriors.mkString( "[", ", ", "]" )
-        )
-      )
-
-      this.copy( priorPeriods = newPriors )
-    }
-
-    private[this] def addPriorPeriod( p: Period, v: Double ): Shape = {
-      this.copy( priorPeriods = CircularBuffer.addTo( window )( priorPeriods, ( p, v ) ) )
-    }
-
-    private val stats: Option[StatisticalSummary] = {
-      val values = priorPeriods map { _._2 } // resize( priorPeriods ) map { _._2 }
+    private[this] def statsFrom( timestamp: joda.DateTime ): Option[StatisticalSummary] = {
+      val values = pastPeriodsFrom( Period fromTimestamp timestamp ) map { _._2 }
       if ( values.isEmpty ) None else Option( MovingStatistics( window, values: _* ) )
     }
 
-    val mean: Option[Double] = stats map { _.getMean }
-    val standardDeviation: Option[Double] = stats map { _.getStandardDeviation }
+    def meanFrom( timestamp: joda.DateTime ): Option[Double] = statsFrom( timestamp ) map { _.getMean }
+    def standardDeviationFrom( timestamp: joda.DateTime ): Option[Double] = statsFrom( timestamp ) map { _.getStandardDeviation }
 
     override def toString: String = {
       "PastPeriodAverageAlgorithm.Shape( " +
-        s"mean:[${mean}] stddev:[${standardDeviation}] " +
+        s"N:[${N}] " +
+        s"current-mean:[${meanFrom( joda.DateTime.now )}] current-stddev:[${standardDeviationFrom( joda.DateTime.now )}] " +
         s"current:[${currentPeriodValue}] " +
-        s"pastPeriods[${stats.map { _.getN }.getOrElse( 0 )}]:[${priorPeriods}] " +
+        s"""pastPeriods:[${periods.mkString( ", " )}] """ +
         ")"
     }
   }
 
-  object Shape {
+  object Shape extends AlgorithmShapeCompanion {
     val WindowPath = "window"
-    def applyWindow[T]( window: Int )( periods: List[T] ): List[T] = periods drop ( periods.size - window )
+    val DefaultWindow: Int = 3
+    def windowFrom( configuration: Option[Config] ): Int = valueFrom( configuration, WindowPath, DefaultWindow ) { _ getInt _ }
+
+    val HistoryPath = "history"
+    val DefaultHistory: Int = DefaultWindow * 10
+    def historyFrom( configuration: Option[Config] ): Int = valueFrom( configuration, HistoryPath, DefaultHistory ) { _ getInt _ }
+
+    //    def applyWindow[T]( window: Int )( periods: List[T] ): List[T] = periods drop ( periods.size - window )
 
     implicit val advancing = new Advancing[Shape] {
       override def zero( configuration: Option[Config] ): Shape = {
         val window = valueFrom( configuration, WindowPath ) { _ getInt WindowPath } getOrElse 3
-        Shape( window )
+        val history = valueFrom( configuration, HistoryPath ) { _ getInt HistoryPath } getOrElse { 10 * window }
+        Shape( window = window, history = history )
       }
 
-      override def N( shape: Shape ): Long = shape.stats map { _.getN } getOrElse 0L
+      override def N( shape: Shape ): Long = shape.N
 
       override def advance( original: Shape, advanced: Advanced ): Shape = {
-        val ( p, v ) = Period assign advanced.point
-        log.debug( Map( "@msg" → "#TEST ASSIGNING point to period", "timestamp" → advanced.point.timestamp, "period" → p ) )
+        val ( p, v ) = Period fromDataPoint advanced.point
+        //        log.debug( Map( "@msg" → "#TEST ASSIGNING point to period", "timestamp" → advanced.point.timestamp, "period" → p ) )
         original.addPeriodValue( p, v )
       }
 
@@ -163,19 +192,35 @@ object PastPeriodAverageAlgorithm extends Algorithm[PastPeriod.Shape]( label = "
   override type Context = CommonContext
   override def makeContext( message: DetectUsing, state: Option[State] ): Context = new CommonContext( message )
 
-  override def step( point: PointT, shape: Shape )( implicit s: State, c: Context ): Option[( Boolean, ThresholdBoundary )] = {
+  override def score( point: PointT, shape: Shape )( implicit s: State, c: Context ): Option[AnomalyScore] = {
     for {
-      m ← shape.mean
-      sd ← shape.standardDeviation
+      m ← shape.meanFrom( point.dateTime )
+      sd ← shape.standardDeviationFrom( point.dateTime )
     } yield {
+      //      if ( sd == 0.0 || sd == Double.NaN ) throw InsufficientVariance( algorithm.label, shape.N )
+
       val threshold = ThresholdBoundary.fromExpectedAndDistance(
         timestamp = point.timestamp.toLong,
         expected = m,
         distance = c.tolerance * sd
       )
 
-      val isOutlier = shape.inCurrentPeriod( point.dateTime ) && threshold.isOutlier( point.value )
-      ( isOutlier, threshold )
+      AnomalyScore( threshold isOutlier point.value, threshold )
     }
   }
+
+  /** Optimization available for algorithms to more efficiently respond to size estimate requests for algorithm sharding.
+    * @return blended average size for the algorithm shape
+    */
+  override def estimatedAverageShapeSize( properties: Option[Config] ): Option[Information] = {
+    ( PastPeriod.Shape.windowFrom( properties ), PastPeriod.Shape.historyFrom( properties ) ) match {
+      case ( PastPeriod.Shape.DefaultWindow, PastPeriod.Shape.DefaultHistory ) ⇒ Some( Bytes( 1683 ) )
+      //      case window if window <= 32 ⇒ Some( Bytes( 716 + ( window * 13 ) ) ) // identified through observation
+      //      case window if window <= 42 ⇒ Some( Bytes( 798 + ( window * 13 ) ) )
+      //      case window if window <= 73 ⇒ Some( Bytes( 839 + ( window * 13 ) ) )
+      //      case window if window <= 105 ⇒ Some( Bytes( 880 + ( window * 13 ) ) )
+      case _ ⇒ None
+    }
+  }
+
 }
