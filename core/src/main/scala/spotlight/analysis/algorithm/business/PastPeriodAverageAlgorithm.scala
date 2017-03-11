@@ -1,15 +1,15 @@
-package sandbox.algorithm
+package spotlight.analysis.algorithm.business
 
-import com.typesafe.config.Config
-import org.joda.{ time ⇒ joda }
 import com.github.nscala_time.time.Imports._
 import com.persist.logging._
+import com.typesafe.config.Config
 import org.apache.commons.math3.stat.descriptive.StatisticalSummary
-import spotlight.analysis.{ AnomalyScore, DetectUsing }
-import spotlight.analysis.algorithm.{ Advancing, Algorithm, AlgorithmShapeCompanion, CommonContext }
+import org.joda.{ time ⇒ joda }
 import spotlight.analysis.algorithm.AlgorithmProtocol.Advanced
-import spotlight.model.timeseries._
+import spotlight.analysis.algorithm.{ Advancing, Algorithm, AlgorithmShapeCompanion, CommonContext }
+import spotlight.analysis.{ AnomalyScore, DetectUsing }
 import spotlight.model.statistics.{ CircularBuffer, MovingStatistics }
+import spotlight.model.timeseries._
 import squants.information.{ Bytes, Information }
 
 object PastPeriod extends ClassLogging {

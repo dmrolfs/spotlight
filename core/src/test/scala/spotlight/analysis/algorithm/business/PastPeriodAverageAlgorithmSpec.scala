@@ -1,24 +1,23 @@
-package sandbox.algorithm
+package spotlight.analysis.algorithm.business
+
+import akka.actor.ActorSystem
+import akka.testkit._
+import com.persist.logging._
+import com.typesafe.config.{Config, ConfigFactory}
+import omnibus.akka.envelope._
+import org.joda.{time => joda}
+import org.mockito.Mockito._
+import spotlight.analysis.algorithm.AlgorithmProtocol.Advanced
+import spotlight.analysis.algorithm.business.PastPeriod.Period
+import spotlight.analysis.algorithm.{AlgorithmSpec, AlgorithmProtocol => AP}
+import spotlight.analysis.{DetectOutliersInSeries, DetectUsing}
+import spotlight.model.outlier.{NoOutliers, SeriesOutliers}
+import spotlight.model.statistics.MovingStatistics
+import spotlight.model.timeseries.{DataPoint, ThresholdBoundary, TimeSeries}
 
 import scala.annotation.tailrec
 import scala.collection.immutable
 import scala.concurrent.duration.DurationInt
-import akka.actor.ActorSystem
-import akka.testkit._
-import org.mockito.Mockito._
-import com.typesafe.config.{ Config, ConfigFactory }
-import org.joda.{ time ⇒ joda }
-import com.persist.logging._
-import omnibus.akka.envelope._
-import org.scalatest.Tag
-import sandbox.algorithm.PastPeriod.Period
-import spotlight.analysis.{ DetectOutliersInSeries, DetectUsing }
-import spotlight.analysis.algorithm.{ AlgorithmProtocol ⇒ AP }
-import spotlight.analysis.algorithm.AlgorithmProtocol.Advanced
-import spotlight.analysis.algorithm.AlgorithmSpec
-import spotlight.model.outlier.{ NoOutliers, SeriesOutliers }
-import spotlight.model.statistics.MovingStatistics
-import spotlight.model.timeseries.{ DataPoint, ThresholdBoundary, TimeSeries }
 
 /** Created by rolfsd on 3/6/17.
   */
