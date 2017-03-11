@@ -203,7 +203,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
   val NEXT = Tag( "next" )
   val DONE = Tag( "done" )
 
-  "GraphiteModel" should {
+  "OutlierScoringModel" should {
     "convert pickle to TimeSeries" in { f: Fixture ⇒
       import f._
       val now = joda.DateTime.now

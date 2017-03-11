@@ -170,10 +170,18 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[AnalysisPlanSta
 
       val p1 = makePlan( "TestPlan", None )
       entity ! protocol.Add( p1.id, Some( p1 ) )
+      countDown await 3.seconds
+
       bus.expectMsgClass( classOf[protocol.Added] )
+      logger.info( "TEST:looking at entity..." )
       stateFrom( entity, p1.id ) mustBe p1
 
       logger.info( "TEST:taking Snapshot..." )
+      module.rootType.snapshot foreach { ss ⇒
+        logger.warn( "commanding entity:[{}] to save snapshot: [{}]", entity.path.name, ss.saveSnapshotCommand( p1.id ).toString )
+        entity !+ ss.saveSnapshotCommand( p1.id )
+      }
+      //      countDown await 1.second
 
       //      EventFilter.debug( pattern = """Using serializer \[.+\] for message \[demesne.module.entity.EntityProtocol$Added\]""" ) intercept {
       //        intercept {
@@ -185,16 +193,18 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[AnalysisPlanSta
       //        }
       //      }
       //      EventFilter.debug( start = "aggregate snapshot successfully saved:", occurrences = 1 ) intercept {
-      EventFilter.debug( start = "saving snapshot for pid:[AnalysisPlan:", occurrences = 1 ) intercept {
-        logger.warn( "In snapshot intercept..." )
-        module.rootType.snapshot foreach { ss ⇒
-          logger.warn( "commanding entity:[{}] to save snapshot: [{}]", entity.path.name, ss.saveSnapshotCommand( p1.id ).toString )
-          entity !+ ss.saveSnapshotCommand( p1.id )
-        }
-      }
+      //      EventFilter.debug( start = s"saving snapshot for pid:[${p1.id}]", occurrences = 1 ) intercept {
+      //        logger.warn( "In snapshot intercept..." )
+      //        module.rootType.snapshot foreach { ss ⇒
+      //          logger.warn( "commanding entity:[{}] to save snapshot: [{}]", entity.path.name, ss.saveSnapshotCommand( p1.id ).toString )
+      //          entity !+ ss.saveSnapshotCommand( p1.id )
+      //        }
+      //      }
 
+      //      countDown await 1.second
+      logger.info( "TEST: setting algorithms..." )
       entity !+ P.UseAlgorithms( p1.id, Map( "stella" → emptyConfig, "otis" → emptyConfig, "apollo" → emptyConfig ) )
-      bus.expectMsgPF( 1.second.dilated, "change algos" ) {
+      bus.expectMsgPF( 3.seconds.dilated, "change algos" ) {
         case P.AlgorithmsChanged( pid, algos, added, dropped ) ⇒ {
           pid mustBe p1.id
           algos.keySet mustBe Set( "stella", "otis", "apollo" )
