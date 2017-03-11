@@ -23,7 +23,7 @@ import omnibus.akka.envelope._
 import omnibus.commons.{ TryV, V }
 import omnibus.commons.identifier.Identifying
 import omnibus.commons.log.Trace
-import spotlight.analysis.{ DetectOutliersInSeries, DetectUsing, HistoricalStatistics }
+import spotlight.analysis.{ AnomalyScore, DetectOutliersInSeries, DetectUsing, HistoricalStatistics }
 import spotlight.analysis.algorithm.{ AlgorithmProtocol ⇒ P }
 import spotlight.model.outlier._
 import spotlight.model.statistics.MovingStatistics
@@ -331,14 +331,16 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
   }
 
   case class Expected( isOutlier: Boolean, floor: Option[Double], expected: Option[Double], ceiling: Option[Double] ) {
-    def stepResult( i: Int, intervalSeconds: Int = 10 )( implicit start: joda.DateTime ): Option[( Boolean, ThresholdBoundary )] = {
+    def stepResult( i: Int, intervalSeconds: Int = 10 )( implicit start: joda.DateTime ): Option[AnomalyScore] = {
       Some(
-        isOutlier,
-        ThresholdBoundary(
-          timestamp = start.plusSeconds( i * intervalSeconds ),
-          floor = floor,
-          expected = expected,
-          ceiling = ceiling
+        AnomalyScore(
+          isOutlier,
+          ThresholdBoundary(
+            timestamp = start.plusSeconds( i * intervalSeconds ),
+            floor = floor,
+            expected = expected,
+            ceiling = ceiling
+          )
         )
       )
     }
@@ -690,6 +692,7 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
             log.debug(
               Map(
                 "@msg" → "checking memory impact on advance",
+                "algorithm" → defaultAlgorithm.label,
                 "step" → i,
                 "zero-size" → zeroSize.toString,
                 "plateau-size" → plateauSize.toString,

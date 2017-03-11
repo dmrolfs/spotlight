@@ -137,7 +137,7 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmSpec[SimpleMovingAverage
       } {
         testShape.N mustBe i
         val ts = nowTimestamp.plusSeconds( 10 * i )
-        algorithm.step( ( ts.getMillis.toDouble, value ), testShape ) mustBe expected.stepResult( i )
+        algorithm.score( ( ts.getMillis.toDouble, value ), testShape ) mustBe expected.stepResult( i )
         advanceWith( value )
       }
     }
@@ -327,15 +327,19 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmSpec[SimpleMovingAverage
       )
     }
 
-    "happy path process two batches" in { f: Fixture ⇒
+    "happy path process two batches" taggedAs WIP in { f: Fixture ⇒
       import f._
 
       logger.info( "****************** TEST NOW ****************" )
 
-      val dp1 = makeDataPoints( values = Seq.fill( 5 ) { 1.0 }, timeWiggle = ( 0.97, 1.03 ) )
+      val dp1 = makeDataPoints( values = Seq.fill( 5 ) { 1.0 }, valueWiggle = ( 0.9999, 1.0001 ), timeWiggle = ( 0.97, 1.03 ) )
       val s1 = spike( scope.topic, dp1 )()
       val h1 = historyWith( None, s1 )
-      val ( e1, r1 ) = makeExpected( NoHint )( points = s1.points, outliers = Seq( false, false, false, false, true ) )
+      val ( e1, r1 ) = makeExpected( NoHint )(
+        points = s1.points,
+        outliers = Seq( false, false, false, false, true ),
+        minimumPopulation = 2
+      )
 
       evaluate(
         hint = "first",

@@ -14,6 +14,7 @@ import omnibus.commons.log.Trace
 import demesne.AggregateRootType
 import demesne.module.entity.EntityAggregateModule
 import demesne.testkit.AggregateRootSpec
+import demesne.testkit.concurrent.CountDownFunction
 import spotlight.analysis.HistoricalStatistics
 import spotlight.analysis.shard.CellShardModule
 import spotlight.model.outlier._
@@ -36,9 +37,18 @@ abstract class EntityModuleSpec[E <: Entity: ClassTag] extends AggregateRootSpec
 
     var loggingSystem: LoggingSystem = _
 
+    val countDown = new CountDownFunction[String]
+
     override def before( test: OneArgTest ): Unit = {
       super.before( test )
       loggingSystem = LoggingSystem( _system, s"Test:${getClass.getName}", "1", "localhost" )
+      countDown await 250.milliseconds
+    }
+
+    override def after( test: OneArgTest ): Unit = {
+      Option( loggingSystem ) foreach { l ⇒ l.stop }
+      countDown await 500.millis
+      super.after( test )
     }
 
     type Module <: EntityAggregateModule[E]

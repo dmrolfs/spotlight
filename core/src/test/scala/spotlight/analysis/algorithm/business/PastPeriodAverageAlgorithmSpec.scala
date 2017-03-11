@@ -1,23 +1,23 @@
-package sandbox.algorithm
+package spotlight.analysis.algorithm.business
+
+import akka.actor.ActorSystem
+import akka.testkit._
+import com.persist.logging._
+import com.typesafe.config.{Config, ConfigFactory}
+import omnibus.akka.envelope._
+import org.joda.{time => joda}
+import org.mockito.Mockito._
+import spotlight.analysis.algorithm.AlgorithmProtocol.Advanced
+import spotlight.analysis.algorithm.business.PastPeriod.Period
+import spotlight.analysis.algorithm.{AlgorithmSpec, AlgorithmProtocol => AP}
+import spotlight.analysis.{DetectOutliersInSeries, DetectUsing}
+import spotlight.model.outlier.{NoOutliers, SeriesOutliers}
+import spotlight.model.statistics.MovingStatistics
+import spotlight.model.timeseries.{DataPoint, ThresholdBoundary, TimeSeries}
 
 import scala.annotation.tailrec
 import scala.collection.immutable
-import scala.concurrent.duration._
-import akka.actor.ActorSystem
-import akka.testkit._
-import org.mockito.Mockito._
-import com.typesafe.config.{ Config, ConfigFactory }
-import org.joda.{ time ⇒ joda }
-import com.persist.logging._
-import omnibus.akka.envelope._
-import sandbox.algorithm.PastPeriod.Period
-import spotlight.analysis.{ DetectOutliersInSeries, DetectUsing }
-import spotlight.analysis.algorithm.{ AlgorithmProtocol ⇒ AP }
-import spotlight.analysis.algorithm.AlgorithmProtocol.Advanced
-import spotlight.analysis.algorithm.AlgorithmSpec
-import spotlight.model.outlier.{ NoOutliers, SeriesOutliers }
-import spotlight.model.statistics.MovingStatistics
-import spotlight.model.timeseries.{ DataPoint, ThresholdBoundary, TimeSeries }
+import scala.concurrent.duration.DurationInt
 
 /** Created by rolfsd on 3/6/17.
   */
@@ -71,7 +71,7 @@ class PastPeriodAverageAlgorithmSpec extends AlgorithmSpec[PastPeriod.Shape] {
 
   class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends AlgorithmFixture( _config, _system, _slug ) {
     override def expectedUpdatedShape( shape: TestShape, event: Advanced ): TestShape = {
-      val ( p, v ) = PastPeriod.Period assign event.point
+      val ( p, v ) = PastPeriod.Period fromDataPoint event.point
       shape.addPeriodValue( p, v )
     }
 
@@ -81,7 +81,7 @@ class PastPeriodAverageAlgorithmSpec extends AlgorithmSpec[PastPeriod.Shape] {
         else {
           val l = lhs.asInstanceOf[PastPeriod.Shape]
           val r = rhs.asInstanceOf[PastPeriod.Shape]
-          if ( l.priorPeriods.size != r.priorPeriods.size ) ( l.priorPeriods.size - r.priorPeriods.size )
+          if ( l.periods.size != r.periods.size ) ( l.periods.size - r.periods.size )
           else shapeless.the[Ordering[Option[PastPeriod.PeriodValue]]].compare( l.currentPeriodValue, r.currentPeriodValue )
         }
       }
@@ -97,16 +97,16 @@ class PastPeriodAverageAlgorithmSpec extends AlgorithmSpec[PastPeriod.Shape] {
     "assign period" in { f: Fixture ⇒
       import f._
       val points = assemble( series.points, Seq( 0, 1, 2, 31, 32, 60, 61, 91, 92, 120, 121, 149 ) )
-      val expected = Seq( 7, 8, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12 )
+      val expected = Seq( 201607, 201608, 201608, 201608, 201609, 201609, 201610, 201610, 201611, 201611, 201612, 201612 )
       points.size mustBe expected.size
-      points.map( Period.assign ).zip( expected ).foreach { case ( ( p, v ), e ) ⇒ p.descriptor mustBe e }
+      points.map( Period.fromDataPoint ).zip( expected ).foreach { case ( ( p, v ), e ) ⇒ p.qualifier mustBe e }
     }
 
     "identify more recent" in { f: Fixture ⇒
       import f._
 
-      val incumbents = assemble( series.points, Seq( 0, 1, 1, 2 ) ) map { p ⇒ Period.assign( p.timestamp ) }
-      val candidates = assemble( series.points, Seq( 1, 1, 2, 1 ) ) map { p ⇒ Period.assign( p.timestamp ) }
+      val incumbents = assemble( series.points, Seq( 0, 1, 1, 2 ) ) map { p ⇒ Period.fromTimestamp( p.timestamp ) }
+      val candidates = assemble( series.points, Seq( 1, 1, 2, 1 ) ) map { p ⇒ Period.fromTimestamp( p.timestamp ) }
       val expected = Seq( false, false, true, false )
       incumbents.size mustBe candidates.size
       incumbents.size mustBe expected.size
@@ -131,40 +131,36 @@ class PastPeriodAverageAlgorithmSpec extends AlgorithmSpec[PastPeriod.Shape] {
       import f._
 
       val window = 3
-      val pvs = series.points map { p ⇒ ( Period.assign( p.timestamp ), p.value ) }
-      val shape = pvs.foldLeft( PastPeriod.Shape( window ) ) {
+      val pvs = series.points map { Period.fromDataPoint }
+      val shape = pvs.foldLeft( PastPeriod.Shape( window = window, history = window * 10 ) ) {
         case ( s, ( p, v ) ) ⇒
-          val ns = s addPeriodValue (p, v )
+          val ns = s.addPeriodValue( p, v )
           log.info(
             Map(
               "@msg" → "adding period value to shape",
               "PeriodValue" → Map( "period" → p.toString, "value" → v ),
-              "shape" → Map( "window" → s.window, "current" → s.currentPeriodValue.toString, "priors" → s.priorPeriods.toString ),
-              "new" → Map( "window" → ns.window, "current" → ns.currentPeriodValue.toString, "priors" → ns.priorPeriods.toString )
+              "shape" → Map( "window" → s.window, "current" → s.currentPeriodValue.toString, "periods" → s.periods.toString ),
+              "new" → Map( "window" → ns.window, "current" → ns.currentPeriodValue.toString, "periods" → ns.periods.toString )
             )
           )
           ns
       }
 
-      val expectedPriors = {
-        assemble( series.points, Seq( 91, 120, 149 ) )
-          .map { p ⇒ ( Period.assign( p.timestamp ), p.value ) }
-          .to[immutable.Vector]
-      }
+      val expectedPriors = assemble( series.points, Seq( 91, 120, 149 ) ).map { Period.fromDataPoint }.to[immutable.Vector]
 
       shape.window mustBe window
       shape.currentPeriodValue mustBe None
-      shape.priorPeriods.size mustBe window
-      shape.priorPeriods mustBe expectedPriors
+      shape.pastPeriodsFromNow.size mustBe window
+      shape.pastPeriodsFromNow mustBe expectedPriors
 
-      val now = ( Period.assign( joda.DateTime.now ), 3.1415926535897932384264 )
+      val now = ( Period fromTimestamp joda.DateTime.now, 3.1415926535897932384264 )
       val s2 = shape.addPeriodValue( now._1, now._2 )
       s2.currentPeriodValue.value mustBe now
-      s2.priorPeriods.size mustBe window
-      shape.priorPeriods mustBe expectedPriors
+      s2.pastPeriodsFromNow.size mustBe window
+      shape.pastPeriodsFromNow mustBe expectedPriors
     }
 
-    "advance shape with example data" taggedAs WIP in { f: Fixture ⇒
+    "advance shape with example data" in { f: Fixture ⇒
       import f._
 
       val window = 3
@@ -191,24 +187,61 @@ class PastPeriodAverageAlgorithmSpec extends AlgorithmSpec[PastPeriod.Shape] {
         ns
       }
 
+      val now = joda.DateTime.now
+
       val evts = series.points map { p ⇒ AP.Advanced( id, series.topic, p, false, ThresholdBoundary.empty( p.timestamp ) ) }
       val s0 = adv.zero( None )
       adv.N( s0 ) mustBe 0
+      s0.pastPeriodsFromNow.size mustBe 0
+      s0.currentPeriodValue mustBe None
+      log.debug( "+++++++ advanced to s0 +++++++" )
 
       val s1 = advance( s0, evts.take( 1 ) )
-      s1.mean.value mustBe evts.head.point.value
-      s1.standardDeviation.value mustBe 0.0
+      log.debug( "+++++++ advanced to s1 - 2016.07.30 +++++++" )
+      //      countDown await 1.second
+      s1.meanFrom( now ).value mustBe evts.head.point.value
+      s1.standardDeviationFrom( now ).value mustBe 0.0
       adv.N( s1 ) mustBe 1
+      s1.pastPeriodsFromTimestamp( now ).size mustBe 1
+      s1.currentPeriodValue mustBe None
 
       val s2 = advance( s1, evts.drop( 1 ).take( 31 ) )
-      s2.mean.value mustBe 90.15104633 +- tol
-      s2.standardDeviation.value mustBe 42.33646153 +- tol
+      log.debug( "+++++++ advanced to s2 - 2016.08.31 +++++++" )
+      //      countDown await 1.second
+      s2.meanFrom( now ).value mustBe 90.15104633 +- tol
+      s2.standardDeviationFrom( now ).value mustBe 42.33646153 +- tol
       adv.N( s2 ) mustBe 32
+      s2.pastPeriodsFromTimestamp( now ).size mustBe 2
+      s2.currentPeriodValue mustBe None
 
-      val s3 = advance( s2, evts.drop( 32 ) )
-      s3.mean.value mustBe 97.76704121 +- tol
-      s3.standardDeviation.value mustBe 22.85611285 +- tol
-      adv.N( s3 ) mustBe 1000
+      val s3 = advance( s2, evts.drop( 32 ).take( 29 ) ) // missing 9/19/2016
+      log.debug( "+++++++ advanced to s3 - 2016.9.30 +++++++" )
+      //      countDown await 1.second
+      s3.meanFrom( now ).value mustBe 94.86997636 +- tol
+      s3.standardDeviationFrom( now ).value mustBe 31.03212673 +- tol
+      adv.N( s3 ) mustBe 61
+      s3.pastPeriodsFromTimestamp( now ).size mustBe 3
+      s3.currentPeriodValue mustBe None
+
+      val s4 = advance( s3, evts.drop( 61 ).take( 31 ) )
+      log.debug( "+++++++ advanced to s4 - 2016.10.31 +++++++" )
+      //      countDown await 1.second
+      s4.meanFrom( now ).value mustBe 116.0948298 +- tol
+      s4.standardDeviationFrom( now ).value mustBe 10.38331639 +- tol
+      adv.N( s4 ) mustBe 92
+      s4.pastPeriodsFromTimestamp( now ).size mustBe 3
+      s4.currentPeriodValue mustBe None
+
+      val s5 = advance( s4, evts.drop( 92 ) )
+      log.debug( "+++++++ advanced to s5 - 2016.12.31 +++++++" )
+      //      countDown await 1.second
+      s5.meanFrom( now ).value mustBe 97.76704121 +- tol
+      s5.standardDeviationFrom( now ).value mustBe 22.85611285 +- tol
+      adv.N( s5 ) mustBe 150
+      s5.pastPeriodsFromTimestamp( now ).size mustBe 3
+      s5.currentPeriodValue mustBe None
+
+      //      countDown await 1.second
     }
 
     "handle single point" in { f: Fixture ⇒
@@ -258,20 +291,24 @@ class PastPeriodAverageAlgorithmSpec extends AlgorithmSpec[PastPeriod.Shape] {
       }
     }
 
-    "handle example Jul thru Aug" in { f: Fixture ⇒
+    "calculate threshold boundaries" in { f: Fixture ⇒
       import f._
+
+      val tol = 0.0000001
 
       val smaConfig = ConfigFactory.parseString(
         s"""
           |tail-average: 3
-          |tolerance: 3
-          |minimum-population: 2
+          |tolerance: 2
+          |minimum-population: 3
         """.stripMargin
       )
 
       when( plan.algorithms ) thenReturn { Map( defaultAlgorithm.label → smaConfig ) }
 
-      val s = TimeSeries( topic = series.topic, points = series.points.take( 33 ) )
+      val pts = assemble( series.points, Seq( 0, 1, 2, 31, 60, 91, 120, 149 ) )
+      val s = TimeSeries( series.topic, pts )
+
       aggregate.sendEnvelope(
         DetectUsing(
           targetId = id,
@@ -284,7 +321,103 @@ class PastPeriodAverageAlgorithmSpec extends AlgorithmSpec[PastPeriod.Shape] {
           sender.ref
         )
 
-      countDown await 1.second
+      //      countDown await 1.second
+      val anomalyPositions = Set.empty[Int]
+      val expectedAnomolies = pts.zipWithIndex.collect { case ( dp, i ) if anomalyPositions.contains( i ) ⇒ dp }
+      val expectedThresholds = Seq(
+        ThresholdBoundary( pts( 0 ).timestamp, None, None, None ),
+        ThresholdBoundary( pts( 1 ).timestamp, None, None, None ),
+        ThresholdBoundary( pts( 2 ).timestamp, None, None, None ),
+        ThresholdBoundary( pts( 3 ).timestamp, None, None, None ),
+        ThresholdBoundary( pts( 4 ).timestamp, Some( 5.478123273 ), Some( 90.15104633 ), Some( 174.8239694 ) ),
+        ThresholdBoundary( pts( 5 ).timestamp, Some( 32.8057229 ), Some( 94.86997636 ), Some( 156.9342298 ) ),
+        ThresholdBoundary( pts( 6 ).timestamp, Some( 95.32819703 ), Some( 116.0948298 ), Some( 136.8614626 ) ),
+        ThresholdBoundary( pts( 7 ).timestamp, Some( 60.72913575 ), Some( 103.2144051 ), Some( 145.6996745 ) )
+      )
+
+      sender.expectMsgPF( 500.milliseconds.dilated, "result" ) {
+        case m @ Envelope( NoOutliers( a, ts, p, tb ), _ ) ⇒ {
+          log.info(
+            Map(
+              "@msg" → "evaluate series anomaly results",
+              "algorithms" → a.toString,
+              "source" → ts.toString,
+              "plan" → p.toString,
+              "threshold-boundaries" → tb.toString
+            )
+          )
+
+          a mustBe Set( defaultAlgorithm.label )
+          ts mustBe s
+          tb( defaultAlgorithm.label ).zip( expectedThresholds ) foreach {
+            case ( actual, expected ) ⇒
+              log.info(
+                Map(
+                  "@msg" → "checking thresholds",
+                  "actual" → actual.toString,
+                  "expected" → expected.toString
+                )
+              )
+              //              countDown await 1.second
+              actual.timestamp mustBe expected.timestamp
+              actual.floor.isDefined mustBe expected.floor.isDefined
+              for {
+                af ← actual.floor
+                ef ← expected.floor
+              } { af mustBe ef +- 0.000001 }
+
+              actual.expected.isDefined mustBe expected.expected.isDefined
+              for {
+                ae ← actual.expected
+                ee ← expected.expected
+              } { ae mustBe ee +- 0.000001 }
+
+              actual.ceiling.isDefined mustBe expected.ceiling.isDefined
+              for {
+                ac ← actual.ceiling
+                ec ← expected.ceiling
+              } { ac mustBe ec +- 0.000001 }
+          }
+        }
+      }
+
+      //      countDown await 1.second
+
+    }
+
+    "handle example Jul thru Oct" in { f: Fixture ⇒
+      import f._
+
+      val ppConfig = ConfigFactory.parseString(
+        s"""
+          |tail-average: 3
+          |tolerance: 3
+          |minimum-population: 2
+        """.stripMargin
+      )
+
+      when( plan.algorithms ) thenReturn { Map( defaultAlgorithm.label → ppConfig ) }
+
+      def beforeCap( points: Seq[DataPoint] ): Seq[DataPoint] = {
+        val cap = new joda.LocalDate( 2016, 11, 1 ).toDateTimeAtStartOfDay
+        import com.github.nscala_time.time.Imports._
+        points filter { _.timestamp < cap }
+      }
+
+      val s = TimeSeries( topic = series.topic, points = beforeCap( series.points ) )
+      aggregate.sendEnvelope(
+        DetectUsing(
+          targetId = id,
+          algorithm = defaultAlgorithm.label,
+          payload = DetectOutliersInSeries( s, plan, Option( subscriber.ref ), Set.empty[WorkId] ),
+          history = historyWith( None, series ),
+          properties = plan.algorithms.getOrElse( defaultAlgorithm.label, emptyConfig )
+        )
+      )(
+          sender.ref
+        )
+
+      //      countDown await 1.second
       val anomalyPositions = Set.empty[Int]
       val expectedAnomolies = series.points.zipWithIndex.collect { case ( dp, i ) if anomalyPositions.contains( i ) ⇒ dp }
 
@@ -305,11 +438,21 @@ class PastPeriodAverageAlgorithmSpec extends AlgorithmSpec[PastPeriod.Shape] {
         }
       }
 
-      countDown await 1.second
+      //      countDown await 1.second
     }
 
     "handle example data" in { f: Fixture ⇒
       import f._
+
+      val ppConfig = ConfigFactory.parseString(
+        s"""
+                                                   |tail-average: 3
+                                                   |tolerance: 2
+                                                   |minimum-population: 2
+        """.stripMargin
+      )
+
+      when( plan.algorithms ) thenReturn { Map( defaultAlgorithm.label → ppConfig ) }
 
       aggregate.sendEnvelope(
         DetectUsing(
@@ -323,7 +466,7 @@ class PastPeriodAverageAlgorithmSpec extends AlgorithmSpec[PastPeriod.Shape] {
           sender.ref
         )
 
-      countDown await 1.second
+      //      countDown await 10.seconds
       val anomalyPositions = Set( 98, 99, 100, 115, 116, 117, 118, 119, 120 )
       val expectedAnomolies = series.points.zipWithIndex.collect { case ( dp, i ) if anomalyPositions.contains( i ) ⇒ dp }
 
@@ -346,8 +489,6 @@ class PastPeriodAverageAlgorithmSpec extends AlgorithmSpec[PastPeriod.Shape] {
           o mustBe expectedAnomolies
         }
       }
-
-      countDown await 1.second
     }
   }
 
