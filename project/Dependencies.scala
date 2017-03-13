@@ -3,7 +3,7 @@ import sbt._
 
 object Dependencies {
   object omnibus {
-    val version = "0.5.2"
+    val version = "0.5.3-SNAPSHOT"
     def module( id: String ) = "com.github.dmrolfs" %% s"omnibus-$id" % version withSources() withJavadoc()
     def all = Seq( commons, akka, archetype )
 
