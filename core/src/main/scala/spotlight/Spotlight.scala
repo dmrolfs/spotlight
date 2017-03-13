@@ -5,12 +5,12 @@ import scala.concurrent.{ ExecutionContext, Future }
 import akka.Done
 import akka.actor.{ ActorRef, ActorSystem, Props, SupervisorStrategy }
 import akka.stream._
-import akka.stream.scaladsl.{ Flow, GraphDSL, Sink }
+import akka.stream.scaladsl.{ Flow, GraphDSL, Keep, Sink, Source }
 import akka.util.Timeout
 
 import scalaz.Kleisli.kleisli
 import scalaz.Scalaz._
-import scalaz._
+import scalaz.{ Source ⇒ _, _ }
 import shapeless.{ Generic, HNil }
 import com.typesafe.config.{ Config, ConfigFactory }
 import com.persist.logging._
@@ -23,10 +23,13 @@ import omnibus.akka.supervision.{ IsolatedLifeCycleSupervisor, OneForOneStrategy
 import omnibus.commons.builder.HasBuilder
 import omnibus.commons.util._
 import demesne.{ AggregateRootType, BoundedContext, DomainModel, StartTask }
+import omnibus.akka.stream.{ StreamEgress, StreamIngress }
 import spotlight.analysis._
 import spotlight.analysis.{ PlanCatalogProtocol ⇒ CP }
 import spotlight.analysis.shard.{ CellShardModule, LookupShardModule }
 import spotlight.analysis.algorithm.statistical._
+import spotlight.model.outlier.Outliers
+import spotlight.model.timeseries.TimeSeries
 
 /** Created by rolfsd on 11/7/16.
   */
@@ -203,7 +206,11 @@ object Spotlight extends Instrumented with ClassLogging {
         for {
           catalog ← makeCatalog( settings )
           catalogFlow ← PlanCatalog.flow( catalog, settings.parallelism )
-        } yield ( boundedContext, settings, detectFlowFrom( catalogFlow, settings ) )
+        } yield {
+          val detectFlow = detectFlowFrom( catalogFlow, settings )
+          val clusteredFlow = clusterFlowFrom( detectFlow, settings )
+          ( boundedContext, settings, clusteredFlow )
+        }
     }
   }
 
@@ -276,6 +283,49 @@ object Spotlight extends Instrumented with ClassLogging {
       .withAttributes( ActorAttributes supervisionStrategy supervisionDecider )
   }
 
+  def clusterFlowFrom(
+    detectFlow: DetectFlow,
+    settings: Settings
+  )(
+    implicit
+    system: ActorSystem,
+    materializer: Materializer
+  ): DetectFlow = {
+    //      ts ~> localEgress ~> clusterIngress ~> flow ~> clusterEgress ~> localIngress ~> o
+    val ( clusterIngressRef, clusterIngressPublisher ) = {
+      Source
+        .actorPublisher( StreamIngress.props[TimeSeries] )
+        .toMat( Sink.asPublisher( false ) )( Keep.both )
+        .run()
+    }
+
+    val ( localIngressRef, localIngressPublisher ) = {
+      Source
+        .actorPublisher( StreamIngress.props[Outliers] )
+        .toMat( Sink.asPublisher( false ) )( Keep.both )
+        .run()
+    }
+
+    val localEgressProps = StreamEgress.props( clusterIngressRef, high = 8 )
+    val clusterEgressProps = StreamEgress.props( localIngressRef, high = 8 )
+
+    val graph = GraphDSL.create() { implicit b ⇒
+      import GraphDSL.Implicits._
+
+      val localEgress = b.add( Sink.actorSubscriber( localEgressProps ) )
+      val clusterIngress = b.add( Source.fromPublisher( clusterIngressPublisher ) )
+      val clusterEgress = b.add( Sink.actorSubscriber( clusterEgressProps ) )
+      val localIngress = b.add( Source.fromPublisher( localIngressPublisher ) )
+      val flow = b.add( detectFlow )
+
+      clusterIngress ~> flow ~> clusterEgress
+
+      FlowShape( localEgress.in, localIngress.out )
+    }
+
+    Flow.fromGraph( graph ).named( "ClusteredDetectFlow" )
+  }
+
   val supervisionDecider: Supervision.Decider = {
     case ex ⇒ {
       log.error( "Error caught by Supervisor:", ex )
@@ -284,3 +334,4 @@ object Spotlight extends Instrumented with ClassLogging {
     }
   }
 }
+
