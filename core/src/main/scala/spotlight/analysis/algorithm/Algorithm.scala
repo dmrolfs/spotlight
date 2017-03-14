@@ -19,6 +19,7 @@ import bloomfilter.CanGenerateHashFrom
 import bloomfilter.CanGenerateHashFrom.CanGenerateHashFromString
 import com.typesafe.config.Config
 import com.typesafe.config.ConfigException.BadValue
+import net.ceedubs.ficus.Ficus._
 import org.apache.commons.math3.ml.clustering.DoublePoint
 import com.codahale.metrics.{ Metric, MetricFilter }
 import nl.grons.metrics.scala.{ Meter, MetricName, Timer }
@@ -176,7 +177,7 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
 
   def prepareData( c: Context ): Seq[DoublePoint] = {
     import Algorithm.ConfigurationProvider.TailAveragePath
-    val tail = if ( c.properties hasPath TailAveragePath ) c.properties getInt TailAveragePath else 1
+    val tail = c.properties.as[Option[Int]]( TailAveragePath ) getOrElse 1
     if ( 1 < tail ) { c.tailAverage( tail )( c.data ) } else c.data
   }
 
@@ -829,11 +830,8 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
         */
       private def checkSize( shape: S )( implicit analysisContext: Context ): TryV[Long] = {
         import Algorithm.ConfigurationProvider.MinimalPopulationPath
-        val minimumDataPoints = if ( analysisContext.properties hasPath MinimalPopulationPath ) {
-          analysisContext.properties getInt MinimalPopulationPath
-        } else {
-          0
-        }
+
+        val minimumDataPoints = analysisContext.properties.as[Option[Int]]( MinimalPopulationPath ) getOrElse 0
 
         advancing.N( shape ) match {
           case s if s < minimumDataPoints ⇒ InsufficientDataSize( label, s, minimumDataPoints ).left

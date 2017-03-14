@@ -2,6 +2,7 @@ package spotlight.analysis.algorithm.statistical
 
 import com.persist.logging._
 import com.typesafe.config.Config
+import net.ceedubs.ficus.Ficus._
 import org.apache.commons.lang3.ClassUtils
 import org.apache.commons.math3.stat.descriptive.{ StatisticalSummary, SummaryStatistics }
 import squants.information.{ Bytes, Information }
@@ -73,7 +74,7 @@ object SimpleMovingAverageShape extends AlgorithmShapeCompanion {
   val SlidingWindowPath = "sliding-window"
   val DefaultSlidingWindow = Int.MaxValue
   def slidingWindowFrom( configuration: Option[Config] ): Int = {
-    valueFrom( configuration, SlidingWindowPath, DefaultSlidingWindow ) { _ getInt _ }
+    getFromOrElse( configuration, SlidingWindowPath, DefaultSlidingWindow )
   }
 
   implicit val advancing = new Advancing[SimpleMovingAverageShape] {

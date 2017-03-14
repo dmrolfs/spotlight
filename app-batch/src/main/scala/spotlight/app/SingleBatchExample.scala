@@ -150,15 +150,13 @@ object SingleBatchExample extends Instrumented with StrictLogging {
 
   def detectionWorkflow(
     context: BoundedContext,
-    configuration: Settings,
+    settings: Settings,
     scoring: DetectFlow
   )(
     implicit
     system: ActorSystem,
     materializer: Materializer
   ): Flow[ByteString, SimpleFlattenedOutlier, NotUsed] = {
-    val conf = configuration
-
     val graph = GraphDSL.create() { implicit b ⇒
       import GraphDSL.Implicits._
       import omnibus.akka.stream.StreamMonitor._
@@ -167,7 +165,7 @@ object SingleBatchExample extends Instrumented with StrictLogging {
 
       val intakeBuffer = b.add(
         Flow[ByteString]
-          .buffer( conf.tcpInboundBufferSize, OverflowStrategy.backpressure )
+          .buffer( settings.tcpInboundBufferSize, OverflowStrategy.backpressure )
           .watchFlow( 'intake )
       )
 

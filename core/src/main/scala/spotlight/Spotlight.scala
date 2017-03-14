@@ -13,6 +13,7 @@ import scalaz.Scalaz._
 import scalaz._
 import shapeless.{ Generic, HNil }
 import com.typesafe.config.{ Config, ConfigFactory }
+import net.ceedubs.ficus.Ficus._
 import com.persist.logging._
 import nl.grons.metrics.scala.{ Meter, MetricName }
 import org.slf4j.LoggerFactory
@@ -121,17 +122,19 @@ object Spotlight extends Instrumented with ClassLogging {
   def metricsReporterStartTask( config: Config ): StartTask = StartTask.withFunction( "start metrics reporter" ) { bc ⇒
     val MetricsPath = "spotlight.metrics"
 
-    if ( config hasPath MetricsPath ) {
-      val metricsConfig = config getConfig MetricsPath
-      val reporter = Reporter startReporter metricsConfig
-      log.alternative(
-        SystemCategory,
-        Map( "@msg" → "starting metric reporting", "config" → metricsConfig, "reporter" → reporter.toString )
-      )
-    } else {
-      log.alternative( SystemCategory, Map( "@msg" → """metric report configuration missing at "spotlight.metrics"""" ) )
-      log.warn( """metric report configuration missing at "spotlight.metrics"""" )
-    }
+    config
+      .as[Option[Config]]( MetricsPath )
+      .map { metricsConfig ⇒
+        val reporter = Reporter startReporter metricsConfig
+        log.alternative(
+          SystemCategory,
+          Map( "@msg" → "starting metric reporting", "config" → metricsConfig, "reporter" → reporter.toString )
+        )
+      }
+      .getOrElse {
+        log.alternative( SystemCategory, Map( "@msg" → """metric report configuration missing at "spotlight.metrics"""" ) )
+        log.warn( """metric report configuration missing at "spotlight.metrics"""" )
+      }
 
     Done
   }
@@ -150,7 +153,7 @@ object Spotlight extends Instrumented with ClassLogging {
       )
 
       Settings( args, config = ConfigFactory.load() ).disjunction map { settings ⇒
-        log.alternative( SystemCategory, Map( "@msg" → "Settings", "usage" → settings.usage ) )
+        log.alternative( SystemCategory, Map( "@msg" → "Settings", "usage" → settings.usage._2 ) )
         val system = context.system getOrElse ActorSystem( context.name, settings.config )
         ( system, settings )
       } match {

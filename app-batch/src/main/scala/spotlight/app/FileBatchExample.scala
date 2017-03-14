@@ -12,6 +12,7 @@ import akka.event.LoggingReceive
 import akka.stream.scaladsl.{ FileIO, Flow, Framing, GraphDSL, Sink, Source }
 import akka.stream._
 import akka.util.ByteString
+import net.ceedubs.ficus.Ficus._
 import com.persist.logging._
 import com.persist.logging.LoggingLevels.{ DEBUG, Level, WARN }
 
@@ -93,17 +94,11 @@ object FileBatchExample extends Instrumented with ClassLogging {
     val systemConfig = system.settings.config
 
     val ActivePath = "spotlight.logging.filter.active"
-    if ( systemConfig.hasPath( ActivePath ) && systemConfig.getBoolean( ActivePath ) == true ) {
+    for {
+      isActive ← systemConfig.as[Option[Boolean]]( ActivePath ) if isActive == true
+    } {
       val IncludeClassnameSegmentsPath = "spotlight.logging.filter.include-classname-segments"
-
-      val watched = {
-        if ( systemConfig.hasPath( IncludeClassnameSegmentsPath ) ) {
-          import scala.collection.JavaConverters._
-          systemConfig.getStringList( IncludeClassnameSegmentsPath ).asScala.toSet
-        } else {
-          Set.empty[String]
-        }
-      }
+      val watched = systemConfig.as[Option[Set[String]]]( IncludeClassnameSegmentsPath ) getOrElse Set.empty[String]
 
       log.warn(
         Map(
@@ -252,7 +247,7 @@ object FileBatchExample extends Instrumented with ClassLogging {
 
   def rateLimitFlow( parallelism: Int, refreshPeriod: FiniteDuration )( implicit system: ActorSystem ): Flow[TimeSeries, TimeSeries, NotUsed] = {
     //    val limiterRef = system.actorOf( Limiter.props( parallelism, refreshPeriod, parallelism ), "rate-limiter" )
-    //    val limitDuration = 9.minutes // ( configuration.detectionBudget * 1.1 )
+    //    val limitDuration = 9.minutes // ( settings.detectionBudget * 1.1 )
     //    val limitWait = FiniteDuration( limitDuration._1, limitDuration._2 )
     //    Limiter.limitGlobal[TimeSeries](limiterRef, limitWait)( system.dispatcher )
 
@@ -263,15 +258,13 @@ object FileBatchExample extends Instrumented with ClassLogging {
 
   def detectionWorkflow(
     context: BoundedContext,
-    configuration: Settings,
+    settings: Settings,
     scoring: DetectFlow
   )(
     implicit
     system: ActorSystem,
     materializer: Materializer
   ): Flow[String, SimpleFlattenedOutlier, NotUsed] = {
-    val conf = configuration
-
     val graph = GraphDSL.create() { implicit b ⇒
       import GraphDSL.Implicits._
       import omnibus.akka.stream.StreamMonitor._
@@ -280,13 +273,13 @@ object FileBatchExample extends Instrumented with ClassLogging {
 
       val intakeBuffer = b.add(
         Flow[String]
-          .buffer( conf.tcpInboundBufferSize, OverflowStrategy.backpressure )
+          .buffer( settings.tcpInboundBufferSize, OverflowStrategy.backpressure )
           .watchFlow( WatchPoints.Intake )
       )
 
       val timeSeries = b.add( Flow[String].via( unmarshalTimeSeriesData ) )
 
-      val limiter = b.add( rateLimitFlow( configuration.parallelism, 25.milliseconds ).watchFlow( WatchPoints.Rate ) )
+      val limiter = b.add( rateLimitFlow( settings.parallelism, 25.milliseconds ).watchFlow( WatchPoints.Rate ) )
       val score = b.add( scoring )
 
       //todo remove after working

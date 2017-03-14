@@ -3,6 +3,7 @@ package spotlight.analysis.algorithm.statistical
 import scalaz._
 import Scalaz._
 import com.typesafe.config.Config
+import net.ceedubs.ficus.Ficus._
 import com.persist.logging._
 import org.apache.commons.lang3.ClassUtils
 import org.apache.commons.math3.distribution.TDistribution
@@ -59,23 +60,22 @@ object GrubbsShape extends ClassLogging {
   val DefaultSlidingWindow: Int = 60
 
   implicit val advancing = new Advancing[GrubbsShape] {
-    override def zero( configuration: Option[Config] ): GrubbsShape = GrubbsShape( slidingWindowFrom( configuration ) )
+    override def zero( configuration: Option[Config] ): GrubbsShape = {
+      val sliding = getFromOrElse[Int]( configuration, SlidingWindowPath, DefaultSlidingWindow )
+      GrubbsShape( sliding )
+    }
     override def N( shape: GrubbsShape ): Long = shape.N
     override def advance( original: GrubbsShape, advanced: Advanced ): GrubbsShape = { original :+ advanced.point.value }
     override def copy( shape: GrubbsShape ): GrubbsShape = shape.copy( underlying = shape.underlying.copy() )
   }
 
   def slidingWindowFrom( configuration: Option[Config] ): Int = {
-    configuration map { c ⇒
-      if ( c hasPath SlidingWindowPath ) {
-        val sliding = c getInt SlidingWindowPath
-        if ( 0 < sliding ) sliding else DefaultSlidingWindow
-      } else {
-        DefaultSlidingWindow
-      }
-    } getOrElse {
-      DefaultSlidingWindow
-    }
+    val sliding = for {
+      c ← configuration
+      s ← c.as[Option[Int]]( SlidingWindowPath ) if 0 < s
+    } yield s
+
+    sliding getOrElse DefaultSlidingWindow
   }
 }
 
@@ -97,7 +97,7 @@ object GrubbsAlgorithm extends Algorithm[GrubbsShape]( label = "grubbs" ) { algo
   object Context {
     val AlphaPath = "alpha"
     def getAlpha( c: Config ): TryV[Double] = {
-      val alpha = if ( c hasPath AlphaPath ) c getDouble AlphaPath else 0.05
+      val alpha = c.as[Option[Double]]( AlphaPath ) getOrElse 0.05
       alpha.right
     }
   }
@@ -119,13 +119,6 @@ object GrubbsAlgorithm extends Algorithm[GrubbsShape]( label = "grubbs" ) { algo
 
     result match {
       case \/-( r ) ⇒ Some( r )
-      //
-      //      case -\/( ex: Algorithm.InsufficientDataSize ) ⇒ {
-      //        import spotlight.model.timeseries._
-      //        log.info( Map( "@msg" → "skipping point until sufficient history is establish", "point" → point ), ex )
-      //        Some( ( false, ThresholdBoundary empty point.timestamp.toLong ) )
-      //      }
-      //
       case -\/( ex ) ⇒ {
         log.warn( Map( "@msg" → "exception raised in algorithm step calculation", "algorithm" → label ), ex )
         throw ex

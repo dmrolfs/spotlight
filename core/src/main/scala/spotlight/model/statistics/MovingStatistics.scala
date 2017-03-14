@@ -16,7 +16,7 @@ object MovingStatistics {
     *
     * @param width width of moving window
     * @param values values to be added to moving window. Depending on width values may or may not remain in the moving statistics
-    *       but will be counted in count of values seen, N
+    *     but will be counted in count of values seen, N
     * @return MovingStatistics
     */
   def apply( width: Int, values: Double* ): MovingStatistics = {
