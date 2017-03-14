@@ -8,6 +8,7 @@ import akka.persistence.journal.leveldb
 import akka.util.Timeout
 
 import scalaz.concurrent.Task
+import net.ceedubs.ficus.Ficus._
 import com.typesafe.scalalogging.{ Logger, StrictLogging }
 import omnibus.commons.concurrent._
 import demesne.{ BoundedContext, StartTask }
@@ -22,10 +23,8 @@ object SharedLeveldbStore extends StrictLogging {
   def start( createActor: Boolean = false ): StartTask = {
     val actionLabel = if ( createActor ) "create" else "connect"
     StartTask.withBoundTask( s"${actionLabel} shared LevelDB ${Name}" ) { implicit bc: BoundedContext ⇒
-      val clusterPort = {
-        val ClusterPortPath = "spotlight.settings.cluster-port"
-        if ( bc.configuration hasPath ClusterPortPath ) bc.configuration.getInt( ClusterPortPath ) else 2551
-      }
+      val ClusterPortPath = "spotlight.settings.cluster-port"
+      val clusterPort = bc.configuration.as[Option[Int]]( ClusterPortPath ) getOrElse 2551
 
       for {
         _ ← logConfiguration()
@@ -41,21 +40,19 @@ object SharedLeveldbStore extends StrictLogging {
   private def logConfiguration()( implicit bc: BoundedContext ): Task[Unit] = {
     Task now {
       configLogger.info( bc.configuration.root.render )
+      val AkkaPersistencePath = "akka.persistence"
 
-      val JournalPluginPath = "akka.persistence.journal.plugin"
+      val JournalPluginPath = AkkaPersistencePath + ".journal.plugin"
       logger.info( "A TEST: looking at {}", JournalPluginPath )
-      val journalPlugin = {
-        if ( bc.configuration hasPath JournalPluginPath ) Some( bc.configuration getString JournalPluginPath )
-        else None
-      }
+      val journalPlugin = bc.configuration.as[Option[String]]( JournalPluginPath )
       logger.info( "SharedLeveldbStore: akka.persistence.journal.plugin: [{}]", journalPlugin )
 
-      val JournalDirPath = "akka.persistence.journal.leveldb-shared.store.dir" // JournalPluginPath+".store.dir"
-      val journalDir = if ( bc.configuration hasPath JournalDirPath ) Some( bc.configuration.getString( JournalDirPath ) ) else None
+      val JournalDirPath = AkkaPersistencePath + ".journal.leveldb-shared.store.dir" // JournalPluginPath+".store.dir"
+      val journalDir = bc.configuration.as[Option[String]]( JournalDirPath )
       logger.info( "SharedLeveldbStore: journal dir: [{}]", journalDir )
 
-      val SnapshotsDirPath = "akka.persistence.snapshot-store.local.dir"
-      val snapshotDir = if ( bc.configuration hasPath SnapshotsDirPath ) Some( bc.configuration getString SnapshotsDirPath ) else None
+      val SnapshotsDirPath = AkkaPersistencePath + ".snapshot-store.local.dir"
+      val snapshotDir = bc.configuration.as[Option[String]]( SnapshotsDirPath )
       logger.info( "SharedLeveldbStore: snapshots dir: [{}]", snapshotDir )
     }
   }

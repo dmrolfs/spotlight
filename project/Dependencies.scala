@@ -14,7 +14,7 @@ object Dependencies {
   }
 
   object demesne {
-    val version = "2.2.2"
+    val version = "2.2.3-SNAPSHOT"
     def module( id: String ) = "com.github.dmrolfs" %% s"demesne-$id" % version withSources() withJavadoc()
     val core = module( "core" )
     val testkit = module( "testkit" )
@@ -115,8 +115,10 @@ object Dependencies {
     val fastutil = "it.unimi.dsi" % "fastutil" % "7.1.0" withSources() withJavadoc()
     val bloomFilter = "com.github.alexandrnikitin" % "bloom-filter_2.11" % "0.8.0" withSources() withJavadoc()
     val json4sJackson = "org.json4s" %% "json4s-jackson" % "3.5.0"
-    val uuid = "com.eaio.uuid" % "uuid" % "3.4"
+//    val uuid = "com.eaio.uuid" % "uuid" % "3.4"
+    val uuid = "com.github.stephenc.eaio-uuid" % "uuid" % "3.4.0"
     val config = "com.typesafe" % "config" % "1.3.1"
+    val ficus = "com.iheart" %% "ficus" % "1.4.0"
 //    val pureConfig = "com.github.melrief" %% "pureconfig" % "0.1.5"
     val shapeless = "com.chuusai" %% "shapeless" % "2.3.2" withSources() withJavadoc()
     val parboiled = "org.parboiled" %% "parboiled" % "2.1.4"
@@ -181,6 +183,7 @@ persistence.leveldbjni,
       facility.bloomFilter,
       facility.uuid,
       facility.config,
+      facility.ficus,
       facility.shapeless,
       scalaz.core
     ) ++

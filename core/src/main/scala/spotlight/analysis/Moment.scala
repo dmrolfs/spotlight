@@ -3,6 +3,7 @@ package spotlight.analysis
 import scalaz._
 import Scalaz._
 import com.typesafe.config.Config
+import net.ceedubs.ficus.Ficus._
 import com.persist.logging._
 import org.apache.commons.math3.stat.descriptive.StatisticalSummary
 import omnibus.commons.Valid
@@ -39,7 +40,7 @@ object Moment extends ClassLogging {
     val AlphaPath = "alpha"
 
     override def zero( configuration: Option[Config] ): Moment = {
-      val alpha = valueFrom( configuration, AlphaPath ) { _ getDouble AlphaPath } getOrElse 0.05
+      val alpha = getFromOrElse[Double]( configuration, AlphaPath, 0.05 )
       Moment.withAlpha( alpha ).disjunction match {
         case \/-( m ) ⇒ m
         case -\/( exs ) ⇒ {
@@ -59,7 +60,7 @@ object Moment extends ClassLogging {
   object Statistics {
     def apply( alpha: Double, values: Double* ): Statistics = {
       values.foldLeft(
-        Statistics( alpha = alpha, N = 0, sum = 0D, movingMin = 0D, movingMax = 0D, ewma = 0D, ewmsd = 0D )
+        Statistics( alpha = alpha, N = 0, sum = 0.0, movingMin = 0.0, movingMax = 0.0, ewma = 0.0, ewmsd = 0.0 )
       ) {
           _ :+ _
         }

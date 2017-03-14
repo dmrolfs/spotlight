@@ -17,6 +17,7 @@ import akka.util.ByteString
 import shapeless.syntax.typeable._
 import com.codahale.metrics.{ Metric, MetricFilter }
 import com.typesafe.config.ConfigFactory
+import net.ceedubs.ficus.Ficus._
 import org.joda.{ time ⇒ joda }
 import com.typesafe.scalalogging.{ LazyLogging, Logger }
 import org.slf4j.LoggerFactory
@@ -57,7 +58,7 @@ object GraphitePublisher extends LazyLogging {
     def publishThresholdBoundaries( p: AnalysisPlan, algorithm: String ): Boolean = {
       val PublishPath = "publish-threshold"
       val algorithmConfig = p.algorithms.getOrElse( algorithm, ConfigFactory.empty )
-      if ( algorithmConfig hasPath PublishPath ) algorithmConfig getBoolean PublishPath else false
+      algorithmConfig.as[Option[Boolean]]( PublishPath ) getOrElse false
     }
   }
 

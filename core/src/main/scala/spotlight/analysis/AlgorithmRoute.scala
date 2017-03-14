@@ -4,16 +4,18 @@ import akka.actor.{ ActorContext, ActorRef }
 
 import scalaz.\/
 import com.persist.logging._
-import com.typesafe.config.{ Config, ConfigFactory, ConfigObject, ConfigValueType }
-import demesne.{ AggregateRootType, DomainModel }
+import com.typesafe.config._
+import net.ceedubs.ficus.Ficus._
+import squants.information.{ Bytes, Information, Megabytes }
 import omnibus.akka.envelope._
 import omnibus.commons.identifier.Identifying
+import omnibus.commons.config._
 import omnibus.commons.util._
+import demesne.{ AggregateRootType, DomainModel }
 import spotlight.Settings
 import spotlight.analysis.algorithm.{ Algorithm, AlgorithmIdGenerator, AlgorithmIdentifier, AlgorithmProtocol }
 import spotlight.analysis.shard._
 import spotlight.model.outlier.AnalysisPlan
-import squants.information.{ Bytes, Information, Megabytes }
 
 sealed abstract class AlgorithmRoute {
   def forward( message: Any )( implicit sender: ActorRef, context: ActorContext ): Unit = {
@@ -250,8 +252,8 @@ object AlgorithmRoute extends ClassLogging {
         for {
           v ← Settings.detectionPlansConfigFrom( model.configuration ).root.asScala.find { _._1 == plan.name }.map { _._2 }
           co ← v.cast[ConfigObject]
-          c = co.toConfig if c hasPath PlanShardPath
-          shardValue = c getValue PlanShardPath
+          c = co.toConfig
+          shardValue ← c.as[Option[ConfigValue]]( PlanShardPath )
         } yield {
           val DefaultFactory = CellStrategy.make
 
@@ -268,7 +270,7 @@ object AlgorithmRoute extends ClassLogging {
               import scala.collection.JavaConverters._
 
               val ConfigObjectType = classTag[ConfigObject]
-              val specs = c.getConfig( PlanShardPath ).root
+              val specs = c.as[Config]( PlanShardPath ).root
 
               if ( specs.size == 1 ) {
                 val ( key, ConfigObjectType( value ) ) = specs.asScala.head
@@ -320,7 +322,7 @@ object AlgorithmRoute extends ClassLogging {
       val DefaultSize: Int = 3000
 
       val make: ( Config ) ⇒ Strategy = { c ⇒
-        val sz = if ( c hasPath SizePath ) c getInt SizePath else DefaultSize
+        val sz = c.as[Option[Int]]( SizePath ) getOrElse DefaultSize
         CellStrategy( nrCells = sz )
       }
     }
@@ -352,8 +354,8 @@ object AlgorithmRoute extends ClassLogging {
       val DefaultControlBySize: Information = Megabytes( 3 )
 
       val make: ( Config ) ⇒ Strategy = { c ⇒
-        val topics = if ( c hasPath ExpectedNrTopicsPath ) c getInt ExpectedNrTopicsPath else DefaultExpectedNrTopics
-        val bySize = if ( c hasPath ControlBySizePath ) Bytes( c.getMemorySize( ControlBySizePath ).toBytes ) else DefaultControlBySize
+        val topics = c.as[Option[Int]]( ExpectedNrTopicsPath ) getOrElse DefaultExpectedNrTopics
+        val bySize = c.as[Option[Information]]( ControlBySizePath ) getOrElse DefaultControlBySize // Bytes( c.getMemorySize( ControlBySizePath ).toBytes ) else DefaultControlBySize
         LookupStrategy( expectedNrTopics = topics, bySize = bySize )
       }
     }

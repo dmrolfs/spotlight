@@ -1,5 +1,7 @@
 import com.typesafe.config.ConfigFactory
 
+import net.ceedubs.ficus.Ficus._
+
 /** Created by rolfsd on 1/17/17.
   */
 package object spotlight {
@@ -7,11 +9,6 @@ package object spotlight {
 
   lazy val BaseMetricName: String = {
     val base = "spotlight"
-    val config = ConfigFactory.load()
-    if ( config hasPath MetricBasePath ) {
-      config.getString( MetricBasePath ) + "." + base
-    } else {
-      base
-    }
+    ConfigFactory.load().as[Option[String]]( MetricBasePath ) map { _ + "." + base } getOrElse { base }
   }
 }

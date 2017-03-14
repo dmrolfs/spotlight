@@ -3,6 +3,7 @@ package spotlight.analysis.algorithm.business
 import com.github.nscala_time.time.Imports._
 import com.persist.logging._
 import com.typesafe.config.Config
+import net.ceedubs.ficus.Ficus._
 import org.apache.commons.math3.stat.descriptive.StatisticalSummary
 import org.joda.{ time ⇒ joda }
 import spotlight.analysis.algorithm.AlgorithmProtocol.Advanced
@@ -158,18 +159,18 @@ object PastPeriod extends ClassLogging {
   object Shape extends AlgorithmShapeCompanion {
     val WindowPath = "window"
     val DefaultWindow: Int = 3
-    def windowFrom( configuration: Option[Config] ): Int = valueFrom( configuration, WindowPath, DefaultWindow ) { _ getInt _ }
+    def windowFrom( configuration: Option[Config] ): Int = getFromOrElse( configuration, WindowPath, DefaultWindow )
 
     val HistoryPath = "history"
     val DefaultHistory: Int = DefaultWindow * 10
-    def historyFrom( configuration: Option[Config] ): Int = valueFrom( configuration, HistoryPath, DefaultHistory ) { _ getInt _ }
+    def historyFrom( configuration: Option[Config] ): Int = getFromOrElse( configuration, HistoryPath, DefaultHistory )
 
     //    def applyWindow[T]( window: Int )( periods: List[T] ): List[T] = periods drop ( periods.size - window )
 
     implicit val advancing = new Advancing[Shape] {
       override def zero( configuration: Option[Config] ): Shape = {
-        val window = valueFrom( configuration, WindowPath ) { _ getInt WindowPath } getOrElse 3
-        val history = valueFrom( configuration, HistoryPath ) { _ getInt HistoryPath } getOrElse { 10 * window }
+        val window = getFromOrElse[Int]( configuration, WindowPath, 3 )
+        val history = getFromOrElse[Int]( configuration, HistoryPath, 10 * window )
         Shape( window = window, history = history )
       }
 
@@ -214,7 +215,7 @@ object PastPeriodAverageAlgorithm extends Algorithm[PastPeriod.Shape]( label = "
     */
   override def estimatedAverageShapeSize( properties: Option[Config] ): Option[Information] = {
     ( PastPeriod.Shape.windowFrom( properties ), PastPeriod.Shape.historyFrom( properties ) ) match {
-      case ( PastPeriod.Shape.DefaultWindow, PastPeriod.Shape.DefaultHistory ) ⇒ Some( Bytes( 1683 ) )
+      case ( PastPeriod.Shape.DefaultWindow, PastPeriod.Shape.DefaultHistory ) ⇒ Some( Bytes( 1763 ) )
       //      case window if window <= 32 ⇒ Some( Bytes( 716 + ( window * 13 ) ) ) // identified through observation
       //      case window if window <= 42 ⇒ Some( Bytes( 798 + ( window * 13 ) ) )
       //      case window if window <= 73 ⇒ Some( Bytes( 839 + ( window * 13 ) ) )
