@@ -4,11 +4,12 @@ import scala.concurrent.{ ExecutionContext, Future }
 import akka.actor.{ Actor, ActorRef, Props }
 import akka.agent.Agent
 import akka.event.LoggingReceive
-import com.persist.logging._
 
 import scalaz._
 import Scalaz._
-import com.typesafe.config.{ Config, ConfigObject, ConfigValue, ConfigValueType }
+import com.persist.logging._
+import com.typesafe.config.{ Config, ConfigObject, ConfigValue }
+import net.ceedubs.ficus.Ficus._
 import demesne.{ AggregateRootType, BoundedContext, DomainModel, StartTask }
 import omnibus.akka.envelope._
 import omnibus.akka.metrics.InstrumentedActor
@@ -46,8 +47,7 @@ object DetectionAlgorithmRouter extends ClassLogging {
           unknowns = algoRoots.map { case ( _, rt ) ⇒ rt }.toSet
           _ = log.info( Map( "@msg" → "starting with new algorithm routes", "unknowns" → unknowns.mkString( "[", ", ", "]" ) ) )
         } yield {
-          log
-            .info( Map( "@msg" → "DetectionAlgorithmRouter routing table", "routing-table" → roots.mkString( "[", ", ", "]" ) ) )
+          log.info( Map( "@msg" → "DetectionAlgorithmRouter routing table", "routing-table" → roots.mkString( "[", ", ", "]" ) ) )
           StartTask.Result( rootTypes = unknowns )
         }
       }
@@ -151,7 +151,7 @@ object DetectionAlgorithmRouter extends ClassLogging {
 
         val algoFQCN = for {
           algoConfig ← ConfigObjectType.unapply( cv ) map { _.toConfig }
-          fqcn ← if ( algoConfig hasPath ClassPath ) Some( algoConfig getString ClassPath ) else None
+          fqcn ← algoConfig.as[Option[String]]( ClassPath )
           _ = log.debug( Map( "@msg" → "fqcn from algo config", "algorithm" → algorithm, "fqcn" → fqcn ) )
         } yield ( algorithm, fqcn ).right
 
@@ -159,24 +159,25 @@ object DetectionAlgorithmRouter extends ClassLogging {
       }
 
       val AlgorithmPath = "spotlight.algorithms"
-      if ( configuration hasPath AlgorithmPath ) {
-        import scala.collection.JavaConverters._
-
-        configuration.getConfig( AlgorithmPath ).root.entrySet().asScala.toList
-          .map { entry ⇒ ( entry.getKey, entry.getValue ) }
-          .traverseU {
-            case ( a, cv ) ⇒
-              val ac = for {
-                algorithmFqcn ← unwrapAlgorithmFQCN( a, cv )
-                ( algorithm, fqcn ) = algorithmFqcn
-                clazz ← loadClass( algorithm, fqcn )
-              } yield ( algorithm, clazz )
-              ac.validationNel
-          }
-          .map { algorithmClasses ⇒ Map( algorithmClasses: _* ) }
-      } else {
-        Map.empty[String, Class[_ <: Algorithm[_]]].successNel
-      }
+      configuration.as[Option[Config]]( AlgorithmPath )
+        .map { algoConfig ⇒
+          import scala.collection.JavaConverters._
+          algoConfig.root.entrySet.asScala.toList
+            .map { entry ⇒ ( entry.getKey, entry.getValue ) }
+            .traverseU {
+              case ( a, cv ) ⇒
+                val ac = for {
+                  algorithmFqcn ← unwrapAlgorithmFQCN( a, cv )
+                  ( algorithm, fqcn ) = algorithmFqcn
+                  clazz ← loadClass( algorithm, fqcn )
+                } yield ( algorithm, clazz )
+                ac.validationNel
+            }
+            .map { algorithmClasses ⇒ Map( algorithmClasses: _* ) }
+        }
+        .getOrElse {
+          Map.empty[String, Class[_ <: Algorithm[_]]].successNel
+        }
     }
 
     def loadAlgorithms(

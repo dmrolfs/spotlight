@@ -1,6 +1,7 @@
 package spotlight.analysis.algorithm
 
-import com.typesafe.config.{ Config, ConfigFactory }
+import com.typesafe.config.Config
+import net.ceedubs.ficus.Ficus._
 import org.apache.commons.math3.ml.clustering.DoublePoint
 import spotlight.analysis.{ DetectUsing, RecentHistory }
 import spotlight.model.outlier.AnalysisPlan
@@ -81,9 +82,5 @@ object AlgorithmContext {
 class CommonContext( override val message: DetectUsing ) extends AlgorithmContext {
   override def data: Seq[DoublePoint] = message.payload.source.points
   override def recent: RecentHistory = message.recent
-
-  override def tolerance: Double = {
-    import AlgorithmContext.TolerancePath
-    if ( message.properties hasPath TolerancePath ) message.properties.getDouble( TolerancePath ) else 3.0
-  }
+  override def tolerance: Double = message.properties.as[Option[Double]]( AlgorithmContext.TolerancePath ) getOrElse 3.0
 }
