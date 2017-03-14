@@ -3,17 +3,17 @@ package spotlight.analysis.algorithm.business
 import akka.actor.ActorSystem
 import akka.testkit._
 import com.persist.logging._
-import com.typesafe.config.{Config, ConfigFactory}
+import com.typesafe.config.{ Config, ConfigFactory }
 import omnibus.akka.envelope._
-import org.joda.{time => joda}
+import org.joda.{ time ⇒ joda }
 import org.mockito.Mockito._
 import spotlight.analysis.algorithm.AlgorithmProtocol.Advanced
 import spotlight.analysis.algorithm.business.PastPeriod.Period
-import spotlight.analysis.algorithm.{AlgorithmSpec, AlgorithmProtocol => AP}
-import spotlight.analysis.{DetectOutliersInSeries, DetectUsing}
-import spotlight.model.outlier.{NoOutliers, SeriesOutliers}
+import spotlight.analysis.algorithm.{ AlgorithmSpec, AlgorithmProtocol ⇒ AP }
+import spotlight.analysis.{ DetectOutliersInSeries, DetectUsing }
+import spotlight.model.outlier.{ NoOutliers, SeriesOutliers }
 import spotlight.model.statistics.MovingStatistics
-import spotlight.model.timeseries.{DataPoint, ThresholdBoundary, TimeSeries}
+import spotlight.model.timeseries.{ DataPoint, ThresholdBoundary, TimeSeries }
 
 import scala.annotation.tailrec
 import scala.collection.immutable

@@ -214,7 +214,7 @@ object PastPeriodAverageAlgorithm extends Algorithm[PastPeriod.Shape]( label = "
     */
   override def estimatedAverageShapeSize( properties: Option[Config] ): Option[Information] = {
     ( PastPeriod.Shape.windowFrom( properties ), PastPeriod.Shape.historyFrom( properties ) ) match {
-      case ( PastPeriod.Shape.DefaultWindow, PastPeriod.Shape.DefaultHistory ) ⇒ Some( Bytes( 1683 ) )
+      case ( PastPeriod.Shape.DefaultWindow, PastPeriod.Shape.DefaultHistory ) ⇒ Some( Bytes( 1763 ) )
       //      case window if window <= 32 ⇒ Some( Bytes( 716 + ( window * 13 ) ) ) // identified through observation
       //      case window if window <= 42 ⇒ Some( Bytes( 798 + ( window * 13 ) ) )
       //      case window if window <= 73 ⇒ Some( Bytes( 839 + ( window * 13 ) ) )
