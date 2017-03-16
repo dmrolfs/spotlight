@@ -44,7 +44,9 @@ final case class SpotlightContext(
 )
 
 object SpotlightContext extends HasBuilder[SpotlightContext] {
-  object Name extends OptParam[String]( "Spotlight" )
+  val Key: Symbol = 'Spotlight
+
+  object Name extends OptParam[String]( Key.name )
   object RootTypes extends OptParam[Set[AggregateRootType]]( Set.empty[AggregateRootType] )
   object System extends OptParam[Option[ActorSystem]]( None )
   object Resources extends OptParam[Map[Symbol, Any]]( Map.empty[Symbol, Any] )
@@ -178,7 +180,8 @@ object Spotlight extends Instrumented with ClassLogging {
 
         val makeBoundedContext = {
           BoundedContext.make(
-            key = Symbol( context.name ),
+            key = SpotlightContext.Key,
+            //            key = Symbol( context.name ),
             configuration = settings.toConfig,
             rootTypes = context.rootTypes ++ systemRootTypes,
             userResources = context.resources,
@@ -203,8 +206,6 @@ object Spotlight extends Instrumented with ClassLogging {
         implicit val materializer = ActorMaterializer(
           ActorMaterializerSettings( system ) withSupervisionStrategy supervisionDecider
         )
-
-        //        logger.info( "TEST:BOOTSTRAP:BEFORE BoundedContext roottypes = [{}]", boundedContext.unsafeModel.rootTypes )
 
         for {
           catalog ← makeCatalog( settings )

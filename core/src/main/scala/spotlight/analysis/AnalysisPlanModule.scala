@@ -31,69 +31,8 @@ import spotlight.model.timeseries._
 import spotlight.model.timeseries.TimeSeriesBase.Merging
 import spotlight.analysis.AnalysisPlanProtocol.{ AnalysisFlow, MakeFlow }
 import spotlight.analysis.OutlierDetection.{ DetectionResult, DetectionTimedOut }
+import spotlight.analysis.algorithm.AlgorithmRoute
 import spotlight.analysis.{ AnalysisPlanProtocol ⇒ P }
-
-object AnalysisPlanProtocol extends EntityProtocol[AnalysisPlanState#ID] {
-  case class MakeFlow(
-    override val targetId: MakeFlow#TID,
-    parallelism: Int,
-    system: ActorSystem,
-    timeout: Timeout,
-    materializer: Materializer
-  ) extends Message
-
-  case class AnalysisFlow( flow: DetectFlow ) extends ProtocolMessage with ClassLogging {
-    log.warn( Map( "@msg" → "Made analysis plan flow", "flow" → flow.toString ) )
-  }
-
-  case class AcceptTimeSeries(
-      override val targetId: AcceptTimeSeries#TID,
-      override val correlationIds: Set[WorkId],
-      override val data: TimeSeries,
-      override val scope: Option[AnalysisPlan.Scope] = None
-  ) extends Command with CorrelatedSeries {
-    override def withData( newData: TimeSeries ): CorrelatedData[TimeSeries] = this.copy( data = newData )
-    override def withCorrelationIds( newIds: Set[WorkId] ): CorrelatedData[TimeSeries] = this.copy( correlationIds = newIds )
-    override def withScope( newScope: Option[Scope] ): CorrelatedData[TimeSeries] = this.copy( scope = newScope )
-  }
-
-  //todo add info change commands
-  //todo reify algorithm
-  //      case class AddAlgorithm( override val targetId: AnalysisPlan#TID, algorithm: Symbol ) extends Command with AnalysisPlanMessage
-  case class ApplyTo( override val targetId: ApplyTo#TID, appliesTo: AnalysisPlan.AppliesTo ) extends Command
-
-  case class UseAlgorithms( override val targetId: UseAlgorithms#TID, algorithms: Map[String, Config] ) extends Command
-
-  case class ResolveVia(
-    override val targetId: ResolveVia#TID,
-    isQuorum: IsQuorum,
-    reduce: ReduceOutliers
-  ) extends Command
-
-  override def tags: Set[String] = Set( AnalysisPlanModule.module.rootType.name )
-
-  case class ScopeChanged( override val sourceId: ScopeChanged#TID, appliesTo: AnalysisPlan.AppliesTo ) extends TaggedEvent
-
-  case class AlgorithmsChanged(
-    override val sourceId: AlgorithmsChanged#TID,
-    algorithms: Map[String, Config],
-    added: Set[String],
-    dropped: Set[String]
-  ) extends TaggedEvent
-
-  case class AnalysisResolutionChanged(
-    override val sourceId: AnalysisResolutionChanged#TID,
-    isQuorum: IsQuorum,
-    reduce: ReduceOutliers
-  ) extends TaggedEvent
-
-  case class GetPlan( override val targetId: GetPlan#TID ) extends Command
-  case class PlanInfo( override val sourceId: PlanInfo#TID, info: AnalysisPlan ) extends Event {
-    def toSummary: AnalysisPlan.Summary = {
-      AnalysisPlan.Summary( id = sourceId, name = info.name, slug = info.slug, appliesTo = Option( info.appliesTo ) )
-    }
-  }
-}
 
 case class AnalysisPlanState( plan: AnalysisPlan ) extends Entity {
   override type ID = plan.ID
@@ -384,9 +323,19 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
       override def active: Receive = workflow orElse planEntity orElse super.active
 
       val workflow: Receive = {
-        case MakeFlow( _, parallelism, system, timeout, materializer ) ⇒ {
-          sender() ! AnalysisFlow( makeFlow( parallelism )( system, timeout, materializer ) )
+        case P.RouteDetection( id, m ) if detector == null ⇒ {
+          altLog.error(
+            Map(
+              "@msg" → "ignoring outlier detection request since detection workers are not initialized for plan",
+              "id" → id.toString,
+              "message" → Map( "plan" → m.plan.name, "topic" → m.topic.toString )
+            )
+          )
         }
+
+        case P.RouteDetection( _, m ) ⇒ detector forward m
+
+        case m: P.MakeFlow ⇒ sender() !+ P.AnalysisFlow( state.id, new AnalysisFlowFactory( state.plan ) )
       }
 
       val planEntity: Receive = {
@@ -419,126 +368,126 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
         super.unhandled( message )
       }
 
-      def makeFlow(
-        parallelism: Int
-      )(
-        implicit
-        system: ActorSystem,
-        timeout: Timeout,
-        materializer: Materializer
-      ): DetectFlow = {
-        val entry = Flow[TimeSeries].filter { state.plan.appliesTo }
-        val withGrouping = state.plan.grouping map { g ⇒ entry.via( batchSeries( g ) ) } getOrElse entry
+      //      def makeFlow(
+      //        parallelism: Int
+      //      )(
+      //        implicit
+      //        system: ActorSystem,
+      //        timeout: Timeout,
+      //        materializer: Materializer
+      //      ): DetectFlow = {
+      //        val entry = Flow[TimeSeries].filter { state.plan.appliesTo }
+      //        val withGrouping = state.plan.grouping map { g ⇒ entry.via( batchSeries( g ) ) } getOrElse entry
+      //
+      //        withGrouping
+      //          .via( detectionFlow( state.plan, parallelism ) )
+      //          .named( s"AnalysisPlan:${state.plan.name}@${state.plan.id.id}" )
+      //      }
 
-        withGrouping
-          .via( detectionFlow( state.plan, parallelism ) )
-          .named( s"AnalysisPlan:${state.plan.name}@${state.plan.id.id}" )
-      }
+      //      def batchSeries(
+      //        grouping: AnalysisPlan.Grouping
+      //      )(
+      //        implicit
+      //        tsMerging: Merging[TimeSeries]
+      //      ): Flow[TimeSeries, TimeSeries, NotUsed] = {
+      //        Flow[TimeSeries]
+      //          .groupedWithin( n = grouping.limit, d = grouping.window )
+      //          .map {
+      //            _
+      //              .groupBy { _.topic }
+      //              .map {
+      //                case ( _, tss ) ⇒
+      //                  tss.tail.foldLeft( tss.head ) { case ( acc, ts ) ⇒ tsMerging.merge( acc, ts ) valueOr { exs ⇒ throw exs.head } }
+      //              }
+      //          }
+      //          .mapConcat { identity }
+      //      }
 
-      def batchSeries(
-        grouping: AnalysisPlan.Grouping
-      )(
-        implicit
-        tsMerging: Merging[TimeSeries]
-      ): Flow[TimeSeries, TimeSeries, NotUsed] = {
-        Flow[TimeSeries]
-          .groupedWithin( n = grouping.limit, d = grouping.window )
-          .map {
-            _
-              .groupBy { _.topic }
-              .map {
-                case ( _, tss ) ⇒
-                  tss.tail.foldLeft( tss.head ) { case ( acc, ts ) ⇒ tsMerging.merge( acc, ts ) valueOr { exs ⇒ throw exs.head } }
-              }
-          }
-          .mapConcat { identity }
-      }
+      //      def detectionFlow( p: AnalysisPlan, parallelism: Int )( implicit system: ActorSystem, timeout: Timeout ): DetectFlow = {
+      //        import omnibus.akka.envelope.pattern.ask
+      //
+      //        implicit val ec: scala.concurrent.ExecutionContext = system.dispatcher
+      //
+      //        if ( detector == null && detector != context.system.deadLetters ) {
+      //          val ex = new IllegalStateException( s"analysis plan [${p.name}] flow invalid detector reference:[${detector}]" )
+      //
+      //          altLog.error(
+      //            Map(
+      //              "@msg" → "analysis plan [${p.name}] flow created missing valid detector reference:[${detector}]",
+      //              "plan" → p.name,
+      //              "detector" → detector.path
+      //            ),
+      //            ex
+      //          )
+      //
+      //          throw ex
+      //        }
+      //
+      //        Flow[TimeSeries]
+      //          .map { ts ⇒ OutlierDetectionMessage( ts, p ).disjunction }
+      //          .collect { case scalaz.\/-( m ) ⇒ m }
+      //          .map { m ⇒
+      //            inletSeries.mark()
+      //            inletPoints.mark( m.source.points.size )
+      //            m
+      //          }
+      //          .mapAsyncUnordered( parallelism ) { m ⇒
+      //            ( detector ?+ m )
+      //              .recover {
+      //                case ex: TimeoutException ⇒ {
+      //                  altLog.error(
+      //                    Map(
+      //                      "@msg" → "timeout exceeded waiting for detection",
+      //                      "timeout" → timeout.duration.toCoarsest.toString,
+      //                      "plan" → m.plan.name,
+      //                      "topic" → m.topic.toString
+      //                    ),
+      //                    ex
+      //                  )
+      //
+      //                  DetectionTimedOut( m.source, m.plan )
+      //                }
+      //              }
+      //          }.withAttributes( ActorAttributes supervisionStrategy detectorDecider )
+      //          .filter {
+      //            case Envelope( DetectionResult( outliers, _ ), _ ) ⇒ true
+      //            case DetectionResult( outliers, _ ) ⇒ true
+      //            case Envelope( DetectionTimedOut( s, _ ), _ ) ⇒ {
+      //              droppedSeriesMeter.mark()
+      //              droppedPointsMeter.mark( s.points.size )
+      //              false
+      //            }
+      //            case DetectionTimedOut( s, _ ) ⇒ {
+      //              droppedSeriesMeter.mark()
+      //              droppedPointsMeter.mark( s.points.size )
+      //              false
+      //            }
+      //          }
+      //          .collect {
+      //            case Envelope( DetectionResult( outliers, _ ), _ ) ⇒ outliers
+      //            case DetectionResult( outliers, _ ) ⇒ outliers
+      //          }
+      //          .map {
+      //            case m ⇒ {
+      //              val nrPoints = m.source.size
+      //              val nrAnomalyPoints = m.anomalySize
+      //              outletResults.mark()
+      //              outletResultsPoints.mark( nrPoints )
+      //              if ( m.hasAnomalies ) outletResultsAnomalies.mark() else outletResultsConformities.mark()
+      //              outletResultsPointsAnomalies.mark( nrAnomalyPoints )
+      //              outletResultsPointsConformities.mark( nrPoints - nrAnomalyPoints )
+      //              m
+      //            }
+      //          }
+      //      }
 
-      def detectionFlow( p: AnalysisPlan, parallelism: Int )( implicit system: ActorSystem, timeout: Timeout ): DetectFlow = {
-        import omnibus.akka.envelope.pattern.ask
-
-        implicit val ec: scala.concurrent.ExecutionContext = system.dispatcher
-
-        if ( detector == null && detector != context.system.deadLetters ) {
-          val ex = new IllegalStateException( s"analysis plan [${p.name}] flow invalid detector reference:[${detector}]" )
-
-          altLog.error(
-            Map(
-              "@msg" → "analysis plan [${p.name}] flow created missing valid detector reference:[${detector}]",
-              "plan" → p.name,
-              "detector" → detector.path
-            ),
-            ex
-          )
-
-          throw ex
-        }
-
-        Flow[TimeSeries]
-          .map { ts ⇒ OutlierDetectionMessage( ts, p ).disjunction }
-          .collect { case scalaz.\/-( m ) ⇒ m }
-          .map { m ⇒
-            inletSeries.mark()
-            inletPoints.mark( m.source.points.size )
-            m
-          }
-          .mapAsyncUnordered( parallelism ) { m ⇒
-            ( detector ?+ m )
-              .recover {
-                case ex: TimeoutException ⇒ {
-                  altLog.error(
-                    Map(
-                      "@msg" → "timeout exceeded waiting for detection",
-                      "timeout" → timeout.duration.toCoarsest.toString,
-                      "plan" → m.plan.name,
-                      "topic" → m.topic.toString
-                    ),
-                    ex
-                  )
-
-                  DetectionTimedOut( m.source, m.plan )
-                }
-              }
-          }.withAttributes( ActorAttributes supervisionStrategy detectorDecider )
-          .filter {
-            case Envelope( DetectionResult( outliers, _ ), _ ) ⇒ true
-            case DetectionResult( outliers, _ ) ⇒ true
-            case Envelope( DetectionTimedOut( s, _ ), _ ) ⇒ {
-              droppedSeriesMeter.mark()
-              droppedPointsMeter.mark( s.points.size )
-              false
-            }
-            case DetectionTimedOut( s, _ ) ⇒ {
-              droppedSeriesMeter.mark()
-              droppedPointsMeter.mark( s.points.size )
-              false
-            }
-          }
-          .collect {
-            case Envelope( DetectionResult( outliers, _ ), _ ) ⇒ outliers
-            case DetectionResult( outliers, _ ) ⇒ outliers
-          }
-          .map {
-            case m ⇒ {
-              val nrPoints = m.source.size
-              val nrAnomalyPoints = m.anomalySize
-              outletResults.mark()
-              outletResultsPoints.mark( nrPoints )
-              if ( m.hasAnomalies ) outletResultsAnomalies.mark() else outletResultsConformities.mark()
-              outletResultsPointsAnomalies.mark( nrAnomalyPoints )
-              outletResultsPointsConformities.mark( nrPoints - nrAnomalyPoints )
-              m
-            }
-          }
-      }
-
-      val detectorDecider: Decider = new Decider {
-        override def apply( ex: Throwable ): Supervision.Directive = {
-          altLog.error( "error in detection dropping series", ex )
-          droppedSeriesMeter.mark()
-          Supervision.Resume
-        }
-      }
+      //      val detectorDecider: Decider = new Decider {
+      //        override def apply( ex: Throwable ): Supervision.Directive = {
+      //          altLog.error( "error in detection dropping series", ex )
+      //          droppedSeriesMeter.mark()
+      //          Supervision.Resume
+      //        }
+      //      }
 
       override def supervisorStrategy: SupervisorStrategy = OneForOneStrategy() {
         case _: ActorInitializationException ⇒ Stop

@@ -1,9 +1,9 @@
 package spotlight.analysis.algorithm
 
-import akka.actor.{ActorContext, ActorRef}
+import akka.actor.{ ActorContext, ActorRef }
 import com.persist.logging._
 import com.typesafe.config._
-import demesne.{AggregateRootType, DomainModel}
+import demesne.{ AggregateRootType, DomainModel }
 import net.ceedubs.ficus.Ficus._
 import omnibus.akka.envelope._
 import omnibus.commons.config._
@@ -13,7 +13,7 @@ import spotlight.Settings
 import spotlight.analysis.DetectUsing
 import spotlight.analysis.shard._
 import spotlight.model.outlier.AnalysisPlan
-import squants.information.{Information, Megabytes}
+import squants.information.{ Information, Megabytes }
 
 import scalaz.\/
 
@@ -87,7 +87,7 @@ object AlgorithmRoute extends ClassLogging {
         }
 
         case m if algorithmRootType.aggregateIdFor isDefinedAt m ⇒ {
-          import scalaz.{-\/, \/-}
+          import scalaz.{ -\/, \/- }
 
           val ( aid, _ ) = algorithmRootType.aggregateIdFor( m )
           AlgorithmIdentifier.fromAggregateId( aid ).disjunction match {

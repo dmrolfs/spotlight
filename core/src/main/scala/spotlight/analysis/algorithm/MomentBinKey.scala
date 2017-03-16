@@ -11,7 +11,7 @@ class MomentBinKey {
     def id: String = s"${dayOfWeek.label}:${hourOfDay}"
   }
 
-  import org.joda.{time => joda}
+  import org.joda.{ time ⇒ joda }
 
   sealed trait DayOfWeek {
     def label: String
