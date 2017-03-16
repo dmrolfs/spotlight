@@ -1,7 +1,8 @@
-package spotlight.analysis
+package spotlight.analysis.algorithm
+
+import omnibus.commons.Valid
 
 import scalaz.Validation
-import omnibus.commons.Valid
 
 /** Created by rolfsd on 9/21/16.
   */
@@ -10,7 +11,7 @@ class MomentBinKey {
     def id: String = s"${dayOfWeek.label}:${hourOfDay}"
   }
 
-  import org.joda.{ time ⇒ joda }
+  import org.joda.{time => joda}
 
   sealed trait DayOfWeek {
     def label: String

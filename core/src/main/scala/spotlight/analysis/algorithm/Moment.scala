@@ -1,15 +1,4 @@
-package spotlight.analysis
-
-import scalaz._
-import Scalaz._
-import com.typesafe.config.Config
-import net.ceedubs.ficus.Ficus._
-import com.persist.logging._
-import org.apache.commons.math3.stat.descriptive.StatisticalSummary
-import omnibus.commons.Valid
-import omnibus.commons.util._
-import spotlight.analysis.algorithm.Advancing
-import spotlight.analysis.algorithm.AlgorithmProtocol.Advanced
+package spotlight.analysis.algorithm
 
 /** Created by rolfsd on 1/26/16.
   */
