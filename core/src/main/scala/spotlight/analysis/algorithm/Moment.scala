@@ -4,6 +4,7 @@ import scalaz._
 import Scalaz._
 import com.persist.logging._
 import com.typesafe.config.Config
+import net.ceedubs.ficus.Ficus._
 import org.apache.commons.math3.stat.descriptive.StatisticalSummary
 import omnibus.commons.Valid
 import omnibus.commons.util._

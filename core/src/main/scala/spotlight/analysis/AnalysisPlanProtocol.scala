@@ -1,24 +1,12 @@
 package spotlight.analysis
 
-import akka.NotUsed
-import akka.actor.{ ActorRef, ActorSystem, NotInfluenceReceiveTimeout }
-import akka.stream.Supervision.Decider
-import akka.stream.{ ActorAttributes, Materializer, Supervision }
-import akka.stream.scaladsl.Flow
-import akka.util.Timeout
-import com.codahale.metrics.Meter
-import com.persist.logging._
+import akka.actor.NotInfluenceReceiveTimeout
 import com.typesafe.config.Config
-import demesne.AggregateRootModule.{ Command, Event }
 import demesne.module.entity.EntityProtocol
-import omnibus.akka.envelope.{ Envelope, WorkId }
-import spotlight.analysis.OutlierDetection.{ DetectionResult, DetectionTimedOut }
+import omnibus.akka.envelope.WorkId
 import spotlight.model.outlier.AnalysisPlan.Scope
 import spotlight.model.outlier._
 import spotlight.model.timeseries.TimeSeries
-import spotlight.model.timeseries.TimeSeriesBase.Merging
-
-import scala.concurrent.TimeoutException
 
 /** Created by rolfsd on 3/15/17.
   */

@@ -2,15 +2,10 @@ package spotlight.analysis
 
 import scala.reflect._
 import scala.concurrent.duration._
-import scala.concurrent.{ Await, TimeoutException }
-import akka.NotUsed
+import scala.concurrent.Await
 import akka.actor._
 import akka.actor.SupervisorStrategy.{ Resume, Stop }
 import akka.event.LoggingReceive
-import akka.stream.Supervision.Decider
-import akka.stream.{ ActorAttributes, Materializer }
-import akka.stream.scaladsl.Flow
-import akka.stream.Supervision
 import akka.util.Timeout
 import com.persist.logging._
 import shapeless.{ Lens, lens }
@@ -24,13 +19,8 @@ import omnibus.commons.identifier.ShortUUID
 import omnibus.akka.supervision.{ IsolatedDefaultSupervisor, OneForOneStrategyFactory }
 import demesne._
 import demesne.module.LocalAggregate
-import demesne.module.entity.{ EntityAggregateModule, EntityProtocol }
+import demesne.module.entity.EntityAggregateModule
 import spotlight.model.outlier._
-import spotlight.model.outlier.AnalysisPlan.Scope
-import spotlight.model.timeseries._
-import spotlight.model.timeseries.TimeSeriesBase.Merging
-import spotlight.analysis.AnalysisPlanProtocol.{ AnalysisFlow, MakeFlow }
-import spotlight.analysis.OutlierDetection.{ DetectionResult, DetectionTimedOut }
 import spotlight.analysis.algorithm.AlgorithmRoute
 import spotlight.analysis.{ AnalysisPlanProtocol ⇒ P }
 
@@ -53,18 +43,7 @@ case class AnalysisPlanState( plan: AnalysisPlan ) extends Entity {
     val routes = algorithms.keySet.toSeq.map { a ⇒ ( a, makeRoute( plan )( a ) ) }.collect { case ( a, Some( r ) ) ⇒ ( a, r ) }
     Map( routes: _* )
   }
-
 }
-
-//object AnalysisPlanState {
-//  def allAlgorithms( algorithms: Set[String], algorithmSpec: Config ): Set[String] = {
-//    import scala.collection.immutable
-//    import scala.collection.JavaConverters._
-//
-//    val inSpec = algorithmSpec.root.entrySet.asScala.to[immutable.Set] map { _.getKey }
-//    algorithms ++ inSpec
-//  }
-//}
 
 /** Created by rolfsd on 5/26/16.
   */
@@ -352,12 +331,10 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
 
       def changeAlgorithms( algorithms: Map[String, Config] ): P.AlgorithmsChanged = {
         val myAlgorithms = state.algorithms.keySet
-        //        val newAlgorithms = AnalysisPlanState.allAlgorithms( algorithms, algorithmSpec )
 
         P.AlgorithmsChanged(
           sourceId = aggregateId,
           algorithms = algorithms,
-          //          algorithmConfig = algorithmSpec,
           added = algorithms.keySet -- myAlgorithms,
           dropped = myAlgorithms -- algorithms.keySet
         )
@@ -367,127 +344,6 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
         altLog.error( Map( "@msg" → "unhandled message", "aggregateId" → aggregateId.toString, "message" → message.toString ) )
         super.unhandled( message )
       }
-
-      //      def makeFlow(
-      //        parallelism: Int
-      //      )(
-      //        implicit
-      //        system: ActorSystem,
-      //        timeout: Timeout,
-      //        materializer: Materializer
-      //      ): DetectFlow = {
-      //        val entry = Flow[TimeSeries].filter { state.plan.appliesTo }
-      //        val withGrouping = state.plan.grouping map { g ⇒ entry.via( batchSeries( g ) ) } getOrElse entry
-      //
-      //        withGrouping
-      //          .via( detectionFlow( state.plan, parallelism ) )
-      //          .named( s"AnalysisPlan:${state.plan.name}@${state.plan.id.id}" )
-      //      }
-
-      //      def batchSeries(
-      //        grouping: AnalysisPlan.Grouping
-      //      )(
-      //        implicit
-      //        tsMerging: Merging[TimeSeries]
-      //      ): Flow[TimeSeries, TimeSeries, NotUsed] = {
-      //        Flow[TimeSeries]
-      //          .groupedWithin( n = grouping.limit, d = grouping.window )
-      //          .map {
-      //            _
-      //              .groupBy { _.topic }
-      //              .map {
-      //                case ( _, tss ) ⇒
-      //                  tss.tail.foldLeft( tss.head ) { case ( acc, ts ) ⇒ tsMerging.merge( acc, ts ) valueOr { exs ⇒ throw exs.head } }
-      //              }
-      //          }
-      //          .mapConcat { identity }
-      //      }
-
-      //      def detectionFlow( p: AnalysisPlan, parallelism: Int )( implicit system: ActorSystem, timeout: Timeout ): DetectFlow = {
-      //        import omnibus.akka.envelope.pattern.ask
-      //
-      //        implicit val ec: scala.concurrent.ExecutionContext = system.dispatcher
-      //
-      //        if ( detector == null && detector != context.system.deadLetters ) {
-      //          val ex = new IllegalStateException( s"analysis plan [${p.name}] flow invalid detector reference:[${detector}]" )
-      //
-      //          altLog.error(
-      //            Map(
-      //              "@msg" → "analysis plan [${p.name}] flow created missing valid detector reference:[${detector}]",
-      //              "plan" → p.name,
-      //              "detector" → detector.path
-      //            ),
-      //            ex
-      //          )
-      //
-      //          throw ex
-      //        }
-      //
-      //        Flow[TimeSeries]
-      //          .map { ts ⇒ OutlierDetectionMessage( ts, p ).disjunction }
-      //          .collect { case scalaz.\/-( m ) ⇒ m }
-      //          .map { m ⇒
-      //            inletSeries.mark()
-      //            inletPoints.mark( m.source.points.size )
-      //            m
-      //          }
-      //          .mapAsyncUnordered( parallelism ) { m ⇒
-      //            ( detector ?+ m )
-      //              .recover {
-      //                case ex: TimeoutException ⇒ {
-      //                  altLog.error(
-      //                    Map(
-      //                      "@msg" → "timeout exceeded waiting for detection",
-      //                      "timeout" → timeout.duration.toCoarsest.toString,
-      //                      "plan" → m.plan.name,
-      //                      "topic" → m.topic.toString
-      //                    ),
-      //                    ex
-      //                  )
-      //
-      //                  DetectionTimedOut( m.source, m.plan )
-      //                }
-      //              }
-      //          }.withAttributes( ActorAttributes supervisionStrategy detectorDecider )
-      //          .filter {
-      //            case Envelope( DetectionResult( outliers, _ ), _ ) ⇒ true
-      //            case DetectionResult( outliers, _ ) ⇒ true
-      //            case Envelope( DetectionTimedOut( s, _ ), _ ) ⇒ {
-      //              droppedSeriesMeter.mark()
-      //              droppedPointsMeter.mark( s.points.size )
-      //              false
-      //            }
-      //            case DetectionTimedOut( s, _ ) ⇒ {
-      //              droppedSeriesMeter.mark()
-      //              droppedPointsMeter.mark( s.points.size )
-      //              false
-      //            }
-      //          }
-      //          .collect {
-      //            case Envelope( DetectionResult( outliers, _ ), _ ) ⇒ outliers
-      //            case DetectionResult( outliers, _ ) ⇒ outliers
-      //          }
-      //          .map {
-      //            case m ⇒ {
-      //              val nrPoints = m.source.size
-      //              val nrAnomalyPoints = m.anomalySize
-      //              outletResults.mark()
-      //              outletResultsPoints.mark( nrPoints )
-      //              if ( m.hasAnomalies ) outletResultsAnomalies.mark() else outletResultsConformities.mark()
-      //              outletResultsPointsAnomalies.mark( nrAnomalyPoints )
-      //              outletResultsPointsConformities.mark( nrPoints - nrAnomalyPoints )
-      //              m
-      //            }
-      //          }
-      //      }
-
-      //      val detectorDecider: Decider = new Decider {
-      //        override def apply( ex: Throwable ): Supervision.Directive = {
-      //          altLog.error( "error in detection dropping series", ex )
-      //          droppedSeriesMeter.mark()
-      //          Supervision.Resume
-      //        }
-      //      }
 
       override def supervisorStrategy: SupervisorStrategy = OneForOneStrategy() {
         case _: ActorInitializationException ⇒ Stop
