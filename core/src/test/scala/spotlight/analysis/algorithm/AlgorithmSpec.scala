@@ -83,6 +83,8 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
     val sender = TestProbe()
     val subscriber = TestProbe()
 
+    def shapeMemoryConfig: Option[Config] = None
+
     val countDown = new CountDownFunction[String]
 
     var loggingSystem: LoggingSystem = LoggingSystem( _system, s"Test:${defaultAlgorithm.label}", "1", "localhost" )
@@ -603,7 +605,7 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
         actualVsExpectedShape( actual, expected )
       }
 
-      "verify estimated memory usage" taggedAs ( MEMORY ) in { f: Fixture ⇒
+      "verify estimated memory usage" taggedAs ( WIP, MEMORY ) in { f: Fixture ⇒
         import f._
         def makeData( i: Int ): P.Advanced = {
           val pt = DataPoint( nowTimestamp.plusMillis( 10 * i ), 0.14159265353 + 0.0001 * i )
@@ -611,13 +613,12 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
           P.Advanced( id, scope.topic, pt, false, t )
         }
 
-        val config = Some( ConfigFactory.parseString( "sliding-window: 102" ) )
-        defaultAlgorithm.estimatedAverageShapeSize( config ) match {
+        defaultAlgorithm.estimatedAverageShapeSize( shapeMemoryConfig ) match {
           case None ⇒ pending
           case Some( expected ) ⇒ {
             val plateauNr = math.max( 1, memoryPlateauNr )
             val advancing = shapeless.the[Advancing[S]]
-            val zero = advancing.zero( config )
+            val zero = advancing.zero( shapeMemoryConfig )
             val atPlateau = ( 0 to plateauNr ).foldLeft( zero ) { ( acc, i ) ⇒ advancing.advance( acc, makeData( i ) ) }
 
             import akka.serialization.{ SerializationExtension, Serializer }
@@ -639,7 +640,7 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
         }
 
         val advancing: Advancing[S] = shapeless.the[Advancing[S]]
-        val zero = advancing.zero( None )
+        val zero = advancing.zero( shapeMemoryConfig )
 
         import akka.serialization.{ SerializationExtension, Serializer }
         val serializer: Serializer = SerializationExtension( system ).serializerFor( zero.getClass )

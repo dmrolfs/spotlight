@@ -8,12 +8,11 @@ import akka.pattern.ask
 import com.typesafe.config.{ Config, ConfigFactory }
 import com.persist.logging._
 import omnibus.akka.envelope._
-import org.apache.commons.math3.stat.descriptive.{ DescriptiveStatistics, StatisticalSummary, SummaryStatistics }
+import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import org.mockito.Mockito._
 import org.scalatest.Assertion
 import spotlight.analysis.{ DetectOutliersInSeries, DetectUsing }
 import spotlight.analysis.algorithm.{ Advancing, AlgorithmSpec, AlgorithmProtocol ⇒ AP }
-import spotlight.model.statistics.MovingStatistics
 import spotlight.model.timeseries._
 
 /** Created by rolfsd on 6/9/16.
@@ -23,13 +22,15 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmSpec[SimpleMovingAverage
   override type Algo = SimpleMovingAverageAlgorithm.type
   override val defaultAlgorithm: Algo = SimpleMovingAverageAlgorithm
 
-  override val memoryPlateauNr: Int = 70
+  override val memoryPlateauNr: Int = 30
 
   override def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture = {
     new Fixture( config, system, slug )
   }
 
   class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends AlgorithmFixture( _config, _system, _slug ) {
+
+    override def shapeMemoryConfig: Option[Config] = Some( ConfigFactory.parseString( "sliding-window = 30" ) )
 
     override implicit val shapeOrdering: Ordering[Shape] = new Ordering[Shape] {
       override def compare( lhs: TestShape, rhs: TestShape ): Int = {
@@ -327,7 +328,7 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmSpec[SimpleMovingAverage
       )
     }
 
-    "happy path process two batches" taggedAs WIP in { f: Fixture ⇒
+    "happy path process two batches" in { f: Fixture ⇒
       import f._
 
       logger.info( "****************** TEST NOW ****************" )
