@@ -52,23 +52,27 @@ class SpotlightFlowFactory( plans: Set[AnalysisPlan.Summary] ) extends FlowFacto
   ): Future[Set[DetectFlow]] = {
     implicit val ec = boundedContext.system.dispatcher
 
+    def makeFlow( plan: AnalysisPlan.Summary, af: AP.AnalysisFlow ): Future[DetectFlow] = {
+      log.debug(
+        Map(
+          "@msg" → "PlanCatalog: created analysis flow for",
+          "plan" → Map( "id" → af.sourceId.toString, "name" → plan.name ),
+          "factory" → af.factory.toString
+        )
+      )
+
+      af.factory makeFlow parallelism
+    }
+
     Future sequence {
       plans map { p ⇒
         val ref = model( AnalysisPlanModule.module.rootType, p.id )
         //        NEED TO MAKE PLAN -FLOW - SEED IN CATALOG AND INCL IN SPOTLIGHT - SEED
         ( ref ?+ AP.MakeFlow( p.id ) )
-          .mapTo[AP.AnalysisFlow]
+          .mapTo[Envelope]
           .flatMap {
-            case AP.AnalysisFlow( pid, seed ) ⇒
-              log.debug(
-                Map(
-                  "@msg" → "PlanCatalog: created analysis flow for",
-                  "plan" → Map( "id" → pid.toString, "name" → p.name ),
-                  "seed" → seed.toString
-                )
-              )
-
-              seed makeFlow parallelism
+            case af: AP.AnalysisFlow ⇒ makeFlow( p, af )
+            case Envelope( af: AP.AnalysisFlow, _ ) ⇒ makeFlow( p, af )
           }
       }
     }
