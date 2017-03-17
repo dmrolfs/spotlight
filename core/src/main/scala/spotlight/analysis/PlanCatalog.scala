@@ -3,68 +3,54 @@ package spotlight.analysis
 import scala.concurrent.{ Await, ExecutionContext, Future }
 import scala.concurrent.duration._
 import scala.reflect._
-import akka.{ Done, NotUsed }
-import akka.actor.{ Actor, ActorRef, ActorSystem, Props, Status }
+import akka.Done
+import akka.actor.{ Actor, ActorRef, ActorSystem, PoisonPill, Props, Status }
 import akka.agent.Agent
+import akka.cluster.singleton.{ ClusterSingletonManager, ClusterSingletonManagerSettings }
 import akka.event.LoggingReceive
-import akka.pattern.{ ask, pipe }
-import akka.stream.{ ActorMaterializer, ActorMaterializerSettings, FlowShape, Materializer }
-import akka.stream.scaladsl.{ Broadcast, Flow, GraphDSL, Merge }
+import akka.pattern.ask
+import akka.stream.{ ActorMaterializer, ActorMaterializerSettings, Materializer }
 import akka.util.Timeout
 
 import scalaz._
 import Scalaz._
 import shapeless.syntax.typeable._
 import com.typesafe.config.Config
+import net.ceedubs.ficus.Ficus._
 import com.persist.logging._
 import nl.grons.metrics.scala.MetricName
 import omnibus.akka.envelope._
 import omnibus.akka.envelope.pattern.{ ask ⇒ envAsk }
 import omnibus.akka.metrics.InstrumentedActor
 import omnibus.akka.persistence.query.{ AgentProjection, QueryJournal }
-import demesne.{ BoundedContext, DomainModel }
+import omnibus.commons.config._
+import demesne.{ BoundedContext, DomainModel, StartTask }
 import spotlight.Settings
-import spotlight.analysis.OutlierDetection.DetectionResult
-import spotlight.analysis.PlanCatalog.WatchPoints
-import spotlight.model.outlier.{ AnalysisPlan, Outliers }
-import spotlight.model.timeseries.{ TimeSeries, Topic }
+import spotlight.model.outlier.AnalysisPlan
+import spotlight.model.timeseries._
 
 /** Created by rolfsd on 5/20/16.
   */
-object PlanCatalogProtocol {
-  sealed trait CatalogMessage
-
-  case object WaitForStart extends CatalogMessage
-  case object Started extends CatalogMessage
-
-  sealed trait PlanDirective extends CatalogMessage
-  case class AddPlan( plan: AnalysisPlan ) extends PlanDirective
-  case class DisablePlan( pid: AnalysisPlan#TID ) extends PlanDirective
-  case class EnablePlan( pid: AnalysisPlan#TID ) extends PlanDirective
-  case class RenamePlan( pid: AnalysisPlan#TID, newName: String ) extends PlanDirective
-
-  case class MakeFlow(
-    parallelism: Int,
-    system: ActorSystem,
-    timeout: Timeout,
-    materializer: Materializer
-  ) extends CatalogMessage
-  case class CatalogFlow( flow: DetectFlow ) extends CatalogMessage with ClassLogging {
-    log.warn( Map( "@msg" → "Made catalog flow", "flow" → flow.toString ) )
-  }
-
-  case class Route( timeSeries: TimeSeries, correlationId: Option[WorkId] = None ) extends CatalogMessage
-
-  case class UnknownRoute( timeSeries: TimeSeries, correlationId: Option[WorkId] ) extends CatalogMessage
-  object UnknownRoute {
-    def apply( route: Route ): UnknownRoute = UnknownRoute( route.timeSeries, route.correlationId )
-  }
-
-  case class GetPlansForTopic( topic: Topic ) extends CatalogMessage
-  case class CatalogedPlans( plans: Set[AnalysisPlan.Summary], request: GetPlansForTopic ) extends CatalogMessage
-}
-
 object PlanCatalog extends ClassLogging {
+  def startSingleton( configuration: Config )( implicit ec: ExecutionContext ): StartTask = {
+    StartTask.withFunction( "start plan catalog cluster singleton" ) { implicit bc ⇒
+      val SettingsBase = "spotlight.settings"
+      val mifFactor = configuration.as[Option[Double]]( SettingsBase + ".parallelism-factor" ) getOrElse 8.0
+      val budget = configuration.as[Option[Duration]]( SettingsBase + ".detection-budget" )
+
+      bc.system.actorOf(
+        ClusterSingletonManager.props(
+          singletonProps = props( configuration, mifFactor, budget ),
+          terminationMessage = PoisonPill,
+          settings = ClusterSingletonManagerSettings( bc.system ).withRole( "manager" )
+        ),
+        name = PlanCatalog.name
+      )
+
+      Done
+    }
+  }
+
   def props(
     configuration: Config,
     maxInFlightCpuFactor: Double = 8.0,
@@ -84,17 +70,18 @@ object PlanCatalog extends ClassLogging {
     parallelism: Int
   )(
     implicit
-    system: ActorSystem,
+    boundedContext: BoundedContext,
     timeout: Timeout,
     materializer: Materializer
-  ): Future[Flow[TimeSeries, Outliers, NotUsed]] = {
+  ): Future[DetectFlow] = {
     import spotlight.analysis.{ PlanCatalogProtocol ⇒ P }
-    implicit val ec = system.dispatcher
+    implicit val ec = boundedContext.system.dispatcher
 
     for {
       _ ← ( catalogRef ? P.WaitForStart )
-      cf ← ( catalogRef ? P.MakeFlow( parallelism, system, timeout, materializer ) ).mapTo[P.CatalogFlow]
-    } yield { cf.flow }
+      seed ← ( catalogRef ? P.MakeFlow() ).mapTo[P.SpotlightFlow]
+      f ← seed.factory.makeFlow( parallelism )
+    } yield f
   }
 
   object WatchPoints {
@@ -162,8 +149,8 @@ abstract class PlanCatalog( boundedContext: BoundedContext )
 
   override lazy val metricBaseName: MetricName = MetricName( classOf[PlanCatalog] )
 
-  case object Initialize extends P.CatalogMessage
-  case object InitializeCompleted extends P.CatalogMessage
+  private[this] case object Initialize extends P.CatalogMessage
+  private[this] case object InitializeCompleted extends P.CatalogMessage
 
   override def preStart(): Unit = self ! Initialize
 
@@ -242,6 +229,7 @@ abstract class PlanCatalog( boundedContext: BoundedContext )
       _ = log.debug( Map( "@msg" → "PlanCatalog fromFallback", "fallback" → fromFallback.toString ) )
     } yield fromIndex ++ fromFallback
   }
+
   private def doesPlanApply( o: Any )( p: AnalysisPlan.Summary ): Boolean = {
     p.appliesTo map { _.apply( o ) } getOrElse true
   }
@@ -316,10 +304,10 @@ abstract class PlanCatalog( boundedContext: BoundedContext )
   }
 
   val active: Receive = {
-    case P.MakeFlow( parallelism, system, timeout, materializer ) ⇒ {
-      implicit val ec = context.dispatcher
+    case _: P.MakeFlow ⇒ {
+      import omnibus.akka.envelope.pattern.pipe
       val requester = sender()
-      makeFlow( parallelism )( system, timeout, materializer ) map { P.CatalogFlow.apply } pipeTo requester
+      collectPlans() map { ps ⇒ P.SpotlightFlow( ps, new SpotlightFlowFactory( ps ) ) } pipeEnvelopeTo requester
     }
   }
 
@@ -345,76 +333,6 @@ abstract class PlanCatalog( boundedContext: BoundedContext )
     }
 
     case P.WaitForStart ⇒ sender() ! P.Started
-  }
-
-  def makeFlow(
-    parallelism: Int
-  )(
-    implicit
-    system: ActorSystem,
-    timeout: Timeout,
-    materializer: Materializer
-  ): Future[DetectFlow] = {
-    import omnibus.akka.stream.StreamMonitor._
-
-    implicit val ec = context.dispatcher
-    def collectPlanFlows( model: DomainModel, plans: Plans ): Future[Set[DetectFlow]] = {
-      Future sequence {
-        plans map { p ⇒
-          val ref = model( AnalysisPlanModule.module.rootType, p.id )
-
-          ( ref ?+ AP.MakeFlow( p.id, parallelism, system, timeout, materializer ) )
-            .mapTo[AP.AnalysisFlow]
-            .map { af ⇒
-              log.debug(
-                Map( "@msg" → "PlanCatalog: created analysis flow for", "plan" → Map( "id" → p.id.id.toString, "name" → p.name ) )
-              )
-              af.flow
-            }
-        }
-      }
-    }
-
-    def detectFrom( planFlows: Set[DetectFlow] ): Future[DetectFlow] = {
-      val nrFlows = planFlows.size
-      log.debug( Map( "@msg" → "making PlanCatalog graph for plans", "nr-plans" → nrFlows ) )
-
-      val graph = Future {
-        GraphDSL.create() { implicit b ⇒
-          import GraphDSL.Implicits._
-
-          //          val intake = b.add( Flow[TimeSeries].map { identity }
-          //          val outlet = b.add( Flow[Outliers].map { identity }
-
-          if ( planFlows.isEmpty ) throw PlanCatalog.NoRegisteredPlansError
-          else {
-            val broadcast = b.add( Broadcast[TimeSeries]( nrFlows ) )
-            val merge = b.add( Merge[Outliers]( nrFlows ) )
-
-            //            intake ~> broadcast.in
-            planFlows.zipWithIndex foreach {
-              case ( pf, i ) ⇒
-                log.debug( Map( "@msg" → "adding to catalog flow, order undefined analysis flow", "index" → i ) )
-                val flow = b.add( pf )
-                broadcast.out( i ) ~> flow ~> merge.in( i )
-            }
-            //            merge.out ~> outlet
-
-            FlowShape( broadcast.in, merge.out )
-          }
-        }
-      }
-
-      graph map { g ⇒ Flow.fromGraph( g ).named( "PlanCatalogFlow" ).watchFlow( WatchPoints.Catalog ) }
-    }
-
-    for {
-      model ← boundedContext.futureModel
-      plans ← collectPlans()
-      _ = log.debug( Map( "@msg" → "collect plans", "plans" → plans.toSeq.map { p ⇒ ( p.name, p.id ) } ) )
-      planFlows ← collectPlanFlows( model, plans )
-      f ← detectFrom( planFlows )
-    } yield f.named( s"PlanCatalog" )
   }
 
   private def dispatch( route: P.Route, interestedRef: ActorRef )( implicit ec: ExecutionContext ): Unit = {
@@ -443,7 +361,6 @@ abstract class PlanCatalog( boundedContext: BoundedContext )
 
   private def initializePlans()( implicit ec: ExecutionContext, timeout: Timeout ): Future[Done] = {
     for {
-      //      entries <- planIndex.futureEntries
       entries ← knownPlans
       entryNames = entries map { _.name }
       ( registered, missing ) = outer.specifiedPlans partition { entryNames contains _.name }

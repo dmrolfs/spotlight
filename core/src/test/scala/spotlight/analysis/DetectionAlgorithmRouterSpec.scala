@@ -3,16 +3,16 @@ package spotlight.analysis
 import scala.concurrent.duration._
 import akka.actor.ActorSystem
 import akka.testkit._
-import com.typesafe.config.{Config, ConfigFactory}
-import demesne.{AggregateRootType, DomainModel}
-import org.joda.{time => joda}
+import com.typesafe.config.{ Config, ConfigFactory }
+import demesne.{ AggregateRootType, DomainModel }
+import org.joda.{ time ⇒ joda }
 import org.scalatest.mockito.MockitoSugar
 import org.mockito.Mockito._
-import omnibus.akka.envelope.{Envelope, WorkId}
+import omnibus.akka.envelope.{ Envelope, WorkId }
 import spotlight.analysis.algorithm.AlgorithmRoute
 import spotlight.analysis.shard._
-import spotlight.model.outlier.{AnalysisPlan, IsQuorum, ReduceOutliers}
-import spotlight.model.timeseries.{DataPoint, TimeSeries}
+import spotlight.model.outlier.{ AnalysisPlan, IsQuorum, ReduceOutliers }
+import spotlight.model.timeseries.{ DataPoint, TimeSeries }
 import spotlight.testkit.ParallelAkkaSpec
 
 /** Created by rolfsd on 10/20/15.

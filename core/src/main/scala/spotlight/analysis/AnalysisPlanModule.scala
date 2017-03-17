@@ -48,24 +48,6 @@ case class AnalysisPlanState( plan: AnalysisPlan ) extends Entity {
 /** Created by rolfsd on 5/26/16.
   */
 object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Instrumented with ClassLogging { moduleOuter ⇒
-  override lazy val metricBaseName: MetricName = {
-    MetricName( spotlight.BaseMetricName, spotlight.analysis.BaseMetricName )
-  }
-
-  val droppedSeriesMeter: Meter = metrics.meter( "dropped", "series" )
-  val droppedPointsMeter: Meter = metrics.meter( "dropped", "points" )
-
-  val InletBaseMetricName = "inlet"
-  val inletSeries: Meter = metrics.meter( InletBaseMetricName, "series" )
-  val inletPoints: Meter = metrics.meter( InletBaseMetricName, "points" )
-
-  val OutletResultsBaseMetricName = "outlet.results"
-  val outletResults: Meter = metrics.meter( OutletResultsBaseMetricName )
-  val outletResultsAnomalies: Meter = metrics.meter( OutletResultsBaseMetricName, "anomalies" )
-  val outletResultsConformities: Meter = metrics.meter( OutletResultsBaseMetricName, "conformities" )
-  val outletResultsPoints: Meter = metrics.meter( OutletResultsBaseMetricName, "points" )
-  val outletResultsPointsAnomalies: Meter = metrics.meter( OutletResultsBaseMetricName, "points.anomalies" )
-  val outletResultsPointsConformities: Meter = metrics.meter( OutletResultsBaseMetricName, "points.conformities" )
 
   implicit val identifying: EntityIdentifying[AnalysisPlanState] = {
     new EntityIdentifying[AnalysisPlanState] with ShortUUID.ShortUuidIdentifying[AnalysisPlanState] {
@@ -83,8 +65,7 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
     val b = EntityAggregateModule.builderFor[AnalysisPlanState, AnalysisPlanProtocol.type].make
     import b.P.{ Props ⇒ BProps, _ }
 
-    b
-      .builder
+    b.builder
       .set( Environment, LocalAggregate )
       .set( BProps, AggregateRoot.PlanActor.props( _, _ ) )
       .set( PassivateTimeout, 5.minutes )

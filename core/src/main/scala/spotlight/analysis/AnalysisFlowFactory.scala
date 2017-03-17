@@ -27,11 +27,11 @@ class AnalysisFlowFactory( plan: AnalysisPlan ) extends FlowFactory[TimeSeries, 
     parallelism: Int
   )(
     implicit
-    bc: BoundedContext,
+    boundedContext: BoundedContext,
     timeout: Timeout,
     materializer: Materializer
   ): Future[DetectFlow] = {
-    implicit val system = bc.system
+    implicit val system = boundedContext.system
     implicit val ec = system.dispatcher
 
     val entry = Flow[TimeSeries].filter { plan.appliesTo }

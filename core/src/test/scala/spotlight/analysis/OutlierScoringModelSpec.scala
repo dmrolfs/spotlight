@@ -457,11 +457,11 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
       val catalogRef = Await.result( Spotlight.makeCatalog( testSettings )( boundedContext ), 30.seconds )
       logger.info( "Catalog ref = [{}]", catalogRef )
 
-      import PlanCatalogProtocol.{ CatalogFlow, MakeFlow, WaitForStart }
+      import PlanCatalogProtocol.{ SpotlightFlow, MakeFlow, WaitForStart }
       val catalogFlow = {
         for {
           _ ← catalogRef ? WaitForStart
-          CatalogFlow( f ) ← ( catalogRef ? MakeFlow( 2, system, timeout, materializer ) ).mapTo[CatalogFlow]
+          SpotlightFlow( f ) ← ( catalogRef ? MakeFlow( 2, system, timeout, materializer ) ).mapTo[SpotlightFlow]
         } yield f
       }
 

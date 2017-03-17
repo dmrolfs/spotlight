@@ -14,7 +14,7 @@ abstract class FlowFactory[I, O] extends Serializable {
     parallelism: Int
   )(
     implicit
-    bc: BoundedContext,
+    boundedContext: BoundedContext,
     timeout: Timeout,
     materializer: Materializer
   ): Future[Flow[I, O, NotUsed]]
