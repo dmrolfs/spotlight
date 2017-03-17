@@ -70,6 +70,7 @@ object FileBatchExample extends Instrumented with ClassLogging {
         }
 
         case Failure( ex ) ⇒ {
+          log.error( Map( "@msg" → "batch finished with error", "count" → count.get() ), ex )
           println( "\n\nAPP:  ********************************************** " )
           println( s"\nAPP: ${count.get()} batch completed with ERROR: ${ex}" )
           println( "APP:  **********************************************\n\n" )

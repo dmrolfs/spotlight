@@ -8,7 +8,6 @@ import akka.actor.{ Actor, ActorRef, ActorSystem, PoisonPill, Props, Status }
 import akka.agent.Agent
 import akka.cluster.singleton.{ ClusterSingletonManager, ClusterSingletonManagerSettings }
 import akka.event.LoggingReceive
-import akka.pattern.ask
 import akka.stream.{ ActorMaterializer, ActorMaterializerSettings, Materializer }
 import akka.util.Timeout
 
@@ -20,7 +19,7 @@ import net.ceedubs.ficus.Ficus._
 import com.persist.logging._
 import nl.grons.metrics.scala.MetricName
 import omnibus.akka.envelope._
-import omnibus.akka.envelope.pattern.{ ask ⇒ envAsk }
+import omnibus.akka.envelope.pattern.ask
 import omnibus.akka.metrics.InstrumentedActor
 import omnibus.akka.persistence.query.{ AgentProjection, QueryJournal }
 import omnibus.commons.config._
@@ -78,9 +77,9 @@ object PlanCatalog extends ClassLogging {
     implicit val ec = boundedContext.system.dispatcher
 
     for {
-      _ ← ( catalogRef ? P.WaitForStart )
-      seed ← ( catalogRef ? P.MakeFlow() ).mapTo[P.SpotlightFlow]
-      f ← seed.factory.makeFlow( parallelism )
+      _ ← ( catalogRef ?+ P.WaitForStart )
+      Envelope( sf: P.SpotlightFlow, _ ) ← ( catalogRef ?+ P.MakeFlow() ).mapTo[Envelope]
+      f ← sf.factory.makeFlow( parallelism )
     } yield f
   }
 
