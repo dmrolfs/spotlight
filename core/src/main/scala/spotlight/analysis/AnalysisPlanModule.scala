@@ -5,6 +5,7 @@ import scala.concurrent.duration._
 import scala.concurrent.Await
 import akka.actor._
 import akka.actor.SupervisorStrategy.{ Resume, Stop }
+import akka.cluster.sharding.ClusterShardingSettings
 import akka.event.LoggingReceive
 import akka.util.Timeout
 import com.persist.logging._
@@ -18,11 +19,12 @@ import omnibus.archetype.domain.model.core.{ Entity, EntityIdentifying, EntityLe
 import omnibus.commons.identifier.ShortUUID
 import omnibus.akka.supervision.{ IsolatedDefaultSupervisor, OneForOneStrategyFactory }
 import demesne._
-import demesne.module.LocalAggregate
+import demesne.module.{ ClusteredAggregate, LocalAggregate }
 import demesne.module.entity.EntityAggregateModule
 import spotlight.model.outlier._
 import spotlight.analysis.algorithm.AlgorithmRoute
 import spotlight.analysis.{ AnalysisPlanProtocol ⇒ P }
+import spotlight.infrastructure.ClusterRole
 
 case class AnalysisPlanState( plan: AnalysisPlan ) extends Entity {
   override type ID = plan.ID
@@ -65,8 +67,11 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
     val b = EntityAggregateModule.builderFor[AnalysisPlanState, AnalysisPlanProtocol.type].make
     import b.P.{ Props ⇒ BProps, _ }
 
+    val toSettings = ( s: ActorSystem ) ⇒ ClusterShardingSettings( s ).withRole( ClusterRole.Worker.entryName )
+
     b.builder
-      .set( Environment, LocalAggregate )
+      //      .set( Environment, LocalAggregate )
+      .set( Environment, ClusteredAggregate( toSettings ) )
       .set( BProps, AggregateRoot.PlanActor.props( _, _ ) )
       .set( PassivateTimeout, 5.minutes )
       .set( Protocol, AnalysisPlanProtocol )

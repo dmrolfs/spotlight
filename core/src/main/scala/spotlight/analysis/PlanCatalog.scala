@@ -6,7 +6,7 @@ import scala.reflect._
 import akka.Done
 import akka.actor.{ Actor, ActorRef, ActorSystem, PoisonPill, Props, Status }
 import akka.agent.Agent
-import akka.cluster.singleton.{ ClusterSingletonManager, ClusterSingletonManagerSettings }
+import akka.cluster.singleton.{ ClusterSingletonManager, ClusterSingletonManagerSettings, ClusterSingletonProxy, ClusterSingletonProxySettings }
 import akka.event.LoggingReceive
 import akka.stream.{ ActorMaterializer, ActorMaterializerSettings, Materializer }
 import akka.util.Timeout
@@ -27,11 +27,18 @@ import demesne.{ BoundedContext, DomainModel, StartTask }
 import spotlight.Settings
 import spotlight.model.outlier.AnalysisPlan
 import spotlight.model.timeseries._
+import spotlight.infrastructure.ClusterRole.Control
 
 /** Created by rolfsd on 5/20/16.
   */
 object PlanCatalog extends ClassLogging {
-  def startSingleton( configuration: Config )( implicit ec: ExecutionContext ): StartTask = {
+  def startSingleton(
+    configuration: Config,
+    applicationPlans: Set[AnalysisPlan] = Set.empty[AnalysisPlan]
+  )(
+    implicit
+    ec: ExecutionContext
+  ): StartTask = {
     StartTask.withFunction( "start plan catalog cluster singleton" ) { implicit bc ⇒
       val SettingsBase = "spotlight.settings"
       val mifFactor = configuration.as[Option[Double]]( SettingsBase + ".parallelism-factor" ) getOrElse 8.0
@@ -39,9 +46,9 @@ object PlanCatalog extends ClassLogging {
 
       bc.system.actorOf(
         ClusterSingletonManager.props(
-          singletonProps = props( configuration, mifFactor, budget ),
+          singletonProps = actorProps( configuration, mifFactor, budget, applicationPlans ),
           terminationMessage = PoisonPill,
-          settings = ClusterSingletonManagerSettings( bc.system ).withRole( "manager" )
+          settings = ClusterSingletonManagerSettings( bc.system ).withRole( Control.entryName )
         ),
         name = PlanCatalog.name
       )
@@ -50,7 +57,14 @@ object PlanCatalog extends ClassLogging {
     }
   }
 
-  def props(
+  def props( implicit system: ActorSystem ): Props = {
+    ClusterSingletonProxy.props(
+      singletonManagerPath = "/user/" + name,
+      settings = ClusterSingletonProxySettings( system ).withRole( Control.entryName )
+    )
+  }
+
+  private def actorProps(
     configuration: Config,
     maxInFlightCpuFactor: Double = 8.0,
     applicationDetectionBudget: Option[Duration] = None,

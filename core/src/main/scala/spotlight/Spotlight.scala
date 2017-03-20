@@ -235,12 +235,7 @@ object Spotlight extends Instrumented with ClassLogging {
       "CatalogSupervisor"
     )
 
-    val catalogProps = PlanCatalog.props(
-      configuration = settings.toConfig,
-      maxInFlightCpuFactor = settings.parallelismFactor, //todo different yet same - refactor to be parallelsimFactor
-      applicationDetectionBudget = Some( settings.detectionBudget ),
-      applicationPlans = settings.plans
-    )
+    val catalogProps = PlanCatalog.props( bc.system )
 
     import akka.pattern.ask
     implicit val ec = bc.system.dispatcher

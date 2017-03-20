@@ -7,13 +7,14 @@ import scala.concurrent.duration._
 import scala.util.Random
 import scala.reflect._
 import akka.actor._
-import akka.cluster.sharding.ShardRegion
+import akka.cluster.sharding.{ClusterShardingSettings, ShardRegion}
 import akka.event.LoggingReceive
 import akka.persistence._
+import spotlight.infrastructure.ClusterRole
 
 import scalaz._
 import Scalaz._
-import scalaz.Kleisli.{ ask, kleisli }
+import scalaz.Kleisli.{ask, kleisli}
 //import bloomfilter.mutable.BloomFilter
 import bloomfilter.CanGenerateHashFrom
 import bloomfilter.CanGenerateHashFrom.CanGenerateHashFromString
@@ -303,7 +304,7 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
       override val passivateTimeout: Duration = Duration( 1, MINUTES ) //todo make config driven
 
       override lazy val name: String = algorithmModule.shardName
-      override def repositoryProps( implicit model: DomainModel ): Props = Repository localProps model //todo change to clustered with multi-jvm testing of cluster
+      override def repositoryProps( implicit model: DomainModel ): Props = Repository clusteredProps model // Repository localProps model //todo change to clustered with multi-jvm testing of cluster
       override def maximumNrClusterNodes: Int = algorithm.maximumNrClusterNodes
       override def aggregateIdFor: ShardRegion.ExtractEntityId = super.aggregateIdFor orElse {
         case AdvancedType( a ) ⇒ ( a.sourceId.id.toString, a )
@@ -375,7 +376,9 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
       }
     }
 
-    class ClusteredRepository( model: DomainModel ) extends Repository( model ) with ClusteredAggregateContext
+    class ClusteredRepository( model: DomainModel ) extends Repository( model ) with ClusteredAggregateContext {
+      override def settings: ClusterShardingSettings = super.settings.withRole( ClusterRole.Worker.entryName )
+    }
 
     object AlgorithmActor {
       def props( model: DomainModel, rootType: AggregateRootType ): Props = Props( new Default( model, rootType ) )

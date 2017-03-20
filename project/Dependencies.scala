@@ -110,6 +110,7 @@ object Dependencies {
   }
 
   object facility {
+    val enumeratum = "com.beachape" %% "enumeratum" % "1.5.8"
     val guava = "com.google.guava" % "guava" % "21.0"
     val offheap = "sh.den" % "scala-offheap_2.11" % "0.1"
     val fastutil = "it.unimi.dsi" % "fastutil" % "7.1.0" withSources() withJavadoc()
@@ -180,6 +181,7 @@ object Dependencies {
 persistence.leveldb,
 persistence.leveldbjni,
       log.logback.classic,
+      facility.enumeratum,
       facility.bloomFilter,
       facility.uuid,
       facility.config,
