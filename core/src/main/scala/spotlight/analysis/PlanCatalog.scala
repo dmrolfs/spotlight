@@ -27,7 +27,7 @@ import demesne.{ BoundedContext, DomainModel, StartTask }
 import spotlight.Settings
 import spotlight.model.outlier.AnalysisPlan
 import spotlight.model.timeseries._
-import spotlight.infrastructure.ClusterRole.Control
+import spotlight.infrastructure.ClusterRole.Intake
 
 /** Created by rolfsd on 5/20/16.
   */
@@ -48,7 +48,7 @@ object PlanCatalog extends ClassLogging {
         ClusterSingletonManager.props(
           singletonProps = actorProps( configuration, mifFactor, budget, applicationPlans ),
           terminationMessage = PoisonPill,
-          settings = ClusterSingletonManagerSettings( bc.system ).withRole( Control.entryName )
+          settings = ClusterSingletonManagerSettings( bc.system ).withRole( Intake.entryName )
         ),
         name = PlanCatalog.name
       )
@@ -60,7 +60,7 @@ object PlanCatalog extends ClassLogging {
   def props( implicit system: ActorSystem ): Props = {
     ClusterSingletonProxy.props(
       singletonManagerPath = "/user/" + name,
-      settings = ClusterSingletonProxySettings( system ).withRole( Control.entryName )
+      settings = ClusterSingletonProxySettings( system ).withRole( Intake.entryName )
     )
   }
 

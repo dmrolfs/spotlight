@@ -147,7 +147,7 @@ object LookupShardModule extends AggregateRootModule[LookupShardCatalog, LookupS
         rootType = this,
         makeAggregateProps = AggregateRoot.ShardingActor.props(_: DomainModel, _: AggregateRootType)
       )(
-        settings = ClusterShardingSettings( model.system ).withRole( ClusterRole.Worker.entryName )
+        settings = ClusterShardingSettings( model.system ).withRole( ClusterRole.Analysis.entryName )
       )
 //      CommonLocalRepository.props( model, this, AggregateRoot.ShardingActor.props( _: DomainModel, _: AggregateRootType ) )
     }

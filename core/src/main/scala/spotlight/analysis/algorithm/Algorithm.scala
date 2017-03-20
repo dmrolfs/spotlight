@@ -377,7 +377,7 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
     }
 
     class ClusteredRepository( model: DomainModel ) extends Repository( model ) with ClusteredAggregateContext {
-      override def settings: ClusterShardingSettings = super.settings.withRole( ClusterRole.Worker.entryName )
+      override def settings: ClusterShardingSettings = super.settings.withRole( ClusterRole.Analysis.entryName )
     }
 
     object AlgorithmActor {

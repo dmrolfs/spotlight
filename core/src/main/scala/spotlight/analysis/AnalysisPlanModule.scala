@@ -67,7 +67,7 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
     val b = EntityAggregateModule.builderFor[AnalysisPlanState, AnalysisPlanProtocol.type].make
     import b.P.{ Props ⇒ BProps, _ }
 
-    val toSettings = ( s: ActorSystem ) ⇒ ClusterShardingSettings( s ).withRole( ClusterRole.Worker.entryName )
+    val toSettings = ( s: ActorSystem ) ⇒ ClusterShardingSettings( s ).withRole( ClusterRole.Analysis.entryName )
 
     b.builder
       //      .set( Environment, LocalAggregate )
