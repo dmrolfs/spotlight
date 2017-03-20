@@ -73,6 +73,7 @@ class SpotlightFlowFactory( plans: Set[AnalysisPlan.Summary] ) extends FlowFacto
           .flatMap {
             case af: AP.AnalysisFlow ⇒ makeFlow( p, af )
             case Envelope( af: AP.AnalysisFlow, _ ) ⇒ makeFlow( p, af )
+            case m ⇒ Future.failed( new MatchError( m ) )
           }
       }
     }
