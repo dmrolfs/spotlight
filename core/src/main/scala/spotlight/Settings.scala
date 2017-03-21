@@ -1,10 +1,9 @@
 package spotlight
 
-import java.net.{ InetAddress, InetSocketAddress }
+import java.net.{InetAddress, InetSocketAddress}
 
 import scala.concurrent.duration._
 import scala.util.matching.Regex
-
 import scalaz.Scalaz._
 import scalaz._
 import com.typesafe.config._
@@ -12,12 +11,13 @@ import net.ceedubs.ficus.Ficus._
 import com.persist.logging._
 import java.net
 
-import omnibus.commons.{ V, Valid }
+import omnibus.commons.{V, Valid}
 import omnibus.commons.config._
 import spotlight.analysis.OutlierDetection
+import spotlight.infrastructure.ClusterRole
 import spotlight.model.outlier._
 import spotlight.model.timeseries.Topic
-import spotlight.protocol.{ GraphiteSerializationProtocol, MessagePackProtocol, PythonPickleProtocol }
+import spotlight.protocol.{GraphiteSerializationProtocol, MessagePackProtocol, PythonPickleProtocol}
 
 //todo refactor into base required settings and allow for app-specific extension
 /** Created by rolfsd on 1/12/16.
@@ -370,6 +370,7 @@ object Settings extends ClassLogging {
   case class UsageConfigurationError private[Settings] ( usage: String ) extends IllegalArgumentException( usage )
 
   final case class UsageSettings private[Settings] (
+    role: ClusterRole,
     clusterPort: Int = 2552,
     sourceHost: Option[InetAddress] = None,
     sourcePort: Option[Int] = None,
@@ -378,31 +379,41 @@ object Settings extends ClassLogging {
   )
 
   private object UsageSettings {
-    def zero: UsageSettings = UsageSettings()
+    def zero: UsageSettings = UsageSettings( role = ClusterRole.All )
 
     def makeUsageConfig = new scopt.OptionParser[UsageSettings]( "spotlight" ) {
       //todo remove once release is current with corresponding dev
       implicit val inetAddressRead: scopt.Read[InetAddress] = scopt.Read.reads { InetAddress.getByName( _ ) }
 
-      head( "spotlight", "0.1.a" )
+      head( "spotlight", spotlight.BuildInfo.version )
 
-      opt[InetAddress]( 'h', "host" ) action { ( e, c ) ⇒
-        c.copy( sourceHost = Some( e ) )
-      } text ( "connection address to source" )
+      opt[ClusterRole]( 'r', "role" )
+      .required()
+      .action { (r, c) => c.copy( role = r ) }
+      .text( "role played in analysis cluster" )
 
-      opt[Int]( 'p', "port" ) action { ( e, c ) ⇒
-        c.copy( sourcePort = Some( e ) )
-      } text ( "connection port of source server" )
+      opt[InetAddress]( 'h', "host" )
+        .action { ( e, c ) ⇒ c.copy( sourceHost = Some( e ) ) }
+        .text( "connection address to source" )
 
-      opt[Int]( 'c', "cluster-port" ) action { ( e, c ) ⇒
-        c.copy( clusterPort = e )
-      }
+      opt[Int]( 'p', "port" )
+        .action { ( e, c ) ⇒ c.copy( sourcePort = Some( e ) ) }
+        .text( "connection port of source server" )
 
-      opt[Long]( 'w', "window" ) action { ( e, c ) ⇒
-        c.copy( windowSize = Some( FiniteDuration( e, SECONDS ) ) )
-      } text ( "batch window size (in seconds) for collecting time series data. Default = 60s." )
+      opt[Int]( 'c', "cluster-port" )
+        .action { ( e, c ) ⇒ c.copy( clusterPort = e ) }
+        .text( "listening port for this node in the processing cluster. " +
+          "There must be at least one seed at 2551 or 2552; otherwise can be 0"
+        )
 
-      arg[String]( "<arg>..." ).unbounded().optional().action { ( a, c ) ⇒ c.copy( args = c.args :+ a ) }
+      opt[Long]( 'w', "window" )
+        .action { ( e, c ) ⇒ c.copy( windowSize = Some( FiniteDuration( e, SECONDS ) ) ) }
+        .text( "batch window size (in seconds) for collecting time series data. Default = 60s." )
+
+      arg[String]( "<arg>..." )
+        .unbounded()
+        .optional()
+        .action { ( a, c ) ⇒ c.copy( args = c.args :+ a ) }
 
       help( "help" )
 
