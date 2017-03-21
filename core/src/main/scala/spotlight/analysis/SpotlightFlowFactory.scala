@@ -69,7 +69,6 @@ class SpotlightFlowFactory( plans: Set[AnalysisPlan.Summary] ) extends FlowFacto
         val ref = model( AnalysisPlanModule.module.rootType, p.id )
         //        NEED TO MAKE PLAN -FLOW - SEED IN CATALOG AND INCL IN SPOTLIGHT - SEED
         ( ref ?+ AP.MakeFlow( p.id ) )
-          .mapTo[Envelope]
           .flatMap {
             case af: AP.AnalysisFlow ⇒ makeFlow( p, af )
             case Envelope( af: AP.AnalysisFlow, _ ) ⇒ makeFlow( p, af )
