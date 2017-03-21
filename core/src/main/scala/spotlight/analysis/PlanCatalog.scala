@@ -64,7 +64,7 @@ object PlanCatalog extends ClassLogging {
     )
   }
 
-  private def actorProps(
+  private[analysis] def actorProps(
     configuration: Config,
     maxInFlightCpuFactor: Double = 8.0,
     applicationDetectionBudget: Option[Duration] = None,

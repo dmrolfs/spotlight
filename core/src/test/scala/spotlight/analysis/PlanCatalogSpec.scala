@@ -165,7 +165,7 @@ class PlanCatalogSpec extends ParallelAkkaSpec with ScalaFutures with StrictLogg
 
       logger.info( "TEST: ==============  CREATING CATALOG  ==============")
       val catalog = system.actorOf(
-        PlanCatalog.props(
+        PlanCatalog.actorProps(
           config,
           applicationPlans = Settings.PlanFactory.makePlans( planSpecs, globalAlgorithms, 30.seconds )
         )(
