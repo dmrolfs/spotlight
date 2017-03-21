@@ -2,21 +2,21 @@ package spotlight.analysis.shard
 
 import scala.concurrent.duration._
 import scala.reflect._
-import akka.actor.{ActorRef, ActorSystem, Cancellable, Props}
+import akka.actor.{ ActorRef, ActorSystem, Cancellable, Props }
 import akka.cluster.sharding.ClusterShardingSettings
 import akka.event.LoggingReceive
-import akka.persistence.{RecoveryCompleted, SnapshotOffer}
+import akka.persistence.{ RecoveryCompleted, SnapshotOffer }
 import com.persist.logging._
-import nl.grons.metrics.scala.{Histogram, Meter, MetricName}
+import nl.grons.metrics.scala.{ Histogram, Meter, MetricName }
 import omnibus.akka.envelope._
-import omnibus.akka.metrics.{Instrumented, InstrumentedActor}
-import omnibus.akka.publish.{EventPublisher, StackableStreamPublisher}
+import omnibus.akka.metrics.{ Instrumented, InstrumentedActor }
+import omnibus.akka.publish.{ EventPublisher, StackableStreamPublisher }
 import omnibus.commons.identifier._
 import omnibus.commons.util._
 import demesne._
-import demesne.module.{ClusteredAggregate, LocalAggregate, SimpleAggregateModule}
+import demesne.module.{ ClusteredAggregate, LocalAggregate, SimpleAggregateModule }
 import spotlight.analysis.DetectUsing
-import spotlight.analysis.algorithm.{Algorithm, AlgorithmIdGenerator, AlgorithmProtocol => AP}
+import spotlight.analysis.algorithm.{ Algorithm, AlgorithmIdGenerator, AlgorithmProtocol ⇒ AP }
 import spotlight.infrastructure.ClusterRole
 import spotlight.model.outlier.AnalysisPlan
 import spotlight.model.timeseries._
@@ -105,11 +105,11 @@ object CellShardModule extends ClassLogging {
     val b = SimpleAggregateModule.builderFor[CellShardCatalog, CellShardCatalog#ID].make
     import b.P.{ Props ⇒ BProps, _ }
 
-    val toSettings = (s: ActorSystem) => ClusterShardingSettings( s ).withRole( ClusterRole.Analysis.entryName )
+    val toSettings = ( s: ActorSystem ) ⇒ ClusterShardingSettings( s ).withRole( ClusterRole.Analysis.entryName )
     b
       .builder
-//      .set( Environment, LocalAggregate )
-      .set( Environment, ClusteredAggregate(toSettings) )
+      //      .set( Environment, LocalAggregate )
+      .set( Environment, ClusteredAggregate( toSettings ) )
       .set( BProps, ShardingActor.props( _, _ ) )
       .build()
   }

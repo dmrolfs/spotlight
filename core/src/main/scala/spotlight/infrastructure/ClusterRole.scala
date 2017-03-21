@@ -12,4 +12,6 @@ object ClusterRole extends Enum[ClusterRole] {
   case object Analysis extends ClusterRole( "analysis" )
   case object Seed extends ClusterRole( "seed" )
   case object All extends ClusterRole( "all" )
+
+  implicit val readClusterRole: scopt.Read[ClusterRole] = scopt.Read.reads( ClusterRole withName _ )
 }

@@ -1,6 +1,6 @@
 package spotlight
 
-import java.net.{InetAddress, InetSocketAddress}
+import java.net.{ InetAddress, InetSocketAddress }
 
 import scala.concurrent.duration._
 import scala.util.matching.Regex
@@ -11,13 +11,13 @@ import net.ceedubs.ficus.Ficus._
 import com.persist.logging._
 import java.net
 
-import omnibus.commons.{V, Valid}
+import omnibus.commons.{ V, Valid }
 import omnibus.commons.config._
 import spotlight.analysis.OutlierDetection
 import spotlight.infrastructure.ClusterRole
 import spotlight.model.outlier._
 import spotlight.model.timeseries.Topic
-import spotlight.protocol.{GraphiteSerializationProtocol, MessagePackProtocol, PythonPickleProtocol}
+import spotlight.protocol.{ GraphiteSerializationProtocol, MessagePackProtocol, PythonPickleProtocol }
 
 //todo refactor into base required settings and allow for app-specific extension
 /** Created by rolfsd on 1/12/16.
@@ -388,9 +388,9 @@ object Settings extends ClassLogging {
       head( "spotlight", spotlight.BuildInfo.version )
 
       opt[ClusterRole]( 'r', "role" )
-      .required()
-      .action { (r, c) => c.copy( role = r ) }
-      .text( "role played in analysis cluster" )
+        .required()
+        .action { ( r, c ) ⇒ c.copy( role = r ) }
+        .text( "role played in analysis cluster" )
 
       opt[InetAddress]( 'h', "host" )
         .action { ( e, c ) ⇒ c.copy( sourceHost = Some( e ) ) }
@@ -403,8 +403,7 @@ object Settings extends ClassLogging {
       opt[Int]( 'c', "cluster-port" )
         .action { ( e, c ) ⇒ c.copy( clusterPort = e ) }
         .text( "listening port for this node in the processing cluster. " +
-          "There must be at least one seed at 2551 or 2552; otherwise can be 0"
-        )
+          "There must be at least one seed at 2551 or 2552; otherwise can be 0" )
 
       opt[Long]( 'w', "window" )
         .action { ( e, c ) ⇒ c.copy( windowSize = Some( FiniteDuration( e, SECONDS ) ) ) }

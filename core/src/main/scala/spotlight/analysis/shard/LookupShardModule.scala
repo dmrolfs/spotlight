@@ -2,24 +2,24 @@ package spotlight.analysis.shard
 
 import scala.concurrent.duration._
 import scala.reflect._
-import akka.actor.{ActorRef, Cancellable, Props}
+import akka.actor.{ ActorRef, Cancellable, Props }
 import akka.cluster.sharding.ClusterShardingSettings
 import akka.event.LoggingReceive
 import akka.persistence.RecoveryCompleted
-import nl.grons.metrics.scala.{Meter, MetricName}
+import nl.grons.metrics.scala.{ Meter, MetricName }
 import squants.information._
 import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap
 import omnibus.akka.envelope._
-import omnibus.akka.metrics.{Instrumented, InstrumentedActor}
-import omnibus.akka.publish.{EventPublisher, StackableStreamPublisher}
+import omnibus.akka.metrics.{ Instrumented, InstrumentedActor }
+import omnibus.akka.publish.{ EventPublisher, StackableStreamPublisher }
 import omnibus.commons.identifier._
 import omnibus.commons.util._
 import omnibus.commons.TryV
 import demesne._
-import demesne.repository.{CommonClusteredRepository, CommonLocalRepository}
+import demesne.repository.{ CommonClusteredRepository, CommonLocalRepository }
 import spotlight.analysis.DetectUsing
 import spotlight.analysis.shard.ShardCatalog.ShardCatalogIdentifying
-import spotlight.analysis.algorithm.{Algorithm, AlgorithmIdGenerator, AlgorithmProtocol => AP}
+import spotlight.analysis.algorithm.{ Algorithm, AlgorithmIdGenerator, AlgorithmProtocol ⇒ AP }
 import spotlight.infrastructure.ClusterRole
 import spotlight.model.outlier.AnalysisPlan
 import spotlight.model.timeseries._
@@ -145,11 +145,11 @@ object LookupShardModule extends AggregateRootModule[LookupShardCatalog, LookupS
       CommonClusteredRepository.props(
         model = model,
         rootType = this,
-        makeAggregateProps = AggregateRoot.ShardingActor.props(_: DomainModel, _: AggregateRootType)
+        makeAggregateProps = AggregateRoot.ShardingActor.props( _: DomainModel, _: AggregateRootType )
       )(
-        settings = ClusterShardingSettings( model.system ).withRole( ClusterRole.Analysis.entryName )
-      )
-//      CommonLocalRepository.props( model, this, AggregateRoot.ShardingActor.props( _: DomainModel, _: AggregateRootType ) )
+          settings = ClusterShardingSettings( model.system ).withRole( ClusterRole.Analysis.entryName )
+        )
+      //      CommonLocalRepository.props( model, this, AggregateRoot.ShardingActor.props( _: DomainModel, _: AggregateRootType ) )
     }
   }
 

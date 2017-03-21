@@ -7,14 +7,14 @@ import scala.concurrent.duration._
 import scala.util.Random
 import scala.reflect._
 import akka.actor._
-import akka.cluster.sharding.{ClusterShardingSettings, ShardRegion}
+import akka.cluster.sharding.{ ClusterShardingSettings, ShardRegion }
 import akka.event.LoggingReceive
 import akka.persistence._
 import spotlight.infrastructure.ClusterRole
 
 import scalaz._
 import Scalaz._
-import scalaz.Kleisli.{ask, kleisli}
+import scalaz.Kleisli.{ ask, kleisli }
 //import bloomfilter.mutable.BloomFilter
 import bloomfilter.CanGenerateHashFrom
 import bloomfilter.CanGenerateHashFrom.CanGenerateHashFromString
