@@ -119,13 +119,13 @@ object GrubbsAlgorithm extends Algorithm[GrubbsShape]( label = "grubbs" ) { algo
 
     result match {
       case \/-( r ) ⇒ Some( r )
-      //
-      //      case -\/( ex: Algorithm.InsufficientDataSize ) ⇒ {
-      //        import spotlight.model.timeseries._
-      //        log.info( Map( "@msg" → "skipping point until sufficient history is establish", "point" → point ), ex )
-      //        Some( ( false, ThresholdBoundary empty point.timestamp.toLong ) )
-      //      }
-      //
+
+      case -\/( ex: InsufficientDataSize ) ⇒ {
+        import spotlight.model.timeseries._
+        log.info( Map( "@msg" → "skipping point until sufficient history is establish", "point" → point ), ex )
+        Some( AnomalyScore( isOutlier = false, threshold = ThresholdBoundary empty point.timestamp.toLong ) )
+      }
+
       case -\/( ex ) ⇒ {
         log.warn( Map( "@msg" → "exception raised in algorithm step calculation", "algorithm" → label ), ex )
         throw ex

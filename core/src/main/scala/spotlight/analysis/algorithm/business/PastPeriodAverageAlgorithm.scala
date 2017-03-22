@@ -119,9 +119,9 @@ object PastPeriod extends ClassLogging {
       }
     }
 
-    private val wholeWindow = window + 1 // to include current period at end of buffer
+    private def wholeWindow = window + 1 // to include current period at end of buffer
 
-    private val addToPeriods = CircularBuffer.addTo( wholeWindow )( periods, _: PeriodValue )
+    @transient private lazy val addToPeriods = CircularBuffer.addTo( wholeWindow )( periods, _: PeriodValue )
     private[this] def addPeriod( p: Period, v: Double ): Shape = this.copy( N = this.N + 1, periods = addToPeriods( p, v ) )
 
     private[this] def updatePeriod( p: Period, v: Double, index: Int ): Shape = {
