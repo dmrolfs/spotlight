@@ -23,11 +23,12 @@ import spotlight.protocol.{ GraphiteSerializationProtocol, MessagePackProtocol, 
 /** Created by rolfsd on 1/12/16.
   */
 trait Settings extends ClassLogging {
-  def sourceAddress: InetSocketAddress
+  def role: ClusterRole
+  //  def sourceAddress: InetSocketAddress
   def clusterPort: Int
   def maxFrameLength: Int
   def protocol: GraphiteSerializationProtocol
-  def windowDuration: FiniteDuration
+  //  def windowDuration: FiniteDuration
   def graphiteAddress: Option[InetSocketAddress]
   def detectionBudget: Duration
   def parallelismFactor: Double
@@ -44,11 +45,9 @@ trait Settings extends ClassLogging {
     val settingsConfig = {
       s"""
          | spotlight.settings {
-         |   source-address: "${sourceAddress}"
          |   cluster-port: ${clusterPort}
          |   max-frame-length: ${maxFrameLength}
          |   protocol: ${protocol.getClass.getCanonicalName}
-         |   window-duration: ${windowDuration.toCoarsest}
          |   ${graphiteAddress.map { ga ⇒ "graphite-address:\"" + ga.toString + "\"" } getOrElse ""}
          |   detection-budget: ${detectionBudget.toCoarsest}
          |   parallelism-factor: ${parallelismFactor}
@@ -63,11 +62,11 @@ trait Settings extends ClassLogging {
       Map(
         "@msg" → "Settings.toConfig",
         "base" → Map(
-          "source-address" → sourceAddress.toString,
+          //          "source-address" → sourceAddress.toString,
           "cluster-port" → clusterPort,
           "max-frame-length" → maxFrameLength,
           "protocol" → protocol.getClass.getCanonicalName,
-          "window-duration" → windowDuration.toCoarsest.toString,
+          //          "window-duration" → windowDuration.toCoarsest.toString,
           "graphite-address" → graphiteAddress.toString,
           "detection-budget" → detectionBudget.toCoarsest.toString,
           "parallelism-factor" → parallelismFactor,
@@ -84,12 +83,10 @@ trait Settings extends ClassLogging {
   def usage: ( String, Map[String, Any] ) = {
     val displayUsage = s"""
       |\nRunning Spotlight using the following configuration:
-      |\tsource binding  : ${sourceAddress}
       |\tcluster port    : ${clusterPort}
       |\tpublish binding : ${graphiteAddress}
       |\tmax frame size  : ${maxFrameLength}
       |\tprotocol        : ${protocol}
-      |\twindow          : ${windowDuration.toCoarsest}
       |\tdetection budget: ${detectionBudget.toCoarsest}
       |\tAvail Processors: ${Runtime.getRuntime.availableProcessors}
       |\tplans           : [${plans.zipWithIndex.map { case ( p, i ) ⇒ f"${i}%2d: ${p}" }.mkString( "\n", "\n", "\n" )}]
@@ -111,12 +108,12 @@ trait Settings extends ClassLogging {
     )
 
     val richUsage = Map(
-      "source-binding" → sourceAddress.toString,
+      //      "source-binding" → sourceAddress.toString,
       "cluster-port" → clusterPort,
       "publish-binding" → graphiteAddress.toString,
       "max-frame-size" → maxFrameLength,
       "protocol" → protocol.toString,
-      "window" → windowDuration.toCoarsest.toString,
+      //      "window" → windowDuration.toCoarsest.toString,
       "detection-budget" → detectionBudget.toCoarsest.toString,
       "available-processors" → Runtime.getRuntime.availableProcessors,
       "plans" → planMap
@@ -186,6 +183,20 @@ object Settings extends ClassLogging {
       }
   }
 
+  case class SeedNode( protocol: String, systemName: String, hostname: String, port: Int )
+  object SeedNode {
+    val AkkaPath = "akka.cluster.seed-nodes"
+    val AkkaNode = """akka\.(.+):(.+)@(.+):(\d+)""".r
+  }
+
+  def seedNodesFrom( c: Config ): Seq[SeedNode] = {
+    val seeds = c.as[Option[Seq[String]]]( SeedNode.AkkaPath ) getOrElse { Seq.empty[String] }
+    seeds collect { case SeedNode.AkkaNode( pr, s, h, po ) =>
+      SeedNode( protocol = pr, systemName = s, hostname = h, port = po.toInt )
+    }
+  }
+
+
   type Reload = () ⇒ V[Settings]
 
   def reloader(
@@ -252,8 +263,8 @@ object Settings extends ClassLogging {
     case class Req( path: String, inUsage: () ⇒ Boolean )
 
     val required: List[Req] = List(
-      Req.withUsageSetting( Directory.SOURCE_HOST, usage.sourceHost ),
-      Req.withUsageSetting( Directory.SOURCE_PORT, usage.sourcePort ),
+      //      Req.withUsageSetting( Directory.SOURCE_HOST, usage.sourceHost ),
+      //      Req.withUsageSetting( Directory.SOURCE_PORT, usage.sourcePort ),
       //      Req.withoutUsageSetting( Directory.PUBLISH_GRAPHITE_HOST ),
       //      Req.withoutUsageSetting( Directory.PUBLISH_GRAPHITE_PORT ),
       Req.withoutUsageSetting( Directory.DETECTION_BUDGET ),
@@ -266,17 +277,17 @@ object Settings extends ClassLogging {
   }
 
   private def makeSettings( usage: UsageSettings, config: Config ): Settings = {
-    val sourceHost: InetAddress = {
-      usage
-        .sourceHost
-        .getOrElse {
-          config
-            .as[Option[InetAddress]]( Directory.SOURCE_HOST )
-            .getOrElse { net.InetAddress.getLocalHost }
-        }
-    }
-
-    val sourcePort = usage.sourcePort getOrElse { config.as[Int]( Directory.SOURCE_PORT ) }
+    //    val sourceHost: InetAddress = {
+    //      usage
+    //        .sourceHost
+    //        .getOrElse {
+    //          config
+    //            .as[Option[InetAddress]]( Directory.SOURCE_HOST )
+    //            .getOrElse { net.InetAddress.getLocalHost }
+    //        }
+    //    }
+    //
+    //    val sourcePort = usage.sourcePort getOrElse { config.as[Int]( Directory.SOURCE_PORT ) }
 
     val maxFrameLength = {
       config.as[Option[Int]]( Directory.SOURCE_MAX_FRAME_LENGTH ) getOrElse { 4 + scala.math.pow( 2, 20 ).toInt } // from graphite documentation
@@ -293,32 +304,94 @@ object Settings extends ClassLogging {
         .getOrElse { new PythonPickleProtocol }
     }
 
-    val windowSize = {
-      usage
-        .windowSize
-        .getOrElse {
-          config.as[Option[FiniteDuration]]( Directory.SOURCE_WINDOW_SIZE ) getOrElse { 2.minutes }
-        }
-    }
+    //    val windowSize = {
+    //      usage
+    //        .windowSize
+    //        .getOrElse {
+    //          config.as[Option[FiniteDuration]]( Directory.SOURCE_WINDOW_SIZE ) getOrElse { 2.minutes }
+    //        }
+    //    }
 
     val graphiteHost = config.as[Option[InetAddress]]( Directory.PUBLISH_GRAPHITE_HOST )
 
     val graphitePort = config.as[Option[Int]]( Directory.PUBLISH_GRAPHITE_PORT ) getOrElse { 2004 }
 
     SimpleSettings(
-      sourceAddress = new InetSocketAddress( sourceHost, sourcePort ),
+      role = usage.role,
+      //      sourceAddress = new InetSocketAddress( sourceHost, sourcePort ),
       maxFrameLength = maxFrameLength,
       protocol = protocol,
-      windowDuration = windowSize,
-      graphiteAddress = {
-      for {
-        h ← graphiteHost
-        p ← Option( graphitePort )
-      } yield new InetSocketAddress( h, p )
-    },
-      config = ConfigFactory.parseString( SimpleSettings.AkkaRemotePortPath + "=" + usage.clusterPort ).withFallback( config ),
+      //      windowDuration = windowSize,
+      graphiteAddress = for ( h ← graphiteHost; p ← Option( graphitePort ) ) yield new InetSocketAddress( h, p ),
+      config = clusterConditionConfiguration( config, usage ),
       args = usage.args
     )
+  }
+
+  /** Augment the given configuration with cluster settings corresponding to the cluster role in the usage settings.
+    * @param config
+    * @param usage
+    * @return
+    */
+  def clusterConditionConfiguration( config: Config, usage: UsageSettings ): Config = {
+    def makeConfigString( port: Int, roles: Seq[ClusterRole] ): String = {
+      val remotePort = "akka.remote.netty.tcp.port = " + port
+      val clusterRoles = {
+        if ( roles.isEmpty ) None
+        else Some( "akka.cluster.roles = " + roles.map( _.entryName ).mkString( "[", ", ", "]" ) )
+      }
+
+      val result = clusterRoles map { remotePort + '\n' + _ } getOrElse remotePort
+
+      log.info(
+        Map(
+          "@msg" → "augmented configuration for clustering",
+          "role" → usage.role.entryName,
+          "cluster-config" → result
+        )
+      )
+
+      result
+    }
+
+    val expectedSeeds = seedNodesFrom( config ).map( _.port ).toSet
+    val port = usage.clusterPort orElse { config.as[Option[Int]]( SimpleSettings.AkkaRemotePortPath ) } getOrElse { 0 }
+
+    val clusterConfig = usage.role match {
+      case r if r == ClusterRole.Intake || r == ClusterRole.Analysis ⇒ makeConfigString( port, Seq( r ) )
+
+      case ClusterRole.All ⇒ {
+        if ( !expectedSeeds.contains( port ) ) {
+          log.warn(
+            Map(
+              "@msg" → "configured port is not listed in cluster seed ports; overriding to first seed if possible",
+              "expected-seed-ports" → expectedSeeds,
+              "seed-override" → expectedSeeds.headOption.toString,
+              "port" → port
+            )
+          )
+        }
+
+        makeConfigString( expectedSeeds.headOption getOrElse port, Seq( ClusterRole.Intake, ClusterRole.Analysis ) )
+      }
+
+      case ClusterRole.Seed ⇒ {
+        if ( !expectedSeeds.contains( port ) ) {
+          log.error(
+            Map(
+              "@msg" → "configured port is not listed in cluster seed ports; overriding to first seed if possible",
+              "expected-seed-ports" → expectedSeeds,
+              "seed-override" → expectedSeeds.headOption.toString,
+              "port" → port
+            )
+          )
+        }
+
+        makeConfigString( expectedSeeds.headOption getOrElse port, Seq.empty[ClusterRole] )
+      }
+    }
+
+    ConfigFactory.parseString( clusterConfig ) withFallback config
   }
 
   def makeOutlierReducer( spec: Config ): ReduceOutliers = {
@@ -338,10 +411,11 @@ object Settings extends ClassLogging {
   }
 
   final case class SimpleSettings private[Settings] (
-      override val sourceAddress: InetSocketAddress,
+      override val role: ClusterRole,
+      //      override val sourceAddress: InetSocketAddress,
       override val maxFrameLength: Int,
       override val protocol: GraphiteSerializationProtocol,
-      override val windowDuration: FiniteDuration,
+      //      override val windowDuration: FiniteDuration,
       override val graphiteAddress: Option[InetSocketAddress],
       override val config: Config,
       override val args: Seq[String]
@@ -371,14 +445,16 @@ object Settings extends ClassLogging {
 
   final case class UsageSettings private[Settings] (
     role: ClusterRole,
-    clusterPort: Int = 2552,
-    sourceHost: Option[InetAddress] = None,
-    sourcePort: Option[Int] = None,
-    windowSize: Option[FiniteDuration] = None,
+    clusterPort: Option[Int] = None,
+    //    sourceHost: Option[InetAddress] = None,
+    //    sourcePort: Option[Int] = None,
+    //    windowSize: Option[FiniteDuration] = None,
     args: Seq[String] = Seq.empty[String]
   )
 
   private object UsageSettings {
+    val DefaultClusterPort: Int = 2551
+
     def zero: UsageSettings = UsageSettings( role = ClusterRole.All )
 
     def makeUsageConfig = new scopt.OptionParser[UsageSettings]( "spotlight" ) {
@@ -392,22 +468,22 @@ object Settings extends ClassLogging {
         .action { ( r, c ) ⇒ c.copy( role = r ) }
         .text( "role played in analysis cluster" )
 
-      opt[InetAddress]( 'h', "host" )
-        .action { ( e, c ) ⇒ c.copy( sourceHost = Some( e ) ) }
-        .text( "connection address to source" )
+      //      opt[InetAddress]( 'h', "host" )
+      //        .action { ( e, c ) ⇒ c.copy( sourceHost = Some( e ) ) }
+      //        .text( "connection address to source" )
+
+      //      opt[Int]( 'p', "port" )
+      //        .action { ( e, c ) ⇒ c.copy( sourcePort = Some( e ) ) }
+      //        .text( "connection port of source server" )
 
       opt[Int]( 'p', "port" )
-        .action { ( e, c ) ⇒ c.copy( sourcePort = Some( e ) ) }
-        .text( "connection port of source server" )
+        .action { ( e, c ) ⇒ c.copy( clusterPort = Some( e ) ) }
+        .text( "listening remote port for this node in the processing cluster. " +
+          "There must be at least one seed at 2551 or 2552; otherwise can be 0 which is the default" )
 
-      opt[Int]( 'c', "cluster-port" )
-        .action { ( e, c ) ⇒ c.copy( clusterPort = e ) }
-        .text( "listening port for this node in the processing cluster. " +
-          "There must be at least one seed at 2551 or 2552; otherwise can be 0" )
-
-      opt[Long]( 'w', "window" )
-        .action { ( e, c ) ⇒ c.copy( windowSize = Some( FiniteDuration( e, SECONDS ) ) ) }
-        .text( "batch window size (in seconds) for collecting time series data. Default = 60s." )
+      //      opt[Long]( 'w', "window" )
+      //        .action { ( e, c ) ⇒ c.copy( windowSize = Some( FiniteDuration( e, SECONDS ) ) ) }
+      //        .text( "batch window size (in seconds) for collecting time series data. Default = 60s." )
 
       arg[String]( "<arg>..." )
         .unbounded()

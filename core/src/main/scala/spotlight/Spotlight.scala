@@ -29,6 +29,7 @@ import spotlight.analysis._
 import spotlight.analysis.{ PlanCatalogProtocol ⇒ CP }
 import spotlight.analysis.shard.{ CellShardModule, LookupShardModule }
 import spotlight.analysis.algorithm.statistical._
+import spotlight.infrastructure.ClusterRole
 import spotlight.model.outlier.Outliers
 import spotlight.model.timeseries.TimeSeries
 
@@ -75,7 +76,7 @@ object Spotlight extends Instrumented with ClassLogging {
 
   type SystemSettings = ( ActorSystem, Settings )
   type BoundedSettings = ( BoundedContext, Settings )
-  type SpotlightModel = ( BoundedContext, Settings, DetectFlow )
+  type SpotlightModel = ( BoundedContext, Settings, Option[DetectFlow] )
 
   def apply(
     context: SpotlightContext,
@@ -104,6 +105,26 @@ object Spotlight extends Instrumented with ClassLogging {
     )
 
     systemConfiguration( context ) >=> startBoundedContext( context ) >=> makeFlow( finishSubscriberOnComplete )
+  }
+
+  def startActorSystemForRole( role: ClusterRole, port: Int, config: Config ): ActorSystem = {
+    def expectedSeedPortsFrom( c: Config ): Set[Int] = {
+
+      val Port = """.*:(\d+)""".r
+      val seeds = c.as[Option[Set[String]]]( "akka.cluster.seed-nodes" ) getOrElse { Set.empty[String] }
+      seeds collect { case Port( p ) ⇒ p.toInt }
+    }
+
+    val expectedSeeds = expectedSeedPortsFrom( config )
+    WORK HERE
+    val configuration = role match {
+      case ClusterRole.All ⇒ ???
+      case ClusterRole.Seed ⇒ ???
+      case ClusterRole.Analysis ⇒ ???
+      case ClusterRole.Intake ⇒ ???
+    }
+
+    ActorSystem()
   }
 
   val systemRootTypes: Set[AggregateRootType] = {
@@ -146,7 +167,12 @@ object Spotlight extends Instrumented with ClassLogging {
 
   def systemConfiguration( context: SpotlightContext ): Kleisli[Future, Array[String], SystemSettings] = {
     kleisli[Future, Array[String], SystemSettings] { args ⇒
-      def spotlightConfig: String = Option( System getProperty "spotlight.config" ) getOrElse { "application.conf" }
+      val spotlightConfig: String = {
+        Option( System.getProperty( "config.resource" ) )
+          .orElse { Option( System.getProperty( "config.file" ) ) }
+          .orElse { Option( System.getProperty( "config.url" ) ) }
+          .getOrElse { "application.conf" }
+      }
 
       log.alternative(
         SystemCategory,
@@ -159,7 +185,7 @@ object Spotlight extends Instrumented with ClassLogging {
 
       Settings( args, config = ConfigFactory.load() ).disjunction map { settings ⇒
         log.alternative( SystemCategory, Map( "@msg" → "Settings", "usage" → settings.usage._2 ) )
-        val system = context.system getOrElse ActorSystem( context.name, settings.config )
+        val system = context.system getOrElse ActorSystem( context.name, settings.config ) CHANGE !!!
         ( system, settings )
       } match {
         case \/-( systemConfiguration ) ⇒ Future successful systemConfiguration
@@ -198,7 +224,7 @@ object Spotlight extends Instrumented with ClassLogging {
 
   def makeFlow( finishSubscriberOnComplete: Boolean ): Kleisli[Future, BoundedSettings, SpotlightModel] = {
     kleisli[Future, BoundedSettings, SpotlightModel] {
-      case ( boundedContext, settings ) ⇒
+      case ( boundedContext, settings ) if settings.role.hostsFlow ⇒ {
         implicit val bc = boundedContext
         implicit val system = boundedContext.system
         implicit val dispatcher = system.dispatcher
@@ -213,8 +239,11 @@ object Spotlight extends Instrumented with ClassLogging {
         } yield {
           val detectFlow = detectFlowFrom( catalogFlow, settings )
           val clusteredFlow = clusterFlowFrom( detectFlow, settings )
-          ( boundedContext, settings, clusteredFlow )
+          ( boundedContext, settings, Option( clusteredFlow ) )
         }
+      }
+
+      case ( boundedContext, settings ) ⇒ Future successful ( boundedContext, settings, None )
     }
   }
 

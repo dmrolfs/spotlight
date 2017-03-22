@@ -547,7 +547,7 @@ object SimpleMovingAverageAlgorithmSpec {
       DataPoint( timestamp = new joda.DateTime( 1472256000000L ), value = 69.51184153171673 ),
       DataPoint( timestamp = new joda.DateTime( 1472342400000L ), value = 65.43925997873313 ),
       DataPoint( timestamp = new joda.DateTime( 1472428800000L ), value = 63.471353373683705 ),
-      DataPoint( timestamp = new joda.DateTime( 1472515200000L ), value = 65.37633751909686 ),  // 2016-08-30
+      DataPoint( timestamp = new joda.DateTime( 1472515200000L ), value = 65.37633751909686 ), // 2016-08-30
       DataPoint( timestamp = new joda.DateTime( 1472601600000L ), value = 63.23891091237377 ),
       DataPoint( timestamp = new joda.DateTime( 1472688000000L ), value = 120.08744537193263 ),
       DataPoint( timestamp = new joda.DateTime( 1472774400000L ), value = 95.97125374052719 ),
