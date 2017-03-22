@@ -59,7 +59,7 @@ object Moment extends ClassLogging {
   object Statistics {
     def apply( alpha: Double, values: Double* ): Statistics = {
       values.foldLeft(
-        Statistics( alpha = alpha, N = 0L, sum = 0.0, movingMin = 0.0, movingMax = 0.0, ewma = 0.0, ewmsd = 0.0 )
+        Statistics( N = 0L, alpha = alpha, sum = 0.0, movingMin = 0.0, movingMax = 0.0, ewma = 0.0, ewmsd = 0.0 )
       ) {
           _ :+ _
         }
@@ -67,7 +67,7 @@ object Moment extends ClassLogging {
   }
 
   final case class Statistics private[analysis] (
-      N: Long = 1L,
+      N: Long,
       alpha: Double,
       sum: Double,
       movingMax: Double,
@@ -87,8 +87,8 @@ object Moment extends ClassLogging {
       val newSum = this.sum + value
       val newMax = math.max( this.movingMax, value )
       val newMin = math.min( this.movingMin, value )
-      val newEWMA = ( this.alpha * value ) + ( 1 - this.alpha ) * this.ewma
-      val newEWMSD = math.sqrt( this.alpha * math.pow( this.ewmsd, 2 ) + ( 1 - this.alpha ) * math.pow( value - this.ewma, 2 ) )
+      val newEWMA = ( this.alpha * value ) + ( 1.0 - this.alpha ) * this.ewma
+      val newEWMSD = math.sqrt( this.alpha * math.pow( this.ewmsd, 2 ) + ( 1.0 - this.alpha ) * math.pow( value - this.ewma, 2 ) )
       this.copy( N = this.N + 1L, sum = newSum, movingMax = newMax, movingMin = newMin, ewma = newEWMA, ewmsd = newEWMSD )
     }
 
