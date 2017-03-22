@@ -25,7 +25,7 @@ import spotlight.protocol.{ GraphiteSerializationProtocol, MessagePackProtocol, 
 trait Settings extends ClassLogging {
   def role: ClusterRole
   //  def sourceAddress: InetSocketAddress
-  def clusterPort: Int
+  def externalPort: Int
   def maxFrameLength: Int
   def protocol: GraphiteSerializationProtocol
   //  def windowDuration: FiniteDuration
@@ -45,7 +45,7 @@ trait Settings extends ClassLogging {
     val settingsConfig = {
       s"""
          | spotlight.settings {
-         |   cluster-port: ${clusterPort}
+         |   external-port: ${externalPort}
          |   max-frame-length: ${maxFrameLength}
          |   protocol: ${protocol.getClass.getCanonicalName}
          |   ${graphiteAddress.map { ga ⇒ "graphite-address:\"" + ga.toString + "\"" } getOrElse ""}
@@ -63,7 +63,7 @@ trait Settings extends ClassLogging {
         "@msg" → "Settings.toConfig",
         "base" → Map(
           //          "source-address" → sourceAddress.toString,
-          "cluster-port" → clusterPort,
+          "external-port" → externalPort,
           "max-frame-length" → maxFrameLength,
           "protocol" → protocol.getClass.getCanonicalName,
           //          "window-duration" → windowDuration.toCoarsest.toString,
@@ -83,7 +83,7 @@ trait Settings extends ClassLogging {
   def usage: ( String, Map[String, Any] ) = {
     val displayUsage = s"""
       |\nRunning Spotlight using the following configuration:
-      |\tcluster port    : ${clusterPort}
+      |\texternal port    : ${externalPort}
       |\tpublish binding : ${graphiteAddress}
       |\tmax frame size  : ${maxFrameLength}
       |\tprotocol        : ${protocol}
@@ -109,7 +109,7 @@ trait Settings extends ClassLogging {
 
     val richUsage = Map(
       //      "source-binding" → sourceAddress.toString,
-      "cluster-port" → clusterPort,
+      "external-port" → externalPort,
       "publish-binding" → graphiteAddress.toString,
       "max-frame-size" → maxFrameLength,
       "protocol" → protocol.toString,
@@ -138,7 +138,7 @@ object Settings extends ClassLogging {
   //    }
   //  }
 
-  def clusterPortFrom( c: Config ): Option[Int] = c.as[Option[Int]]( SettingsPathRoot + "cluster-port" )
+  def externalPortFrom( c: Config ): Option[Int] = c.as[Option[Int]]( SimpleSettings.AkkaRemotePortPath )
   def maxFrameLengthFrom( c: Config ): Option[Int] = c.as[Option[Int]]( SettingsPathRoot + "max-frame-length" )
 
   //  def protocolFrom( c: Config ): Option[GraphiteSerializationProtocol] = {
@@ -191,16 +191,17 @@ object Settings extends ClassLogging {
 
   def seedNodesFrom( c: Config ): Seq[SeedNode] = {
     val seeds = c.as[Option[Seq[String]]]( SeedNode.AkkaPath ) getOrElse { Seq.empty[String] }
-    seeds collect { case SeedNode.AkkaNode( pr, s, h, po ) =>
-      SeedNode( protocol = pr, systemName = s, hostname = h, port = po.toInt )
+    seeds collect {
+      case SeedNode.AkkaNode( pr, s, h, po ) ⇒
+        SeedNode( protocol = pr, systemName = s, hostname = h, port = po.toInt )
     }
   }
-
 
   type Reload = () ⇒ V[Settings]
 
   def reloader(
-    args: Array[String]
+    args: Array[String],
+    systemName: Option[String] = None
   )(
     config: ⇒ Config = { ConfigFactory.load }
   )(
@@ -213,17 +214,17 @@ object Settings extends ClassLogging {
       for {
         u ← usage.disjunction
         c ← checkConfiguration( config, u ).disjunction
-      } yield makeSettings( u, c )
+      } yield makeSettings( u, systemName, c )
     }
   }
 
-  def apply( args: Array[String], config: ⇒ Config = ConfigFactory.load ): Valid[Settings] = {
+  def apply( args: Array[String], systemName: Option[String] = None, config: ⇒ Config = ConfigFactory.load ): Valid[Settings] = {
     import scalaz.Validation.FlatMap._
 
     for {
       u ← checkUsage( args )
       c ← checkConfiguration( config, u )
-    } yield makeSettings( u, c )
+    } yield makeSettings( u, systemName, c )
   }
 
   private def checkUsage( args: Array[String] ): Valid[UsageSettings] = {
@@ -236,11 +237,11 @@ object Settings extends ClassLogging {
   }
 
   private object Directory {
-    val SOURCE_HOST = "spotlight.source.host"
-    val SOURCE_PORT = "spotlight.source.port"
+    //    val SOURCE_HOST = "spotlight.source.host"
+    //    val SOURCE_PORT = "spotlight.source.port"
     val SOURCE_MAX_FRAME_LENGTH = "spotlight.source.max-frame-length"
     val SOURCE_PROTOCOL = "spotlight.source.protocol"
-    val SOURCE_WINDOW_SIZE = "spotlight.source.window-size"
+    //    val SOURCE_WINDOW_SIZE = "spotlight.source.window-size"
     val PUBLISH_GRAPHITE_HOST = "spotlight.publish.graphite.host"
     val PUBLISH_GRAPHITE_PORT = "spotlight.publish.graphite.port"
     val DETECTION_BUDGET = "spotlight.workflow.detect.timeout"
@@ -276,7 +277,7 @@ object Settings extends ClassLogging {
     required.traverseU { Req.check }.map { _ ⇒ config }
   }
 
-  private def makeSettings( usage: UsageSettings, config: Config ): Settings = {
+  private def makeSettings( usage: UsageSettings, systemName: Option[String], config: Config ): Settings = {
     //    val sourceHost: InetAddress = {
     //      usage
     //        .sourceHost
@@ -323,19 +324,25 @@ object Settings extends ClassLogging {
       protocol = protocol,
       //      windowDuration = windowSize,
       graphiteAddress = for ( h ← graphiteHost; p ← Option( graphitePort ) ) yield new InetSocketAddress( h, p ),
-      config = clusterConditionConfiguration( config, usage ),
+      config = clusterConditionConfiguration( config, usage.role, Settings.externalPortFrom( config ), systemName ),
       args = usage.args
     )
   }
 
   /** Augment the given configuration with cluster settings corresponding to the cluster role in the usage settings.
     * @param config
-    * @param usage
+    * @param role
+    * @param port
     * @return
     */
-  def clusterConditionConfiguration( config: Config, usage: UsageSettings ): Config = {
-    def makeConfigString( port: Int, roles: Seq[ClusterRole] ): String = {
-      val remotePort = "akka.remote.netty.tcp.port = " + port
+  def clusterConditionConfiguration(
+    config: Config,
+    role: ClusterRole,
+    port: Option[Int] = None,
+    systemName: Option[String] = None
+  ): Config = {
+    def makeConfigString( p: Int, roles: Seq[ClusterRole] ): String = {
+      val remotePort = "akka.remote.netty.tcp.port = " + p
       val clusterRoles = {
         if ( roles.isEmpty ) None
         else Some( "akka.cluster.roles = " + roles.map( _.entryName ).mkString( "[", ", ", "]" ) )
@@ -346,7 +353,7 @@ object Settings extends ClassLogging {
       log.info(
         Map(
           "@msg" → "augmented configuration for clustering",
-          "role" → usage.role.entryName,
+          "role" → role.entryName,
           "cluster-config" → result
         )
       )
@@ -354,25 +361,25 @@ object Settings extends ClassLogging {
       result
     }
 
-    val expectedSeeds = seedNodesFrom( config ).map( _.port ).toSet
-    val port = usage.clusterPort orElse { config.as[Option[Int]]( SimpleSettings.AkkaRemotePortPath ) } getOrElse { 0 }
+    val expectedSeeds = for { n ← seedNodesFrom( config ) if systemName.isEmpty || n.systemName == systemName.get } yield n.port
+    val requestedPort: Int = port orElse { config.as[Option[Int]]( SimpleSettings.AkkaRemotePortPath ) } getOrElse { 0 }
 
-    val clusterConfig = usage.role match {
-      case r if r == ClusterRole.Intake || r == ClusterRole.Analysis ⇒ makeConfigString( port, Seq( r ) )
+    val clusterConfig = role match {
+      case r if r == ClusterRole.Intake || r == ClusterRole.Analysis ⇒ makeConfigString( requestedPort, Seq( r ) )
 
       case ClusterRole.All ⇒ {
-        if ( !expectedSeeds.contains( port ) ) {
+        if ( !expectedSeeds.contains( requestedPort ) ) {
           log.warn(
             Map(
-              "@msg" → "configured port is not listed in cluster seed ports; overriding to first seed if possible",
+              "@msg" → "requested port is not listed in cluster seed ports; overriding to first seed if possible",
               "expected-seed-ports" → expectedSeeds,
               "seed-override" → expectedSeeds.headOption.toString,
-              "port" → port
+              "requested-port" → requestedPort
             )
           )
         }
 
-        makeConfigString( expectedSeeds.headOption getOrElse port, Seq( ClusterRole.Intake, ClusterRole.Analysis ) )
+        makeConfigString( expectedSeeds.headOption getOrElse requestedPort, Seq( ClusterRole.Intake, ClusterRole.Analysis ) )
       }
 
       case ClusterRole.Seed ⇒ {
@@ -387,7 +394,7 @@ object Settings extends ClassLogging {
           )
         }
 
-        makeConfigString( expectedSeeds.headOption getOrElse port, Seq.empty[ClusterRole] )
+        makeConfigString( expectedSeeds.headOption getOrElse requestedPort, Seq.empty[ClusterRole] )
       }
     }
 
@@ -420,7 +427,7 @@ object Settings extends ClassLogging {
       override val config: Config,
       override val args: Seq[String]
   ) extends Settings {
-    override def clusterPort: Int = config.as[Int]( SimpleSettings.AkkaRemotePortPath )
+    override def externalPort: Int = config.as[Int]( SimpleSettings.AkkaRemotePortPath )
 
     override def detectionBudget: Duration = config.as[Duration]( Directory.DETECTION_BUDGET )
 

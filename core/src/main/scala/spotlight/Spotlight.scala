@@ -107,24 +107,10 @@ object Spotlight extends Instrumented with ClassLogging {
     systemConfiguration( context ) >=> startBoundedContext( context ) >=> makeFlow( finishSubscriberOnComplete )
   }
 
-  def startActorSystemForRole( role: ClusterRole, port: Int, config: Config ): ActorSystem = {
-    def expectedSeedPortsFrom( c: Config ): Set[Int] = {
-
-      val Port = """.*:(\d+)""".r
-      val seeds = c.as[Option[Set[String]]]( "akka.cluster.seed-nodes" ) getOrElse { Set.empty[String] }
-      seeds collect { case Port( p ) ⇒ p.toInt }
-    }
-
-    val expectedSeeds = expectedSeedPortsFrom( config )
-    WORK HERE
-    val configuration = role match {
-      case ClusterRole.All ⇒ ???
-      case ClusterRole.Seed ⇒ ???
-      case ClusterRole.Analysis ⇒ ???
-      case ClusterRole.Intake ⇒ ???
-    }
-
-    ActorSystem()
+  def startActorSystemForRole( name: String, config: Config, role: ClusterRole, port: Option[Int] = None ): ActorSystem = {
+    val clusterConditioned = Settings.clusterConditionConfiguration( config, role, port, Option( name ) )
+    val seeds = Settings.seedNodesFrom( config ) filter { _.systemName == name }
+    ActorSystem( name, clusterConditioned )
   }
 
   val systemRootTypes: Set[AggregateRootType] = {
@@ -185,7 +171,7 @@ object Spotlight extends Instrumented with ClassLogging {
 
       Settings( args, config = ConfigFactory.load() ).disjunction map { settings ⇒
         log.alternative( SystemCategory, Map( "@msg" → "Settings", "usage" → settings.usage._2 ) )
-        val system = context.system getOrElse ActorSystem( context.name, settings.config ) CHANGE !!!
+        val system = context.system getOrElse startActorSystemForRole( context.name, settings.config, settings.role ) // ActorSystem( context.name, settings.config ) CHANGE !!!
         ( system, settings )
       } match {
         case \/-( systemConfiguration ) ⇒ Future successful systemConfiguration
