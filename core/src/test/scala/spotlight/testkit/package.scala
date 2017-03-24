@@ -89,14 +89,14 @@ package object testkit {
         |    }
         |  }
         |
-        |#  cluster {
-        |#    seed-nodes = [
-        |#      "akka.tcp://${systemName}@127.0.0.1:2551",
-        |#      "akka.tcp://${systemName}@127.0.0.1:2552"
-        |#    ]
-        |#
-        |#    auto-down-unreachable-after = 10s
-        |#  }
+        |  cluster {
+        |    seed-nodes = [
+        |      "akka.tcp://${systemName}@127.0.0.1:2551",
+        |      "akka.tcp://${systemName}@127.0.0.1:2552"
+        |    ]
+        |
+        |    auto-down-unreachable-after = 10s
+        |  }
         |}
         |
         |akka.actor.debug {

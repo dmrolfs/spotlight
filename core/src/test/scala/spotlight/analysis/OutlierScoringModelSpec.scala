@@ -27,6 +27,7 @@ import omnibus.commons.log.Trace
 import spotlight.analysis.shard.{ CellShardModule, LookupShardModule }
 import spotlight.analysis.{ AnalysisPlanProtocol ⇒ AP }
 import spotlight.analysis.algorithm.statistical.SimpleMovingAverageAlgorithm
+import spotlight.infrastructure.ClusterRole
 import spotlight.model.outlier._
 import spotlight.model.timeseries.TimeSeriesBase.Merging
 import spotlight.model.timeseries.{ DataPoint, TimeSeries }
@@ -42,6 +43,8 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
   override def testConfiguration( test: OneArgTest, slug: String ): Config = {
     val tc = ConfigFactory.parseString(
       """
+        |include "algorithms"
+        |
         |spotlight.workflow.detect.timeout: 10s
         |spotlight.source.buffer: 1000
         |spotlight.workflow.buffer: 1000
@@ -51,15 +54,25 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
         |  skyline {
         |    majority: 50
         |    default: on
-        |    algorithms.simple-moving-average.publish-threshold: yes
+        |    algorithms {
+        |      simple-moving-average {
+        |        publish-threshold: yes
+        |      }
+        |    }
         |  }
         |}
       """.stripMargin
     )
-    val c = spotlight.testkit.config( systemName = slug )
+
+    val c = Settings.conditionConfiguration(
+      config = tc.resolve() withFallback spotlight.testkit.config( systemName = slug ),
+      role = ClusterRole.All,
+      systemName = slug
+    )
+
     import scala.collection.JavaConverters._
     logger.debug( "Test Config: akka.cluster.seed-nodes=[{}]", c.getStringList( "akka.cluster.seed-nodes" ).asScala.mkString( ", " ) )
-    tc withFallback c
+    c
   }
 
   override def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture = {
@@ -67,6 +80,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
   }
 
   class TestSettingsWithPlans( override val plans: Set[AnalysisPlan], underlying: Settings ) extends Settings {
+    override def role: ClusterRole = underlying.role
     //    override def sourceAddress: InetSocketAddress = underlying.sourceAddress
     override def externalPort: Int = underlying.externalPort
     override def maxFrameLength: Int = underlying.maxFrameLength
@@ -77,7 +91,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
     override def parallelismFactor: Double = underlying.parallelismFactor
     override def planOrigin: ConfigOrigin = underlying.planOrigin
     override def tcpInboundBufferSize: Int = underlying.tcpInboundBufferSize
-    override def workflowBufferSize: Int = underlying.workflowBufferSize
+    //    override def workflowBufferSize: Int = underlying.workflowBufferSize
     override def args: Seq[String] = underlying.args
     override def config: Config = underlying.config
   }
@@ -89,26 +103,25 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
 
     implicit val materializer: Materializer = ActorMaterializer()
 
-    val settings: Settings = {
-      Settings( Array( "-c", "2552" ), _config ).disjunction match {
-        case scalaz.\/-( s ) ⇒ s
-        case scalaz.-\/( exs ) ⇒ {
-          exs foreach { ex ⇒ logger.info( "Setting error: [{}]", ex ) }
-          throw exs.head
-        }
-      }
-    }
-
-    val protocol = new PythonPickleProtocol
-    val stringFlow: Flow[ByteString, ByteString, NotUsed] = Flow[ByteString].via( protocol.framingFlow() )
-
-    val bus = TestProbe()
-    system.eventStream.subscribe( bus.ref, classOf[AP.Event] )
-
     //    val configurationReloader = Settings.reloader( Array.empty[String] )()()
 
     //    val algo = SeriesDensityAnalyzer.Algorithm
     val algo = SimpleMovingAverageAlgorithm.label
+
+    val algos = Map(
+      algo → ConfigFactory.parseString(
+        s"""
+        |#tolerance: 1.043822701 // eps:0.75
+        |tolerance: 3
+        |tail-average: 3
+        |minimum-population: 2
+        |seedEps: 0.75
+        |minDensityConnectedPoints: 3
+        |distance: Mahalanobis // Euclidean
+        """.stripMargin
+      )
+    )
+
     val algoRef = TestProbe()
     val routingTable = Map( algo → algoRef.ref )
 
@@ -136,11 +149,30 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
       reduce = ReduceOutliers.byCorroborationPercentage( 50 ),
       planSpecification = ConfigFactory.parseString(
         s"""
-          |algorithms.${algo}.seedEps: 5.0
-          |algorithms.${algo}.minDensityConnectedPoints: 3
+        |algorithms.${algo}.seedEps: 5.0
+        |algorithms.${algo}.minDensityConnectedPoints: 3
         """.stripMargin
       )
     )
+
+    val plans = Set( plan )
+
+    val settings: Settings = new TestSettingsWithPlans(
+      plans,
+      Settings( Array( "-r", "all", "-p", "2551" ), config = config, systemName = system.name ).disjunction match {
+        case scalaz.\/-( s ) ⇒ s
+        case scalaz.-\/( exs ) ⇒ {
+          exs foreach { ex ⇒ logger.info( "Setting error: [{}]", ex ) }
+          throw exs.head
+        }
+      }
+    )
+
+    val protocol = new PythonPickleProtocol
+    val stringFlow: Flow[ByteString, ByteString, NotUsed] = Flow[ByteString].via( protocol.framingFlow() )
+
+    val bus = TestProbe()
+    system.eventStream.subscribe( bus.ref, classOf[AP.Event] )
 
     def rootTypes: Set[AggregateRootType] = Set(
       AnalysisPlanModule.module.rootType,
@@ -154,7 +186,13 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
       import scala.concurrent.ExecutionContext.Implicits.global
       val bc = {
         for {
-          made ← BoundedContext.make( Symbol( slug ), config, rootTypes, startTasks = Set() )
+          made ← BoundedContext.make(
+            key = Symbol( slug ),
+            configuration = config,
+            rootTypes = rootTypes,
+            startTasks = Set( PlanCatalog.startSingleton( config, plans ) )
+          )
+
           started ← made.start()
         } yield started
       }
@@ -187,8 +225,6 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
         )
       )
     }
-
-    val plans = Seq( plan )
   }
 
   object Fixture {
@@ -402,59 +438,59 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
       import system.dispatcher
       import omnibus.akka.envelope._
 
-      val algos = Map(
-        algo → ConfigFactory.parseString(
-          s"""
-          |#tolerance: 1.043822701 // eps:0.75
-          |tolerance: 3
-          |tail-average: 3
-          |minimum-population: 2
-          |seedEps: 0.75
-          |minDensityConnectedPoints: 3
-          |distance: Mahalanobis // Euclidean
-          """.stripMargin
-        )
-      )
+      //      val algos = Map(
+      //        algo → ConfigFactory.parseString(
+      //          s"""
+      //          |#tolerance: 1.043822701 // eps:0.75
+      //          |tolerance: 3
+      //          |tail-average: 3
+      //          |minimum-population: 2
+      //          |seedEps: 0.75
+      //          |minDensityConnectedPoints: 3
+      //          |distance: Mahalanobis // Euclidean
+      //          """.stripMargin
+      //        )
+      //      )
 
       val grouping: Option[AnalysisPlan.Grouping] = {
         val window = None
         window map { w ⇒ AnalysisPlan.Grouping( limit = 10000, w ) }
       }
 
-      val defaultPlan = AnalysisPlan.default(
-        name = "DEFAULT_PLAN",
-        algorithms = algos,
-        grouping = grouping,
-        timeout = 5000.millis,
-        isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = algos.size, triggerPoint = 1 ),
-        reduce = ReduceOutliers.byCorroborationPercentage( 50 ),
-        planSpecification = ConfigFactory.parseString(
-          algos
-            .map {
-              case ( a, _ ) ⇒
-                logger.warn( "a:[{}]", a )
-                s"""
-               |algorithms.${a} {
-               |#  tolerance: 1.043822701 // eps:0.75
-               |  tolerance: 3
-               |  tail-average: 3
-               |  minimum-population: 2
-               |  seedEps: 0.75
-               |  minDensityConnectedPoints: 3
-               |  distance: Mahalanobis // Euclidean
-               |}
-            """.stripMargin
-            }
-            .mkString( "\n" )
-        )
-      )
+      //      val defaultPlan = AnalysisPlan.default(
+      //        name = "DEFAULT_PLAN",
+      //        algorithms = algos,
+      //        grouping = grouping,
+      //        timeout = 5000.millis,
+      //        isQuorum = IsQuorum.AtLeastQuorumSpecification( totalIssued = algos.size, triggerPoint = 1 ),
+      //        reduce = ReduceOutliers.byCorroborationPercentage( 50 ),
+      //        planSpecification = ConfigFactory.parseString(
+      //          algos
+      //            .map {
+      //              case ( a, _ ) ⇒
+      //                logger.warn( "a:[{}]", a )
+      //                s"""
+      //               |algorithms.${a} {
+      //               |#  tolerance: 1.043822701 // eps:0.75
+      //               |  tolerance: 3
+      //               |  tail-average: 3
+      //               |  minimum-population: 2
+      //               |  seedEps: 0.75
+      //               |  minDensityConnectedPoints: 3
+      //               |  distance: Mahalanobis // Euclidean
+      //               |}
+      //            """.stripMargin
+      //            }
+      //            .mkString( "\n" )
+      //        )
+      //      )
 
-      val testSettings = new TestSettingsWithPlans( Set( defaultPlan ), settings )
+      //      val testSettings = new TestSettingsWithPlans( Set( defaultPlan ), settings )
 
-      logger.debug( "default plan = [{}]", defaultPlan )
+      logger.debug( "default plan = [{}]", plan )
       implicit val timeout = akka.util.Timeout( 5.seconds )
       logger.info( "BOOTSTRAP:BEFORE BoundedContext roottypes = [{}]", boundedContext.unsafeModel.rootTypes )
-      val catalogRef = Await.result( Spotlight.makeCatalog( testSettings )( boundedContext ), 30.seconds )
+      val catalogRef = Await.result( Spotlight.makeCatalog( boundedContext ), 30.seconds )
       logger.info( "Catalog ref = [{}]", catalogRef )
 
       import PlanCatalogProtocol.{ SpotlightFlow, MakeFlow, WaitForStart }
@@ -484,7 +520,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
         algorithms = algos.keySet,
         source = TimeSeries( "foo", dp1 ),
         outliers = expectedPoints,
-        plan = defaultPlan
+        plan = plan
       )
       //      val expected = TimeSeries( "foo", (dp1 ++ dp3).sortBy( _.timestamp ) )
 

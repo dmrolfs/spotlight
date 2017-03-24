@@ -14,7 +14,6 @@ import akka.stream._
 import akka.util.ByteString
 import net.ceedubs.ficus.Ficus._
 import com.persist.logging._
-import com.persist.logging.LoggingLevels.{ DEBUG, Level, WARN }
 
 import scalaz.{ -\/, \/, \/- }
 import nl.grons.metrics.scala.MetricName
@@ -38,16 +37,23 @@ object FileBatchExample extends Instrumented with ClassLogging {
   def main( args: Array[String] ): Unit = {
     import scala.concurrent.ExecutionContext.Implicits.global
 
-    implicit val actorSystem = ActorSystem( "Spotlight" )
-    startLogging( actorSystem )
-    log.info( "Starting Application Up" )
+    val context = {
+      SpotlightContext
+      .builder
+      .set( SpotlightContext.Arguments, args )
+      //      .set( SpotlightContext.StartTasks, Set( /*SharedLeveldbStore.start(true), Spotlight.kamonStartTask*/ ) )
+//      .set( SpotlightContext.System, Some( system ) )
+      .build()
+    }
 
-    val deadListener = actorSystem.actorOf( DeadListenerActor.props, "dead-listener" )
-    actorSystem.eventStream.subscribe( deadListener, classOf[DeadLetter] )
+    //    implicit val actorSystem = ActorSystem( "Spotlight" )
+//    startLogging( actorSystem )
+//    log.info( "Starting Application Up" )
 
-    implicit val materializer = ActorMaterializer( ActorMaterializerSettings( actorSystem ) )
+    val deadListener = context.system.actorOf( DeadListenerActor.props, "dead-listener" )
+    context.system.eventStream.subscribe( deadListener, classOf[DeadLetter] )
 
-    start( args )
+    start( context )
       .map { results ⇒
         log.info(
           Map(
@@ -65,8 +71,7 @@ object FileBatchExample extends Instrumented with ClassLogging {
           println( s"\nAPP:${count.get()} batch completed finding ${results.size} outliers:" )
           results.zipWithIndex foreach { case ( o, i ) ⇒ println( s"${i + 1}: ${o}" ) }
           println( "APP:  **********************************************\n\n" )
-          loggingSystem.stop
-          actorSystem.terminate()
+          context.terminate()
         }
 
         case Failure( ex ) ⇒ {
@@ -74,56 +79,9 @@ object FileBatchExample extends Instrumented with ClassLogging {
           println( "\n\nAPP:  ********************************************** " )
           println( s"\nAPP: ${count.get()} batch completed with ERROR: ${ex}" )
           println( "APP:  **********************************************\n\n" )
-          loggingSystem.stop
-          actorSystem.terminate()
+          context.terminate()
         }
       }
-  }
-
-  def startLogging( system: ActorSystem ): Unit = {
-    val loggingSystem = LoggingSystem(
-      system,
-      spotlight.BuildInfo.name,
-      spotlight.BuildInfo.version,
-      java.net.InetAddress.getLocalHost.getHostName
-    )
-
-    activateLoggingFilter( loggingSystem, system )
-  }
-
-  def activateLoggingFilter( loggingSystem: LoggingSystem, system: ActorSystem ): Unit = {
-    val systemConfig = system.settings.config
-
-    val ActivePath = "spotlight.logging.filter.active"
-    for {
-      isActive ← systemConfig.as[Option[Boolean]]( ActivePath ) if isActive == true
-    } {
-      val IncludeClassnameSegmentsPath = "spotlight.logging.filter.include-classname-segments"
-      val watched = systemConfig.as[Option[Set[String]]]( IncludeClassnameSegmentsPath ) getOrElse Set.empty[String]
-
-      log.warn(
-        Map(
-          "@msg" → "logging started",
-          "loglevel" → loggingSystem.logLevel.toString,
-          "log-debug-for" → watched.mkString( "[", ", ", "]" )
-        )
-      )
-
-      if ( watched.nonEmpty ) {
-        val loggingLevel = loggingSystem.logLevel
-        def inWatched( fqn: String ): Boolean = watched exists { fqn.contains }
-
-        def filter( fields: Map[String, RichMsg], level: Level ): Boolean = {
-          fields
-            .get( "class" )
-            .collect { case fqn: String if inWatched( fqn ) ⇒ level >= DEBUG }
-            .getOrElse { level >= loggingLevel }
-        }
-
-        loggingSystem.setFilter( Some( filter ) )
-        loggingSystem.setLevel( DEBUG )
-      }
-    }
   }
 
   //  case class OutlierInfo( metricName: String, metricWebId: String, metricSegment: String )
@@ -174,25 +132,18 @@ object FileBatchExample extends Instrumented with ClassLogging {
 
   val count: AtomicInteger = new AtomicInteger( 0 )
 
-  def start( args: Array[String] )( implicit system: ActorSystem, materializer: Materializer ): Future[Seq[SimpleFlattenedOutlier]] = {
+  //todo
+  def start( context: SpotlightContext ): Future[Seq[SimpleFlattenedOutlier]] = {
 
     log.debug( "starting the detecting flow logic" )
 
     import scala.concurrent.ExecutionContext.Implicits.global
 
-    val context = {
-      SpotlightContext
-        .builder
-        //      .set( SpotlightContext.StartTasks, Set( /*SharedLeveldbStore.start(true), Spotlight.kamonStartTask*/ ) )
-        .set( SpotlightContext.System, Some( system ) )
-        .build()
-    }
-
-    Spotlight( context )
-      .run( args )
+    Spotlight()
+      .run( context )
       .map { e ⇒ log.debug( "bootstrapping process..." ); e }
       .flatMap {
-        case ( boundedContext, settings, scoring ) ⇒
+        case ( boundedContext, ctx, Some(scoring) ) ⇒
           log.debug( "process bootstrapped. processing data..." )
 
           import StreamMonitor._
@@ -222,10 +173,10 @@ object FileBatchExample extends Instrumented with ClassLogging {
 
           val publish = Flow[SimpleFlattenedOutlier].buffer( 10, OverflowStrategy.backpressure ).watchFlow( Publish )
 
-          sourceData( settings )
+          sourceData( ctx.settings )
             .via( Flow[String].watchSourced( DataSource ) )
             //      .via( Flow[String].buffer( 10, OverflowStrategy.backpressure ).watchSourced( Data ) )
-            .via( detectionWorkflow( boundedContext, settings, scoring ) )
+            .via( detectionWorkflow( boundedContext, ctx.settings, scoring ) )
             .via( publish )
             .runWith( Sink.seq )
       }

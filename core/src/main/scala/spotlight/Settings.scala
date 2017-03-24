@@ -35,7 +35,7 @@ trait Settings extends ClassLogging {
   def plans: Set[AnalysisPlan]
   def planOrigin: ConfigOrigin
   def tcpInboundBufferSize: Int
-  def workflowBufferSize: Int
+  //  def workflowBufferSize: Int
   def parallelism: Int = ( parallelismFactor * Runtime.getRuntime.availableProcessors() ).toInt
   def args: Seq[String]
 
@@ -53,7 +53,6 @@ trait Settings extends ClassLogging {
          |   parallelism-factor: ${parallelismFactor}
          |   parallelism: ${parallelism}
          |   tcp-inbound-buffer-size: ${tcpInboundBufferSize}
-         |   workflow-buffer-size: ${workflowBufferSize}
          | }
        """.stripMargin
     }
@@ -71,8 +70,7 @@ trait Settings extends ClassLogging {
           "detection-budget" → detectionBudget.toCoarsest.toString,
           "parallelism-factor" → parallelismFactor,
           "parallelism" → parallelism,
-          "tcp-inbound-buffer-size" → tcpInboundBufferSize,
-          "workflow-buffer-size" → workflowBufferSize
+          "tcp-inbound-buffer-size" → tcpInboundBufferSize
         )
       )
     )
@@ -124,6 +122,9 @@ trait Settings extends ClassLogging {
 }
 
 object Settings extends ClassLogging {
+  val ActorSystemName = "Spotlight"
+
+  val AkkaRemotePortPath = "akka.remote.netty.tcp.port"
   val SettingsPathRoot = "spotlight.settings."
 
   //  def sourceAddressFrom( c: Config ): Option[InetSocketAddress] = {
@@ -138,7 +139,7 @@ object Settings extends ClassLogging {
   //    }
   //  }
 
-  def externalPortFrom( c: Config ): Option[Int] = c.as[Option[Int]]( SimpleSettings.AkkaRemotePortPath )
+  def externalPortFrom( c: Config ): Option[Int] = c.as[Option[Int]]( AkkaRemotePortPath )
   def maxFrameLengthFrom( c: Config ): Option[Int] = c.as[Option[Int]]( SettingsPathRoot + "max-frame-length" )
 
   //  def protocolFrom( c: Config ): Option[GraphiteSerializationProtocol] = {
@@ -173,7 +174,7 @@ object Settings extends ClassLogging {
   }
 
   def tcpInboundBufferSizeFrom( c: Config ): Option[Int] = c.as[Option[Int]]( SettingsPathRoot + "tcp-inbound-buffer-size" )
-  def workflowBufferSizeFrom( c: Config ): Option[Int] = c.as[Option[Int]]( SettingsPathRoot + "workflow-buffer-size" )
+  //  def workflowBufferSizeFrom( c: Config ): Option[Int] = c.as[Option[Int]]( SettingsPathRoot + "workflow-buffer-size" )
 
   def detectionPlansConfigFrom( c: Config ): Config = {
     c.as[Option[Config]]( Directory.PLAN_PATH )
@@ -186,22 +187,34 @@ object Settings extends ClassLogging {
   case class SeedNode( protocol: String, systemName: String, hostname: String, port: Int )
   object SeedNode {
     val AkkaPath = "akka.cluster.seed-nodes"
-    val AkkaNode = """akka\.(.+):(.+)@(.+):(\d+)""".r
+    val AkkaNode = """akka\.(.+):\/\/(.+)@(.+):(\d+)""".r
   }
 
   def seedNodesFrom( c: Config ): Seq[SeedNode] = {
-    val seeds = c.as[Option[Seq[String]]]( SeedNode.AkkaPath ) getOrElse { Seq.empty[String] }
-    seeds collect {
+    val configSeeds = c.as[Option[Seq[String]]]( SeedNode.AkkaPath )
+    val seeds = configSeeds getOrElse Seq.empty[String]
+    val nodes = seeds collect {
       case SeedNode.AkkaNode( pr, s, h, po ) ⇒
         SeedNode( protocol = pr, systemName = s, hostname = h, port = po.toInt )
     }
+
+    log.info(
+      Map(
+        "@msg" → "seed nodes from config",
+        "config-seed-nodes" → configSeeds.toString,
+        "seeds" → seeds.toString,
+        "nodes" → nodes.mkString( "[", ", ", "]" )
+      )
+    )
+
+    nodes
   }
 
   type Reload = () ⇒ V[Settings]
 
   def reloader(
     args: Array[String],
-    systemName: Option[String] = None
+    systemName: String = ActorSystemName
   )(
     config: ⇒ Config = { ConfigFactory.load }
   )(
@@ -218,7 +231,11 @@ object Settings extends ClassLogging {
     }
   }
 
-  def apply( args: Array[String], systemName: Option[String] = None, config: ⇒ Config = ConfigFactory.load ): Valid[Settings] = {
+  def apply(
+    args: Array[String],
+    systemName: String = ActorSystemName,
+    config: ⇒ Config = ConfigFactory.load()
+  ): Valid[Settings] = {
     import scalaz.Validation.FlatMap._
 
     for {
@@ -247,7 +264,7 @@ object Settings extends ClassLogging {
     val DETECTION_BUDGET = "spotlight.workflow.detect.timeout"
     val PLAN_PATH = "spotlight.detection-plans"
     val TCP_INBOUND_BUFFER_SIZE = "spotlight.source.buffer"
-    val WORKFLOW_BUFFER_SIZE = "spotlight.workflow.buffer"
+    //    val WORKFLOW_BUFFER_SIZE = "spotlight.workflow.buffer"
   }
 
   private def checkConfiguration( config: Config, usage: UsageSettings ): Valid[Config] = {
@@ -270,14 +287,14 @@ object Settings extends ClassLogging {
       //      Req.withoutUsageSetting( Directory.PUBLISH_GRAPHITE_PORT ),
       Req.withoutUsageSetting( Directory.DETECTION_BUDGET ),
       Req.withoutUsageSetting( Directory.PLAN_PATH ),
-      Req.withoutUsageSetting( Directory.TCP_INBOUND_BUFFER_SIZE ),
-      Req.withoutUsageSetting( Directory.WORKFLOW_BUFFER_SIZE )
+      Req.withoutUsageSetting( Directory.TCP_INBOUND_BUFFER_SIZE )
+    //      Req.withoutUsageSetting( Directory.WORKFLOW_BUFFER_SIZE )
     )
 
     required.traverseU { Req.check }.map { _ ⇒ config }
   }
 
-  private def makeSettings( usage: UsageSettings, systemName: Option[String], config: Config ): Settings = {
+  private def makeSettings( usage: UsageSettings, systemName: String, config: Config ): Settings = {
     //    val sourceHost: InetAddress = {
     //      usage
     //        .sourceHost
@@ -324,22 +341,31 @@ object Settings extends ClassLogging {
       protocol = protocol,
       //      windowDuration = windowSize,
       graphiteAddress = for ( h ← graphiteHost; p ← Option( graphitePort ) ) yield new InetSocketAddress( h, p ),
-      config = clusterConditionConfiguration( config, usage.role, Settings.externalPortFrom( config ), systemName ),
+      config = conditionConfiguration( config, usage.role, systemName ),
       args = usage.args
     )
   }
+
+  def conditionConfiguration( config: Config, role: ClusterRole, systemName: String = ActorSystemName ): Config = {
+    clusterConfigurationTreatment( config, role, Settings.externalPortFrom( config ), systemName )
+      .withFallback( algorithmJournalConfigurationTreatment( config ) )
+      .withFallback( config )
+  }
+
+  private def algorithmJournalConfigurationTreatment( config: Config ): Config = ConfigFactory.empty
 
   /** Augment the given configuration with cluster settings corresponding to the cluster role in the usage settings.
     * @param config
     * @param role
     * @param port
+    * @param systemName
     * @return
     */
-  def clusterConditionConfiguration(
+  private def clusterConfigurationTreatment(
     config: Config,
     role: ClusterRole,
     port: Option[Int] = None,
-    systemName: Option[String] = None
+    systemName: String = ActorSystemName
   ): Config = {
     def makeConfigString( p: Int, roles: Seq[ClusterRole] ): String = {
       val remotePort = "akka.remote.netty.tcp.port = " + p
@@ -352,7 +378,7 @@ object Settings extends ClassLogging {
 
       log.info(
         Map(
-          "@msg" → "augmented configuration for clustering",
+          "@msg" → "conditioned configuration for clustering",
           "role" → role.entryName,
           "cluster-config" → result
         )
@@ -361,8 +387,12 @@ object Settings extends ClassLogging {
       result
     }
 
-    val expectedSeeds = for { n ← seedNodesFrom( config ) if systemName.isEmpty || n.systemName == systemName.get } yield n.port
-    val requestedPort: Int = port orElse { config.as[Option[Int]]( SimpleSettings.AkkaRemotePortPath ) } getOrElse { 0 }
+    val expectedSeeds = for { n ← seedNodesFrom( config ) if n.systemName == systemName } yield n.port
+    if ( expectedSeeds.isEmpty ) {
+      log.warn( Map( "@msg" → "there are no cluster seed nodes configured for actor system", "system" → systemName ) )
+    }
+
+    val requestedPort: Int = port orElse { config.as[Option[Int]]( AkkaRemotePortPath ) } getOrElse { 0 }
 
     val clusterConfig = role match {
       case r if r == ClusterRole.Intake || r == ClusterRole.Analysis ⇒ makeConfigString( requestedPort, Seq( r ) )
@@ -398,7 +428,7 @@ object Settings extends ClassLogging {
       }
     }
 
-    ConfigFactory.parseString( clusterConfig ) withFallback config
+    ConfigFactory.parseString( clusterConfig )
   }
 
   def makeOutlierReducer( spec: Config ): ReduceOutliers = {
@@ -413,10 +443,6 @@ object Settings extends ClassLogging {
     }
   }
 
-  object SimpleSettings {
-    val AkkaRemotePortPath = "akka.remote.netty.tcp.port"
-  }
-
   final case class SimpleSettings private[Settings] (
       override val role: ClusterRole,
       //      override val sourceAddress: InetSocketAddress,
@@ -427,7 +453,7 @@ object Settings extends ClassLogging {
       override val config: Config,
       override val args: Seq[String]
   ) extends Settings {
-    override def externalPort: Int = config.as[Int]( SimpleSettings.AkkaRemotePortPath )
+    override def externalPort: Int = config.as[Int]( AkkaRemotePortPath )
 
     override def detectionBudget: Duration = config.as[Duration]( Directory.DETECTION_BUDGET )
 
@@ -443,7 +469,7 @@ object Settings extends ClassLogging {
       )
     } //todo support plan reloading
     override def planOrigin: ConfigOrigin = detectionPlansConfigFrom( config ).origin()
-    override def workflowBufferSize: Int = config.as[Int]( Directory.WORKFLOW_BUFFER_SIZE )
+    //    override def workflowBufferSize: Int = config.as[Int]( Directory.WORKFLOW_BUFFER_SIZE )
     override def tcpInboundBufferSize: Int = config.as[Int]( Directory.TCP_INBOUND_BUFFER_SIZE )
 
   }
