@@ -437,20 +437,7 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
         }
       }
 
-      override def persistenceIdFromPath(): String = {
-        val p = self.path.toStringWithoutAddress
-        val sepPos = p lastIndexOf '/'
-        val aidRep = p drop ( sepPos + 1 )
-
-        AlgorithmIdentifier.fromAggregateId( aidRep ).disjunction match {
-          case \/-( aid ) ⇒ algorithmModule.identifying.tag( aid ).toString
-
-          case -\/( exs ) ⇒ {
-            exs foreach { ex ⇒ altLog.error( Map( "@msg" → "failed to parse persistenceId from path", "path" → p.toString ), ex ) }
-            throw exs.head
-          }
-        }
-      }
+      override def persistenceIdFromPath(): String = aggregateIdFromPath().toString
 
       override lazy val metricBaseName: MetricName = algorithm.metricBaseName
       lazy val executionTimer: Timer = metrics.timer( "execution" )
