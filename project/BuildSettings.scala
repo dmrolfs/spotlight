@@ -78,6 +78,7 @@ object BuildSettings {
         .getMethod( "getLogger", classLoader.loadClass("java.lang.String") )
         .invoke( null, "ROOT" )
     ),
+    parallelExecution in Test := false,
     testOptions in Test += Tests.Argument( TestFrameworks.ScalaTest, "-oDFT" ),
     triggeredMessage in ThisBuild := Watched.clearWhenTriggered,
     cancelable in Global := true

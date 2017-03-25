@@ -63,7 +63,10 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
     )
 
     val c = Settings.conditionConfiguration(
-      config = tc.resolve() withFallback spotlight.testkit.config( systemName = slug ),
+      config = tc.resolve().withFallback(
+        spotlight.testkit.config( systemName = slug, portOffset = scala.util.Random.nextInt( 20000 ) )
+      //        spotlight.testkit.config( systemName = slug, portOffset = ParallelAkkaSpec.testPosition.get() )
+      ),
       role = ClusterRole.All,
       systemName = slug
     )
@@ -323,7 +326,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
         .grouped( 10 )
         .runWith( Sink.head )
 
-      val result = Await.result( future, 1.second.dilated )
+      val result = Await.result( future, 3.seconds.dilated )
       result.toSet mustBe expected
     }
 
@@ -488,7 +491,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
       logger.debug( "default plan = [{}]", plan )
       implicit val timeout = akka.util.Timeout( 5.seconds )
       logger.info( "BOOTSTRAP:BEFORE BoundedContext roottypes = [{}]", boundedContext.unsafeModel.rootTypes )
-      val catalogRef = Await.result( Spotlight.makeCatalog( boundedContext ), 30.seconds )
+      val catalogRef = Await.result( Spotlight.makeCatalog( boundedContext ), 5.seconds )
       logger.info( "Catalog ref = [{}]", catalogRef )
 
       import PlanCatalogProtocol.{ SpotlightFlow, MakeFlow, WaitForStart }
@@ -609,7 +612,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
       import f._
       val sinkUnderTest = Flow[Int].map { _ * 2 }.toMat { Sink.fold( 0 ) { _ + _ } }( Keep.right )
       val future = Source( 1 to 4 ) runWith sinkUnderTest
-      val result = Await.result( future, 2.seconds.dilated )
+      val result = Await.result( future, 3.seconds.dilated )
       result mustBe 20
     }
 
@@ -617,7 +620,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
       import f._
       val sourceUnderTest = Source.repeat( 1 ).map( _ * 2 )
       val future = sourceUnderTest.grouped( 10 ).runWith( Sink.head )
-      val result = Await.result( future, 2.second.dilated )
+      val result = Await.result( future, 3.second.dilated )
       result mustBe Seq.fill( 10 )( 2 )
     }
 
@@ -625,7 +628,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
       import f._
       val flowUnderTest = Flow[Int].takeWhile( _ < 5 )
       val future = Source( 1 to 10 ).via( flowUnderTest ).runWith( Sink.fold( Seq.empty[Int] ) { _ :+ _ } )
-      val result = Await.result( future, 2.seconds.dilated )
+      val result = Await.result( future, 3.seconds.dilated )
       result mustBe ( 1 to 4 )
     }
 

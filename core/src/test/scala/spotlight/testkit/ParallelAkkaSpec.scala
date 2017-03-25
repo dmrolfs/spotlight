@@ -197,7 +197,7 @@ trait ParallelAkkaSpec
 
         Option( f.system ) foreach { s ⇒
           val terminated = s.terminate()
-          Await.ready( terminated, 1.second )
+          Await.ready( terminated, 3.second )
         }
 
         outcome
