@@ -11,7 +11,6 @@ import akka.util.Timeout
 import scalaz.{ Source ⇒ _, _ }
 import scalaz.Scalaz._
 import scalaz.Kleisli.kleisli
-import scalaz.std.scalaFuture
 import com.typesafe.config.Config
 import net.ceedubs.ficus.Ficus._
 import com.persist.logging._

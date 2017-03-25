@@ -47,17 +47,15 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
         |
         |spotlight.workflow.detect.timeout: 10s
         |spotlight.source.buffer: 1000
-        |spotlight.workflow.buffer: 1000
-        |spotlight.source.host: "0.0.0.0"
-        |spotlight.source.port: 2004
+        |#spotlight.workflow.buffer: 1000
+        |#spotlight.source.host: "0.0.0.0"
+        |#spotlight.source.port: 2004
         |spotlight.detection-plans {
         |  skyline {
         |    majority: 50
         |    default: on
         |    algorithms {
-        |      simple-moving-average {
-        |        publish-threshold: yes
-        |      }
+        |      simple-moving-average: on
         |    }
         |  }
         |}
@@ -138,8 +136,8 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
         algo →
           ConfigFactory.parseString(
             s"""
-          |seedEps: 5.0
-          |minDensityConnectedPoints: 3
+          |tail-average = 3
+          |tolerance = 3
           """.stripMargin
           )
       ),
@@ -149,8 +147,8 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
       reduce = ReduceOutliers.byCorroborationPercentage( 50 ),
       planSpecification = ConfigFactory.parseString(
         s"""
-        |algorithms.${algo}.seedEps: 5.0
-        |algorithms.${algo}.minDensityConnectedPoints: 3
+        |algorithms.${algo}.tail-average: 3
+        |algorithms.${algo}.tolerance: 3
         """.stripMargin
       )
     )
@@ -452,10 +450,10 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
       //        )
       //      )
 
-      val grouping: Option[AnalysisPlan.Grouping] = {
-        val window = None
-        window map { w ⇒ AnalysisPlan.Grouping( limit = 10000, w ) }
-      }
+      //      val grouping: Option[AnalysisPlan.Grouping] = {
+      //        val window = None
+      //        window map { w ⇒ AnalysisPlan.Grouping( limit = 10000, w ) }
+      //      }
 
       //      val defaultPlan = AnalysisPlan.default(
       //        name = "DEFAULT_PLAN",
