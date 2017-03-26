@@ -49,15 +49,13 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[AnalysisPlanState] with Op
       """.stripMargin
     )
 
-    val c = Settings.conditionConfiguration(
+    Settings.conditionConfiguration(
       config = tc.resolve().withFallback(
         spotlight.testkit.config( systemName = slug, portOffset = scala.util.Random.nextInt( 20000 ) )
       ),
       role = ClusterRole.All,
       systemName = slug
     )
-
-    c
   }
 
   override def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture = {
