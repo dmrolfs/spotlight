@@ -23,8 +23,10 @@ import omnibus.akka.envelope._
 import omnibus.commons.{ TryV, V }
 import omnibus.commons.identifier.Identifying
 import omnibus.commons.log.Trace
+import spotlight.Settings
 import spotlight.analysis.{ AnomalyScore, DetectOutliersInSeries, DetectUsing, HistoricalStatistics }
 import spotlight.analysis.algorithm.{ AlgorithmProtocol ⇒ P }
+import spotlight.infrastructure.ClusterRole
 import spotlight.model.outlier._
 import spotlight.model.statistics.MovingStatistics
 import spotlight.model.timeseries._
@@ -58,7 +60,19 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
   }
 
   override def testConfiguration( test: OneArgTest, slug: String ): Config = {
-    val c = spotlight.testkit.config( systemName = slug )
+    val tc = ConfigFactory.parseString(
+      """
+        |
+      """.stripMargin
+    )
+
+    val c = Settings.conditionConfiguration(
+      config = tc.resolve().withFallback(
+        spotlight.testkit.config( systemName = slug, portOffset = scala.util.Random.nextInt( 20000 ) )
+      ),
+      role = ClusterRole.All,
+      systemName = slug
+    )
 
     import scala.collection.JavaConverters._
     log.debug(
@@ -250,7 +264,7 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
           sender.ref
         )
 
-      sender.expectMsgPF( 500.millis.dilated, hint ) {
+      sender.expectMsgPF( 3.seconds.dilated, hint ) {
         case m @ Envelope( SeriesOutliers( a, s, p, o, t ), _ ) if expectedAnomalies.nonEmpty ⇒ {
           log.info( "evaluate EXPECTED ANOMALIES..." )
           a mustBe Set( defaultAlgorithm.label )
@@ -535,12 +549,12 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
 
   def bootstrapSuite(): Unit = {
     s"${defaultAlgorithm.label} entity" should {
-      "have zero shape before advance" in { f: Fixture ⇒
+      "have zero shape before advance" taggedAs WIP in { f: Fixture ⇒
         import f._
 
         logger.debug( "aggregate = [{}]", aggregate )
         val actual = ( aggregate ? P.GetTopicShapeSnapshot( id, scope.topic ) ).mapTo[P.TopicShapeSnapshot]
-        whenReady( actual, timeout( 5.seconds ) ) { a ⇒
+        whenReady( actual, timeout( 10.seconds ) ) { a ⇒
           a.sourceId.id mustBe id.id
           a.snapshot mustBe None
         }

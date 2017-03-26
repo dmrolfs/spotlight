@@ -273,7 +273,7 @@ class PastPeriodAverageAlgorithmSpec extends AlgorithmSpec[PastPeriod.Shape] {
       val anomalyPositions = Set.empty[Int]
       val expectedAnomolies = series.points.zipWithIndex.collect { case ( dp, i ) if anomalyPositions.contains( i ) ⇒ dp }
 
-      sender.expectMsgPF( 500.milliseconds.dilated, "result" ) {
+      sender.expectMsgPF( 3.seconds.dilated, "result" ) {
         case m @ Envelope( NoOutliers( a, ts, p, tb ), _ ) ⇒ {
           log.info(
             Map(
@@ -335,7 +335,7 @@ class PastPeriodAverageAlgorithmSpec extends AlgorithmSpec[PastPeriod.Shape] {
         ThresholdBoundary( pts( 7 ).timestamp, Some( 60.72913575 ), Some( 103.2144051 ), Some( 145.6996745 ) )
       )
 
-      sender.expectMsgPF( 500.milliseconds.dilated, "result" ) {
+      sender.expectMsgPF( 3.seconds.dilated, "result" ) {
         case m @ Envelope( NoOutliers( a, ts, p, tb ), _ ) ⇒ {
           log.info(
             Map(
@@ -421,7 +421,7 @@ class PastPeriodAverageAlgorithmSpec extends AlgorithmSpec[PastPeriod.Shape] {
       val anomalyPositions = Set.empty[Int]
       val expectedAnomolies = series.points.zipWithIndex.collect { case ( dp, i ) if anomalyPositions.contains( i ) ⇒ dp }
 
-      sender.expectMsgPF( 500.milliseconds.dilated, "result" ) {
+      sender.expectMsgPF( 3.seconds.dilated, "result" ) {
         case m @ Envelope( NoOutliers( a, ts, p, tb ), _ ) ⇒ {
           log.info(
             Map(
@@ -470,7 +470,7 @@ class PastPeriodAverageAlgorithmSpec extends AlgorithmSpec[PastPeriod.Shape] {
       val anomalyPositions = Set( 98, 99, 100, 115, 116, 117, 118, 119, 120 )
       val expectedAnomolies = series.points.zipWithIndex.collect { case ( dp, i ) if anomalyPositions.contains( i ) ⇒ dp }
 
-      sender.expectMsgPF( 500.milliseconds.dilated, "result" ) {
+      sender.expectMsgPF( 3.seconds.dilated, "result" ) {
         case m @ Envelope( SeriesOutliers( a, ts, p, o, tb ), _ ) ⇒ {
           log.info(
             Map(

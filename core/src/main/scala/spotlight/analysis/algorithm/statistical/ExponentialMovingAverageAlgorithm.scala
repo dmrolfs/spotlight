@@ -38,5 +38,5 @@ object ExponentialMovingAverageAlgorithm extends Algorithm[Moment]( label = "ewm
   /** Optimization available for algorithms to more efficiently respond to size estimate requests for algorithm sharding.
     * @return blended average size for the algorithm shape
     */
-  override def estimatedAverageShapeSize( properties: Option[Config] ): Option[Information] = Some( Bytes( 354 ) )
+  override def estimatedAverageShapeSize( properties: Option[Config] ): Option[Information] = Some( Bytes( 374 ) )
 }

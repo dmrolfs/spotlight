@@ -459,7 +459,7 @@ class SimpleMovingAverageAlgorithmSpec extends AlgorithmSpec[SimpleMovingAverage
       log.info( "---------- TEST DONE -----------" )
     }
 
-    "handle example data" taggedAs WIP in { f: Fixture ⇒
+    "handle example data" in { f: Fixture ⇒
       import f._
 
       val ppConfig = ConfigFactory.parseString(
