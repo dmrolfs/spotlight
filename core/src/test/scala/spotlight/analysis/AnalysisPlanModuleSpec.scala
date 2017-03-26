@@ -16,12 +16,14 @@ import omnibus.akka.publish.StackableStreamPublisher
 import omnibus.commons.{ TryV, V }
 import omnibus.commons.log.Trace
 import shapeless.Lens
+import spotlight.Settings
 import spotlight.analysis.AnalysisPlanModule.AggregateRoot.PlanActor
 import spotlight.analysis.AnalysisPlanModule.AggregateRoot.PlanActor.{ FlowConfigurationProvider, WorkerProvider }
 import spotlight.analysis.algorithm.statistical.SimpleMovingAverageAlgorithm
 import spotlight.model.outlier._
 import spotlight.testkit.EntityModuleSpec
 import spotlight.analysis.{ AnalysisPlanProtocol ⇒ P }
+import spotlight.infrastructure.ClusterRole
 import spotlight.model.timeseries._
 
 /** Created by rolfsd on 6/15/16.
@@ -40,7 +42,23 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[AnalysisPlanState] with Op
     override def environment: AggregateEnvironment = LocalAggregate
   }
 
-  override def testConfiguration( test: OneArgTest, slug: String ): Config = AnalysisPlanModuleSpec.config( systemName = slug )
+  override def testConfiguration( test: OneArgTest, slug: String ): Config = {
+    val tc = ConfigFactory.parseString(
+      """
+        |
+      """.stripMargin
+    )
+
+    val c = Settings.conditionConfiguration(
+      config = tc.resolve().withFallback(
+        spotlight.testkit.config( systemName = slug, portOffset = scala.util.Random.nextInt( 20000 ) )
+      ),
+      role = ClusterRole.All,
+      systemName = slug
+    )
+
+    c
+  }
 
   override def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture = {
     test.tags match {
