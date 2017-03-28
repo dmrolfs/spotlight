@@ -15,6 +15,7 @@ import omnibus.akka.envelope._
 import omnibus.akka.metrics.InstrumentedActor
 import omnibus.commons.{ TryV, Valid }
 import omnibus.commons.concurrent._
+import spotlight.Settings
 import spotlight.analysis.algorithm._
 import spotlight.analysis.algorithm.statistical._
 import spotlight.model.outlier.AnalysisPlan
@@ -129,57 +130,6 @@ object DetectionAlgorithmRouter extends ClassLogging {
       }
     }
 
-    def userAlgorithms( configuration: Config ): Valid[Map[String, Class[_ <: Algorithm[_]]]] = {
-      def loadClass( algorithm: String, fqcn: String ): TryV[Class[_ <: Algorithm[_]]] = {
-        \/ fromTryCatchNonFatal { Class.forName( fqcn, true, getClass.getClassLoader ).asInstanceOf[Class[_ <: Algorithm[_]]] }
-      }
-
-      def unwrapAlgorithmFQCN( algorithm: String, cv: ConfigValue ): TryV[( String, String )] = {
-        import scala.reflect._
-        val ConfigObjectType = classTag[ConfigObject]
-        val ClassPath = "class"
-        val value = cv.unwrapped()
-        log.debug(
-          Map(
-            "@msg" → "unwrapping algorithm FQCN",
-            "algorithm" → algorithm,
-            "config-value-type" → cv.valueType,
-            "config-value" → cv.toString,
-            "is-object" → ConfigObjectType.unapply( cv ).isDefined
-          )
-        )
-
-        val algoFQCN = for {
-          algoConfig ← ConfigObjectType.unapply( cv ) map { _.toConfig }
-          fqcn ← algoConfig.as[Option[String]]( ClassPath )
-          _ = log.debug( Map( "@msg" → "fqcn from algo config", "algorithm" → algorithm, "fqcn" → fqcn ) )
-        } yield ( algorithm, fqcn ).right
-
-        algoFQCN getOrElse InsufficientAlgorithmError( algorithm, value.toString ).left
-      }
-
-      val AlgorithmPath = "spotlight.algorithms"
-      configuration.as[Option[Config]]( AlgorithmPath )
-        .map { algoConfig ⇒
-          import scala.collection.JavaConverters._
-          algoConfig.root.entrySet.asScala.toList
-            .map { entry ⇒ ( entry.getKey, entry.getValue ) }
-            .traverseU {
-              case ( a, cv ) ⇒
-                val ac = for {
-                  algorithmFqcn ← unwrapAlgorithmFQCN( a, cv )
-                  ( algorithm, fqcn ) = algorithmFqcn
-                  clazz ← loadClass( algorithm, fqcn )
-                } yield ( algorithm, clazz )
-                ac.validationNel
-            }
-            .map { algorithmClasses ⇒ Map( algorithmClasses: _* ) }
-        }
-        .getOrElse {
-          Map.empty[String, Class[_ <: Algorithm[_]]].successNel
-        }
-    }
-
     def loadAlgorithms(
       boundedContext: BoundedContext,
       configuration: Config
@@ -204,7 +154,9 @@ object DetectionAlgorithmRouter extends ClassLogging {
       }
 
       val userAlgos: TryV[Map[String, Class[_ <: Algorithm[_]]]] = {
-        userAlgorithms( configuration ).disjunction
+        Settings
+          .userAlgorithmClassesFrom( configuration )
+          .disjunction
           .leftMap { exs ⇒
             exs foreach { ex ⇒ log.error( "loading user algorithm failed", ex ) }
             exs.head
@@ -232,7 +184,8 @@ object DetectionAlgorithmRouter extends ClassLogging {
           .map { _.flatten }
       }
 
-      boundedContext.futureModel
+      boundedContext
+        .futureModel
         .flatMap { implicit model ⇒
           val unknownRoots = {
             for {

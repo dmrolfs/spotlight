@@ -30,6 +30,8 @@ object Dependencies {
     val agent = module( "agent" )
     val cluster = module( "cluster" )
     val clusterSharding = module( "cluster-sharding" )
+    val clusterMetrics = module( "cluster-metrics" )
+    val clusterTools = module( "cluster-tools" )
     val contrib = module( "contrib" )
     val persistence = module( "persistence" )
     val persistenceQuery = module( "persistence-query-experimental" )
@@ -84,9 +86,9 @@ object Dependencies {
   object metrics {
     val version = "3.1.2"
     def module( id: String ) = "io.dropwizard.metrics" % s"metrics-$id" % "3.1.2"
-    def all = Seq( sigar, core, graphite, metricsScala, hdrhistogramReservoir, hdrhistogram ) ++ kamon.all
+    def all = Seq( /*sigar,*/ core, graphite, metricsScala, hdrhistogramReservoir, hdrhistogram ) ++ kamon.all
 
-    val sigar = "org.hyperic" % "sigar" % "1.6.4"
+//    val sigar = "org.hyperic" % "sigar" % "1.6.4"
 
     val core = module( "core" )
     val graphite = module( "graphite" )
@@ -106,6 +108,7 @@ object Dependencies {
       val system = module( "system-metrics" )
       val statsd = module( "statsd" )
       val logReporter = module( "log-reporter" )
+      val sigarLoader = "io.kamon" % "sigar-loader" % "1.6.6-rev002"
     }
   }
 
@@ -171,6 +174,11 @@ object Dependencies {
     time.all ++
     Seq(
       akka.actor,
+      akka.cluster,
+      akka.clusterSharding,
+      akka.clusterMetrics,
+      metrics.kamon.sigarLoader,
+      akka.remote,
       akka.stream,
       akka.slf4j,
       akka.kryo,
@@ -178,8 +186,8 @@ object Dependencies {
       akka.persistence,
       akka.persistenceQuery,
       persistence.cassandra,
-persistence.leveldb,
-persistence.leveldbjni,
+//persistence.leveldb,
+//persistence.leveldbjni,
       log.logback.classic,
       facility.enumeratum,
       facility.bloomFilter,

@@ -9,11 +9,12 @@ import scalaz._
 import com.typesafe.config._
 import net.ceedubs.ficus.Ficus._
 import com.persist.logging._
-import java.net
 
-import omnibus.commons.{ V, Valid }
+import omnibus.commons.{ TryV, V, Valid }
 import omnibus.commons.config._
+import omnibus.commons.util._
 import spotlight.analysis.OutlierDetection
+import spotlight.analysis.algorithm.{ Algorithm, InsufficientAlgorithmError }
 import spotlight.infrastructure.ClusterRole
 import spotlight.model.outlier._
 import spotlight.model.timeseries.Topic
@@ -184,6 +185,57 @@ object Settings extends ClassLogging {
       }
   }
 
+  def userAlgorithmClassesFrom( configuration: Config ): Valid[Map[String, Class[_ <: Algorithm[_]]]] = {
+    def loadClass( algorithm: String, fqcn: String ): TryV[Class[_ <: Algorithm[_]]] = {
+      \/ fromTryCatchNonFatal { Class.forName( fqcn, true, getClass.getClassLoader ).asInstanceOf[Class[_ <: Algorithm[_]]] }
+    }
+
+    def unwrapAlgorithmFQCN( algorithm: String, cv: ConfigValue ): TryV[( String, String )] = {
+      import scala.reflect._
+      val ConfigObjectType = classTag[ConfigObject]
+      val ClassPath = "class"
+      val value = cv.unwrapped()
+      //      log.debug(
+      //        Map(
+      //          "@msg" → "unwrapping algorithm FQCN",
+      //          "algorithm" → algorithm,
+      //          "config-value-type" → cv.valueType,
+      //          "is-object" → ConfigObjectType.unapply( cv ).isDefined,
+      //          "config-value" → cv.render()
+      //        )
+      //      )
+
+      val algoFQCN = for {
+        algoConfig ← ConfigObjectType.unapply( cv ) map { _.toConfig }
+        fqcn ← algoConfig.as[Option[String]]( ClassPath )
+        _ = log.debug( Map( "@msg" → "fqcn from algo config", "algorithm" → algorithm, "fqcn" → fqcn ) )
+      } yield ( algorithm, fqcn ).right
+
+      algoFQCN getOrElse InsufficientAlgorithmError( algorithm, value.toString ).left
+    }
+
+    val AlgorithmPath = "spotlight.algorithms"
+    configuration.as[Option[Config]]( AlgorithmPath )
+      .map { algoConfig ⇒
+        import scala.collection.JavaConverters._
+        algoConfig.root.entrySet.asScala.toList
+          .map { entry ⇒ ( entry.getKey, entry.getValue ) }
+          .traverseU {
+            case ( a, cv ) ⇒
+              val ac = for {
+                algorithmFqcn ← unwrapAlgorithmFQCN( a, cv )
+                ( algorithm, fqcn ) = algorithmFqcn
+                clazz ← loadClass( algorithm, fqcn )
+              } yield ( algorithm, clazz )
+              ac.validationNel
+          }
+          .map { algorithmClasses ⇒ Map( algorithmClasses: _* ) }
+      }
+      .getOrElse {
+        Map.empty[String, Class[_ <: Algorithm[_]]].successNel
+      }
+  }
+
   case class SeedNode( protocol: String, systemName: String, hostname: String, port: Int )
   object SeedNode {
     val AkkaPath = "akka.cluster.seed-nodes"
@@ -334,37 +386,59 @@ object Settings extends ClassLogging {
 
     val graphitePort = config.as[Option[Int]]( Directory.PUBLISH_GRAPHITE_PORT ) getOrElse { 2004 }
 
+    val usageExternalPort = usage.externalPort orElse Settings.externalPortFrom( config ) getOrElse { 0 }
+
+    log.info(
+      Map(
+        "@msg" → "make settings from",
+        "usage" → Map(
+          "role" → usage.role.entryName,
+          "external-port" → usage.externalPort.toString,
+          "args" → usage.args.mkString( "[", ", ", "]" )
+        ),
+        "max-frame-length" → maxFrameLength,
+        "protocol" → protocol.getClass.safeSimpleName,
+        "graphite" → Map( "host" → graphiteHost.toString, "port" → graphitePort )
+      )
+    )
+
     SimpleSettings(
       role = usage.role,
+      externalPort = usageExternalPort,
       //      sourceAddress = new InetSocketAddress( sourceHost, sourcePort ),
       maxFrameLength = maxFrameLength,
       protocol = protocol,
       //      windowDuration = windowSize,
       graphiteAddress = for ( h ← graphiteHost; p ← Option( graphitePort ) ) yield new InetSocketAddress( h, p ),
-      config = conditionConfiguration( config, usage.role, systemName ),
+      config = adaptConfiguration( config, usage.role, usageExternalPort, systemName ),
       args = usage.args
     )
   }
 
-  def conditionConfiguration( config: Config, role: ClusterRole, systemName: String = ActorSystemName ): Config = {
-    clusterConfigurationTreatment( config, role, Settings.externalPortFrom( config ), systemName )
-      .withFallback( algorithmJournalConfigurationTreatment( config ) )
+  def adaptConfiguration(
+    config: Config,
+    role: ClusterRole,
+    externalPort: Int,
+    systemName: String = ActorSystemName
+  ): Config = {
+    adaptConfiguratonForClustering( config, role, externalPort, systemName )
+      .withFallback( adaptConfigurationForAlgorithmJournal( config ) )
       .withFallback( config )
   }
 
-  private def algorithmJournalConfigurationTreatment( config: Config ): Config = ConfigFactory.empty
+  private def adaptConfigurationForAlgorithmJournal( config: Config ): Config = ConfigFactory.empty
 
   /** Augment the given configuration with cluster settings corresponding to the cluster role in the usage settings.
     * @param config
     * @param role
-    * @param port
+    * @param requestedPort
     * @param systemName
     * @return
     */
-  private def clusterConfigurationTreatment(
+  private def adaptConfiguratonForClustering(
     config: Config,
     role: ClusterRole,
-    port: Option[Int] = None,
+    requestedPort: Int,
     systemName: String = ActorSystemName
   ): Config = {
     def makeConfigString( p: Int, roles: Seq[ClusterRole] ): String = {
@@ -376,11 +450,18 @@ object Settings extends ClassLogging {
 
       val result = clusterRoles map { remotePort + '\n' + _ } getOrElse remotePort
 
+      import scala.collection.JavaConverters._
+
       log.info(
         Map(
-          "@msg" → "conditioned configuration for clustering",
+          "@msg" → "#TEST adapted configuration for clustering",
           "role" → role.entryName,
-          "cluster-config" → result
+          AkkaRemotePortPath → config.as[Option[Int]]( AkkaRemotePortPath ).toString,
+          "requested-port" → requestedPort,
+          "cluster-config" → ConfigFactory.parseString( result ).toString
+        //          "cluster-config" → Map(
+        //            ConfigFactory.parseString( result ).root.entrySet.asScala.toSeq.map( e ⇒ ( e.getKey, e.getValue.render() ) ): _*
+        //          )
         )
       )
 
@@ -392,39 +473,45 @@ object Settings extends ClassLogging {
       log.warn( Map( "@msg" → "there are no cluster seed nodes configured for actor system", "system" → systemName ) )
     }
 
-    val requestedPort: Int = port orElse { config.as[Option[Int]]( AkkaRemotePortPath ) } getOrElse { 0 }
-
     val clusterConfig = role match {
       case r if r == ClusterRole.Intake || r == ClusterRole.Analysis ⇒ makeConfigString( requestedPort, Seq( r ) )
 
       case ClusterRole.All ⇒ {
-        if ( !expectedSeeds.contains( requestedPort ) ) {
-          log.warn(
-            Map(
-              "@msg" → "requested port is not listed in cluster seed ports; overriding to first seed if possible",
-              "expected-seed-ports" → expectedSeeds,
-              "seed-override" → expectedSeeds.headOption.toString,
-              "requested-port" → requestedPort
+        val port = {
+          if ( expectedSeeds contains requestedPort ) requestedPort
+          else {
+            log.warn(
+              Map(
+                "@msg" → "requested port is not listed in cluster seed ports; overriding to first seed if possible",
+                "expected-seed-ports" → expectedSeeds,
+                "seed-override" → expectedSeeds.headOption.toString,
+                "requested-port" → requestedPort
+              )
             )
-          )
+            expectedSeeds.headOption getOrElse requestedPort
+          }
         }
 
-        makeConfigString( expectedSeeds.headOption getOrElse requestedPort, Seq( ClusterRole.Intake, ClusterRole.Analysis ) )
+        makeConfigString( port, Seq( ClusterRole.Intake, ClusterRole.Analysis ) )
       }
 
       case ClusterRole.Seed ⇒ {
-        if ( !expectedSeeds.contains( port ) ) {
-          log.error(
-            Map(
-              "@msg" → "configured port is not listed in cluster seed ports; overriding to first seed if possible",
-              "expected-seed-ports" → expectedSeeds,
-              "seed-override" → expectedSeeds.headOption.toString,
-              "port" → port
+        val port = {
+          if ( expectedSeeds contains requestedPort ) requestedPort
+          else {
+            log.warn(
+              Map(
+                "@msg" → "configured port is not listed in cluster seed ports; overriding to first seed if possible",
+                "expected-seed-ports" → expectedSeeds,
+                "seed-override" → expectedSeeds.headOption.toString,
+                "requested-port" → requestedPort
+              )
             )
-          )
+            expectedSeeds.headOption getOrElse requestedPort
+          }
         }
 
-        makeConfigString( expectedSeeds.headOption getOrElse requestedPort, Seq.empty[ClusterRole] )
+        makeConfigString( port, Seq( ClusterRole.Seed ) )
       }
     }
 
@@ -445,6 +532,7 @@ object Settings extends ClassLogging {
 
   final case class SimpleSettings private[Settings] (
       override val role: ClusterRole,
+      override val externalPort: Int,
       //      override val sourceAddress: InetSocketAddress,
       override val maxFrameLength: Int,
       override val protocol: GraphiteSerializationProtocol,
@@ -453,8 +541,6 @@ object Settings extends ClassLogging {
       override val config: Config,
       override val args: Seq[String]
   ) extends Settings {
-    override def externalPort: Int = config.as[Int]( AkkaRemotePortPath )
-
     override def detectionBudget: Duration = config.as[Duration]( Directory.DETECTION_BUDGET )
 
     override def parallelismFactor: Double = {
@@ -478,7 +564,7 @@ object Settings extends ClassLogging {
 
   final case class UsageSettings private[Settings] (
     role: ClusterRole,
-    clusterPort: Option[Int] = None,
+    externalPort: Option[Int] = None,
     //    sourceHost: Option[InetAddress] = None,
     //    sourcePort: Option[Int] = None,
     //    windowSize: Option[FiniteDuration] = None,
@@ -510,7 +596,7 @@ object Settings extends ClassLogging {
       //        .text( "connection port of source server" )
 
       opt[Int]( 'p', "port" )
-        .action { ( e, c ) ⇒ c.copy( clusterPort = Some( e ) ) }
+        .action { ( e, c ) ⇒ c.copy( externalPort = Some( e ) ) }
         .text( "listening remote port for this node in the processing cluster. " +
           "There must be at least one seed at 2551 or 2552; otherwise can be 0 which is the default" )
 
@@ -525,22 +611,22 @@ object Settings extends ClassLogging {
 
       help( "help" )
 
-      note(
-        """
-          |DBSCAN eps: The value for ε can then be chosen by using a k-distance graph, plotting the distance to the k = minPts
-          |nearest neighbor. Good values of ε are where this plot shows a strong bend: if ε is chosen much too small, a large
-          |part of the data will not be clustered; whereas for a too high value of ε, clusters will merge and the majority of
-          |objects will be in the same cluster. In general, small values of ε are preferable, and as a rule of thumb only a small
-          |fraction of points should be within this distance of each other.
-          |
-          |DBSCAN density: As a rule of thumb, a minimum minPts can be derived from the number of dimensions D in the data set,
-          |as minPts ≥ D + 1. The low value of minPts = 1 does not make sense, as then every point on its own will already be a
-          |cluster. With minPts ≤ 2, the result will be the same as of hierarchical clustering with the single link metric, with
-          |the dendrogram cut at height ε. Therefore, minPts must be chosen at least 3. However, larger values are usually better
-          |for data sets with noise and will yield more significant clusters. The larger the data set, the larger the value of
-          |minPts should be chosen.
-        """.stripMargin
-      )
+      //      note(
+      //        """
+      //          |DBSCAN eps: The value for ε can then be chosen by using a k-distance graph, plotting the distance to the k = minPts
+      //          |nearest neighbor. Good values of ε are where this plot shows a strong bend: if ε is chosen much too small, a large
+      //          |part of the data will not be clustered; whereas for a too high value of ε, clusters will merge and the majority of
+      //          |objects will be in the same cluster. In general, small values of ε are preferable, and as a rule of thumb only a small
+      //          |fraction of points should be within this distance of each other.
+      //          |
+      //          |DBSCAN density: As a rule of thumb, a minimum minPts can be derived from the number of dimensions D in the data set,
+      //          |as minPts ≥ D + 1. The low value of minPts = 1 does not make sense, as then every point on its own will already be a
+      //          |cluster. With minPts ≤ 2, the result will be the same as of hierarchical clustering with the single link metric, with
+      //          |the dendrogram cut at height ε. Therefore, minPts must be chosen at least 3. However, larger values are usually better
+      //          |for data sets with noise and will yield more significant clusters. The larger the data set, the larger the value of
+      //          |minPts should be chosen.
+      //        """.stripMargin
+      //      )
     }
   }
 
@@ -565,7 +651,7 @@ object Settings extends ClassLogging {
                 Map(
                   "@msg" → "Settings making plan from specification",
                   "origin" → Map( "origin" → spec.origin().toString, "line-number" → spec.origin().lineNumber ),
-                  "spec" → spec.toString
+                  "spec" → spec.root.render()
                 )
               )
 

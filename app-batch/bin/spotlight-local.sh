@@ -6,12 +6,11 @@ echo "DIR=$DIR"
 
 # mkdir ./target/persistence/shared-journal ./target/persistence/snapshots
 
-SPOTLIGHT_CONFIG="application.conf"
-
 #SLF4J_LEVEL=DEBUG
 #SLF4J_LEVEL=INFO
 SLF4J_LEVEL=WARN
 
+SPOTLIGHT_CONFIG=application.conf
 
 #rm ./log/monitor.csv
 # rm -rf ./graphite/target/data/leveldb
@@ -34,7 +33,6 @@ JAVAAGENT="$DIR/../../infr/coreos/aspectjweaver-1.8.10.jar"
 echo "javaagent=${JAVAAGENT}"
 
 java -classpath ${CPATH} \
-  -Dspotlight.config=${SPOTLIGHT_CONFIG} \
   -Dconfig.resource=${SPOTLIGHT_CONFIG} \
   -Djava.library.path="${DIR}/../../infr/native" \
   -DSLF4J_LEVEL="${SLF4J_LEVEL}" \
@@ -42,4 +40,4 @@ java -classpath ${CPATH} \
   -Xmx10g \
   -javaagent:"${JAVAAGENT}" \
   -XX:MaxMetaspaceSize=512m \
-  ${MAIN_CLASS} -c 2552 "$@"
+  ${MAIN_CLASS} "$@"

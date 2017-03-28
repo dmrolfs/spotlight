@@ -140,6 +140,9 @@ object LookupShardModule extends AggregateRootModule[LookupShardCatalog, LookupS
     override val name: String = module.identifying.idTag.name
     override type S = LookupShardCatalog
     override val identifying: Identifying[S] = module.identifying
+
+    override val clusterRoles: Set[String] = Set( ClusterRole.Analysis.entryName )
+
     override val snapshotPeriod: Option[FiniteDuration] = None
     override def repositoryProps( implicit model: DomainModel ): Props = {
       CommonClusteredRepository.props(
@@ -147,7 +150,7 @@ object LookupShardModule extends AggregateRootModule[LookupShardCatalog, LookupS
         rootType = this,
         makeAggregateProps = AggregateRoot.ShardingActor.props( _: DomainModel, _: AggregateRootType )
       )(
-          settings = ClusterShardingSettings( model.system ).withRole( ClusterRole.Analysis.entryName )
+          settings = ClusterShardingSettings( model.system )
         )
       //      CommonLocalRepository.props( model, this, AggregateRoot.ShardingActor.props( _: DomainModel, _: AggregateRootType ) )
     }

@@ -36,52 +36,42 @@ import spotlight.protocol.GraphiteSerializationProtocol
 object FileBatchExample extends Instrumented with ClassLogging {
   def main( args: Array[String] ): Unit = {
     import scala.concurrent.ExecutionContext.Implicits.global
+    import SpotlightContext.{ Builder ⇒ B }
 
     val context = {
-      SpotlightContext
-      .builder
-      .set( SpotlightContext.Arguments, args )
-      //      .set( SpotlightContext.StartTasks, Set( /*SharedLeveldbStore.start(true), Spotlight.kamonStartTask*/ ) )
-//      .set( SpotlightContext.System, Some( system ) )
-      .build()
+      SpotlightContext.Builder
+        .builder
+        .set( B.Arguments, args )
+        //      .set( SpotlightContext.StartTasks, Set( /*SharedLeveldbStore.start(true), Spotlight.kamonStartTask*/ ) )
+        //      .set( SpotlightContext.System, Some( system ) )
+        .build()
     }
 
     //    implicit val actorSystem = ActorSystem( "Spotlight" )
-//    startLogging( actorSystem )
-//    log.info( "Starting Application Up" )
+    //    startLogging( actorSystem )
+    //    log.info( "Starting Application Up" )
 
     val deadListener = context.system.actorOf( DeadListenerActor.props, "dead-listener" )
     context.system.eventStream.subscribe( deadListener, classOf[DeadLetter] )
 
     start( context )
-      .map { results ⇒
-        log.info(
-          Map(
-            "@msg" → "APP: Example processed records successfully and found result(s)",
-            "nr-records" → count.get().toString,
-            "nr-results" → results.size.toString
-          )
-        )
-
-        results
-      }
-      .onComplete {
-        case Success( results ) ⇒ {
-          println( "\n\nAPP:  ********************************************** " )
-          println( s"\nAPP:${count.get()} batch completed finding ${results.size} outliers:" )
-          results.zipWithIndex foreach { case ( o, i ) ⇒ println( s"${i + 1}: ${o}" ) }
-          println( "APP:  **********************************************\n\n" )
-          context.terminate()
-        }
-
-        case Failure( ex ) ⇒ {
-          log.error( Map( "@msg" → "batch finished with error", "count" → count.get() ), ex )
-          println( "\n\nAPP:  ********************************************** " )
-          println( s"\nAPP: ${count.get()} batch completed with ERROR: ${ex}" )
-          println( "APP:  **********************************************\n\n" )
-          context.terminate()
-        }
-      }
+    //      .onComplete {
+    //        case Success( results ) ⇒ {
+    //          println( "\n\nAPP:  ********************************************** " )
+    //          println( s"\nAPP:${count.get()} batch completed finding ${results.size} outliers:" )
+    //          results.zipWithIndex foreach { case ( o, i ) ⇒ println( s"${i + 1}: ${o}" ) }
+    //          println( "APP:  **********************************************\n\n" )
+    //          context.terminate()
+    //        }
+    //
+    //        case Failure( ex ) ⇒ {
+    //          log.error( Map( "@msg" → "batch finished with error", "count" → count.get() ), ex )
+    //          println( "\n\nAPP:  ********************************************** " )
+    //          println( s"\nAPP: ${count.get()} batch completed with ERROR: ${ex}" )
+    //          println( "APP:  **********************************************\n\n" )
+    //          context.terminate()
+    //        }
+    //      }
   }
 
   //  case class OutlierInfo( metricName: String, metricWebId: String, metricSegment: String )
@@ -143,7 +133,12 @@ object FileBatchExample extends Instrumented with ClassLogging {
       .run( context )
       .map { e ⇒ log.debug( "bootstrapping process..." ); e }
       .flatMap {
-        case ( boundedContext, ctx, Some(scoring) ) ⇒
+        case ( boundedContext, ctx, None ) ⇒ {
+          log.info( Map( "@msg" → "spotlight node started", "role" → ctx.settings.role.entryName ) )
+          Future.successful( Seq.empty[SimpleFlattenedOutlier] )
+        }
+
+        case ( boundedContext, ctx, Some( scoring ) ) ⇒
           log.debug( "process bootstrapped. processing data..." )
 
           import StreamMonitor._
@@ -171,14 +166,49 @@ object FileBatchExample extends Instrumented with ClassLogging {
           //        OSM.ScoringUnrecognized
           )
 
+          implicit val system = ctx.system
+          implicit val materializer = ActorMaterializer( ActorMaterializerSettings( system ) )
+
           val publish = Flow[SimpleFlattenedOutlier].buffer( 10, OverflowStrategy.backpressure ).watchFlow( Publish )
 
-          sourceData( ctx.settings )
+          val process = sourceData( ctx.settings )
             .via( Flow[String].watchSourced( DataSource ) )
             //      .via( Flow[String].buffer( 10, OverflowStrategy.backpressure ).watchSourced( Data ) )
             .via( detectionWorkflow( boundedContext, ctx.settings, scoring ) )
             .via( publish )
             .runWith( Sink.seq )
+
+          process
+            .map { results ⇒
+              log.info(
+                Map(
+                  "@msg" → "APP: Example processed records successfully and found result(s)",
+                  "nr-records" → count.get().toString,
+                  "nr-results" → results.size.toString
+                )
+              )
+
+              results
+            }
+            .onComplete {
+              case Success( results ) ⇒ {
+                println( "\n\nAPP:  ********************************************** " )
+                println( s"\nAPP:${count.get()} batch completed finding ${results.size} outliers:" )
+                results.zipWithIndex foreach { case ( o, i ) ⇒ println( s"${i + 1}: ${o}" ) }
+                println( "APP:  **********************************************\n\n" )
+                context.terminate()
+              }
+
+              case Failure( ex ) ⇒ {
+                log.error( Map( "@msg" → "batch finished with error", "count" → count.get() ), ex )
+                println( "\n\nAPP:  ********************************************** " )
+                println( s"\nAPP: ${count.get()} batch completed with ERROR: ${ex}" )
+                println( "APP:  **********************************************\n\n" )
+                context.terminate()
+              }
+            }
+
+          process
       }
   }
 

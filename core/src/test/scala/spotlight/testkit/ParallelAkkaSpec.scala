@@ -131,7 +131,7 @@ trait ParallelAkkaSpec
 
   def testConfiguration( test: OneArgTest, slug: String ): Config = {
     logger.error( "#TEST testConfiguration..." )
-    Settings.conditionConfiguration(
+    Settings.adaptConfiguration(
       config = ParallelAkkaSpec.testConf( systemName = slug ),
       role = ClusterRole.All,
       systemName = slug

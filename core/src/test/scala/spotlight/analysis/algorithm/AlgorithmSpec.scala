@@ -66,7 +66,7 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
       """.stripMargin
     )
 
-    val c = Settings.conditionConfiguration(
+    val c = Settings.adaptConfiguration(
       config = tc.resolve().withFallback(
         spotlight.testkit.config( systemName = slug, portOffset = scala.util.Random.nextInt( 20000 ) )
       ),

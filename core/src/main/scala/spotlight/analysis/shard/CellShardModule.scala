@@ -105,11 +105,11 @@ object CellShardModule extends ClassLogging {
     val b = SimpleAggregateModule.builderFor[CellShardCatalog, CellShardCatalog#ID].make
     import b.P.{ Props ⇒ BProps, _ }
 
-    val toSettings = ( s: ActorSystem ) ⇒ ClusterShardingSettings( s ).withRole( ClusterRole.Analysis.entryName )
+    //    val toSettings = ( s: ActorSystem ) ⇒ ClusterShardingSettings( s ).withRole( ClusterRole.Analysis.entryName )
+
     b
       .builder
-      //      .set( Environment, LocalAggregate )
-      .set( Environment, ClusteredAggregate( toSettings ) )
+      .set( Environment, ClusteredAggregate() )
       .set( BProps, ShardingActor.props( _, _ ) )
       .build()
   }

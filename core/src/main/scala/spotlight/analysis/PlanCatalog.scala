@@ -25,13 +25,15 @@ import omnibus.akka.persistence.query.{ AgentProjection, QueryJournal }
 import omnibus.commons.config._
 import demesne.{ BoundedContext, DomainModel, StartTask }
 import spotlight.Settings
+import spotlight.infrastructure.ClusterRole
 import spotlight.model.outlier.AnalysisPlan
 import spotlight.model.timeseries._
-import spotlight.infrastructure.ClusterRole.Intake
 
 /** Created by rolfsd on 5/20/16.
   */
 object PlanCatalog extends ClassLogging {
+  val clusterRole: ClusterRole = ClusterRole.Intake
+
   def startSingleton(
     configuration: Config,
     applicationPlans: Set[AnalysisPlan] = Set.empty[AnalysisPlan]
@@ -48,7 +50,7 @@ object PlanCatalog extends ClassLogging {
         ClusterSingletonManager.props(
           singletonProps = actorProps( configuration, mifFactor, budget, applicationPlans ),
           terminationMessage = PoisonPill,
-          settings = ClusterSingletonManagerSettings( bc.system ).withRole( Intake.entryName )
+          settings = ClusterSingletonManagerSettings( bc.system ).withRole( ClusterRole.Intake.entryName )
         ),
         name = PlanCatalog.name
       )
@@ -60,7 +62,7 @@ object PlanCatalog extends ClassLogging {
   def props( implicit system: ActorSystem ): Props = {
     ClusterSingletonProxy.props(
       singletonManagerPath = "/user/" + name,
-      settings = ClusterSingletonProxySettings( system ).withRole( Intake.entryName )
+      settings = ClusterSingletonProxySettings( system ).withRole( clusterRole.entryName )
     )
   }
 

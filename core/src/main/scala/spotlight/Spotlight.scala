@@ -23,10 +23,13 @@ import omnibus.akka.supervision.{ IsolatedLifeCycleSupervisor, OneForOneStrategy
 import omnibus.commons.util._
 import demesne.{ AggregateRootType, BoundedContext, DomainModel, StartTask }
 import omnibus.akka.stream.{ StreamEgress, StreamIngress }
+import omnibus.commons.{ TryV, Valid }
 import spotlight.analysis._
+import spotlight.analysis.algorithm.Algorithm
 import spotlight.analysis.{ PlanCatalogProtocol ⇒ CP }
 import spotlight.analysis.shard.{ CellShardModule, LookupShardModule }
 import spotlight.analysis.algorithm.statistical._
+import spotlight.infrastructure.ClusterRole
 import spotlight.model.outlier.Outliers
 import spotlight.model.timeseries.TimeSeries
 
@@ -47,23 +50,56 @@ object Spotlight extends Instrumented with ClassLogging {
     makeContext >=> apply()
   }
 
-  @transient val systemRootTypes: Set[AggregateRootType] = {
-    Set(
+  def systemRootTypes( settings: Settings ): Set[AggregateRootType] = {
+    val base = Set(
       AnalysisPlanModule.module.rootType,
       LookupShardModule.rootType,
-      CellShardModule.module.rootType,
-      SimpleMovingAverageAlgorithm.module.rootType,
-      GrubbsAlgorithm.module.rootType,
-      ExponentialMovingAverageAlgorithm.module.rootType
+      CellShardModule.module.rootType
     )
+
+    val algorithms = {
+      Valid.unsafeGet( Settings.userAlgorithmClassesFrom( settings.config ) )
+        .values
+        .map { clazz ⇒
+          import scala.reflect.runtime.{ universe ⇒ ru }
+          val loader = getClass.getClassLoader
+          val mirror = ru runtimeMirror loader
+          val algorithmSymbol = mirror moduleSymbol clazz
+          val algorithmMirror = mirror reflectModule algorithmSymbol
+          val algorithm = algorithmMirror.instance.asInstanceOf[Algorithm[_]]
+          algorithm.module.rootType
+        }
+        .toSet
+    }
+
+    val all = base ++ algorithms
+
+    settings.role match {
+      case ClusterRole.Seed ⇒ Set.empty[AggregateRootType]
+      case ClusterRole.All ⇒ all
+      case role ⇒ {
+        all
+          .map { rt ⇒ ( rt, rt.clusterRoles.map( ClusterRole.withName ) ) }
+          .collect { case ( rt, roles ) if roles.exists( r ⇒ role.includes( r ) ) ⇒ rt }
+      }
+    }
   }
 
   def systemStartTasks( settings: Settings )( implicit ec: ExecutionContext ): Set[StartTask] = {
-    Set(
-      PlanCatalog.startSingleton( settings.config, settings.plans ),
-      DetectionAlgorithmRouter.startTask( settings.config ),
-      metricsReporterStartTask( settings.config )
+    val all: Map[StartTask, Set[ClusterRole]] = Map(
+      PlanCatalog.startSingleton( settings.config, settings.plans ) → Set( PlanCatalog.clusterRole ),
+      DetectionAlgorithmRouter.startTask( settings.config ) → AnalysisPlanModule.module.rootType.clusterRoles.map( ClusterRole withName _ ),
+      metricsReporterStartTask( settings.config ) → Set( ClusterRole.All )
     )
+
+    settings.role match {
+      case ClusterRole.Seed ⇒ Set.empty[StartTask]
+      case ClusterRole.All ⇒ all.keySet
+      case r ⇒ {
+        val taskRoles: Set[( StartTask, Set[ClusterRole] )] = all.toSet[( StartTask, Set[ClusterRole] )]
+        taskRoles.collect { case ( task: StartTask, roles: Set[ClusterRole] ) if roles contains r ⇒ task }
+      }
+    }
   }
 
   def metricsReporterStartTask( config: Config ): StartTask = StartTask.withFunction( "start metrics reporter" ) { bc ⇒
@@ -132,13 +168,31 @@ object Spotlight extends Instrumented with ClassLogging {
       implicit val ec = context.system.dispatcher
       implicit val timeout = context.timeout
 
+      val role = context.settings.role
+      val nodeRootTypes = context.rootTypes ++ systemRootTypes( context.settings )
+      val nodeStartTasks = context.startTasks ++ systemStartTasks( context.settings )
+
+      log.info(
+        Map(
+          "@msg" → "making bounded context on node",
+          "key" → context.name,
+          "root-types" → nodeRootTypes.mkString( "[", ", ", "]" ),
+          "user-resources" → context.resources.mapKeys( _.name ),
+          "#TEST CONTEXT START TASKS" → context.startTasks.map( _.description ).toString,
+          "#TEST SYSTEM START TASKS" → systemStartTasks( context.settings ).map( _.description ).toString,
+          "#TEST CONTEXT ROOT TYPES" → context.rootTypes,
+          "#TEST SYSTEM ROOT TYPES" → systemRootTypes( context.settings ),
+          "start-tasks" → nodeStartTasks.map( _.description ).mkString( "[", ", ", "] " )
+        )
+      )
+
       for {
         made ← BoundedContext.make(
           key = Symbol( context.name ),
           configuration = context.settings.toConfig,
-          rootTypes = context.rootTypes ++ systemRootTypes,
+          rootTypes = nodeRootTypes,
           userResources = context.resources,
-          startTasks = context.startTasks ++ systemStartTasks( context.settings )
+          startTasks = nodeStartTasks
         )
 
         started ← made.start()

@@ -62,7 +62,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
       """.stripMargin
     )
 
-    val c = Settings.conditionConfiguration(
+    val c = Settings.adaptConfiguration(
       config = tc.resolve().withFallback(
         spotlight.testkit.config( systemName = slug, portOffset = scala.util.Random.nextInt( 20000 ) )
       //        spotlight.testkit.config( systemName = slug, portOffset = ParallelAkkaSpec.testPosition.get() )

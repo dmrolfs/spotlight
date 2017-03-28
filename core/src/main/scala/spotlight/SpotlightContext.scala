@@ -63,9 +63,39 @@ object SpotlightContext extends ClassLogging {
       override val timeout: Timeout,
       applicationArguments: Array[String]
   ) extends SpotlightContext {
-    @transient override lazy val system: ActorSystem = applicationSystem getOrElse ActorSystem( name, settings.config )
+    @transient override lazy val system: ActorSystem = {
+      val s = applicationSystem getOrElse {
+        println(
+          s"starting ActorSystem with:\n" +
+            s"\tname=${name}\n" +
+            s"""\takka.actor.provider=${settings.config.as[String]( "akka.actor.provider" )}\n""" +
+            s"""\ttransport=${settings.config.as[Option[String]]( "akka.remote.transport" )}\n""" +
+            s"""\takka.remote.netty.tcp.hostname=${settings.config.as[String]( "akka.remote.netty.tcp.hostname" )}\n""" +
+            s"\t${Settings.AkkaRemotePortPath}=${settings.config.as[Int]( Settings.AkkaRemotePortPath )}\n" +
+            s"""\takka.cluster.seed-nodes=${settings.config.as[Seq[String]]( "akka.cluster.seed-nodes" ).mkString( "[", ", ", "]" )}\n""" +
+            s"""\takka.cluster.roles=${settings.config.as[Seq[String]]( "akka.cluster.roles" ).mkString( "[", ", ", "]" )}\n"""
+        )
 
-    @transient override val settings: Settings = {
+        ActorSystem( name, settings.config )
+      }
+      println(
+        s"ActorSystem = ${s.toString}:\n" +
+          s"""\takka.actor.provider=${s.settings.config.config.as[String]( "akka.actor.provider" )}\n""" +
+          s"""\ttransport=${s.settings.config.as[Option[String]]( "akka.remote.transport" )}\n""" +
+          s"""\takka.remote.netty.tcp.hostname=${s.settings.config.as[String]( "akka.remote.netty.tcp.hostname" )}\n""" +
+          s"\t${Settings.AkkaRemotePortPath}=${s.settings.config.as[Int]( Settings.AkkaRemotePortPath )}\n" +
+          s"""\takka.cluster.seed-nodes=${s.settings.config.as[Seq[String]]( "akka.cluster.seed-nodes" ).mkString( "[", ", ", "]" )}\n""" +
+          s"""\takka.cluster.roles=${s.settings.config.as[Seq[String]]( "akka.cluster.roles" ).mkString( "[", ", ", "]" )}\n""" +
+          s"""\takka.cluster.min-nr-of-members=${s.settings.config.as[Option[Int]]( "akka.cluster.min-nr-of-members" )}\n"""
+      )
+      """
+  |
+""".stripMargin
+      startLogging( s )
+      s
+    }
+
+    @transient override lazy val settings: Settings = {
       val spotlightConfig: String = {
         Option( java.lang.System.getProperty( "config.resource" ) )
           .orElse { Option( java.lang.System.getProperty( "config.file" ) ) }
@@ -73,16 +103,25 @@ object SpotlightContext extends ClassLogging {
           .getOrElse { "application.conf" }
       }
 
+      println(
+        s"spotlight config.resource:[${spotlightConfig.toString}] " +
+          s"url:[${scala.util.Try { Thread.currentThread.getContextClassLoader.getResource( spotlightConfig ) }}]"
+      )
+
       log.alternative(
         SystemLogCategory,
         Map(
           "@msg" → "spotlight config",
-          "config" → spotlightConfig.toString,
+          "config.resource" → spotlightConfig.toString,
           "url" → scala.util.Try { Thread.currentThread.getContextClassLoader.getResource( spotlightConfig ) }
         )
       )
 
-      Valid.unsafeGet( Settings( applicationArguments, systemName = name, config = ConfigFactory.load() ) )
+      val s = Valid.unsafeGet( Settings( applicationArguments, systemName = name, config = ConfigFactory.load() ) )
+
+      println( s"SETTINGS external-port:[${Settings.externalPortFrom( s.config )}]" )
+
+      s
     }
 
     override def terminate()( implicit ec: ExecutionContext ): Future[Terminated] = {

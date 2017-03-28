@@ -62,13 +62,13 @@ class PlanCatalogSpec extends ParallelAkkaSpec with ScalaFutures with StrictLogg
       """.stripMargin
     )
 
-    Settings.conditionConfiguration(
+    Settings.adaptConfiguration(
       config = catalogConfig.resolve().withFallback(
         spotlight.testkit.config( systemName = slug, portOffset = scala.util.Random.nextInt( 20000 ) )
       ),
       role = ClusterRole.All,
       systemName = slug
-    )
+                               )
   }
 
   override def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture = {

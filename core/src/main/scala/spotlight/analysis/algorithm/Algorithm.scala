@@ -282,6 +282,9 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
     class RootType extends AggregateRootType {
       override type S = State
       override val identifying: Identifying[S] = algorithmModule.identifying
+
+      override val clusterRoles: Set[String] = Set( ClusterRole.Analysis.entryName )
+
       //todo: make configuration driven for algorithms
       override val snapshotPeriod: Option[FiniteDuration] = None // not used - snapshot timing explicitly defined below
       //    override def snapshot: Option[SnapshotSpecification] = None
@@ -376,9 +379,7 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
       }
     }
 
-    class ClusteredRepository( model: DomainModel ) extends Repository( model ) with ClusteredAggregateContext {
-      override def settings: ClusterShardingSettings = super.settings.withRole( ClusterRole.Analysis.entryName )
-    }
+    class ClusteredRepository( model: DomainModel ) extends Repository( model ) with ClusteredAggregateContext
 
     object AlgorithmActor {
       def props( model: DomainModel, rootType: AggregateRootType ): Props = Props( new Default( model, rootType ) )

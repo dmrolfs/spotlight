@@ -60,7 +60,7 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[AnalysisPlanSta
       """.stripMargin
     )
 
-    Settings.conditionConfiguration(
+    Settings.adaptConfiguration(
       config = tc.resolve().withFallback(
         spotlight.testkit.config( systemName = slug, portOffset = scala.util.Random.nextInt( 20000 ) )
       ),
@@ -76,6 +76,8 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[AnalysisPlanSta
   class Fixture( _config: Config, _system: ActorSystem, _slug: String ) extends EntityFixture( _config, _system, _slug ) {
     class Module extends EntityAggregateModule[AnalysisPlanState] { testModule ⇒
       private val trace: Trace[_] = Trace[Module]
+
+      override val clusterRoles: Set[String] = Set( ClusterRole.Analysis.entryName )
 
       override def passivateTimeout: Duration = Duration( 2, SECONDS )
       override def snapshotPeriod: Option[FiniteDuration] = Some( 1.second )
