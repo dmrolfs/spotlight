@@ -259,7 +259,11 @@ object FileBatchExample extends Instrumented with ClassLogging {
           .watchFlow( WatchPoints.Intake )
       )
 
-      val timeSeries = b.add( Flow[String].via( unmarshalTimeSeriesData ) )
+      val timeSeries = b.add(
+        Flow[String]
+          .via( unmarshalTimeSeriesData )
+          .map { ts ⇒ count.incrementAndGet(); ts }
+      )
 
       val limiter = b.add( rateLimitFlow( settings.parallelism, 25.milliseconds ).watchFlow( WatchPoints.Rate ) )
       val score = b.add( scoring )
