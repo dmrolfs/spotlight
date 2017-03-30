@@ -474,8 +474,6 @@ object Settings extends ClassLogging {
     }
 
     val clusterConfig = role match {
-      case r if r == ClusterRole.Intake || r == ClusterRole.Analysis ⇒ makeConfigString( requestedPort, Seq( r ) )
-
       case ClusterRole.All ⇒ {
         val port = {
           if ( expectedSeeds contains requestedPort ) requestedPort
@@ -492,7 +490,7 @@ object Settings extends ClassLogging {
           }
         }
 
-        makeConfigString( port, Seq( ClusterRole.Intake, ClusterRole.Analysis ) )
+        makeConfigString( port, Seq( ClusterRole.Seed, ClusterRole.Intake, ClusterRole.Analysis ) )
       }
 
       case ClusterRole.Seed ⇒ {
@@ -513,6 +511,8 @@ object Settings extends ClassLogging {
 
         makeConfigString( port, Seq( ClusterRole.Seed ) )
       }
+
+      case r ⇒ makeConfigString( requestedPort, Seq( r ) )
     }
 
     ConfigFactory.parseString( clusterConfig )

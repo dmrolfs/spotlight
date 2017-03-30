@@ -68,6 +68,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
       //        spotlight.testkit.config( systemName = slug, portOffset = ParallelAkkaSpec.testPosition.get() )
       ),
       role = ClusterRole.All,
+      externalPort = 0,
       systemName = slug
     )
 

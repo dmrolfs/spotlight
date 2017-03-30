@@ -34,8 +34,7 @@ import omnibus.archetype.domain.model.core.Entity
 import omnibus.commons.{ KOp, TryV, Valid }
 import omnibus.commons.identifier.{ Identifying, ShortUUID, TaggedID }
 import demesne._
-import demesne.repository.{ AggregateRootRepository, EnvelopingAggregateRootRepository }
-import demesne.repository.AggregateRootRepository.{ ClusteredAggregateContext, LocalAggregateContext }
+import demesne.repository._
 import spotlight.analysis._
 import spotlight.analysis.algorithm.AlgorithmProtocol.RouteMessage
 import spotlight.model.outlier.{ NoOutliers, Outliers }
@@ -283,7 +282,7 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
       override type S = State
       override val identifying: Identifying[S] = algorithmModule.identifying
 
-      override val clusterRoles: Set[String] = Set( ClusterRole.Analysis.entryName )
+      override val clusterRole: Option[String] = Option( ClusterRole.Analysis.entryName )
 
       //todo: make configuration driven for algorithms
       override val snapshotPeriod: Option[FiniteDuration] = None // not used - snapshot timing explicitly defined below
@@ -322,7 +321,7 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
 
     class Repository( model: DomainModel )
         extends EnvelopingAggregateRootRepository( model, algorithmModule.rootType ) with AltActorLogging {
-      actor: AggregateRootRepository.AggregateContext ⇒
+      actor: AggregateContext ⇒
 
       override def aggregateProps: Props = AlgorithmActor.props( model, rootType )
 
@@ -842,45 +841,9 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
 
       private def collectOutlierPoints( points: Seq[DoublePoint] ): KOp[Context, Seq[Advanced]] = {
         kleisli[TryV, Context, Seq[Advanced]] { implicit analysisContext ⇒
-          def tryScoring( pt: PointT, shape: Shape ): TryV[AnomalyScore] = {
-            val attempt = \/ fromTryCatchNonFatal {
-              algorithm
-                .score( pt, shape )( state, analysisContext )
-                .getOrElse { AnomalyScore( false, ThresholdBoundary empty pt.timestamp.toLong ) }
-            }
-
-            val anomaly = {
-              for {
-                _ ← checkSize( shape )
-                score ← attempt
-                _ ← checkScore( score, shape )
-              } yield score
-            }
-
-            anomaly match {
-              case \/-( a ) ⇒ a.right
-
-              case -\/( ex: NonFatalSkipScoringException ) ⇒ {
-                altLog.info(
-                  Map(
-                    "@msg" → "will not score point",
-                    "message" → ex.getMessage,
-                    "point" → Map(
-                      "datetime" → pt.dateTime.toString,
-                      "timestamp" → pt.timestamp.toLong,
-                      "value" → f"${pt.value}%2.5f"
-                    ),
-                    "algorithm" → algorithm.label
-                  ),
-                  ex,
-                  id = requestId
-                )
-
-                AnomalyScore( false, ThresholdBoundary empty pt.timestamp.toLong ).right
-              }
-
-              case ex ⇒ ex
-            }
+          val workingShape = state.shapes.get( analysisContext.topic ) match {
+            case None ⇒ advancing zero Option( analysisContext.properties )
+            case Some( shape ) ⇒ advancing copy shape
           }
 
           @tailrec def loop( points: List[DoublePoint], accumulation: TryV[Accumulation] ): TryV[Seq[Advanced]] = {
@@ -957,9 +920,44 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
             }
           }
 
-          val workingShape = state.shapes.get( analysisContext.topic ) match {
-            case None ⇒ advancing zero Option( analysisContext.properties )
-            case Some( shape ) ⇒ advancing copy shape
+          def tryScoring( pt: PointT, shape: Shape ): TryV[AnomalyScore] = {
+            val attempt = \/ fromTryCatchNonFatal {
+              algorithm
+                .score( pt, shape )( state, analysisContext )
+                .getOrElse { AnomalyScore( false, ThresholdBoundary empty pt.timestamp.toLong ) }
+            }
+
+            val anomaly = {
+              for {
+                _ ← checkSize( shape )
+                score ← attempt
+                checkedScore ← checkScore( score, shape )
+              } yield checkedScore
+            }
+
+            anomaly match {
+              case \/-( a ) ⇒ a.right
+
+              case -\/( ex: NonFatalSkipScoringException ) ⇒ {
+                altLog.info(
+                  Map(
+                    "@msg" → "will not score point",
+                    "message" → ex.getMessage,
+                    "point" → Map(
+                      "datetime" → pt.dateTime.toString,
+                      "timestamp" → pt.timestamp.toLong,
+                      "value" → f"${pt.value}%2.5f"
+                    ),
+                    "algorithm" → algorithm.label
+                  ),
+                  id = requestId
+                )
+
+                AnomalyScore( false, ThresholdBoundary empty pt.timestamp.toLong ).right
+              }
+
+              case ex ⇒ ex // error fatal in processing algorithm
+            }
           }
 
           loop( points.toList, Accumulation( analysisContext.topic, workingShape ).right )

@@ -65,6 +65,7 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[AnalysisPlanSta
         spotlight.testkit.config( systemName = slug, portOffset = scala.util.Random.nextInt( 20000 ) )
       ),
       role = ClusterRole.All,
+      externalPort = 0,
       systemName = slug
     )
   }
@@ -77,11 +78,9 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[AnalysisPlanSta
     class Module extends EntityAggregateModule[AnalysisPlanState] { testModule ⇒
       private val trace: Trace[_] = Trace[Module]
 
-      override val clusterRoles: Set[String] = Set( ClusterRole.Analysis.entryName )
-
+      override val clusterRole: Option[String] = Option( ClusterRole.Analysis.entryName )
       override def passivateTimeout: Duration = Duration( 2, SECONDS )
       override def snapshotPeriod: Option[FiniteDuration] = Some( 1.second )
-
       override val idLens: Lens[AnalysisPlanState, AnalysisPlanState#TID] = AnalysisPlanModule.idLens
       override val nameLens: Lens[AnalysisPlanState, String] = AnalysisPlanModule.nameLens
       override def aggregateRootPropsOp: AggregateRootProps = testProps( _, _ )

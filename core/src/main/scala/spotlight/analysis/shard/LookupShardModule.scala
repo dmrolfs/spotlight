@@ -1,7 +1,6 @@
 package spotlight.analysis.shard
 
 import scala.concurrent.duration._
-import scala.reflect._
 import akka.actor.{ ActorRef, Cancellable, Props }
 import akka.cluster.sharding.ClusterShardingSettings
 import akka.event.LoggingReceive
@@ -14,9 +13,8 @@ import omnibus.akka.metrics.{ Instrumented, InstrumentedActor }
 import omnibus.akka.publish.{ EventPublisher, StackableStreamPublisher }
 import omnibus.commons.identifier._
 import omnibus.commons.util._
-import omnibus.commons.TryV
 import demesne._
-import demesne.repository.{ CommonClusteredRepository, CommonLocalRepository }
+import demesne.repository.CommonClusteredRepository
 import spotlight.analysis.DetectUsing
 import spotlight.analysis.shard.ShardCatalog.ShardCatalogIdentifying
 import spotlight.analysis.algorithm.{ Algorithm, AlgorithmIdGenerator, AlgorithmProtocol ⇒ AP }
@@ -141,7 +139,7 @@ object LookupShardModule extends AggregateRootModule[LookupShardCatalog, LookupS
     override type S = LookupShardCatalog
     override val identifying: Identifying[S] = module.identifying
 
-    override val clusterRoles: Set[String] = Set( ClusterRole.Analysis.entryName )
+    override val clusterRole: Option[String] = Option( ClusterRole.Analysis.entryName )
 
     override val snapshotPeriod: Option[FiniteDuration] = None
     override def repositoryProps( implicit model: DomainModel ): Props = {

@@ -79,25 +79,25 @@ object Spotlight extends Instrumented with ClassLogging {
       case ClusterRole.All ⇒ all
       case role ⇒ {
         all
-          .map { rt ⇒ ( rt, rt.clusterRoles.map( ClusterRole.withName ) ) }
-          .collect { case ( rt, roles ) if roles.exists( r ⇒ role.includes( r ) ) ⇒ rt }
+        //          .map { rt ⇒ ( rt, rt.clusterRoles.map( ClusterRole.withName ) ) }
+        //          .collect { case ( rt, roles ) if roles.exists( r ⇒ role.includes( r ) ) ⇒ rt }
       }
     }
   }
 
   def systemStartTasks( settings: Settings )( implicit ec: ExecutionContext ): Set[StartTask] = {
-    val all: Map[StartTask, Set[ClusterRole]] = Map(
-      PlanCatalog.startSingleton( settings.config, settings.plans ) → Set( PlanCatalog.clusterRole ),
-      DetectionAlgorithmRouter.startTask( settings.config ) → AnalysisPlanModule.module.rootType.clusterRoles.map( ClusterRole withName _ ),
-      metricsReporterStartTask( settings.config ) → Set( ClusterRole.All )
+    val all: Map[StartTask, Option[ClusterRole]] = Map(
+      PlanCatalog.startSingleton( settings.config, settings.plans ) → Option( PlanCatalog.clusterRole ),
+      DetectionAlgorithmRouter.startTask( settings.config ) → AnalysisPlanModule.module.rootType.clusterRole.map( ClusterRole withName _ ),
+      metricsReporterStartTask( settings.config ) → Option( ClusterRole.All )
     )
 
     settings.role match {
       case ClusterRole.Seed ⇒ Set.empty[StartTask]
       case ClusterRole.All ⇒ all.keySet
       case r ⇒ {
-        val taskRoles: Set[( StartTask, Set[ClusterRole] )] = all.toSet[( StartTask, Set[ClusterRole] )]
-        taskRoles.collect { case ( task: StartTask, roles: Set[ClusterRole] ) if roles contains r ⇒ task }
+        val taskRoles: Set[( StartTask, Option[ClusterRole] )] = all.toSet[( StartTask, Option[ClusterRole] )]
+        taskRoles.collect { case ( task: StartTask, role: Option[ClusterRole] ) if role contains r ⇒ task }
       }
     }
   }

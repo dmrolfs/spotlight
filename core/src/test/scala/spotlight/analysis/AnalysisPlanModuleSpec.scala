@@ -54,6 +54,7 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[AnalysisPlanState] with Op
         spotlight.testkit.config( systemName = slug, portOffset = scala.util.Random.nextInt( 20000 ) )
       ),
       role = ClusterRole.All,
+      externalPort = 0,
       systemName = slug
     )
   }
@@ -144,7 +145,7 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[AnalysisPlanState] with Op
     }
 
     class Module extends FixtureModule {
-      override val clusterRoles: Set[String] = Set( ClusterRole.Analysis.entryName )
+      override val clusterRole: Option[String] = Option( ClusterRole.Analysis.entryName )
       override def passivateTimeout: Duration = Duration.Undefined
       override def snapshotPeriod: Option[FiniteDuration] = None
       override def aggregateRootPropsOp: AggregateRootProps = testProps( _, _ )
@@ -185,7 +186,7 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[AnalysisPlanState] with Op
     }
 
     class Module extends FixtureModule {
-      override val clusterRoles: Set[String] = Set( ClusterRole.Analysis.entryName )
+      override val clusterRole: Option[String] = Option( ClusterRole.Analysis.entryName )
       override def passivateTimeout: Duration = Duration.Undefined
       override def snapshotPeriod: Option[FiniteDuration] = None
       override def aggregateRootPropsOp: AggregateRootProps = {

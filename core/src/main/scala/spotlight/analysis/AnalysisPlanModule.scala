@@ -65,20 +65,20 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
 
   val module: EntityAggregateModule[AnalysisPlanState] = {
     val b = EntityAggregateModule.builderFor[AnalysisPlanState, AnalysisPlanProtocol.type].make
-    import b.P.{ Props ⇒ BProps, _ }
+    import b.P
 
     //    val toSettings = ( s: ActorSystem ) ⇒ ClusterShardingSettings( s ).withRole( ClusterRole.Analysis.entryName )
 
     b.builder
       //      .set( Environment, LocalAggregate )
-      .set( Environment, ClusteredAggregate() )
-      .set( ClusterRoles, Set( ClusterRole.Analysis.entryName ) )
-      .set( BProps, AggregateRoot.PlanActor.props( _, _ ) )
-      .set( PassivateTimeout, 5.minutes )
-      .set( Protocol, AnalysisPlanProtocol )
-      .set( IdLens, moduleOuter.idLens )
-      .set( NameLens, moduleOuter.nameLens )
-      .set( IsActiveLens, Some( moduleOuter.isActiveLens ) )
+      .set( P.Environment, ClusteredAggregate() )
+      .set( P.ClusterRole, Option( ClusterRole.Analysis.entryName ) )
+      .set( P.Props, AggregateRoot.PlanActor.props( _, _ ) )
+      .set( P.PassivateTimeout, 5.minutes )
+      .set( P.Protocol, AnalysisPlanProtocol )
+      .set( P.IdLens, moduleOuter.idLens )
+      .set( P.NameLens, moduleOuter.nameLens )
+      .set( P.IsActiveLens, Some( moduleOuter.isActiveLens ) )
       .build()
   }
 

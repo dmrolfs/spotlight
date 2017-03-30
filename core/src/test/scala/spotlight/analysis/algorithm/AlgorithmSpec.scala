@@ -71,6 +71,7 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
         spotlight.testkit.config( systemName = slug, portOffset = scala.util.Random.nextInt( 20000 ) )
       ),
       role = ClusterRole.All,
+      externalPort = 0,
       systemName = slug
     )
 

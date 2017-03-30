@@ -1,11 +1,9 @@
 package spotlight.analysis.shard
 
 import scala.concurrent.duration._
-import scala.reflect._
-import akka.actor.{ ActorRef, ActorSystem, Cancellable, Props }
-import akka.cluster.sharding.ClusterShardingSettings
+import akka.actor.{ ActorRef, Cancellable, Props }
 import akka.event.LoggingReceive
-import akka.persistence.{ RecoveryCompleted, SnapshotOffer }
+import akka.persistence.RecoveryCompleted
 import com.persist.logging._
 import nl.grons.metrics.scala.{ Histogram, Meter, MetricName }
 import omnibus.akka.envelope._
@@ -14,9 +12,9 @@ import omnibus.akka.publish.{ EventPublisher, StackableStreamPublisher }
 import omnibus.commons.identifier._
 import omnibus.commons.util._
 import demesne._
-import demesne.module.{ ClusteredAggregate, LocalAggregate, SimpleAggregateModule }
+import demesne.module.{ ClusteredAggregate, SimpleAggregateModule }
 import spotlight.analysis.DetectUsing
-import spotlight.analysis.algorithm.{ Algorithm, AlgorithmIdGenerator, AlgorithmProtocol ⇒ AP }
+import spotlight.analysis.algorithm.{ AlgorithmIdGenerator, AlgorithmProtocol ⇒ AP }
 import spotlight.infrastructure.ClusterRole
 import spotlight.model.outlier.AnalysisPlan
 import spotlight.model.timeseries._
@@ -103,14 +101,15 @@ object CellShardModule extends ClassLogging {
 
   val module: SimpleAggregateModule[CellShardCatalog, CellShardCatalog#ID] = {
     val b = SimpleAggregateModule.builderFor[CellShardCatalog, CellShardCatalog#ID].make
-    import b.P.{ Props ⇒ BProps, _ }
+    import b.P
 
     //    val toSettings = ( s: ActorSystem ) ⇒ ClusterShardingSettings( s ).withRole( ClusterRole.Analysis.entryName )
 
     b
       .builder
-      .set( Environment, ClusteredAggregate() )
-      .set( BProps, ShardingActor.props( _, _ ) )
+      .set( P.Environment, ClusteredAggregate() )
+      .set( P.ClusterRole, Option( ClusterRole.Analysis.entryName ) )
+      .set( P.Props, ShardingActor.props( _, _ ) )
       .build()
   }
 

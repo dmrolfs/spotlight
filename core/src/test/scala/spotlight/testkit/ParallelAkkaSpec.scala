@@ -134,6 +134,7 @@ trait ParallelAkkaSpec
     Settings.adaptConfiguration(
       config = ParallelAkkaSpec.testConf( systemName = slug ),
       role = ClusterRole.All,
+      externalPort = 0,
       systemName = slug
     )
   }

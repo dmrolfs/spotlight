@@ -115,8 +115,7 @@ object SimpleMovingAverageAlgorithm extends Algorithm[SimpleMovingAverageShape](
       distance = c.tolerance * stddev
     )
 
-    def property( path: String ): String = if ( c.properties hasPath path ) c.properties getString path else "-nil-"
-
+    //    def property( path: String ): String = if ( c.properties hasPath path ) c.properties getString path else "-nil-"
     //    log.debug(
     //      Map(
     //        "@msg" → "Step",
