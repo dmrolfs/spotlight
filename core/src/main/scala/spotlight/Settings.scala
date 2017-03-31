@@ -445,7 +445,17 @@ object Settings extends ClassLogging {
       val remotePort = "akka.remote.netty.tcp.port = " + p
       val clusterRoles = {
         if ( roles.isEmpty ) None
-        else Some( "akka.cluster.roles = " + roles.map( _.entryName ).mkString( "[", ", ", "]" ) )
+        else {
+          Some(
+            s"""
+               |akka.cluster {
+               |  roles = ${roles.map( _.entryName ).mkString( "[", ", ", "]" )}
+               |  sharding.role = ${ClusterRole.Analysis.entryName}
+               |  role.${ClusterRole.Analysis.entryName}.min-nr-of-members = 1
+               |}
+             """.stripMargin
+          )
+        }
       }
 
       val result = clusterRoles map { remotePort + '\n' + _ } getOrElse remotePort
