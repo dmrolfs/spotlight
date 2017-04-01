@@ -27,6 +27,13 @@ trait Advancing[S <: Serializable] {
 }
 
 object Advancing {
+  /** type class summoner
+    *
+    * @tparam S
+    * @return
+    */
+  def apply[S <: Serializable: Advancing]: Advancing[S] = the[Advancing[S]]
+
   object syntax {
     implicit class AdvancingOps[S <: Serializable: Advancing]( val shape: S ) {
       def N: Long = the[Advancing[S]].N( shape )
