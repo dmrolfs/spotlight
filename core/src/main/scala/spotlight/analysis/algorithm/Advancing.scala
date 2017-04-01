@@ -1,6 +1,7 @@
 package spotlight.analysis.algorithm
 
 import java.io.Serializable
+import shapeless.the
 import com.typesafe.config.Config
 import net.ceedubs.ficus.Ficus._
 import net.ceedubs.ficus.readers.ValueReader
@@ -22,5 +23,15 @@ trait Advancing[S <: Serializable] {
 
   def getFromOrElse[T: ValueReader]( configuration: Option[Config], path: String, default: ⇒ T ): T = {
     getFrom[T]( configuration, path ) getOrElse default
+  }
+}
+
+object Advancing {
+  object syntax {
+    implicit class AdvancingOps[S <: Serializable: Advancing]( val shape: S ) {
+      def N: Long = the[Advancing[S]].N( shape )
+      def advance( advanced: AlgorithmProtocol.Advanced ): S = the[Advancing[S]].advance( shape, advanced )
+      def copy: S = the[Advancing[S]].copy( shape )
+    }
   }
 }

@@ -36,6 +36,7 @@ import omnibus.commons.identifier.{ Identifying, ShortUUID, TaggedID }
 import demesne._
 import demesne.repository._
 import spotlight.analysis._
+import spotlight.analysis.algorithm.Advancing.syntax._
 import spotlight.analysis.algorithm.AlgorithmProtocol.RouteMessage
 import spotlight.model.outlier.{ NoOutliers, Outliers }
 import spotlight.model.timeseries._
@@ -455,7 +456,7 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
         case ( AdvancedType( event ), cs ) ⇒ {
           val s = cs.shapes.get( event.topic ) getOrElse advancing.zero( Option( algorithmContext ) map { ctx ⇒ ctx.properties } )
           _advances += 1
-          val newShape = advancing.advance( s, event )
+          val newShape = s.advance( event )
           val newState = cs.withTopicShape( event.topic, newShape )
 
           altLog.debug( Map( "@msg" → "#TEST acceptance", "before" → s.toString, "advanced" → newShape.toString, "advances" → _advances ) )
@@ -823,7 +824,7 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
 
         val minimumDataPoints = analysisContext.properties.as[Option[Int]]( MinimalPopulationPath ) getOrElse 0
 
-        advancing.N( shape ) match {
+        shape.N match {
           case s if s < minimumDataPoints ⇒ InsufficientDataSize( label, s, minimumDataPoints ).left
           case s ⇒ s.right
         }
@@ -832,9 +833,9 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
       private def checkScore( score: AnomalyScore, shape: Shape )( implicit analysisContext: Context ): TryV[AnomalyScore] = {
         ( score.threshold.floor, score.threshold.expected, score.threshold.ceiling ) match {
           case ( Some( f ), Some( e ), Some( c ) ) if f == e && e == c ⇒ {
-            InsufficientVariance( algorithm.label, advancing.N( shape ) ).left
+            InsufficientVariance( algorithm.label, shape.N ).left
           }
-          case ( Some( f ), _, Some( c ) ) if f.isNaN && c.isNaN ⇒ InsufficientVariance( algorithm.label, advancing.N( shape ) ).left
+          case ( Some( f ), _, Some( c ) ) if f.isNaN && c.isNaN ⇒ InsufficientVariance( algorithm.label, shape.N ).left
           case _ ⇒ score.right
         }
       }
@@ -843,7 +844,7 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
         kleisli[TryV, Context, Seq[Advanced]] { implicit analysisContext ⇒
           val workingShape = state.shapes.get( analysisContext.topic ) match {
             case None ⇒ advancing zero Option( analysisContext.properties )
-            case Some( shape ) ⇒ advancing copy shape
+            case Some( shape ) ⇒ shape.copy
           }
 
           @tailrec def loop( points: List[DoublePoint], accumulation: TryV[Accumulation] ): TryV[Seq[Advanced]] = {
@@ -893,7 +894,7 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
                         )
 
                         acc.copy(
-                          shape = advancing.advance( acc.shape, event ),
+                          shape = acc.shape.advance( event ),
                           advances = acc.advances :+ event
                         )
                       }

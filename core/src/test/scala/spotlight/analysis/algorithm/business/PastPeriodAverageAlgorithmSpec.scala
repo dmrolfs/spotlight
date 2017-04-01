@@ -7,6 +7,7 @@ import com.typesafe.config.{ Config, ConfigFactory }
 import omnibus.akka.envelope._
 import org.joda.{ time ⇒ joda }
 import org.mockito.Mockito._
+import spotlight.analysis.algorithm.Advancing.syntax._
 import spotlight.analysis.algorithm.AlgorithmProtocol.Advanced
 import spotlight.analysis.algorithm.business.PastPeriod.Period
 import spotlight.analysis.algorithm.{ AlgorithmSpec, AlgorithmProtocol ⇒ AP }
@@ -175,13 +176,13 @@ class PastPeriodAverageAlgorithmSpec extends AlgorithmSpec[PastPeriod.Shape] {
               "event" → Map( "timestamp" → e.point.timestamp, "value" → f"${e.point.value}%2.5f" )
             )
           )
-          adv.advance( s, e )
+          s advance e
         }
         log.info(
           Map(
             "@msg" → "advanced shape forware",
-            "prior" → Map( "N" → adv.N( shape ), "shape" → shape.toString ),
-            "advanced" → Map( "N" → adv.N( ns ), "shape" → ns.toString )
+            "prior" → Map( "N" → shape.N, "shape" → shape.toString ),
+            "advanced" → Map( "N" → ns.N, "shape" → ns.toString )
           )
         )
         ns
@@ -191,7 +192,7 @@ class PastPeriodAverageAlgorithmSpec extends AlgorithmSpec[PastPeriod.Shape] {
 
       val evts = series.points map { p ⇒ AP.Advanced( id, series.topic, p, false, ThresholdBoundary.empty( p.timestamp ) ) }
       val s0 = adv.zero( None )
-      adv.N( s0 ) mustBe 0
+      s0.N mustBe 0
       s0.pastPeriodsFromNow.size mustBe 0
       s0.currentPeriodValue mustBe None
       log.debug( "+++++++ advanced to s0 +++++++" )
@@ -201,7 +202,7 @@ class PastPeriodAverageAlgorithmSpec extends AlgorithmSpec[PastPeriod.Shape] {
       //      countDown await 1.second
       s1.meanFrom( now ).value mustBe evts.head.point.value
       s1.standardDeviationFrom( now ).value mustBe 0.0
-      adv.N( s1 ) mustBe 1
+      s1.N mustBe 1
       s1.pastPeriodsFromTimestamp( now ).size mustBe 1
       s1.currentPeriodValue mustBe None
 
@@ -210,7 +211,7 @@ class PastPeriodAverageAlgorithmSpec extends AlgorithmSpec[PastPeriod.Shape] {
       //      countDown await 1.second
       s2.meanFrom( now ).value mustBe 90.15104633 +- tol
       s2.standardDeviationFrom( now ).value mustBe 42.33646153 +- tol
-      adv.N( s2 ) mustBe 32
+      s2.N mustBe 32
       s2.pastPeriodsFromTimestamp( now ).size mustBe 2
       s2.currentPeriodValue mustBe None
 
@@ -219,7 +220,7 @@ class PastPeriodAverageAlgorithmSpec extends AlgorithmSpec[PastPeriod.Shape] {
       //      countDown await 1.second
       s3.meanFrom( now ).value mustBe 94.86997636 +- tol
       s3.standardDeviationFrom( now ).value mustBe 31.03212673 +- tol
-      adv.N( s3 ) mustBe 61
+      s3.N mustBe 61
       s3.pastPeriodsFromTimestamp( now ).size mustBe 3
       s3.currentPeriodValue mustBe None
 
@@ -228,7 +229,7 @@ class PastPeriodAverageAlgorithmSpec extends AlgorithmSpec[PastPeriod.Shape] {
       //      countDown await 1.second
       s4.meanFrom( now ).value mustBe 116.0948298 +- tol
       s4.standardDeviationFrom( now ).value mustBe 10.38331639 +- tol
-      adv.N( s4 ) mustBe 92
+      s4.N mustBe 92
       s4.pastPeriodsFromTimestamp( now ).size mustBe 3
       s4.currentPeriodValue mustBe None
 
@@ -237,7 +238,7 @@ class PastPeriodAverageAlgorithmSpec extends AlgorithmSpec[PastPeriod.Shape] {
       //      countDown await 1.second
       s5.meanFrom( now ).value mustBe 97.76704121 +- tol
       s5.standardDeviationFrom( now ).value mustBe 22.85611285 +- tol
-      adv.N( s5 ) mustBe 150
+      s5.N mustBe 150
       s5.pastPeriodsFromTimestamp( now ).size mustBe 3
       s5.currentPeriodValue mustBe None
 

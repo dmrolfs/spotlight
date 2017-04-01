@@ -85,6 +85,8 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
     override def role: ClusterRole = underlying.role
     //    override def sourceAddress: InetSocketAddress = underlying.sourceAddress
     override def requestedExternalPort: Int = underlying.requestedExternalPort
+    override def bindHostname: Option[String] = None
+    override def bindPort: Option[Int] = None
     override def maxFrameLength: Int = underlying.maxFrameLength
     override def protocol: GraphiteSerializationProtocol = underlying.protocol
     //    override def windowDuration: FiniteDuration = underlying.windowDuration

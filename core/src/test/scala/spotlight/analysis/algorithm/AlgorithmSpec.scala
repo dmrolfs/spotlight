@@ -25,6 +25,7 @@ import omnibus.commons.identifier.Identifying
 import omnibus.commons.log.Trace
 import spotlight.Settings
 import spotlight.analysis.{ AnomalyScore, DetectOutliersInSeries, DetectUsing, HistoricalStatistics }
+import spotlight.analysis.algorithm.Advancing.syntax._
 import spotlight.analysis.algorithm.{ AlgorithmProtocol ⇒ P }
 import spotlight.infrastructure.ClusterRole
 import spotlight.model.outlier._
@@ -613,7 +614,7 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
         val expected = expectedUpdatedShape( zero, adv )
         log.debug( Map( "@msg" → "#TEST advance shape", "zero" → zero.toString, "expected" → expected.toString ) )
 
-        val actual = shapeless.the[Advancing[S]].advance( zero, adv )
+        val actual = zero.advance( adv )
         countDown await 25.millis.dilated
         actualVsExpectedShape( actual, expected )
       }
@@ -633,7 +634,7 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
             val plateauNr = math.max( 1, memoryPlateauNr )
             val advancing = shapeless.the[Advancing[S]]
             val zero = advancing.zero( config )
-            val atPlateau = ( 0 to plateauNr ).foldLeft( zero ) { ( acc, i ) ⇒ advancing.advance( acc, makeData( i ) ) }
+            val atPlateau = ( 0 to plateauNr ).foldLeft( zero ) { ( acc, i ) ⇒ acc.advance( makeData( i ) ) }
 
             import akka.serialization.{ SerializationExtension, Serializer }
             val serializer: Serializer = SerializationExtension( system ).serializerFor( zero.getClass )
@@ -660,14 +661,14 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
         val serializer: Serializer = SerializationExtension( system ).serializerFor( zero.getClass )
 
         val zeroSize = Bytes( serializer.toBinary( zero.asInstanceOf[AnyRef] ).size )
-        val first: S = advancing.advance( zero, makeData( 0 ) )
+        val first: S = zero.advance( makeData( 0 ) )
         val firstBytes = serializer.toBinary( first.asInstanceOf[AnyRef] )
         val firstSize = Bytes( firstBytes.size )
 
         val plateauNr = math.max( 1, memoryPlateauNr )
         val ( plateauState, plateauSize ) = ( 2 to plateauNr ).foldLeft( first, firstSize ) {
           case ( ( acc, accSize ), i ) ⇒ {
-            val next = advancing.advance( acc, makeData( i ) )
+            val next = acc.advance( makeData( i ) )
             val nextSize = Bytes( serializer.toBinary( next.asInstanceOf[AnyRef] ).size )
             log.debug(
               Map(
@@ -701,7 +702,7 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
 
         ( ( plateauNr + 1 ) to memoryStepsToValidate ).foldLeft( ( first, firstSize ) ) {
           case ( ( acc, accSize ), i ) ⇒ {
-            val next = advancing.advance( acc, makeData( i ) )
+            val next = acc.advance( makeData( i ) )
             val nextSize = Bytes( serializer.toBinary( next.asInstanceOf[AnyRef] ).size )
 
             log.debug(
