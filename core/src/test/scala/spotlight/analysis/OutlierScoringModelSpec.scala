@@ -84,7 +84,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
   class TestSettingsWithPlans( override val plans: Set[AnalysisPlan], underlying: Settings ) extends Settings {
     override def role: ClusterRole = underlying.role
     //    override def sourceAddress: InetSocketAddress = underlying.sourceAddress
-    override def externalPort: Int = underlying.externalPort
+    override def requestedExternalPort: Int = underlying.requestedExternalPort
     override def maxFrameLength: Int = underlying.maxFrameLength
     override def protocol: GraphiteSerializationProtocol = underlying.protocol
     //    override def windowDuration: FiniteDuration = underlying.windowDuration

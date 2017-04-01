@@ -26,7 +26,9 @@ import spotlight.protocol.{ GraphiteSerializationProtocol, MessagePackProtocol, 
 trait Settings extends ClassLogging {
   def role: ClusterRole
   //  def sourceAddress: InetSocketAddress
-  def externalPort: Int
+  def requestedExternalPort: Int
+  def bindHostname: Option[String]
+  def bindPort: Option[Int]
   def maxFrameLength: Int
   def protocol: GraphiteSerializationProtocol
   //  def windowDuration: FiniteDuration
@@ -46,24 +48,32 @@ trait Settings extends ClassLogging {
     val settingsConfig = {
       s"""
          | spotlight.settings {
-         |   external-port: ${externalPort}
-         |   max-frame-length: ${maxFrameLength}
-         |   protocol: ${protocol.getClass.getCanonicalName}
-         |   ${graphiteAddress.map { ga ⇒ "graphite-address:\"" + ga.toString + "\"" } getOrElse ""}
-         |   detection-budget: ${detectionBudget.toCoarsest}
-         |   parallelism-factor: ${parallelismFactor}
-         |   parallelism: ${parallelism}
-         |   tcp-inbound-buffer-size: ${tcpInboundBufferSize}
+         |   role = ${role.entryName}
+         |   requested-external-port = ${requestedExternalPort}
+         |   max-frame-length = ${maxFrameLength}
+         |   protocol = ${protocol.getClass.getCanonicalName}
+         |   ${graphiteAddress.map { ga ⇒ "graphite-address = \"" + ga.toString + "\"" } getOrElse ""}
+         |   detection-budget = ${detectionBudget.toCoarsest}
+         |   parallelism-factor = ${parallelismFactor}
+         |   parallelism = ${parallelism}
+         |   tcp-inbound-buffer-size = ${tcpInboundBufferSize}
          | }
-       """.stripMargin
+         |
+         | akka.remote.netty.tcp {
+         |   bind-hostname = ${bindHostname}
+         |   bind-port = ${bindPort}
+         | }
+        """.stripMargin
     }
 
     log.info(
       Map(
         "@msg" → "Settings.toConfig",
         "base" → Map(
+          "role" → role.entryName,
           //          "source-address" → sourceAddress.toString,
-          "external-port" → externalPort,
+          "requested-external-port" → requestedExternalPort,
+          "bind" → Map( "hostname" → bindHostname.toString, "port" → bindPort.toString ),
           "max-frame-length" → maxFrameLength,
           "protocol" → protocol.getClass.getCanonicalName,
           //          "window-duration" → windowDuration.toCoarsest.toString,
@@ -82,13 +92,16 @@ trait Settings extends ClassLogging {
   def usage: ( String, Map[String, Any] ) = {
     val displayUsage = s"""
       |\nRunning Spotlight using the following configuration:
-      |\texternal port    : ${externalPort}
-      |\tpublish binding : ${graphiteAddress}
-      |\tmax frame size  : ${maxFrameLength}
-      |\tprotocol        : ${protocol}
-      |\tdetection budget: ${detectionBudget.toCoarsest}
-      |\tAvail Processors: ${Runtime.getRuntime.availableProcessors}
-      |\tplans           : [${plans.zipWithIndex.map { case ( p, i ) ⇒ f"${i}%2d: ${p}" }.mkString( "\n", "\n", "\n" )}]
+      |\trole                     : ${role.entryName}
+      |\trequested external port  : ${requestedExternalPort}
+      |\tbind-hostname            : ${bindHostname}
+      |\tbind-port                : ${bindPort}
+      |\tpublish binding          : ${graphiteAddress}
+      |\tmax frame size           : ${maxFrameLength}
+      |\tprotocol                 : ${protocol}
+      |\tdetection budget         : ${detectionBudget.toCoarsest}
+      |\tAvail Processors         : ${Runtime.getRuntime.availableProcessors}
+      |\tplans                    : [${plans.zipWithIndex.map { case ( p, i ) ⇒ f"${i}%2d: ${p}" }.mkString( "\n", "\n", "\n" )}]
     """.stripMargin
 
     val planMap: Map[String, Any] = Map(
@@ -107,8 +120,10 @@ trait Settings extends ClassLogging {
     )
 
     val richUsage = Map(
+      "role" → role,
       //      "source-binding" → sourceAddress.toString,
-      "external-port" → externalPort,
+      "requested-external-port" → requestedExternalPort,
+      "bind" → Map( "hostname" → bindHostname, "port" → bindPort ),
       "publish-binding" → graphiteAddress.toString,
       "max-frame-size" → maxFrameLength,
       "protocol" → protocol.toString,
@@ -125,7 +140,6 @@ trait Settings extends ClassLogging {
 object Settings extends ClassLogging {
   val ActorSystemName = "Spotlight"
 
-  val AkkaRemotePortPath = "akka.remote.netty.tcp.port"
   val SettingsPathRoot = "spotlight.settings."
 
   //  def sourceAddressFrom( c: Config ): Option[InetSocketAddress] = {
@@ -140,7 +154,18 @@ object Settings extends ClassLogging {
   //    }
   //  }
 
-  def externalPortFrom( c: Config ): Option[Int] = c.as[Option[Int]]( AkkaRemotePortPath )
+  def requestedExternalPortForm( c: Config ): Option[Int] = c.as[Option[Int]]( "spotlight.settings.requested-external-port" )
+
+  val AkkaRemotePortPath = "akka.remote.netty.tcp.port"
+
+  def remotePortFrom( c: Config ): Option[Int] = c.as[Option[Int]]( AkkaRemotePortPath )
+
+  val AkkaBindHostname = "akka.remote.netty.tcp.bind-hostname"
+  val AkkaBindPort = "akka.remote.netty.tcp.bind-port"
+
+  def bindHostnameFrom( c: Config ): Option[String] = c.as[Option[String]]( AkkaBindHostname )
+  def bindPortFrom( c: Config ): Option[Int] = c.as[Option[Int]]( AkkaBindPort )
+
   def maxFrameLengthFrom( c: Config ): Option[Int] = c.as[Option[Int]]( SettingsPathRoot + "max-frame-length" )
 
   //  def protocolFrom( c: Config ): Option[GraphiteSerializationProtocol] = {
@@ -386,14 +411,14 @@ object Settings extends ClassLogging {
 
     val graphitePort = config.as[Option[Int]]( Directory.PUBLISH_GRAPHITE_PORT ) getOrElse { 2004 }
 
-    val usageExternalPort = usage.externalPort orElse Settings.externalPortFrom( config ) getOrElse { 0 }
+    val usageExternalPort = usage.requestedExternalPort orElse Settings.remotePortFrom( config ) getOrElse { 0 }
 
     log.info(
       Map(
         "@msg" → "make settings from",
         "usage" → Map(
           "role" → usage.role.entryName,
-          "external-port" → usage.externalPort.toString,
+          "external-port" → usage.requestedExternalPort.toString,
           "args" → usage.args.mkString( "[", ", ", "]" )
         ),
         "max-frame-length" → maxFrameLength,
@@ -404,13 +429,15 @@ object Settings extends ClassLogging {
 
     SimpleSettings(
       role = usage.role,
-      externalPort = usageExternalPort,
+      requestedExternalPort = usageExternalPort,
+      bindHostname = usage.bindHostname,
+      bindPort = usage.bindPort,
       //      sourceAddress = new InetSocketAddress( sourceHost, sourcePort ),
       maxFrameLength = maxFrameLength,
       protocol = protocol,
       //      windowDuration = windowSize,
       graphiteAddress = for ( h ← graphiteHost; p ← Option( graphitePort ) ) yield new InetSocketAddress( h, p ),
-      config = adaptConfiguration( config, usage.role, usageExternalPort, systemName ),
+      config = adaptConfiguration( config, usage.role, usageExternalPort, systemName, usage.bindHostname, usage.bindPort ),
       args = usage.args
     )
   }
@@ -419,9 +446,11 @@ object Settings extends ClassLogging {
     config: Config,
     role: ClusterRole,
     externalPort: Int,
-    systemName: String = ActorSystemName
+    systemName: String = ActorSystemName,
+    bindHostname: Option[String] = None,
+    bindPort: Option[Int] = None
   ): Config = {
-    adaptConfiguratonForClustering( config, role, externalPort, systemName )
+    adaptConfiguratonForClustering( config, role, externalPort, systemName, bindHostname, bindPort )
       .withFallback( adaptConfigurationForAlgorithmJournal( config ) )
       .withFallback( config )
   }
@@ -439,22 +468,30 @@ object Settings extends ClassLogging {
     config: Config,
     role: ClusterRole,
     requestedPort: Int,
-    systemName: String = ActorSystemName
+    systemName: String,
+    bindHostName: Option[String],
+    bindPort: Option[Int]
   ): Config = {
     def makeConfigString( p: Int, roles: Seq[ClusterRole] ): String = {
       val remotePort = "akka.remote.netty.tcp.port = " + p
       val clusterRoles = {
         if ( roles.isEmpty ) None
         else {
-          Some(
-            s"""
-               |akka.cluster {
-               |  roles = ${roles.map( _.entryName ).mkString( "[", ", ", "]" )}
-               |  sharding.role = ${ClusterRole.Analysis.entryName}
-               |  role.${ClusterRole.Analysis.entryName}.min-nr-of-members = 1
-               |}
-             """.stripMargin
+          val gists = Seq(
+            Some(
+              s"""
+                 |akka.cluster {
+                 |  roles = ${roles.map( _.entryName ).mkString( "[", ", ", "]" )}
+                 |  sharding.role = ${ClusterRole.Analysis.entryName}
+                 |  role.${ClusterRole.Analysis.entryName}.min-nr-of-members = 1
+                 |}
+               """.stripMargin
+            ),
+            bindHostName map { AkkaBindHostname + " = " + _ },
+            bindPort map { AkkaBindPort + " = " + _ }
           )
+
+          Option( gists.flatten.mkString( "\n" ) )
         }
       }
 
@@ -468,7 +505,7 @@ object Settings extends ClassLogging {
           "role" → role.entryName,
           AkkaRemotePortPath → config.as[Option[Int]]( AkkaRemotePortPath ).toString,
           "requested-port" → requestedPort,
-          "cluster-config" → ConfigFactory.parseString( result ).toString
+          "cluster-config" → ConfigFactory.parseString( result ).root.render( ConfigRenderOptions.concise )
         //          "cluster-config" → Map(
         //            ConfigFactory.parseString( result ).root.entrySet.asScala.toSeq.map( e ⇒ ( e.getKey, e.getValue.render() ) ): _*
         //          )
@@ -542,7 +579,9 @@ object Settings extends ClassLogging {
 
   final case class SimpleSettings private[Settings] (
       override val role: ClusterRole,
-      override val externalPort: Int,
+      override val requestedExternalPort: Int,
+      override val bindHostname: Option[String],
+      override val bindPort: Option[Int],
       //      override val sourceAddress: InetSocketAddress,
       override val maxFrameLength: Int,
       override val protocol: GraphiteSerializationProtocol,
@@ -574,7 +613,9 @@ object Settings extends ClassLogging {
 
   final case class UsageSettings private[Settings] (
     role: ClusterRole,
-    externalPort: Option[Int] = None,
+    requestedExternalPort: Option[Int] = None,
+    bindHostname: Option[String] = None,
+    bindPort: Option[Int] = None,
     //    sourceHost: Option[InetAddress] = None,
     //    sourcePort: Option[Int] = None,
     //    windowSize: Option[FiniteDuration] = None,
@@ -606,13 +647,54 @@ object Settings extends ClassLogging {
       //        .text( "connection port of source server" )
 
       opt[Int]( 'p', "port" )
-        .action { ( e, c ) ⇒ c.copy( externalPort = Some( e ) ) }
+        .action { ( e, c ) ⇒ c.copy( requestedExternalPort = Some( e ) ) }
         .text( "listening remote port for this node in the processing cluster. " +
           "There must be at least one seed at 2551 or 2552; otherwise can be 0 which is the default" )
 
       //      opt[Long]( 'w', "window" )
       //        .action { ( e, c ) ⇒ c.copy( windowSize = Some( FiniteDuration( e, SECONDS ) ) ) }
       //        .text( "batch window size (in seconds) for collecting time series data. Default = 60s." )
+
+      opt[String]( "bind-hostname" )
+        .optional()
+        .action { ( h, c ) ⇒ c.copy( bindHostname = Option( h ) ) }
+        .text(
+          """
+          | Use this setting to bind a network interface to a different hostname or ip than remoting protocol expects messages
+          | at. Use "0.0.0.0" to bind to all interfaces. akka.remote.netty.tcp.hostname if empty
+        """.stripMargin
+        )
+
+      opt[Int]( "bind-port" )
+        .optional()
+        .action { ( p, c ) ⇒ c.copy( bindPort = Option( p ) ) }
+        .text(
+          """
+          |Use this setting to bind a network interface to a different port than remoting protocol expects messages at. This may be used when running akka nodes in a separated networks (under NATs or docker containers). Use 0 if you want a random available port. Examples:
+          |
+          | akka.remote.netty.tcp.port = 2552
+          | akka.remote.netty.tcp.bind-port = 2553
+          |Network interface will be bound to the 2553 port, but remoting protocol will expect messages sent to port 2552.
+          |
+          | akka.remote.netty.tcp.port = 0
+          | akka.remote.netty.tcp.bind-port = 0
+          |Network interface will be bound to a random port, and remoting protocol will expect messages sent to the bound port.
+          |
+          | akka.remote.netty.tcp.port = 2552
+          | akka.remote.netty.tcp.bind-port = 0
+          |Network interface will be bound to a random port, but remoting protocol will expect messages sent to port 2552.
+          |
+          | akka.remote.netty.tcp.port = 0
+          | akka.remote.netty.tcp.bind-port = 2553
+          |Network interface will be bound to the 2553 port, and remoting protocol will expect messages sent to the bound port.
+          |
+          | akka.remote.netty.tcp.port = 2552
+          | akka.remote.netty.tcp.bind-port = ""
+          |Network interface will be bound to the 2552 port, and remoting protocol will expect messages sent to the bound port.
+          |
+          |akka.remote.netty.tcp.port if empty
+        """.stripMargin
+        )
 
       arg[String]( "<arg>..." )
         .unbounded()
@@ -661,7 +743,7 @@ object Settings extends ClassLogging {
                 Map(
                   "@msg" → "Settings making plan from specification",
                   "origin" → Map( "origin" → spec.origin().toString, "line-number" → spec.origin().lineNumber ),
-                  "spec" → spec.root.render()
+                  "spec" → spec.root.render( ConfigRenderOptions.concise )
                 )
               )
 
@@ -735,7 +817,7 @@ object Settings extends ClassLogging {
                   Map(
                     "@msg" → "regex plan",
                     "topic" → name,
-                    "origin" → Map( "origin" → spec.origin, "line-number" → spec.origin().lineNumber() )
+                    "origin" → Map( "origin" → spec.origin.toString, "line-number" → spec.origin().lineNumber() )
                   )
                 )
 
