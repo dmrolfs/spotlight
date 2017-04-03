@@ -46,7 +46,6 @@ case class CellShardCatalog(
     cells: Vector[AlgoTID]
 ) extends ShardCatalog with Equals with ClassLogging {
   override def id: TID = ShardCatalog.idFor( plan, algorithmRootType.name )( CellShardCatalog.identifying )
-  //  override def id: TID = identifying.tag( ShardCatalog.ID( plan.id, algorithmRootType.name ).asInstanceOf[identifying.ID] ).asInstanceOf[TID]
   override def name: String = plan.name
   override def slug: String = plan.slug
   val size: Int = cells.size
@@ -97,13 +96,9 @@ object CellShardModule extends ClassLogging {
   type ID = CellShardCatalog#ID
   type TID = CellShardCatalog#TID
 
-  //  implicit val identifying: Identifying[CellShardCatalog] = CellShardCatalog.identifying
-
   val module: SimpleAggregateModule[CellShardCatalog, CellShardCatalog#ID] = {
     val b = SimpleAggregateModule.builderFor[CellShardCatalog, CellShardCatalog#ID].make
     import b.P
-
-    //    val toSettings = ( s: ActorSystem ) ⇒ ClusterShardingSettings( s ).withRole( ClusterRole.Analysis.entryName )
 
     b
       .builder
@@ -157,44 +152,15 @@ object CellShardModule extends ClassLogging {
       val memoryHistogram: Histogram = metrics.histogram( MemoryHistogramName ) //todo make biased to recent 5 mins
       val sizeHistogram: Histogram = metrics.histogram( SizeHistogramName ) //todo make biased to recent 5 mins
 
+      def initializeMetrics(): Unit = metrics.unregisterGauges()
+
       initializeMetrics()
-
-      def initializeMetrics(): Unit = {
-        stripLingeringMetrics()
-        metrics.unregisterGauges()
-      }
-
-      def stripLingeringMetrics(): Unit = {
-        import com.codahale.metrics.{ Metric, MetricFilter }
-
-        metrics.registry.removeMatching(
-          new MetricFilter {
-            override def matches( name: String, metric: Metric ): Boolean = {
-              val isMatch = {
-                false && name.contains( ShardBaseName ) &&
-                  (
-                    false
-                  )
-              }
-
-              isMatch
-            }
-          }
-        )
-      }
     }
 
     var updateAvailability: Option[Cancellable] = None
     override def postStop(): Unit = updateAvailability foreach { _.cancel() }
 
-    // override def tidFromPersistenceId(pid: String): TID = {
-    //   val delimPos = pid lastIndexOf ':'
-    //   val (rootName, arep) = pid splitAt delimPos
-    //   identifying.safeParseTid[TID](arep)(classTag[TID])
-    // }
-
     override var state: CellShardCatalog = _
-    //    override val evState: ClassTag[CellShardCatalog] = classTag[CellShardCatalog]
 
     override def acceptance: Acceptance = {
       case ( CellShardProtocol.Added( tid, p, rt, next, cells ), s ) if Option( s ).isEmpty ⇒ {

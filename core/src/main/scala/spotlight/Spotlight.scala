@@ -96,8 +96,8 @@ object Spotlight extends Instrumented with ClassLogging {
       case ClusterRole.Seed ⇒ Set.empty[StartTask]
       case ClusterRole.All ⇒ all.keySet
       case role ⇒ all.toSet[( StartTask, Option[ClusterRole] )].collect { case ( t, r ) if r.forall( _ includes role ) ⇒ t }
-//      case ( t, r ) if r.map( _ includes role ).getOrElse( true ) ⇒ t
-//      }
+      //      case ( t, r ) if r.map( _ includes role ).getOrElse( true ) ⇒ t
+      //      }
     }
   }
 
