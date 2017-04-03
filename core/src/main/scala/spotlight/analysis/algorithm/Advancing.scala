@@ -32,7 +32,7 @@ object Advancing {
     * @tparam S
     * @return
     */
-  def apply[S <: Serializable: Advancing]: Advancing[S] = the[Advancing[S]]
+  def apply[S <: Serializable]( implicit advancing: Advancing[S] ): Advancing[S] = advancing
 
   object syntax {
     implicit class AdvancingOps[S <: Serializable: Advancing]( val shape: S ) {
