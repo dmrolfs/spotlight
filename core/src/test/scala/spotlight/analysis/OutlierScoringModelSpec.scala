@@ -68,7 +68,8 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
       //        spotlight.testkit.config( systemName = slug, portOffset = ParallelAkkaSpec.testPosition.get() )
       ),
       role = ClusterRole.All,
-      externalPort = 0,
+      externalHostname = "127.0.0.1",
+      requestedPort = 0,
       systemName = slug
     )
 
@@ -83,7 +84,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
 
   class TestSettingsWithPlans( override val plans: Set[AnalysisPlan], underlying: Settings ) extends Settings {
     override def role: ClusterRole = underlying.role
-    //    override def sourceAddress: InetSocketAddress = underlying.sourceAddress
+    override def externalHostname: String = underlying.externalHostname
     override def requestedExternalPort: Int = underlying.requestedExternalPort
     override def bindHostname: Option[String] = None
     override def bindPort: Option[Int] = None

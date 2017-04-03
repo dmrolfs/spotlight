@@ -36,8 +36,10 @@ java -classpath ${CPATH} \
   -Dconfig.resource=${SPOTLIGHT_CONFIG} \
   -Djava.library.path="${DIR}/../../infr/native" \
   -DSLF4J_LEVEL="${SLF4J_LEVEL}" \
-  -Xms4g \
-  -Xmx10g \
   -javaagent:"${JAVAAGENT}" \
   -XX:MaxMetaspaceSize=512m \
   ${MAIN_CLASS} "$@"
+
+
+#  -Xms4g \
+#  -Xmx10g \

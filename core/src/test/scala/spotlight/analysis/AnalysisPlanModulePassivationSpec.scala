@@ -65,7 +65,8 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[AnalysisPlanSta
         spotlight.testkit.config( systemName = slug, portOffset = scala.util.Random.nextInt( 20000 ) )
       ),
       role = ClusterRole.All,
-      externalPort = 0,
+      externalHostname = "127.0.0.1",
+      requestedPort = 0,
       systemName = slug
     )
   }

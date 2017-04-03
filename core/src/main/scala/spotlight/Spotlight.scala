@@ -95,10 +95,9 @@ object Spotlight extends Instrumented with ClassLogging {
     settings.role match {
       case ClusterRole.Seed ⇒ Set.empty[StartTask]
       case ClusterRole.All ⇒ all.keySet
-      case r ⇒ {
-        val taskRoles: Set[( StartTask, Option[ClusterRole] )] = all.toSet[( StartTask, Option[ClusterRole] )]
-        taskRoles.collect { case ( task: StartTask, role: Option[ClusterRole] ) if role contains r ⇒ task }
-      }
+      case role ⇒ all.toSet[( StartTask, Option[ClusterRole] )].collect { case ( t, r ) if r.forall( _ includes role ) ⇒ t }
+//      case ( t, r ) if r.map( _ includes role ).getOrElse( true ) ⇒ t
+//      }
     }
   }
 
@@ -182,7 +181,8 @@ object Spotlight extends Instrumented with ClassLogging {
           "#TEST SYSTEM START TASKS" → systemStartTasks( context.settings ).map( _.description ).toString,
           "#TEST CONTEXT ROOT TYPES" → context.rootTypes,
           "#TEST SYSTEM ROOT TYPES" → systemRootTypes( context.settings ),
-          "start-tasks" → nodeStartTasks.map( _.description ).mkString( "[", ", ", "] " )
+          "start-tasks" → nodeStartTasks.map( _.description ).mkString( "[", ", ", "] " ),
+          "usage" → context.settings.usage._2
         )
       )
 

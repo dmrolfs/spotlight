@@ -25,7 +25,7 @@ import spotlight.protocol.{ GraphiteSerializationProtocol, MessagePackProtocol, 
   */
 trait Settings extends ClassLogging {
   def role: ClusterRole
-  //  def sourceAddress: InetSocketAddress
+  def externalHostname: String
   def requestedExternalPort: Int
   def bindHostname: Option[String]
   def bindPort: Option[Int]
@@ -49,6 +49,7 @@ trait Settings extends ClassLogging {
       s"""
          | spotlight.settings {
          |   role = ${role.entryName}
+         |   external-hostname = ${externalHostname}
          |   requested-external-port = ${requestedExternalPort}
          |   max-frame-length = ${maxFrameLength}
          |   protocol = ${protocol.getClass.getCanonicalName}
@@ -71,7 +72,7 @@ trait Settings extends ClassLogging {
         "@msg" → "Settings.toConfig",
         "base" → Map(
           "role" → role.entryName,
-          //          "source-address" → sourceAddress.toString,
+          "external-hostname" → externalHostname,
           "requested-external-port" → requestedExternalPort,
           "bind" → Map( "hostname" → bindHostname.toString, "port" → bindPort.toString ),
           "max-frame-length" → maxFrameLength,
@@ -93,6 +94,7 @@ trait Settings extends ClassLogging {
     val displayUsage = s"""
       |\nRunning Spotlight using the following configuration:
       |\trole                     : ${role.entryName}
+      |\texternal hostname        : ${externalHostname}
       |\trequested external port  : ${requestedExternalPort}
       |\tbind-hostname            : ${bindHostname}
       |\tbind-port                : ${bindPort}
@@ -121,8 +123,7 @@ trait Settings extends ClassLogging {
 
     val richUsage = Map(
       "role" → role,
-      //      "source-binding" → sourceAddress.toString,
-      "requested-external-port" → requestedExternalPort,
+      "requested" → Map( "hostname" → externalHostname, "external-port" → requestedExternalPort ),
       "bind" → Map( "hostname" → bindHostname, "port" → bindPort ),
       "publish-binding" → graphiteAddress.toString,
       "max-frame-size" → maxFrameLength,
@@ -154,7 +155,9 @@ object Settings extends ClassLogging {
   //    }
   //  }
 
-  def requestedExternalPortForm( c: Config ): Option[Int] = c.as[Option[Int]]( "spotlight.settings.requested-external-port" )
+  val AkkaRemoteHostname = "akka.remote.netty.tcp.hostname"
+  def externalHostnameFrom( c: Config ): Option[String] = c.as[Option[String]]( AkkaRemoteHostname )
+  def requestedExternalPortFrom( c: Config ): Option[Int] = c.as[Option[Int]]( "spotlight.settings.requested-external-port" )
 
   val AkkaRemotePortPath = "akka.remote.netty.tcp.port"
 
@@ -429,6 +432,7 @@ object Settings extends ClassLogging {
 
     SimpleSettings(
       role = usage.role,
+      externalHostname = usage.externalHostname,
       requestedExternalPort = usageExternalPort,
       bindHostname = usage.bindHostname,
       bindPort = usage.bindPort,
@@ -437,7 +441,15 @@ object Settings extends ClassLogging {
       protocol = protocol,
       //      windowDuration = windowSize,
       graphiteAddress = for ( h ← graphiteHost; p ← Option( graphitePort ) ) yield new InetSocketAddress( h, p ),
-      config = adaptConfiguration( config, usage.role, usageExternalPort, systemName, usage.bindHostname, usage.bindPort ),
+      config = adaptConfiguration(
+        config = config,
+        role = usage.role,
+        externalHostname = usage.externalHostname,
+        requestedPort = usageExternalPort,
+        systemName = systemName,
+        bindHostname = usage.bindHostname,
+        bindPort = usage.bindPort
+      ),
       args = usage.args
     )
   }
@@ -445,12 +457,13 @@ object Settings extends ClassLogging {
   def adaptConfiguration(
     config: Config,
     role: ClusterRole,
-    externalPort: Int,
+    externalHostname: String,
+    requestedPort: Int,
     systemName: String = ActorSystemName,
     bindHostname: Option[String] = None,
     bindPort: Option[Int] = None
   ): Config = {
-    adaptConfiguratonForClustering( config, role, externalPort, systemName, bindHostname, bindPort )
+    adaptConfigurationForClustering( config, role, externalHostname, requestedPort, systemName, bindHostname, bindPort )
       .withFallback( adaptConfigurationForAlgorithmJournal( config ) )
       .withFallback( config )
   }
@@ -464,16 +477,25 @@ object Settings extends ClassLogging {
     * @param systemName
     * @return
     */
-  private def adaptConfiguratonForClustering(
+  private def adaptConfigurationForClustering(
     config: Config,
     role: ClusterRole,
+    externalHostname: String,
     requestedPort: Int,
     systemName: String,
     bindHostName: Option[String],
     bindPort: Option[Int]
   ): Config = {
-    def makeConfigString( p: Int, roles: Seq[ClusterRole] ): String = {
-      val remotePort = "akka.remote.netty.tcp.port = " + p
+    def makeConfigString( hostname: String, port: Int, roles: Seq[ClusterRole] ): String = {
+      val remote = {
+        s"""
+           |akka.remote.netty.tcp {
+           |  hostname = ${hostname}
+           |  port = ${port}
+           |}
+        """.stripMargin
+      }
+
       val clusterRoles = {
         if ( roles.isEmpty ) None
         else {
@@ -495,71 +517,82 @@ object Settings extends ClassLogging {
         }
       }
 
-      val result = clusterRoles map { remotePort + '\n' + _ } getOrElse remotePort
+      val logging = {
+        val LogPath = "com.persist.logging.appenders.file.logPath"
+        val oldLogPath = config.as[String]( LogPath )
+        val logHome = oldLogPath + '/' + hostname + '/' + port
+        s"""
+          |${LogPath} = ${logHome}
+          |spotlight.metrics.csv.dir = ${logHome}/metrics
+        """.stripMargin
+      }
 
-      import scala.collection.JavaConverters._
+      val result = Seq( Option( remote ), clusterRoles, Option( logging ) ).flatten.mkString( "\n" )
 
       log.info(
         Map(
           "@msg" → "#TEST adapted configuration for clustering",
           "role" → role.entryName,
           AkkaRemotePortPath → config.as[Option[Int]]( AkkaRemotePortPath ).toString,
+          "external-hostname" → externalHostname,
           "requested-port" → requestedPort,
           "cluster-config" → ConfigFactory.parseString( result ).root.render( ConfigRenderOptions.concise )
-        //          "cluster-config" → Map(
-        //            ConfigFactory.parseString( result ).root.entrySet.asScala.toSeq.map( e ⇒ ( e.getKey, e.getValue.render() ) ): _*
-        //          )
         )
       )
 
       result
     }
 
-    val expectedSeeds = for { n ← seedNodesFrom( config ) if n.systemName == systemName } yield n.port
+    val expectedSeeds = for { n ← seedNodesFrom( config ) if n.systemName == systemName } yield ( n.hostname, n.port )
     if ( expectedSeeds.isEmpty ) {
       log.warn( Map( "@msg" → "there are no cluster seed nodes configured for actor system", "system" → systemName ) )
     }
 
+    val requested = ( externalHostname, requestedPort )
+
     val clusterConfig = role match {
       case ClusterRole.All ⇒ {
-        val port = {
-          if ( expectedSeeds contains requestedPort ) requestedPort
+        val ( hostname, port ) = {
+          if ( expectedSeeds contains requested ) requested
           else {
             log.warn(
               Map(
-                "@msg" → "requested port is not listed in cluster seed ports; overriding to first seed if possible",
+                "@msg" → "requested hostname:port is not listed in cluster seed ports; overriding to first seed if possible",
                 "expected-seed-ports" → expectedSeeds,
                 "seed-override" → expectedSeeds.headOption.toString,
-                "requested-port" → requestedPort
+                "requested" → Map( "hostname" → requested._1, "port" → requested._2 )
               )
             )
-            expectedSeeds.headOption getOrElse requestedPort
+            expectedSeeds.headOption getOrElse requested
           }
         }
 
-        makeConfigString( port, Seq( ClusterRole.Seed, ClusterRole.Intake, ClusterRole.Analysis ) )
+        makeConfigString( hostname, port, Seq( ClusterRole.Seed, ClusterRole.Intake, ClusterRole.Analysis ) )
       }
 
       case ClusterRole.Seed ⇒ {
-        val port = {
-          if ( expectedSeeds contains requestedPort ) requestedPort
+        val ( hostname, port ) = {
+          if ( expectedSeeds contains requestedPort ) requested
           else {
             log.warn(
               Map(
-                "@msg" → "configured port is not listed in cluster seed ports; overriding to first seed if possible",
+                "@msg" → "configured hostname:port is not listed in cluster seed ports; overriding to first seed if possible",
                 "expected-seed-ports" → expectedSeeds,
                 "seed-override" → expectedSeeds.headOption.toString,
-                "requested-port" → requestedPort
+                "requested" → Map( "hostname" → requested._1, "port" → requested._2 )
               )
             )
-            expectedSeeds.headOption getOrElse requestedPort
+            expectedSeeds.headOption getOrElse requested
           }
         }
 
-        makeConfigString( port, Seq( ClusterRole.Seed ) )
+        makeConfigString( hostname, port, Seq( ClusterRole.Seed ) )
       }
 
-      case r ⇒ makeConfigString( requestedPort, Seq( r ) )
+      case r ⇒ {
+        val ( hostname, port ) = requested
+        makeConfigString( hostname, port, Seq( r ) )
+      }
     }
 
     ConfigFactory.parseString( clusterConfig )
@@ -579,6 +612,7 @@ object Settings extends ClassLogging {
 
   final case class SimpleSettings private[Settings] (
       override val role: ClusterRole,
+      override val externalHostname: String,
       override val requestedExternalPort: Int,
       override val bindHostname: Option[String],
       override val bindPort: Option[Int],
@@ -613,6 +647,7 @@ object Settings extends ClassLogging {
 
   final case class UsageSettings private[Settings] (
     role: ClusterRole,
+    externalHostname: String = InetAddress.getLocalHost.getHostAddress,
     requestedExternalPort: Option[Int] = None,
     bindHostname: Option[String] = None,
     bindPort: Option[Int] = None,
@@ -638,9 +673,9 @@ object Settings extends ClassLogging {
         .action { ( r, c ) ⇒ c.copy( role = r ) }
         .text( "role played in analysis cluster" )
 
-      //      opt[InetAddress]( 'h', "host" )
-      //        .action { ( e, c ) ⇒ c.copy( sourceHost = Some( e ) ) }
-      //        .text( "connection address to source" )
+      opt[String]( 'h', "host" )
+        .action { ( h, c ) ⇒ c.copy( externalHostname = h ) }
+        .text( "The hostname or ip clients should connect to. InetAddress.getLocalHost.getHostAddress is used if empty" )
 
       //      opt[Int]( 'p', "port" )
       //        .action { ( e, c ) ⇒ c.copy( sourcePort = Some( e ) ) }
