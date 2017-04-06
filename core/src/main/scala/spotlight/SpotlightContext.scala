@@ -76,7 +76,9 @@ object SpotlightContext extends ClassLogging {
         Option( s"""akka.cluster.roles = ${s.settings.config.as[Seq[String]]( "akka.cluster.roles" ).mkString( "[", ", ", "]" )}""" ),
         s.settings.config.as[Option[Int]]( "akka.cluster.min-nr-of-members" ) map { "akka.cluster.min-nr-of-members = " + _ },
         s.settings.config.as[Option[String]]( Settings.AkkaBindHostname ) map { Settings.AkkaBindHostname + " = " + _ },
-        s.settings.config.as[Option[String]]( Settings.AkkaBindPort ) map { Settings.AkkaBindPort + " = " + _ }
+        s.settings.config.as[Option[String]]( Settings.AkkaBindPort ) map { Settings.AkkaBindPort + " = " + _ },
+        s.settings.config.as[Option[String]]( "com.persist.logging.appenders.file.logPath" ) map { "com.persist.logging.appenders.file.logPath = " + _ },
+        s.settings.config.as[Option[String]]( "spotlight.metrics.csv.dir" ) map { "spotlight.metrics.csv.dir = " + _ }
       )
 
       println( description.flatten.mkString( "", "\n\t", "\n" ) )

@@ -520,14 +520,15 @@ object Settings extends ClassLogging {
       val logging = {
         val LogPath = "com.persist.logging.appenders.file.logPath"
         val oldLogPath = config.as[String]( LogPath )
-        val logHome = oldLogPath + '/' + hostname + '/' + port
+        val logHome = oldLogPath + '/' + hostname + '_' + port
         s"""
-          |${LogPath} = ${logHome}
-          |spotlight.metrics.csv.dir = ${logHome}/metrics
+          |${LogPath} = "${logHome}"
+          |spotlight.metrics.csv.dir = "${logHome}/metrics"
         """.stripMargin
       }
 
       val result = Seq( Option( remote ), clusterRoles, Option( logging ) ).flatten.mkString( "\n" )
+      println( s"ADAPTED CONFIG:\n${result}" )
 
       log.info(
         Map(

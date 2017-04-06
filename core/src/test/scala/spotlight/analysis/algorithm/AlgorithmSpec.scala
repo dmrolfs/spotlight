@@ -164,7 +164,7 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
         planName = plan.name,
         planId = plan.id.id.toString,
         spanType = AlgorithmIdentifier.TopicSpan,
-        spanHint = scope.topic.toString
+        topic = scope.topic
       )
     )
 

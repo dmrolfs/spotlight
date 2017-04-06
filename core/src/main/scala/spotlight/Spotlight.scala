@@ -176,13 +176,13 @@ object Spotlight extends Instrumented with ClassLogging {
           "@msg" → "making bounded context on node",
           "key" → context.name,
           "root-types" → nodeRootTypes.mkString( "[", ", ", "]" ),
-          "user-resources" → context.resources.mapKeys( _.name ),
-          "#TEST CONTEXT START TASKS" → context.startTasks.map( _.description ).toString,
-          "#TEST SYSTEM START TASKS" → systemStartTasks( context.settings ).map( _.description ).toString,
-          "#TEST CONTEXT ROOT TYPES" → context.rootTypes,
-          "#TEST SYSTEM ROOT TYPES" → systemRootTypes( context.settings ),
+          "user-resources" → context.resources.map( kv ⇒ ( kv._1.name, kv._2.toString ) ),
+          "#TEST CONTEXT START TASKS" → context.startTasks.map( _.description ).mkString( "[", ", ", "]" ),
+          "#TEST SYSTEM START TASKS" → systemStartTasks( context.settings ).map( _.description ).mkString( "[", ", ", "]" ),
+          "#TEST CONTEXT ROOT TYPES" → context.rootTypes.map( _.name ).mkString( "[", ", ", "]" ),
+          "#TEST SYSTEM ROOT TYPES" → systemRootTypes( context.settings ).map( _.name ).mkString( "[", ", ", "]" ),
           "start-tasks" → nodeStartTasks.map( _.description ).mkString( "[", ", ", "] " ),
-          "usage" → context.settings.usage._2
+          "usage" → context.settings.usage._2.mapValues( _.toString )
         )
       )
 
