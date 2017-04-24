@@ -42,5 +42,5 @@ tmp/
 *.hprof
 *.hprof.*
 *.orig
-out.txt
+out*.txt
 sample*.txt
