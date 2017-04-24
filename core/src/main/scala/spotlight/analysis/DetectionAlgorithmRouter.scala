@@ -80,6 +80,7 @@ object DetectionAlgorithmRouter extends ClassLogging {
     private lazy val algorithmRootTypes: Agent[Map[String, AggregateRootType]] = {
       import scala.concurrent.ExecutionContext.Implicits.global
 
+      //TODO empty due to new algo registration mechanism.
       Agent(
         Map(
           //        SeriesDensityAnalyzer.Algorithm -> ???, // SeriesDensityAnalyzer.props( router ),
