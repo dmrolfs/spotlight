@@ -1,5 +1,12 @@
 #!/bin/bash
 
+set -e
+set -x
+
+#/app/scripts/wait-for-it.sh -t 0 cassandra-node1:9041 -- echo "CASSANDRA Node1 started"
+#/app/scripts/wait-for-it.sh -t 0 cassandra-node2:9041 -- echo "CASSANDRA Node2 started"
+#/app/scripts/wait-for-it.sh -t 0 cassandra-node3:9041 -- echo "CASSANDRA Node3 started"
+
 # DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 DIR="$(dirname ${BASH_SOURCE[0]} )" 
 echo "DIR=$DIR"

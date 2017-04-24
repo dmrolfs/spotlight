@@ -21,7 +21,7 @@ object Dependencies {
   }
 
   object akka {
-    val version = "2.4.17"
+    val version = "2.5.0"
     def module( id: String ) = "com.typesafe.akka" %% s"akka-$id" % version withSources() withJavadoc()
     val all: Seq[ModuleID] = Seq( actor, stream, agent, cluster, clusterSharding, contrib, persistence, remote, slf4j )
 
@@ -34,7 +34,7 @@ object Dependencies {
     val clusterTools = module( "cluster-tools" )
     val contrib = module( "contrib" )
     val persistence = module( "persistence" )
-    val persistenceQuery = module( "persistence-query-experimental" )
+    val persistenceQuery = module( "persistence-query" )
     val remote = module( "remote" )
     val slf4j = module( "slf4j" )
     val testkit = module( "testkit" )
@@ -45,7 +45,7 @@ object Dependencies {
   }
 
   object persistence {
-    val cassandra = "com.typesafe.akka" %% "akka-persistence-cassandra" % "0.24"
+    val cassandra = "com.typesafe.akka" %% "akka-persistence-cassandra" % "0.26"
     val leveldb = "org.iq80.leveldb" % "leveldb" % "0.7" // "org.iq80.leveldb" % "leveldb" % "0.9"
     val leveldbjni = "org.fusesource.leveldbjni" % "leveldbjni-all" % "1.8" // "org.fusesource.leveldbjni" % "leveldbjni-all" % "1.8"
   }
@@ -86,9 +86,7 @@ object Dependencies {
   object metrics {
     val version = "3.1.2"
     def module( id: String ) = "io.dropwizard.metrics" % s"metrics-$id" % "3.1.2"
-    def all = Seq( /*sigar,*/ core, graphite, metricsScala, hdrhistogramReservoir, hdrhistogram ) ++ kamon.all
-
-//    val sigar = "org.hyperic" % "sigar" % "1.6.4"
+    def all = Seq( core, graphite, metricsScala, hdrhistogramReservoir, hdrhistogram ) ++ kamon.all
 
     val core = module( "core" )
     val graphite = module( "graphite" )
@@ -99,7 +97,8 @@ object Dependencies {
     object kamon {
       val version = "0.6.5"
       def module( id: String, v: String = version ) = "io.kamon" %% s"kamon-$id" % v
-      def all: Seq[sbt.ModuleID] = Seq.empty[sbt.ModuleID] // Seq( core, scala, akka, /*akkaRemote,*/ system, statsd )
+//      def all: Seq[sbt.ModuleID] = Seq.empty[sbt.ModuleID] // Seq( core, scala, akka, /*akkaRemote,*/ system, statsd )
+      def all: Seq[sbt.ModuleID] = Seq( sigarLoader )
 
       val core = module( "core" )
       val scala = module( "scala" )
@@ -148,7 +147,7 @@ object Dependencies {
     }
 
     object betterFiles {
-      val version = "2.17.1"
+      val version = "3.0.0"
       val core = "com.github.pathikrit" %% "better-files" % version
       val akka = "com.github.pathikrit" %% "better-files-akka" % version
       def all = Seq( core, akka )

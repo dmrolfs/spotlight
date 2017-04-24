@@ -62,11 +62,12 @@ dockerfile in docker := {
   val artifact = ( assemblyOutputPath in assembly ).value
   val targetBase = "/app"
   val artifactTargetPath = s"${targetBase}/${artifact.name}"
-  val coreosPath = baseDirectory.value / "coreos"
+  val infrastructurePath = baseDirectory.value / ".." / "infr"
+  val coreosPath = infrastructurePath / "coreos"
   val dockerPath = baseDirectory.value / "docker"
-  val entryScript = ( dockerPath ** "spotlight-docker.sh" ).get.headOption
+  val entryScript = ( baseDirectory.value / "bin" / "spotlight.sh" ).get.headOption
   val aspectjArtifactName = ( coreosPath ** "aspectjweaver-*.jar" ).get.headOption
-  val sigarBinary = ( coreosPath ** "libsigar-amd64-linux.so" ).get.headOption
+//  val sigarBinary = ( infrastructurePath / "native" ** "libsigar-amd64-linux.so" ).get.headOption
   val mainclass = mainClass.in( Compile, run ).value.getOrElse( sys.error("Expected exactly one main class") )
 
   new Dockerfile {
@@ -74,27 +75,34 @@ dockerfile in docker := {
     from( "java:8" )
     run( "apt-get", "update" )
     run( "apt-get", "-y", "install", "tmux" )
+//    copy( baseDirectory.value / ".." / "infr" / "scripts", s"${targetBase}/scripts" )
     copy( artifact, artifactTargetPath )
+
+//    env( "ROLE", "all" )
+
+    val targetFile = "sample-10.txt"
+    copy( baseDirectory.value / ".." / targetFile, s"${targetBase}/.." )
+    env( "TARGET", s"${targetBase}/../${targetFile}")
 
     env( ("LOG_HOME", "/var/log"), ("SPOTLIGHT_CONFIG", "application-prod.conf") )
     expose( 22, 2004, 2552 )
 
     val aspectAndSigar = for {
       aspectj <- aspectjArtifactName
-      sigar <- sigarBinary
-    } yield ( aspectj, sigar )
+//      sigar <- sigarBinary
+    } yield ( aspectj /*, sigar*/ )
 
     (entryScript, aspectAndSigar) match {
-      case ( Some(entry), Some( (aspectj, sigar) ) ) => {
+      case ( Some(entry), Some( (aspectj /*, sigar*/) ) ) => {
         copy( entry, targetBase + "/" + entry.name )
         copy( aspectj, targetBase + "/" + aspectj.name )
-        copy( sigar, targetBase + "/sigar-bin/" + sigar.name )
+//        copy( sigar, targetBase + "/sigar-bin/" + sigar.name )
 
         entryPointShell(
           s"${targetBase}/${entry.name}",
           mainclass,
           "/etc/spotlight:" + artifactTargetPath,
-          s"-Djava.library.path=${targetBase}/sigar-bin/",
+//          s"-Djava.library.path=${targetBase}/sigar-bin/",
           s"-javaagent:${targetBase}/${aspectj.name}"
         )
 //        entryPoint(

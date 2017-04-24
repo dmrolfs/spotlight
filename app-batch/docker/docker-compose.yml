@@ -1,4 +1,4 @@
-version: '3'
+version: '2'
 
 services:
 
@@ -52,22 +52,17 @@ services:
 
 ######## SERVICES ########
 
-spotlight-batch:
-  image: dmrolfs/spotlight-batch:latest
-  expose:
-    - 22
-    - 2551
-  volumes_from:
-    - logs
-  volumes:
-    - /Users/rolfsd/spotlight/log/seed:/var/log
-    - /Users/rolfsd/spotlight/etc/seed:/etc/spotlight
-  restart: always
-  networks:
-    dockernet:
-      ipv4_address: 172.16.2.10
-  #environment:
-  #  - SPOTLIGHT_CONFIG=application-prod.conf
+  spotlight-batch:
+    extends:
+      file: base-containers.yml
+      service: spotlight-base
+    networks:
+      dockernet:
+        ipv4_address: 172.16.2.10
+    environment:
+      - ROLE=all
+      - BIND_HOSTNAME=172.16.2.10
+  #    - SPOTLIGHT_CONFIG=application-prod.conf
 
 
 ######## SETUP ########
