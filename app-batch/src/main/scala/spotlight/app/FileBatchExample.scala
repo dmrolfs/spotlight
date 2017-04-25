@@ -1,12 +1,12 @@
 package spotlight.app
 
 import java.nio.file.Paths
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 import scala.concurrent.Future
 import scala.concurrent.duration._
 import scala.util.{ Failure, Success }
-import akka.NotUsed
+import akka.{ Done, NotUsed }
 import akka.actor.{ Actor, ActorSystem, DeadLetter, Props }
 import akka.event.LoggingReceive
 import akka.stream.scaladsl.{ FileIO, Flow, Framing, GraphDSL, Sink, Source }
@@ -34,6 +34,9 @@ import spotlight.protocol.GraphiteSerializationProtocol
 /** Created by rolfsd on 11/17/16.
   */
 object FileBatchExample extends Instrumented with ClassLogging {
+  val inputCount: AtomicLong = new AtomicLong( 0L )
+  val resultCount: AtomicLong = new AtomicLong( 0L )
+
   def main( args: Array[String] ): Unit = {
     import scala.concurrent.ExecutionContext.Implicits.global
     import SpotlightContext.{ Builder ⇒ B }
@@ -120,10 +123,8 @@ object FileBatchExample extends Instrumented with ClassLogging {
     val Results = 'results
   }
 
-  val count: AtomicInteger = new AtomicInteger( 0 )
-
   //todo
-  def start( context: SpotlightContext ): Future[Seq[SimpleFlattenedOutlier]] = {
+  def start( context: SpotlightContext ): Future[Done] = {
 
     log.debug( "starting the detecting flow logic" )
 
@@ -135,7 +136,7 @@ object FileBatchExample extends Instrumented with ClassLogging {
       .flatMap {
         case ( boundedContext, ctx, None ) ⇒ {
           log.info( Map( "@msg" → "spotlight node started", "role" → ctx.settings.role.entryName ) )
-          Future.successful( Seq.empty[SimpleFlattenedOutlier] )
+          Future.successful( Done )
         }
 
         case ( boundedContext, ctx, Some( scoring ) ) ⇒
@@ -170,39 +171,46 @@ object FileBatchExample extends Instrumented with ClassLogging {
           implicit val materializer = ActorMaterializer( ActorMaterializerSettings( system ) )
 
           val publish = Flow[SimpleFlattenedOutlier].buffer( 10, OverflowStrategy.backpressure ).watchFlow( Publish )
+          val sink = Sink.foreach[SimpleFlattenedOutlier] { o ⇒ println( s"***** APP: found outlier: ${o}" ) }
 
           val process = sourceData( ctx.settings )
             .via( Flow[String].watchSourced( DataSource ) )
             //      .via( Flow[String].buffer( 10, OverflowStrategy.backpressure ).watchSourced( Data ) )
             .via( detectionWorkflow( boundedContext, ctx.settings, scoring ) )
             .via( publish )
-            .runWith( Sink.seq )
+            .groupedWithin( 100, 1.minute )
+            .mapConcat { identity }
+            .map { o ⇒
+              resultCount.incrementAndGet()
+              o
+            }
+            .runWith( sink )
 
           process
-            .map { results ⇒
+            .map { d ⇒
               log.info(
                 Map(
                   "@msg" → "APP: Example processed records successfully and found result(s)",
-                  "nr-records" → count.get().toString,
-                  "nr-results" → results.size.toString
+                  "nr-records" → inputCount.get().toString,
+                  "nr-results" → resultCount.get().toString
                 )
               )
 
-              results
+              d
             }
             .onComplete {
-              case Success( results ) ⇒ {
+              case Success( _ ) ⇒ {
                 println( "\n\nAPP:  ********************************************** " )
-                println( s"\nAPP:${count.get()} batch completed finding ${results.size} outliers:" )
-                results.zipWithIndex foreach { case ( o, i ) ⇒ println( s"${i + 1}: ${o}" ) }
+                println( s"\nAPP:${inputCount.get()} batch completed finding ${resultCount.get()} outliers:" )
+                //                results.zipWithIndex foreach { case ( o, i ) ⇒ println( s"${i + 1}: ${o}" ) }
                 println( "APP:  **********************************************\n\n" )
                 context.terminate()
               }
 
               case Failure( ex ) ⇒ {
-                log.error( Map( "@msg" → "batch finished with error", "count" → count.get() ), ex )
+                log.error( Map( "@msg" → "batch finished with error", "count" → inputCount.get() ), ex )
                 println( "\n\nAPP:  ********************************************** " )
-                println( s"\nAPP: ${count.get()} batch completed with ERROR: ${ex}" )
+                println( s"\nAPP: ${inputCount.get()} batch completed with ERROR - found ${resultCount.get()} outliers: ${ex}" )
                 println( "APP:  **********************************************\n\n" )
                 context.terminate()
               }
@@ -262,7 +270,7 @@ object FileBatchExample extends Instrumented with ClassLogging {
       val timeSeries = b.add(
         Flow[String]
           .via( unmarshalTimeSeriesData )
-          .map { ts ⇒ count.incrementAndGet(); ts }
+          .map { ts ⇒ inputCount.incrementAndGet(); ts }
       )
 
       val limiter = b.add( rateLimitFlow( settings.parallelism, 25.milliseconds ).watchFlow( WatchPoints.Rate ) )
