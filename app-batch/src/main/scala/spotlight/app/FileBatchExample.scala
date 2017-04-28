@@ -1,17 +1,18 @@
 package spotlight.app
 
-import java.nio.file.Paths
+import java.nio.file.{ Paths, WatchEvent }
 import java.util.concurrent.atomic.AtomicLong
 
 import scala.concurrent.Future
 import scala.concurrent.duration._
 import scala.util.{ Failure, Success }
 import akka.{ Done, NotUsed }
-import akka.actor.{ Actor, ActorSystem, DeadLetter, Props }
+import akka.actor.{ Actor, ActorRef, ActorSystem, DeadLetter, Props }
 import akka.event.LoggingReceive
-import akka.stream.scaladsl.{ FileIO, Flow, Framing, GraphDSL, Sink, Source }
+import akka.stream.scaladsl.{ FileIO, Flow, Framing, GraphDSL, Keep, Sink, Source }
 import akka.stream._
 import akka.util.ByteString
+import better.files.ThreadBackedFileMonitor
 import net.ceedubs.ficus.Ficus._
 import com.persist.logging._
 
@@ -171,16 +172,25 @@ object FileBatchExample extends Instrumented with ClassLogging {
           implicit val materializer = ActorMaterializer( ActorMaterializerSettings( system ) )
 
           val publish = Flow[SimpleFlattenedOutlier].buffer( 10, OverflowStrategy.backpressure ).watchFlow( Publish )
-          val sink = Sink.foreach[SimpleFlattenedOutlier] { o ⇒ println( s"***** APP: found outlier: ${o}" ) }
+          val sink = Sink.foreach[SimpleFlattenedOutlier] { o ⇒
+            log.alternative(
+              category = "results",
+              Map(
+                "topic" → o.topic,
+                "outliers-in-batch" → o.outliers.size,
+                "algorithm" → o.algorithm,
+                "outliers" → o.outliers.mkString( "[", ", ", "]" )
+              )
+            )
+          }
 
           val process = sourceData( ctx.settings )
             .via( Flow[String].watchSourced( DataSource ) )
             //      .via( Flow[String].buffer( 10, OverflowStrategy.backpressure ).watchSourced( Data ) )
             .via( detectionWorkflow( boundedContext, ctx.settings, scoring ) )
             .via( publish )
-            .groupedWithin( 100, 1.minute )
-            .mapConcat { identity }
             .map { o ⇒
+              log.warn( Map( "@msg" → "published result - BEFORE SINK", "result" → o.toString ) )
               resultCount.incrementAndGet()
               o
             }
@@ -207,6 +217,14 @@ object FileBatchExample extends Instrumented with ClassLogging {
                 context.terminate()
               }
 
+              case Failure( ex: akka.stream.AbruptTerminationException ) ⇒ {
+                println( "\n\nAPP:  ********************************************** " )
+                println( s"\nAPP:${inputCount.get()} batch completed with manual termination finding ${resultCount.get()} outliers:" )
+                //                results.zipWithIndex foreach { case ( o, i ) ⇒ println( s"${i + 1}: ${o}" ) }
+                println( "APP:  **********************************************\n\n" )
+                context.terminate()
+              }
+
               case Failure( ex ) ⇒ {
                 log.error( Map( "@msg" → "batch finished with error", "count" → inputCount.get() ), ex )
                 println( "\n\nAPP:  ********************************************** " )
@@ -220,15 +238,80 @@ object FileBatchExample extends Instrumented with ClassLogging {
       }
   }
 
-  def sourceData( settings: Settings ): Source[String, Future[IOResult]] = {
-    val data = settings.args.lastOption getOrElse "source.txt"
-    log.info( Map( "@msg" → "using data file", "file" → Paths.get( data ).toString ) )
+  //  def sourceData( settings: Settings ): Source[String, Future[IOResult]] = {
+  def sourceData( settings: Settings )( implicit materializer: Materializer ): Source[String, NotUsed] = {
+    val dataPath = Paths.get( settings.args.lastOption getOrElse "source.txt" )
+    log.info( Map( "@msg" → "using data file", "path" → dataPath.toString ) )
 
-    FileIO
-      .fromPath( Paths.get( data ) )
-      .via( Framing.delimiter( ByteString( "\n" ), maximumFrameLength = 1024 ) )
-      .map { _.utf8String }
+    //    FileIO
+    //      .fromPath( Paths.get( data ) )
+    //      .via( Framing.delimiter( ByteString( "\n" ), maximumFrameLength = 1024 ) )
+    //      .map { _.utf8String }
 
+    val ( recordPublisherRef, recordPublisher ) = {
+      Source
+        .actorPublisher[RecordPublisher.Record]( RecordPublisher.props )
+        .toMat( Sink.asPublisher( false ) )( Keep.both )
+        .run()
+    }
+
+    import better.files._
+    val watcher = new ThreadBackedFileMonitor( File( dataPath ), recursive = true ) {
+      override def onCreate( file: File ): Unit = {
+        log.info(
+          Map(
+            "@msg" → "loading newly CREATED data file",
+            "name" → file.path.toString,
+            "records" → file.lines.size
+          )
+        )
+        recordPublisherRef ! RecordPublisher.Record( payload = file.lines.to[scala.collection.immutable.Iterable] )
+      }
+
+      override def onModify( file: File ): Unit = {
+        log.warn(
+          Map(
+            "@msg" → "newly MODIFIED data file",
+            "name" → file.path.toString,
+            "records" → file.lines.size
+          )
+        )
+      }
+
+      override def onDelete( file: File ): Unit = {
+        log.warn(
+          Map(
+            "@msg" → "newly DELETED data file",
+            "name" → file.path.toString,
+            "records" → file.lines.size
+          )
+        )
+      }
+
+      override def onUnknownEvent( event: WatchEvent[_] ): Unit = {
+        log.error(
+          Map(
+            "@msg" → "UNKNOWN EVENT",
+            "kind" → event.kind(),
+            "count" → event.count(),
+            "event" → event.toString
+          )
+        )
+      }
+
+      override def onException( exception: Throwable ): Unit = {
+        log.error(
+          Map(
+            "@msg" → "EXCEPTION",
+            "message" → exception.getMessage
+          ),
+          ex = exception
+        )
+      }
+    }
+    watcher.start()
+
+    Source.fromPublisher( recordPublisher ).map( _.payload ).mapConcat { identity }
     //    import better.files._
     //
     //    val file = File( data )
@@ -406,3 +489,4 @@ object FileBatchExample extends Instrumented with ClassLogging {
     }
   }
 }
+

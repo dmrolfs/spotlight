@@ -22,7 +22,7 @@ object Dependencies {
 
   object akka {
     val version = "2.5.0"
-    def module( id: String ) = "com.typesafe.akka" %% s"akka-$id" % version withSources() withJavadoc()
+    def module( id: String ) = "com.typesafe.akka" %% s"akka-${id}" % version withSources() withJavadoc()
     val all: Seq[ModuleID] = Seq( actor, stream, agent, cluster, clusterSharding, contrib, persistence, remote, slf4j )
 
     val actor = module( "actor" )
@@ -45,7 +45,7 @@ object Dependencies {
   }
 
   object persistence {
-    val cassandra = "com.typesafe.akka" %% "akka-persistence-cassandra" % "0.26"
+    val cassandra = "com.typesafe.akka" %% "akka-persistence-cassandra" % "0.51"
     val leveldb = "org.iq80.leveldb" % "leveldb" % "0.7" // "org.iq80.leveldb" % "leveldb" % "0.9"
     val leveldbjni = "org.fusesource.leveldbjni" % "leveldbjni-all" % "1.8" // "org.fusesource.leveldbjni" % "leveldbjni-all" % "1.8"
   }
@@ -158,7 +158,7 @@ object Dependencies {
     val scalatest = "org.scalatest" %% "scalatest" % "3.0.1" withSources() withJavadoc()
     val scalazMatchers = "org.typelevel" %% "scalaz-scalatest" % "1.1.1" withSources() withJavadoc()
 
-    val inmemory = "com.github.dnvriend" %% "akka-persistence-inmemory" % "2.4.17.1"
+    val inmemory = "com.github.dnvriend" %% "akka-persistence-inmemory" % "2.5.0.0"
 
     object mockito {
       val version = "2.7.7"

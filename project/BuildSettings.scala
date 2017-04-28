@@ -11,7 +11,7 @@ object BuildSettings {
     version := VERSION,
     organization := "com.github.dmrolfs",
     licenses += ("MIT", url("http://opensource.org/licenses/MIT")),
-    crossScalaVersions := Seq( "2.12.1" ),
+    crossScalaVersions := Seq( "2.12.2" ),
     scalaVersion := crossScalaVersions{ (vs: Seq[String]) => vs.head }.value,
     // updateOptions := updateOptions.value.withCachedResolution(true),
     scalacOptions ++= Seq(

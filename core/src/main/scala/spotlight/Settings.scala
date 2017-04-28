@@ -672,7 +672,15 @@ object Settings extends ClassLogging {
       opt[ClusterRole]( 'r', "role" )
         .required()
         .action { ( r, c ) ⇒ c.copy( role = r ) }
-        .text( "role played in analysis cluster" )
+        .text(
+          """
+            |role node plays in spotlight cluster:
+            |  all: used for single-node use where the node handles all responsibilities
+            |  seed: one of required seed nodes who manage cluster membership
+            |  analysis: algorithm worker processing
+            |  intake: integration point with time series data supplier and executes the spotlight execution stream
+          """.stripMargin
+        )
 
       opt[String]( 'h', "host" )
         .action { ( h, c ) ⇒ c.copy( externalHostname = h ) }

@@ -133,7 +133,7 @@ class PastPeriodAverageAlgorithmSpec extends AlgorithmSpec[PastPeriod.Shape] {
 
       val window = 3
       val pvs = series.points map { Period.fromDataPoint }
-      val shape = pvs.foldLeft( PastPeriod.Shape( window = window, history = window * 10 ) ) {
+      val shape = pvs.foldLeft( PastPeriod.Shape( window = window /*, history = window * 10*/ ) ) {
         case ( s, ( p, v ) ) ⇒
           val ns = s.addPeriodValue( p, v )
           log.info(

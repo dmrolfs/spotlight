@@ -224,10 +224,10 @@ object CellShardModule extends ClassLogging {
       case UpdateAvailability ⇒ dispatchEstimateRequests()
 
       case estimate: AP.EstimatedSize ⇒ {
-        log.info(
-          "AlgorithmCellShardCatalog[{}] Received estimate from shard:[{}] with estimated shapes:[{}] and average shape size:[{}]",
-          self.path.name, estimate.sourceId, estimate.nrShapes, estimate.averageSizePerShape
-        )
+        //        log.debug(
+        //          "AlgorithmCellShardCatalog[{}] Received estimate from shard:[{}] with estimated shapes:[{}] and average shape size:[{}]",
+        //          self.path.name, estimate.sourceId, estimate.nrShapes, estimate.averageSizePerShape
+        //        )
 
         shardMetrics foreach { m ⇒
           m.memoryHistogram += estimate.size.toBytes.toLong
