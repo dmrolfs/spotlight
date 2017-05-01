@@ -40,6 +40,7 @@ trait Settings extends ClassLogging {
   def tcpInboundBufferSize: Int
   //  def workflowBufferSize: Int
   def parallelism: Int = ( parallelismFactor * Runtime.getRuntime.availableProcessors() ).toInt
+  def forceLocal: Boolean
   def args: Seq[String]
 
   def config: Config
@@ -623,7 +624,8 @@ object Settings extends ClassLogging {
       //      override val windowDuration: FiniteDuration,
       override val graphiteAddress: Option[InetSocketAddress],
       override val config: Config,
-      override val args: Seq[String]
+      override val args: Seq[String],
+      override val forceLocal: Boolean = false
   ) extends Settings {
     override def detectionBudget: Duration = config.as[Duration]( Directory.DETECTION_BUDGET )
 
@@ -655,6 +657,7 @@ object Settings extends ClassLogging {
     //    sourceHost: Option[InetAddress] = None,
     //    sourcePort: Option[Int] = None,
     //    windowSize: Option[FiniteDuration] = None,
+    forceLocal: Boolean = false,
     args: Seq[String] = Seq.empty[String]
   )
 
@@ -737,6 +740,15 @@ object Settings extends ClassLogging {
           |Network interface will be bound to the 2552 port, and remoting protocol will expect messages sent to the bound port.
           |
           |akka.remote.netty.tcp.port if empty
+        """.stripMargin
+        )
+
+      opt[Unit]( "force-local" )
+        .optional()
+        .action { ( _, c ) ⇒ c.copy( forceLocal = true ) }
+        .text(
+          """
+        |Use this setting in conjunction with "all" role to force system to work on only one node, which may improve performance.
         """.stripMargin
         )
 

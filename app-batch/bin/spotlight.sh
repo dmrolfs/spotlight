@@ -30,10 +30,10 @@ Analyzes data files at PATH for anomalies
 [-p PORT]             Listening remote port for this node in the processing cluster.
   There must be at least one seed at 2551 or 2552; otherwise can be 0 which is the default
 
-[-b BIND_IP_ADDRESS]  Use this setting to bind a network interface to a different hostname or ip than remoting protocol expects messages
+[-H BIND_IP_ADDRESS]  Use this setting to bind a network interface to a different hostname or ip than remoting protocol expects messages
  at. Use "0.0.0.0" to bind to all interfaces. akka.remote.netty.tcp.hostname if empty
 
-[-d BIND_PORT]        Use this setting to bind a network interface to a different port than remoting protocol expects messages at. This may be used when running akka nodes in a separated networks (under NATs or docker containers). Use 0 if you want a random available port. Examples:
+[-P BIND_PORT]        Use this setting to bind a network interface to a different port than remoting protocol expects messages at. This may be used when running akka nodes in a separated networks (under NATs or docker containers). Use 0 if you want a random available port. Examples:
 
  akka.remote.netty.tcp.port = 2552
  akka.remote.netty.tcp.bind-port = 2553
@@ -63,6 +63,8 @@ akka.remote.netty.tcp.port if empty
 
 [-c CONFIG_RESOURCE]  Configuration resource file. application.conf is default
 
+[ -L ]                Force node to execute locally in conjunction with -r all.
+[-n JVM_MIN_MEMORY]   Minimum memory allocation for JVM. 1g is default
 [-x JVM_MAX_MEMORY]   Maximum memory allocation for JVM. 2g is default
 EOF
 }
@@ -75,10 +77,12 @@ bind_port=
 batch_target=
 slf4j_level=WARN
 main_class=spotlight.app.FileBatchExample
-jvm_mx_memory=2g
+jvm_min_memory=1g
+jvm_max_memory=2g
 config_resource=application.conf
+force_local=false
 
-while getopts r:h:p:b:d:l:m:c:x: opt
+while getopts :?Lr:h:p:H:P:l:m:c:n:x: opt
 do
   case "$opt" in
     r)
@@ -93,11 +97,11 @@ do
       echo "using $OPTARG for requested_external_port" >&2
       requested_external_port="$OPTARG"
       ;;
-    b)
+    H)
       echo "using $OPTARG for bind_hostname" >&2
       bind_hostname="$OPTARG"
       ;;
-    d)
+    P)
       echo "using $OPTARG for bind_port" >&2
       bind_port="$OPTARG"
       ;;
@@ -113,13 +117,21 @@ do
       echo "using $OPTARG for config_resource" >&2
       config_resource="$OPTARG"
       ;;
+    n)
+      echo "using $OPTARG for jvm_min_memory" >&2
+      jvm_min_memory="$OPTARG"
+      ;;
     x)
-      echo "using $OPTARG for jvm_mx_memory" >&2
-      jvm_mx_memory="$OPTARG"
+      echo "using $OPTARG for jvm_max_memory" >&2
+      jvm_max_memory="$OPTARG"
+      ;;
+    L)
+      echo "setting true for force_local" >&2
+      force_local=true
       ;;
     ?)
       show_help
-      exit 2
+      exit 0
       ;;
   esac
 done
@@ -160,9 +172,9 @@ then
   ((++i))
 fi
 
-if [ ! "$batch_target" = "" ]
+if [ ! "$force_local" = true ]
 then
-  args[i]="${batch_target}"
+  args[i]="--force-local"
   ((++i))
 fi
 
@@ -180,6 +192,7 @@ echo "  bind port: ${bind_port:-<nil>}"
 echo "  batch target: ${batch_target:-<nil>}"
 echo "  slf4j log level: ${slf4j_level:-WARN}"
 echo "  config resource: ${config_resource}"
+echo "  force local: ${force_local}"
 echo "  env arguments: ${args[@]}"
 echo "  remaining arguments: $@"
 echo
@@ -193,7 +206,7 @@ cpath="$dir/../target/scala-2.12/*"
 echo "classpath=$cpath"
 echo
 
-echo "java -classpath ${cpath} -Dconfig.resource=${config_resource} -Djava.library.path=${dir}/../../infr/native -DSLF4J_LEVEL=${slf4j_level:-WARN} -javaagent:${java_agent} -XX:MaxMetaspaceSize=512m -Xmx${jvm_mx_memory:2g} ${main_class} ${args[@]} ${batch_target} $@"
+echo "java -classpath ${cpath} -Dconfig.resource=${config_resource} -Djava.library.path=${dir}/../../infr/native -DSLF4J_LEVEL=${slf4j_level:-WARN} -javaagent:${java_agent} -XX:MaxMetaspaceSize=512m -Xms${jvm_min_memory:-1g} -Xmx${jvm_max_memory:-2g} ${main_class:-spotlight.app.FileBatchExample} ${args[@]} ${batch_target} $@"
 echo
 
 #java -classpath "${CPATH}" \
@@ -203,14 +216,11 @@ echo
 #  ${MAIN_CLASS} ${args[@]} "$@"
 
 java -classpath "${cpath}" \
-  -Dconfig.resource=${config_resource} \
+  -Dconfig.resource="${config_resource}" \
   -Djava.library.path="${dir}/../../infr/native" \
   -DSLF4J_LEVEL="${slf4j_level:-WARN}" \
   -javaagent:"${java_agent}" \
   -XX:MaxMetaspaceSize=512m \
-  -Xmx${jvm_mx_memory:2g} \
-  ${main_class} ${args[@]} "${batch_target}" "$@"
-
-
-#  -Xms4g \
-#  -Xmx10g \
+  -Xms${jvm_min_memory:-1g} \
+  -Xmx${jvm_max_memory:-2g} \
+  ${main_class:-spotlight.app.FileBatchExample} ${args[@]} "${batch_target}" "$@"
