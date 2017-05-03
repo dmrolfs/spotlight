@@ -69,18 +69,17 @@ akka.remote.netty.tcp.port if empty
 EOF
 }
 
-role=all
-external_hostname=
-requested_external_port=
-bind_hostname=
-bind_port=
-batch_target=
-slf4j_level=WARN
-main_class=spotlight.app.FileBatchExample
-jvm_min_memory=1g
-jvm_max_memory=2g
-config_resource=application.conf
-force_local=false
+role=${ROLE:-all}
+external_hostname=${EXTERNAL_HOSTNAME}
+requested_external_port=${REQUESTED_EXTERNAL_PORT}
+bind_hostname=${BIND_HOSTNAME}
+bind_port=${BIND_PORT}
+slf4j_level=${SLF4J_LEVEL:-WARN}
+main_class=${MAIN_CLASS:-spotlight.app.FileBatchExample}
+jvm_min_memory=${JVM_MIN_MEMORY:-1g}
+jvm_max_memory=${JVM_MAX_MEMORY:-2g}
+config_resource=${CONFIG_RESOURCE:-application.conf}
+force_local=${FORCE_LOCAL:-false}
 
 while getopts :?Lr:h:p:H:P:l:m:c:n:x: opt
 do
@@ -139,7 +138,8 @@ echo "OPTIND: $OPTIND"
 echo ${#@}
 shift $(($OPTIND - 1))
 
-batch_target=$1
+default_batch_target="$dir/../data"
+batch_target=${1-${default_batch_target}}
 shift
 
 i=0
