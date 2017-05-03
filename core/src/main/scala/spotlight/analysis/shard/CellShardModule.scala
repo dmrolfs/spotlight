@@ -13,6 +13,7 @@ import omnibus.commons.identifier._
 import omnibus.commons.util._
 import demesne._
 import demesne.module.{ ClusteredAggregate, SimpleAggregateModule }
+import spotlight.Settings
 import spotlight.analysis.DetectUsing
 import spotlight.analysis.algorithm.{ AlgorithmIdGenerator, AlgorithmProtocol ⇒ AP }
 import spotlight.infrastructure.ClusterRole
@@ -100,9 +101,15 @@ object CellShardModule extends ClassLogging {
     val b = SimpleAggregateModule.builderFor[CellShardCatalog, CellShardCatalog#ID].make
     import b.P
 
+    import demesne.module.AggregateEnvironment.Resolver
+    val resolveEnvironment: Resolver = { m: DomainModel ⇒
+      if ( Settings.forceLocalFrom( m.configuration ) ) Resolver.local( m ) else Resolver.clustered( m )
+    }
+
     b
       .builder
-      .set( P.Environment, ClusteredAggregate() )
+      .set( P.Environment, resolveEnvironment )
+      //      .set( P.Environment, ClusteredAggregate() )
       .set( P.ClusterRole, Option( ClusterRole.Analysis.entryName ) )
       .set( P.Props, ShardingActor.props( _, _ ) )
       .build()

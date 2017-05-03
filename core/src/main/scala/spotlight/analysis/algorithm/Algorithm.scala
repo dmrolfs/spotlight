@@ -10,6 +10,7 @@ import akka.actor._
 import akka.cluster.sharding.{ ClusterShardingSettings, ShardRegion }
 import akka.event.LoggingReceive
 import akka.persistence._
+import spotlight.Settings
 import spotlight.infrastructure.ClusterRole
 
 import scalaz._
@@ -307,7 +308,9 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
       override val passivateTimeout: Duration = Duration( 1, MINUTES ) //todo make config driven
 
       override lazy val name: String = algorithmModule.shardName
-      override def repositoryProps( implicit model: DomainModel ): Props = Repository clusteredProps model // Repository localProps model //todo change to clustered with multi-jvm testing of cluster
+      override def repositoryProps( implicit model: DomainModel ): Props = {
+        if ( Settings.forceLocalFrom( model.configuration ) ) Repository localProps model else Repository clusteredProps model
+      }
       override def maximumNrClusterNodes: Int = algorithm.maximumNrClusterNodes
       override def aggregateIdFor: ShardRegion.ExtractEntityId = super.aggregateIdFor orElse {
         case AdvancedType( a ) ⇒ ( a.sourceId.id.toString, a )

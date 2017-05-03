@@ -87,7 +87,7 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[AnalysisPlanSta
       override def aggregateRootPropsOp: AggregateRootProps = testProps( _, _ )
       override type Protocol = outer.Protocol
       override val protocol: Protocol = outer.protocol
-      override def environment: AggregateEnvironment = LocalAggregate
+      override def environment: AggregateEnvironment.Resolver = AggregateEnvironment.Resolver.local
     }
 
     override val module: Module = new Module

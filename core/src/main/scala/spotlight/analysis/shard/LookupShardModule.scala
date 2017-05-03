@@ -14,7 +14,8 @@ import omnibus.akka.publish.{ EventPublisher, StackableStreamPublisher }
 import omnibus.commons.identifier._
 import omnibus.commons.util._
 import demesne._
-import demesne.repository.CommonClusteredRepository
+import demesne.repository.{ CommonClusteredRepository, CommonLocalRepository }
+import spotlight.Settings
 import spotlight.analysis.DetectUsing
 import spotlight.analysis.shard.ShardCatalog.ShardCatalogIdentifying
 import spotlight.analysis.algorithm.{ Algorithm, AlgorithmIdGenerator, AlgorithmProtocol ⇒ AP }
@@ -143,14 +144,17 @@ object LookupShardModule extends AggregateRootModule[LookupShardCatalog, LookupS
 
     override val snapshotPeriod: Option[FiniteDuration] = None
     override def repositoryProps( implicit model: DomainModel ): Props = {
-      CommonClusteredRepository.props(
-        model = model,
-        rootType = this,
-        makeAggregateProps = AggregateRoot.ShardingActor.props( _: DomainModel, _: AggregateRootType )
-      )(
-          settings = ClusterShardingSettings( model.system )
-        )
-      //      CommonLocalRepository.props( model, this, AggregateRoot.ShardingActor.props( _: DomainModel, _: AggregateRootType ) )
+      if ( Settings.forceLocalFrom( model.configuration ) ) {
+        CommonLocalRepository.props( model, this, AggregateRoot.ShardingActor.props( _: DomainModel, _: AggregateRootType ) )
+      } else {
+        CommonClusteredRepository.props(
+          model = model,
+          rootType = this,
+          makeAggregateProps = AggregateRoot.ShardingActor.props( _: DomainModel, _: AggregateRootType )
+        )(
+            settings = ClusterShardingSettings( model.system )
+          )
+      }
     }
   }
 

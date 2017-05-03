@@ -39,7 +39,7 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[AnalysisPlanState] with Op
     override val idLens: Lens[AnalysisPlanState, AnalysisPlanState#TID] = AnalysisPlanModule.idLens
     override val nameLens: Lens[AnalysisPlanState, String] = AnalysisPlanModule.nameLens
     //      override def aggregateRootPropsOp: AggregateRootProps = testProps( _, _ )( proxy )
-    override def environment: AggregateEnvironment = LocalAggregate
+    override def environment: AggregateEnvironment.Resolver = AggregateEnvironment.Resolver.local
   }
 
   override def testConfiguration( test: OneArgTest, slug: String ): Config = {

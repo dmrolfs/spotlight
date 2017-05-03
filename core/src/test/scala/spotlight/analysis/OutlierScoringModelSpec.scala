@@ -97,6 +97,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
     override def planOrigin: ConfigOrigin = underlying.planOrigin
     override def tcpInboundBufferSize: Int = underlying.tcpInboundBufferSize
     //    override def workflowBufferSize: Int = underlying.workflowBufferSize
+    override def forceLocal: Boolean = underlying.forceLocal
     override def args: Seq[String] = underlying.args
     override def config: Config = underlying.config
   }

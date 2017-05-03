@@ -5,7 +5,6 @@ import scala.concurrent.duration._
 import scala.concurrent.Await
 import akka.actor._
 import akka.actor.SupervisorStrategy.{ Resume, Stop }
-import akka.cluster.sharding.ClusterShardingSettings
 import akka.event.LoggingReceive
 import akka.util.Timeout
 import com.persist.logging._
@@ -19,8 +18,9 @@ import omnibus.archetype.domain.model.core.{ Entity, EntityIdentifying, EntityLe
 import omnibus.commons.identifier.ShortUUID
 import omnibus.akka.supervision.{ IsolatedDefaultSupervisor, OneForOneStrategyFactory }
 import demesne._
-import demesne.module.{ ClusteredAggregate, LocalAggregate }
+import demesne.module.{ AggregateEnvironment, ClusteredAggregate, LocalAggregate }
 import demesne.module.entity.EntityAggregateModule
+import spotlight.Settings
 import spotlight.model.outlier._
 import spotlight.analysis.algorithm.AlgorithmRoute
 import spotlight.analysis.{ AnalysisPlanProtocol ⇒ P }
@@ -67,11 +67,17 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
     val b = EntityAggregateModule.builderFor[AnalysisPlanState, AnalysisPlanProtocol.type].make
     import b.P
 
+    import AggregateEnvironment.Resolver
+    val resolveEnvironment: Resolver = { m: DomainModel ⇒
+      if ( Settings.forceLocalFrom( m.configuration ) ) Resolver.local( m ) else Resolver.clustered( m )
+    }
     //    val toSettings = ( s: ActorSystem ) ⇒ ClusterShardingSettings( s ).withRole( ClusterRole.Analysis.entryName )
 
+    //todo: make demesne module builder accept an => Environment rt static. then configure via function initialized with forced local setting
     b.builder
+      .set( P.Environment, resolveEnvironment )
       //      .set( Environment, LocalAggregate )
-      .set( P.Environment, ClusteredAggregate() )
+      //      .set( P.Environment, ClusteredAggregate() )
       .set( P.ClusterRole, Option( ClusterRole.Analysis.entryName ) )
       .set( P.Props, AggregateRoot.PlanActor.props( _, _ ) )
       .set( P.PassivateTimeout, 5.minutes )

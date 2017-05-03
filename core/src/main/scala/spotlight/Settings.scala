@@ -58,6 +58,7 @@ trait Settings extends ClassLogging {
          |   detection-budget = ${detectionBudget.toCoarsest}
          |   parallelism-factor = ${parallelismFactor}
          |   parallelism = ${parallelism}
+         |   force-local = ${forceLocal}
          |   tcp-inbound-buffer-size = ${tcpInboundBufferSize}
          | }
          |
@@ -144,6 +145,8 @@ object Settings extends ClassLogging {
 
   val SettingsPathRoot = "spotlight.settings."
 
+  val ForceLocalPath = SettingsPathRoot + "force-local"
+
   //  def sourceAddressFrom( c: Config ): Option[InetSocketAddress] = {
   //    val Path = SettingsPathRoot + "source-address"
   //    if ( c hasPath Path ) {
@@ -155,6 +158,17 @@ object Settings extends ClassLogging {
   //      None
   //    }
   //  }
+
+  val RolePath = SettingsPathRoot + "role"
+  def roleFrom( c: Config ): Option[ClusterRole] = c.as[Option[String]]( RolePath ) map { ClusterRole.withName }
+  def forceLocalFrom( c: Config ): Boolean = {
+    val force = for {
+      f ← c.as[Option[Boolean]]( ForceLocalPath )
+      r ← roleFrom( c ) if r == ClusterRole.All
+    } yield f
+
+    force getOrElse false
+  }
 
   val AkkaRemoteHostname = "akka.remote.netty.tcp.hostname"
   def externalHostnameFrom( c: Config ): Option[String] = c.as[Option[String]]( AkkaRemoteHostname )
