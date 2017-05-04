@@ -5,6 +5,7 @@ import akka.actor.{ ActorRef, Cancellable, Props }
 import akka.cluster.sharding.ClusterShardingSettings
 import akka.event.LoggingReceive
 import akka.persistence.RecoveryCompleted
+import com.persist.logging._
 import nl.grons.metrics.scala.{ Meter, MetricName }
 import squants.information._
 import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap
@@ -15,7 +16,7 @@ import omnibus.commons.identifier._
 import omnibus.commons.util._
 import demesne._
 import demesne.repository.{ CommonClusteredRepository, CommonLocalRepository }
-import spotlight.Settings
+import spotlight.{ Settings, SpotlightContext }
 import spotlight.analysis.DetectUsing
 import spotlight.analysis.shard.ShardCatalog.ShardCatalogIdentifying
 import spotlight.analysis.algorithm.{ Algorithm, AlgorithmIdGenerator, AlgorithmProtocol ⇒ AP }
@@ -133,7 +134,7 @@ object LookupShardCatalog {
   }
 }
 
-object LookupShardModule extends AggregateRootModule[LookupShardCatalog, LookupShardCatalog#ID] { module ⇒
+object LookupShardModule extends AggregateRootModule[LookupShardCatalog, LookupShardCatalog#ID] with ClassLogging { module ⇒
   override val rootType: AggregateRootType = AlgorithmShardCatalogRootType
   object AlgorithmShardCatalogRootType extends AggregateRootType {
     override val name: String = module.identifying.idTag.name
@@ -144,17 +145,33 @@ object LookupShardModule extends AggregateRootModule[LookupShardCatalog, LookupS
 
     override val snapshotPeriod: Option[FiniteDuration] = None
     override def repositoryProps( implicit model: DomainModel ): Props = {
-      if ( Settings.forceLocalFrom( model.configuration ) ) {
-        CommonLocalRepository.props( model, this, AggregateRoot.ShardingActor.props( _: DomainModel, _: AggregateRootType ) )
+      val forceLocal = Settings forceLocalFrom model.configuration
+      val ( props, label ) = if ( forceLocal ) {
+        val p = CommonLocalRepository.props(
+          model,
+          this,
+          AggregateRoot.ShardingActor.props( _: DomainModel, _: AggregateRootType )
+        )
+
+        ( p, "LOCAL" )
       } else {
-        CommonClusteredRepository.props(
+        val p = CommonClusteredRepository.props(
           model = model,
           rootType = this,
           makeAggregateProps = AggregateRoot.ShardingActor.props( _: DomainModel, _: AggregateRootType )
         )(
             settings = ClusterShardingSettings( model.system )
           )
+
+        ( p, "CLUSTERED" )
       }
+
+      log.alternative(
+        SpotlightContext.SystemLogCategory,
+        Map( "@msg" → "Algorithm Environment", "label" → label, "force-local" → forceLocal, "props" → props.toString )
+      )
+
+      props
     }
   }
 

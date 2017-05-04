@@ -20,7 +20,7 @@ import omnibus.akka.supervision.{ IsolatedDefaultSupervisor, OneForOneStrategyFa
 import demesne._
 import demesne.module.{ AggregateEnvironment, ClusteredAggregate, LocalAggregate }
 import demesne.module.entity.EntityAggregateModule
-import spotlight.Settings
+import spotlight.{ Settings, SpotlightContext }
 import spotlight.model.outlier._
 import spotlight.analysis.algorithm.AlgorithmRoute
 import spotlight.analysis.{ AnalysisPlanProtocol ⇒ P }
@@ -69,7 +69,15 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
 
     import AggregateEnvironment.Resolver
     val resolveEnvironment: Resolver = { m: DomainModel ⇒
-      if ( Settings.forceLocalFrom( m.configuration ) ) Resolver.local( m ) else Resolver.clustered( m )
+      val forceLocal = Settings forceLocalFrom m.configuration
+      val ( env, label ) = if ( forceLocal ) ( Resolver.local( m ), "LOCAL" ) else ( Resolver.clustered( m ), "CLUSTERED" )
+
+      log.alternative(
+        SpotlightContext.SystemLogCategory,
+        Map( "@msg" → "Algorithm Environment", "label" → label, "force-local" → forceLocal, "environment" → env.toString )
+      )
+
+      env
     }
     //    val toSettings = ( s: ActorSystem ) ⇒ ClusterShardingSettings( s ).withRole( ClusterRole.Analysis.entryName )
 

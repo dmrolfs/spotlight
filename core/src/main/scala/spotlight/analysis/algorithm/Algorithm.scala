@@ -10,7 +10,7 @@ import akka.actor._
 import akka.cluster.sharding.{ ClusterShardingSettings, ShardRegion }
 import akka.event.LoggingReceive
 import akka.persistence._
-import spotlight.Settings
+import spotlight.{ Settings, SpotlightContext }
 import spotlight.infrastructure.ClusterRole
 
 import scalaz._
@@ -309,8 +309,21 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
 
       override lazy val name: String = algorithmModule.shardName
       override def repositoryProps( implicit model: DomainModel ): Props = {
-        if ( Settings.forceLocalFrom( model.configuration ) ) Repository localProps model else Repository clusteredProps model
+        val forceLocal = Settings forceLocalFrom model.configuration
+        val ( props, label ) = if ( forceLocal ) {
+          ( Repository.localProps( model ), "LOCAL" )
+        } else {
+          ( Repository.clusteredProps( model ), "CLUSTERED" )
+        }
+
+        log.alternative(
+          SpotlightContext.SystemLogCategory,
+          Map( "@msg" → "Algorithm Environment", "label" → label, "force-local" → forceLocal, "props" → props.toString )
+        )
+
+        props
       }
+
       override def maximumNrClusterNodes: Int = algorithm.maximumNrClusterNodes
       override def aggregateIdFor: ShardRegion.ExtractEntityId = super.aggregateIdFor orElse {
         case AdvancedType( a ) ⇒ ( a.sourceId.id.toString, a )

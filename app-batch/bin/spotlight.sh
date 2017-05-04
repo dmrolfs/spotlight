@@ -172,7 +172,7 @@ then
   ((++i))
 fi
 
-if [ ! "$force_local" = true ]
+if [ "$force_local" = true ]
 then
   args[i]="--force-local"
   ((++i))
@@ -206,7 +206,7 @@ cpath="$dir/../target/scala-2.12/*"
 echo "classpath=$cpath"
 echo
 
-echo "java -classpath ${cpath} -Dconfig.resource=${config_resource} -Djava.library.path=${dir}/../../infr/native -DSLF4J_LEVEL=${slf4j_level:-WARN} -javaagent:${java_agent} -XX:MaxMetaspaceSize=512m -Xms${jvm_min_memory:-1g} -Xmx${jvm_max_memory:-2g} ${main_class:-spotlight.app.FileBatchExample} ${args[@]} ${batch_target} $@"
+echo "java -classpath ${cpath} -Dconfig.resource=${config_resource} -Djava.library.path=${dir}/../../infr/native -DSLF4J_LEVEL=${slf4j_level:-WARN} -javaagent:${java_agent} -XX:MaxMetaspaceSize=512m -Xms${jvm_min_memory:-1g} -Xmx${jvm_max_memory:-2g} -XX:+UseG1GC -XX:MaxGCPauseMillis=100 -Xloggc:gc_g1_4g_5_5000_1000_60.log -XX:+PrintGCDetails -XX:+PrintGCDateStamps -XX:+PrintGCTimeStamps ${main_class:-spotlight.app.FileBatchExample} ${args[@]} ${batch_target} $@"
 echo
 
 #java -classpath "${CPATH}" \
@@ -223,4 +223,10 @@ java -classpath "${cpath}" \
   -XX:MaxMetaspaceSize=512m \
   -Xms${jvm_min_memory:-1g} \
   -Xmx${jvm_max_memory:-2g} \
+  -XX:+UseG1GC \
+  -XX:MaxGCPauseMillis=100 \
+  -Xloggc:gc_g1_4g_5_5000_1000_60.log \
+  -XX:+PrintGCDetails \
+  -XX:+PrintGCDateStamps \
+  -XX:+PrintGCTimeStamps \
   ${main_class:-spotlight.app.FileBatchExample} ${args[@]} "${batch_target}" "$@"

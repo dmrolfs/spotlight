@@ -84,6 +84,7 @@ trait Settings extends ClassLogging {
           "detection-budget" → detectionBudget.toCoarsest.toString,
           "parallelism-factor" → parallelismFactor,
           "parallelism" → parallelism,
+          "force-local" → forceLocal,
           "tcp-inbound-buffer-size" → tcpInboundBufferSize
         )
       )
@@ -164,7 +165,9 @@ object Settings extends ClassLogging {
   def forceLocalFrom( c: Config ): Boolean = {
     val force = for {
       f ← c.as[Option[Boolean]]( ForceLocalPath )
-      r ← roleFrom( c ) if r == ClusterRole.All
+      r ← roleFrom( c )
+      _ = log.debug( Map( "@msg" → "force local from config", ForceLocalPath → f, RolePath → r.toString ) )
+      if r == ClusterRole.All
     } yield f
 
     force getOrElse false
@@ -465,7 +468,8 @@ object Settings extends ClassLogging {
         bindHostname = usage.bindHostname,
         bindPort = usage.bindPort
       ),
-      args = usage.args
+      args = usage.args,
+      forceLocal = usage.forceLocal
     )
   }
 
@@ -639,7 +643,7 @@ object Settings extends ClassLogging {
       override val graphiteAddress: Option[InetSocketAddress],
       override val config: Config,
       override val args: Seq[String],
-      override val forceLocal: Boolean = false
+      override val forceLocal: Boolean
   ) extends Settings {
     override def detectionBudget: Duration = config.as[Duration]( Directory.DETECTION_BUDGET )
 
@@ -758,8 +762,10 @@ object Settings extends ClassLogging {
         )
 
       opt[Unit]( "force-local" )
-        .optional()
-        .action { ( _, c ) ⇒ c.copy( forceLocal = true ) }
+        .action { ( _, c ) ⇒
+          log.error( "FORCE_LOCAL OPTION IDENTIFIED" )
+          c.copy( forceLocal = true )
+        }
         .text(
           """
         |Use this setting in conjunction with "all" role to force system to work on only one node, which may improve performance.
