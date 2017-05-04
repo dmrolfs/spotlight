@@ -77,11 +77,7 @@ object Spotlight extends Instrumented with ClassLogging {
     settings.role match {
       case ClusterRole.Seed ⇒ Set.empty[AggregateRootType]
       case ClusterRole.All ⇒ all
-      case role ⇒ {
-        all
-        //          .map { rt ⇒ ( rt, rt.clusterRoles.map( ClusterRole.withName ) ) }
-        //          .collect { case ( rt, roles ) if roles.exists( r ⇒ role.includes( r ) ) ⇒ rt }
-      }
+      case _ ⇒ all // even if not on host, register needed to enable cluster proxying
     }
   }
 
@@ -121,7 +117,7 @@ object Spotlight extends Instrumented with ClassLogging {
     Done
   }
 
-  def makeContext: Kleisli[Future, Array[String], SpotlightContext] = {
+  val makeContext: Kleisli[Future, Array[String], SpotlightContext] = {
     kleisli[Future, Array[String], SpotlightContext] { args ⇒
       import SpotlightContext.{ Builder ⇒ B }
 
@@ -136,7 +132,7 @@ object Spotlight extends Instrumented with ClassLogging {
     }
   }
 
-  def prep: Kleisli[Future, SpotlightContext, SpotlightContext] = {
+  val prep: Kleisli[Future, SpotlightContext, SpotlightContext] = {
     kleisli[Future, SpotlightContext, SpotlightContext] { context ⇒
       log.alternative(
         SpotlightContext.SystemLogCategory,
@@ -161,7 +157,7 @@ object Spotlight extends Instrumented with ClassLogging {
     }
   }
 
-  def startBoundedContext: Kleisli[Future, SpotlightContext, SpotlightBoundedContext] = {
+  val startBoundedContext: Kleisli[Future, SpotlightContext, SpotlightBoundedContext] = {
     kleisli[Future, SpotlightContext, SpotlightBoundedContext] { context ⇒
       implicit val sys = context.system
       implicit val ec = context.system.dispatcher
@@ -200,7 +196,7 @@ object Spotlight extends Instrumented with ClassLogging {
     }
   }
 
-  def makeFlow: Kleisli[Future, SpotlightBoundedContext, SpotlightModel] = {
+  val makeFlow: Kleisli[Future, SpotlightBoundedContext, SpotlightModel] = {
     kleisli[Future, SpotlightBoundedContext, SpotlightModel] {
       case ( boundedContext, context ) if context.settings.role.hostsFlow == false ⇒ {
         Future successful ( boundedContext, context, None )
