@@ -18,7 +18,6 @@ libraryDependencies ++=
   facility.betterFiles.all ++
 //  facility.avro.all ++
   Seq(
-    akka.persistenceQuery,
     //  facility.pureConfig,
     facility.math3,
 //    facility.suanshu, // don't want to use due to $$$

@@ -2,15 +2,10 @@ package spotlight.analysis
 
 import scala.reflect._
 import scala.concurrent.duration._
-import scala.concurrent.{ Await, TimeoutException }
-import akka.NotUsed
+import scala.concurrent.Await
 import akka.actor._
 import akka.actor.SupervisorStrategy.{ Resume, Stop }
 import akka.event.LoggingReceive
-import akka.stream.Supervision.Decider
-import akka.stream.{ ActorAttributes, Materializer }
-import akka.stream.scaladsl.Flow
-import akka.stream.Supervision
 import akka.util.Timeout
 import com.persist.logging._
 import shapeless.{ Lens, lens }
@@ -23,77 +18,13 @@ import omnibus.archetype.domain.model.core.{ Entity, EntityIdentifying, EntityLe
 import omnibus.commons.identifier.ShortUUID
 import omnibus.akka.supervision.{ IsolatedDefaultSupervisor, OneForOneStrategyFactory }
 import demesne._
-import demesne.module.LocalAggregate
-import demesne.module.entity.{ EntityAggregateModule, EntityProtocol }
+import demesne.module.{ AggregateEnvironment, ClusteredAggregate, LocalAggregate }
+import demesne.module.entity.EntityAggregateModule
+import spotlight.{ Settings, SpotlightContext }
 import spotlight.model.outlier._
-import spotlight.model.outlier.AnalysisPlan.Scope
-import spotlight.model.timeseries._
-import spotlight.model.timeseries.TimeSeriesBase.Merging
-import spotlight.analysis.AnalysisPlanProtocol.{ AnalysisFlow, MakeFlow }
-import spotlight.analysis.OutlierDetection.{ DetectionResult, DetectionTimedOut }
+import spotlight.analysis.algorithm.AlgorithmRoute
 import spotlight.analysis.{ AnalysisPlanProtocol ⇒ P }
-
-object AnalysisPlanProtocol extends EntityProtocol[AnalysisPlanState#ID] {
-  case class MakeFlow(
-    override val targetId: MakeFlow#TID,
-    parallelism: Int,
-    system: ActorSystem,
-    timeout: Timeout,
-    materializer: Materializer
-  ) extends Message
-
-  case class AnalysisFlow( flow: DetectFlow ) extends ProtocolMessage with ClassLogging {
-    log.warn( Map( "@msg" → "Made analysis plan flow", "flow" → flow.toString ) )
-  }
-
-  case class AcceptTimeSeries(
-      override val targetId: AcceptTimeSeries#TID,
-      override val correlationIds: Set[WorkId],
-      override val data: TimeSeries,
-      override val scope: Option[AnalysisPlan.Scope] = None
-  ) extends Command with CorrelatedSeries {
-    override def withData( newData: TimeSeries ): CorrelatedData[TimeSeries] = this.copy( data = newData )
-    override def withCorrelationIds( newIds: Set[WorkId] ): CorrelatedData[TimeSeries] = this.copy( correlationIds = newIds )
-    override def withScope( newScope: Option[Scope] ): CorrelatedData[TimeSeries] = this.copy( scope = newScope )
-  }
-
-  //todo add info change commands
-  //todo reify algorithm
-  //      case class AddAlgorithm( override val targetId: AnalysisPlan#TID, algorithm: Symbol ) extends Command with AnalysisPlanMessage
-  case class ApplyTo( override val targetId: ApplyTo#TID, appliesTo: AnalysisPlan.AppliesTo ) extends Command
-
-  case class UseAlgorithms( override val targetId: UseAlgorithms#TID, algorithms: Map[String, Config] ) extends Command
-
-  case class ResolveVia(
-    override val targetId: ResolveVia#TID,
-    isQuorum: IsQuorum,
-    reduce: ReduceOutliers
-  ) extends Command
-
-  override def tags: Set[String] = Set( AnalysisPlanModule.module.rootType.name )
-
-  case class ScopeChanged( override val sourceId: ScopeChanged#TID, appliesTo: AnalysisPlan.AppliesTo ) extends TaggedEvent
-
-  case class AlgorithmsChanged(
-    override val sourceId: AlgorithmsChanged#TID,
-    algorithms: Map[String, Config],
-    added: Set[String],
-    dropped: Set[String]
-  ) extends TaggedEvent
-
-  case class AnalysisResolutionChanged(
-    override val sourceId: AnalysisResolutionChanged#TID,
-    isQuorum: IsQuorum,
-    reduce: ReduceOutliers
-  ) extends TaggedEvent
-
-  case class GetPlan( override val targetId: GetPlan#TID ) extends Command
-  case class PlanInfo( override val sourceId: PlanInfo#TID, info: AnalysisPlan ) extends Event {
-    def toSummary: AnalysisPlan.Summary = {
-      AnalysisPlan.Summary( id = sourceId, name = info.name, slug = info.slug, appliesTo = Option( info.appliesTo ) )
-    }
-  }
-}
+import spotlight.infrastructure.ClusterRole
 
 case class AnalysisPlanState( plan: AnalysisPlan ) extends Entity {
   override type ID = plan.ID
@@ -114,40 +45,11 @@ case class AnalysisPlanState( plan: AnalysisPlan ) extends Entity {
     val routes = algorithms.keySet.toSeq.map { a ⇒ ( a, makeRoute( plan )( a ) ) }.collect { case ( a, Some( r ) ) ⇒ ( a, r ) }
     Map( routes: _* )
   }
-
 }
-
-//object AnalysisPlanState {
-//  def allAlgorithms( algorithms: Set[String], algorithmSpec: Config ): Set[String] = {
-//    import scala.collection.immutable
-//    import scala.collection.JavaConverters._
-//
-//    val inSpec = algorithmSpec.root.entrySet.asScala.to[immutable.Set] map { _.getKey }
-//    algorithms ++ inSpec
-//  }
-//}
 
 /** Created by rolfsd on 5/26/16.
   */
 object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Instrumented with ClassLogging { moduleOuter ⇒
-  override lazy val metricBaseName: MetricName = {
-    MetricName( spotlight.BaseMetricName, spotlight.analysis.BaseMetricName )
-  }
-
-  val droppedSeriesMeter: Meter = metrics.meter( "dropped", "series" )
-  val droppedPointsMeter: Meter = metrics.meter( "dropped", "points" )
-
-  val InletBaseMetricName = "inlet"
-  val inletSeries: Meter = metrics.meter( InletBaseMetricName, "series" )
-  val inletPoints: Meter = metrics.meter( InletBaseMetricName, "points" )
-
-  val OutletResultsBaseMetricName = "outlet.results"
-  val outletResults: Meter = metrics.meter( OutletResultsBaseMetricName )
-  val outletResultsAnomalies: Meter = metrics.meter( OutletResultsBaseMetricName, "anomalies" )
-  val outletResultsConformities: Meter = metrics.meter( OutletResultsBaseMetricName, "conformities" )
-  val outletResultsPoints: Meter = metrics.meter( OutletResultsBaseMetricName, "points" )
-  val outletResultsPointsAnomalies: Meter = metrics.meter( OutletResultsBaseMetricName, "points.anomalies" )
-  val outletResultsPointsConformities: Meter = metrics.meter( OutletResultsBaseMetricName, "points.conformities" )
 
   implicit val identifying: EntityIdentifying[AnalysisPlanState] = {
     new EntityIdentifying[AnalysisPlanState] with ShortUUID.ShortUuidIdentifying[AnalysisPlanState] {
@@ -163,17 +65,34 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
 
   val module: EntityAggregateModule[AnalysisPlanState] = {
     val b = EntityAggregateModule.builderFor[AnalysisPlanState, AnalysisPlanProtocol.type].make
-    import b.P.{ Props ⇒ BProps, _ }
+    import b.P
 
-    b
-      .builder
-      .set( Environment, LocalAggregate )
-      .set( BProps, AggregateRoot.PlanActor.props( _, _ ) )
-      .set( PassivateTimeout, 5.minutes )
-      .set( Protocol, AnalysisPlanProtocol )
-      .set( IdLens, moduleOuter.idLens )
-      .set( NameLens, moduleOuter.nameLens )
-      .set( IsActiveLens, Some( moduleOuter.isActiveLens ) )
+    import AggregateEnvironment.Resolver
+    val resolveEnvironment: Resolver = { m: DomainModel ⇒
+      val forceLocal = Settings forceLocalFrom m.configuration
+      val ( env, label ) = if ( forceLocal ) ( Resolver.local( m ), "LOCAL" ) else ( Resolver.clustered( m ), "CLUSTERED" )
+
+      log.alternative(
+        SpotlightContext.SystemLogCategory,
+        Map( "@msg" → "Algorithm Environment", "label" → label, "force-local" → forceLocal, "environment" → env.toString )
+      )
+
+      env
+    }
+    //    val toSettings = ( s: ActorSystem ) ⇒ ClusterShardingSettings( s ).withRole( ClusterRole.Analysis.entryName )
+
+    //todo: make demesne module builder accept an => Environment rt static. then configure via function initialized with forced local setting
+    b.builder
+      .set( P.Environment, resolveEnvironment )
+      //      .set( Environment, LocalAggregate )
+      //      .set( P.Environment, ClusteredAggregate() )
+      .set( P.ClusterRole, Option( ClusterRole.Analysis.entryName ) )
+      .set( P.Props, AggregateRoot.PlanActor.props( _, _ ) )
+      .set( P.PassivateTimeout, 5.minutes )
+      .set( P.Protocol, AnalysisPlanProtocol )
+      .set( P.IdLens, moduleOuter.idLens )
+      .set( P.NameLens, moduleOuter.nameLens )
+      .set( P.IsActiveLens, Some( moduleOuter.isActiveLens ) )
       .build()
   }
 
@@ -384,9 +303,19 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
       override def active: Receive = workflow orElse planEntity orElse super.active
 
       val workflow: Receive = {
-        case MakeFlow( _, parallelism, system, timeout, materializer ) ⇒ {
-          sender() ! AnalysisFlow( makeFlow( parallelism )( system, timeout, materializer ) )
+        case P.RouteDetection( id, m ) if detector == null ⇒ {
+          altLog.error(
+            Map(
+              "@msg" → "ignoring outlier detection request since detection workers are not initialized for plan",
+              "id" → id.toString,
+              "message" → Map( "plan" → m.plan.name, "topic" → m.topic.toString )
+            )
+          )
         }
+
+        case P.RouteDetection( _, m ) ⇒ detector forward m
+
+        case m: P.MakeFlow ⇒ sender() !+ P.AnalysisFlow( state.id, new AnalysisFlowFactory( state.plan ) )
       }
 
       val planEntity: Receive = {
@@ -403,12 +332,10 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
 
       def changeAlgorithms( algorithms: Map[String, Config] ): P.AlgorithmsChanged = {
         val myAlgorithms = state.algorithms.keySet
-        //        val newAlgorithms = AnalysisPlanState.allAlgorithms( algorithms, algorithmSpec )
 
         P.AlgorithmsChanged(
           sourceId = aggregateId,
           algorithms = algorithms,
-          //          algorithmConfig = algorithmSpec,
           added = algorithms.keySet -- myAlgorithms,
           dropped = myAlgorithms -- algorithms.keySet
         )
@@ -417,127 +344,6 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
       override def unhandled( message: Any ): Unit = {
         altLog.error( Map( "@msg" → "unhandled message", "aggregateId" → aggregateId.toString, "message" → message.toString ) )
         super.unhandled( message )
-      }
-
-      def makeFlow(
-        parallelism: Int
-      )(
-        implicit
-        system: ActorSystem,
-        timeout: Timeout,
-        materializer: Materializer
-      ): DetectFlow = {
-        val entry = Flow[TimeSeries].filter { state.plan.appliesTo }
-        val withGrouping = state.plan.grouping map { g ⇒ entry.via( batchSeries( g ) ) } getOrElse entry
-
-        withGrouping
-          .via( detectionFlow( state.plan, parallelism ) )
-          .named( s"AnalysisPlan:${state.plan.name}@${state.plan.id.id}" )
-      }
-
-      def batchSeries(
-        grouping: AnalysisPlan.Grouping
-      )(
-        implicit
-        tsMerging: Merging[TimeSeries]
-      ): Flow[TimeSeries, TimeSeries, NotUsed] = {
-        Flow[TimeSeries]
-          .groupedWithin( n = grouping.limit, d = grouping.window )
-          .map {
-            _
-              .groupBy { _.topic }
-              .map {
-                case ( _, tss ) ⇒
-                  tss.tail.foldLeft( tss.head ) { case ( acc, ts ) ⇒ tsMerging.merge( acc, ts ) valueOr { exs ⇒ throw exs.head } }
-              }
-          }
-          .mapConcat { identity }
-      }
-
-      def detectionFlow( p: AnalysisPlan, parallelism: Int )( implicit system: ActorSystem, timeout: Timeout ): DetectFlow = {
-        import omnibus.akka.envelope.pattern.ask
-
-        implicit val ec: scala.concurrent.ExecutionContext = system.dispatcher
-
-        if ( detector == null && detector != context.system.deadLetters ) {
-          val ex = new IllegalStateException( s"analysis plan [${p.name}] flow invalid detector reference:[${detector}]" )
-
-          altLog.error(
-            Map(
-              "@msg" → "analysis plan [${p.name}] flow created missing valid detector reference:[${detector}]",
-              "plan" → p.name,
-              "detector" → detector.path
-            ),
-            ex
-          )
-
-          throw ex
-        }
-
-        Flow[TimeSeries]
-          .map { ts ⇒ OutlierDetectionMessage( ts, p ).disjunction }
-          .collect { case scalaz.\/-( m ) ⇒ m }
-          .map { m ⇒
-            inletSeries.mark()
-            inletPoints.mark( m.source.points.size )
-            m
-          }
-          .mapAsyncUnordered( parallelism ) { m ⇒
-            ( detector ?+ m )
-              .recover {
-                case ex: TimeoutException ⇒ {
-                  altLog.error(
-                    Map(
-                      "@msg" → "timeout exceeded waiting for detection",
-                      "timeout" → timeout.duration.toCoarsest.toString,
-                      "plan" → m.plan.name,
-                      "topic" → m.topic.toString
-                    ),
-                    ex
-                  )
-
-                  DetectionTimedOut( m.source, m.plan )
-                }
-              }
-          }.withAttributes( ActorAttributes supervisionStrategy detectorDecider )
-          .filter {
-            case Envelope( DetectionResult( outliers, _ ), _ ) ⇒ true
-            case DetectionResult( outliers, _ ) ⇒ true
-            case Envelope( DetectionTimedOut( s, _ ), _ ) ⇒ {
-              droppedSeriesMeter.mark()
-              droppedPointsMeter.mark( s.points.size )
-              false
-            }
-            case DetectionTimedOut( s, _ ) ⇒ {
-              droppedSeriesMeter.mark()
-              droppedPointsMeter.mark( s.points.size )
-              false
-            }
-          }
-          .collect {
-            case Envelope( DetectionResult( outliers, _ ), _ ) ⇒ outliers
-            case DetectionResult( outliers, _ ) ⇒ outliers
-          }
-          .map {
-            case m ⇒ {
-              val nrPoints = m.source.size
-              val nrAnomalyPoints = m.anomalySize
-              outletResults.mark()
-              outletResultsPoints.mark( nrPoints )
-              if ( m.hasAnomalies ) outletResultsAnomalies.mark() else outletResultsConformities.mark()
-              outletResultsPointsAnomalies.mark( nrAnomalyPoints )
-              outletResultsPointsConformities.mark( nrPoints - nrAnomalyPoints )
-              m
-            }
-          }
-      }
-
-      val detectorDecider: Decider = new Decider {
-        override def apply( ex: Throwable ): Supervision.Directive = {
-          altLog.error( "error in detection dropping series", ex )
-          droppedSeriesMeter.mark()
-          Supervision.Resume
-        }
       }
 
       override def supervisorStrategy: SupervisorStrategy = OneForOneStrategy() {

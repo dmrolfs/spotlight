@@ -3,10 +3,8 @@ package spotlight.analysis.algorithm.statistical
 import scala.annotation.tailrec
 import akka.actor.ActorSystem
 import com.typesafe.config.Config
-import org.joda.{ time ⇒ joda }
-import org.apache.commons.math3.stat.descriptive.StatisticalSummary
 import org.scalatest.Assertion
-import spotlight.analysis.Moment
+import spotlight.analysis.algorithm.Moment
 import spotlight.analysis.algorithm.{ AlgorithmSpec, AlgorithmProtocol ⇒ P }
 import spotlight.model.timeseries._
 

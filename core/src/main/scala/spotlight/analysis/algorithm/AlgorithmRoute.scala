@@ -1,21 +1,21 @@
-package spotlight.analysis
+package spotlight.analysis.algorithm
 
 import akka.actor.{ ActorContext, ActorRef }
-
-import scalaz.\/
 import com.persist.logging._
 import com.typesafe.config._
-import net.ceedubs.ficus.Ficus._
-import squants.information.{ Bytes, Information, Megabytes }
-import omnibus.akka.envelope._
-import omnibus.commons.identifier.Identifying
-import omnibus.commons.config._
-import omnibus.commons.util._
 import demesne.{ AggregateRootType, DomainModel }
+import net.ceedubs.ficus.Ficus._
+import omnibus.akka.envelope._
+import omnibus.commons.config._
+import omnibus.commons.identifier.Identifying
+import omnibus.commons.util._
 import spotlight.Settings
-import spotlight.analysis.algorithm.{ Algorithm, AlgorithmIdGenerator, AlgorithmIdentifier, AlgorithmProtocol }
+import spotlight.analysis.DetectUsing
 import spotlight.analysis.shard._
 import spotlight.model.outlier.AnalysisPlan
+import squants.information.{ Information, Megabytes }
+
+import scalaz.\/
 
 sealed abstract class AlgorithmRoute {
   def forward( message: Any )( implicit sender: ActorRef, context: ActorContext ): Unit = {
@@ -87,7 +87,7 @@ object AlgorithmRoute extends ClassLogging {
         }
 
         case m if algorithmRootType.aggregateIdFor isDefinedAt m ⇒ {
-          import scalaz.{ \/-, -\/ }
+          import scalaz.{ -\/, \/- }
 
           val ( aid, _ ) = algorithmRootType.aggregateIdFor( m )
           AlgorithmIdentifier.fromAggregateId( aid ).disjunction match {
@@ -246,8 +246,9 @@ object AlgorithmRoute extends ClassLogging {
       )
 
       def from( plan: AnalysisPlan.Summary )( implicit model: DomainModel ): Option[Strategy] = {
-        import scala.collection.JavaConverters._
         import shapeless.syntax.typeable._
+
+        import scala.collection.JavaConverters._
 
         for {
           v ← Settings.detectionPlansConfigFrom( model.configuration ).root.asScala.find { _._1 == plan.name }.map { _._2 }
@@ -266,8 +267,8 @@ object AlgorithmRoute extends ClassLogging {
             }
 
             case ConfigValueType.OBJECT ⇒ {
-              import scala.reflect._
               import scala.collection.JavaConverters._
+              import scala.reflect._
 
               val ConfigObjectType = classTag[ConfigObject]
               val specs = c.as[Config]( PlanShardPath ).root

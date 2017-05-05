@@ -60,10 +60,7 @@ object GrubbsShape extends ClassLogging {
   val DefaultSlidingWindow: Int = 60
 
   implicit val advancing = new Advancing[GrubbsShape] {
-    override def zero( configuration: Option[Config] ): GrubbsShape = {
-      val sliding = getFromOrElse[Int]( configuration, SlidingWindowPath, DefaultSlidingWindow )
-      GrubbsShape( sliding )
-    }
+    override def zero( configuration: Option[Config] ): GrubbsShape = GrubbsShape( slidingWindowFrom( configuration ) )
     override def N( shape: GrubbsShape ): Long = shape.N
     override def advance( original: GrubbsShape, advanced: Advanced ): GrubbsShape = { original :+ advanced.point.value }
     override def copy( shape: GrubbsShape ): GrubbsShape = shape.copy( underlying = shape.underlying.copy() )
@@ -119,6 +116,13 @@ object GrubbsAlgorithm extends Algorithm[GrubbsShape]( label = "grubbs" ) { algo
 
     result match {
       case \/-( r ) ⇒ Some( r )
+
+      case -\/( ex: InsufficientDataSize ) ⇒ {
+        import spotlight.model.timeseries._
+        log.info( Map( "@msg" → "skipping point until sufficient history is establish", "point" → point ), ex )
+        Some( AnomalyScore( isOutlier = false, threshold = ThresholdBoundary empty point.timestamp.toLong ) )
+      }
+
       case -\/( ex ) ⇒ {
         log.warn( Map( "@msg" → "exception raised in algorithm step calculation", "algorithm" → label ), ex )
         throw ex

@@ -18,6 +18,8 @@ import demesne.testkit.concurrent.CountDownFunction
 import org.scalatest.{ MustMatchers, Outcome, ParallelTestExecution, Tag, fixture }
 import omnibus.commons.log.Trace
 import omnibus.commons.util._
+import spotlight.infrastructure.ClusterRole
+import spotlight.{ Settings, Spotlight }
 
 /** Created by rolfsd on 10/28/15.
   */
@@ -126,8 +128,24 @@ trait ParallelAkkaSpec
   type FixtureParam = Fixture
 
   def testSlug( test: OneArgTest ): String = s"Par-${getClass.safeSimpleName}-${ParallelAkkaSpec.testPosition.incrementAndGet()}"
-  def testConfiguration( test: OneArgTest, slug: String ): Config = ParallelAkkaSpec.testConf( systemName = slug )
-  def testSystem( test: OneArgTest, config: Config, slug: String ): ActorSystem = ActorSystem( name = slug, config )
+
+  def testConfiguration( test: OneArgTest, slug: String ): Config = {
+    logger.error( "#TEST testConfiguration..." )
+    Settings.adaptConfiguration(
+      config = ParallelAkkaSpec.testConf( systemName = slug ),
+      role = ClusterRole.All,
+      externalHostname = "127.0.0.1",
+      requestedPort = 0,
+      systemName = slug
+    )
+  }
+
+  def testSystem( test: OneArgTest, config: Config, slug: String ): ActorSystem = {
+    import net.ceedubs.ficus.Ficus._
+    logger.error( "#TEST testSystem...port:[{}] seeds:[{}]", config.as[String]( Settings.AkkaRemotePortPath ), Settings.seedNodesFrom( config ).mkString( ", " ) )
+    ActorSystem( name = slug, config )
+  }
+
   def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture
 
   class AkkaFixture( val config: Config, _system: ActorSystem, val slug: String ) extends TestKit( _system ) {
@@ -181,7 +199,7 @@ trait ParallelAkkaSpec
 
         Option( f.system ) foreach { s ⇒
           val terminated = s.terminate()
-          Await.ready( terminated, 1.second )
+          Await.ready( terminated, 10.second )
         }
 
         outcome

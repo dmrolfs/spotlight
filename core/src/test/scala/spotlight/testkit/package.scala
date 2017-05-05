@@ -6,7 +6,7 @@ import omnibus.commons.identifier.ShortUUID
 /** Created by rolfsd on 7/5/16.
   */
 package object testkit {
-  def config( rootDir: String = ".", systemName: String ): Config = {
+  def config( systemName: String, rootDir: String = ".", portOffset: Int = 0 ): Config = {
     val testConfig = {
       val algoJournal = "${inmemory-journal}"
       val algoSnapshot = "${inmemory-snapshot-store}"
@@ -89,14 +89,13 @@ package object testkit {
         |    }
         |  }
         |
-        |#  cluster {
-        |#    seed-nodes = [
-        |#      "akka.tcp://${systemName}@127.0.0.1:2551",
-        |#      "akka.tcp://${systemName}@127.0.0.1:2552"
-        |#    ]
-        |#
-        |#    auto-down-unreachable-after = 10s
-        |#  }
+        |  cluster {
+        |    seed-nodes = [
+        |      "akka.tcp://${systemName}@127.0.0.1:${2551 + portOffset}"
+        |    ]
+        |
+        |    auto-down-unreachable-after = 10s
+        |  }
         |}
         |
         |akka.actor.debug {

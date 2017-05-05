@@ -23,8 +23,11 @@ import omnibus.akka.envelope._
 import omnibus.commons.{ TryV, V }
 import omnibus.commons.identifier.Identifying
 import omnibus.commons.log.Trace
+import spotlight.Settings
 import spotlight.analysis.{ AnomalyScore, DetectOutliersInSeries, DetectUsing, HistoricalStatistics }
+import spotlight.analysis.algorithm.Advancing.syntax._
 import spotlight.analysis.algorithm.{ AlgorithmProtocol ⇒ P }
+import spotlight.infrastructure.ClusterRole
 import spotlight.model.outlier._
 import spotlight.model.statistics.MovingStatistics
 import spotlight.model.timeseries._
@@ -58,7 +61,21 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
   }
 
   override def testConfiguration( test: OneArgTest, slug: String ): Config = {
-    val c = spotlight.testkit.config( systemName = slug )
+    val tc = ConfigFactory.parseString(
+      """
+        |
+      """.stripMargin
+    )
+
+    val c = Settings.adaptConfiguration(
+      config = tc.resolve().withFallback(
+        spotlight.testkit.config( systemName = slug, portOffset = scala.util.Random.nextInt( 20000 ) )
+      ),
+      role = ClusterRole.All,
+      externalHostname = "127.0.0.1",
+      requestedPort = 0,
+      systemName = slug
+    )
 
     import scala.collection.JavaConverters._
     log.debug(
@@ -149,7 +166,7 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
         planName = plan.name,
         planId = plan.id.id.toString,
         spanType = AlgorithmIdentifier.TopicSpan,
-        spanHint = scope.topic.toString
+        topic = scope.topic
       )
     )
 
@@ -252,7 +269,7 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
           sender.ref
         )
 
-      sender.expectMsgPF( 500.millis.dilated, hint ) {
+      sender.expectMsgPF( 3.seconds.dilated, hint ) {
         case m @ Envelope( SeriesOutliers( a, s, p, o, t ), _ ) if expectedAnomalies.nonEmpty ⇒ {
           log.info( "evaluate EXPECTED ANOMALIES..." )
           a mustBe Set( defaultAlgorithm.label )
@@ -537,12 +554,12 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
 
   def bootstrapSuite(): Unit = {
     s"${defaultAlgorithm.label} entity" should {
-      "have zero shape before advance" in { f: Fixture ⇒
+      "have zero shape before advance" taggedAs WIP in { f: Fixture ⇒
         import f._
 
         logger.debug( "aggregate = [{}]", aggregate )
         val actual = ( aggregate ? P.GetTopicShapeSnapshot( id, scope.topic ) ).mapTo[P.TopicShapeSnapshot]
-        whenReady( actual, timeout( 5.seconds ) ) { a ⇒
+        whenReady( actual, timeout( 10.seconds ) ) { a ⇒
           a.sourceId.id mustBe id.id
           a.snapshot mustBe None
         }
@@ -600,7 +617,7 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
         val expected = expectedUpdatedShape( zero, adv )
         log.debug( Map( "@msg" → "#TEST advance shape", "zero" → zero.toString, "expected" → expected.toString ) )
 
-        val actual = shapeless.the[Advancing[S]].advance( zero, adv )
+        val actual = zero.advance( adv )
         countDown await 25.millis.dilated
         actualVsExpectedShape( actual, expected )
       }
@@ -619,7 +636,7 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
             val plateauNr = math.max( 1, memoryPlateauNr )
             val advancing = shapeless.the[Advancing[S]]
             val zero = advancing.zero( shapeMemoryConfig )
-            val atPlateau = ( 0 to plateauNr ).foldLeft( zero ) { ( acc, i ) ⇒ advancing.advance( acc, makeData( i ) ) }
+            val atPlateau = ( 0 to plateauNr ).foldLeft( zero ) { ( acc, i ) ⇒ acc.advance( makeData( i ) ) }
 
             import akka.serialization.{ SerializationExtension, Serializer }
             val serializer: Serializer = SerializationExtension( system ).serializerFor( zero.getClass )
@@ -646,14 +663,14 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
         val serializer: Serializer = SerializationExtension( system ).serializerFor( zero.getClass )
 
         val zeroSize = Bytes( serializer.toBinary( zero.asInstanceOf[AnyRef] ).size )
-        val first: S = advancing.advance( zero, makeData( 0 ) )
+        val first: S = zero.advance( makeData( 0 ) )
         val firstBytes = serializer.toBinary( first.asInstanceOf[AnyRef] )
         val firstSize = Bytes( firstBytes.size )
 
         val plateauNr = math.max( 1, memoryPlateauNr )
         val ( plateauState, plateauSize ) = ( 2 to plateauNr ).foldLeft( first, firstSize ) {
           case ( ( acc, accSize ), i ) ⇒ {
-            val next = advancing.advance( acc, makeData( i ) )
+            val next = acc.advance( makeData( i ) )
             val nextSize = Bytes( serializer.toBinary( next.asInstanceOf[AnyRef] ).size )
             log.debug(
               Map(
@@ -687,7 +704,7 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
 
         ( ( plateauNr + 1 ) to memoryStepsToValidate ).foldLeft( ( first, firstSize ) ) {
           case ( ( acc, accSize ), i ) ⇒ {
-            val next = advancing.advance( acc, makeData( i ) )
+            val next = acc.advance( makeData( i ) )
             val nextSize = Bytes( serializer.toBinary( next.asInstanceOf[AnyRef] ).size )
 
             log.debug(

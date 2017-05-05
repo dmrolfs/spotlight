@@ -9,6 +9,7 @@ import bloomfilter.CanGenerateHashFrom
 import demesne.AggregateRootType
 import omnibus.commons.identifier.{ Identifying, ShortUUID }
 import spotlight.model.outlier.AnalysisPlan
+import spotlight.model.timeseries.Topic
 
 /** Created by rolfsd on 2/1/17.
   */
@@ -49,7 +50,12 @@ case class AlgorithmIdentifier( planName: String, planId: String, spanType: Span
 object AlgorithmIdentifier extends ClassLogging {
   sealed trait SpanType {
     def label: String
-    def next( hint: String ): String
+
+    /** Depending on SpanType, produces the next identifer.
+      * @param topic
+      * @return
+      */
+    def nextIdFor( topic: Topic ): String
   }
 
   object SpanType {
@@ -64,14 +70,22 @@ object AlgorithmIdentifier extends ClassLogging {
 
   case object TopicSpan extends SpanType {
     override val label: String = "topic"
-    override def next( hint: String ): String = hint
+
+    /** Span identifier is the topic hint.
+      * @param topic
+      * @return
+      */
+    override def nextIdFor( topic: Topic ): String = topic.toString
   }
 
   case object GroupSpan extends SpanType {
     override val label: String = "group"
-    override def next( hint: String ): String = ShortUUID().toString
+    override def nextIdFor( topic: Topic ): String = ShortUUID().toString
   }
 
+  // <plan-name>@<plan-id>:<topic|group>:<span-identifier>
+  // span-type is topic => span is topic
+  // span-type is group => span is short uuid
   private lazy val IdFormat = s"""(.*)@(.*):(${AlgorithmIdentifier.SpanType.options.map { _.label }.mkString( "|" )}):(.*)""".r
 
   def toAggregateId( id: AlgorithmIdentifier ): String = id.planName + "@" + id.planId + ":" + id.spanType.label + ":" + id.span
@@ -108,8 +122,8 @@ object AlgorithmIdentifier extends ClassLogging {
     }
   }
 
-  def nextId( planName: String, planId: String, spanType: SpanType, spanHint: String ): AlgorithmIdentifier = {
-    AlgorithmIdentifier( planName = planName, planId = planId, spanType = spanType, span = spanType.next( spanHint ) )
+  def nextId( planName: String, planId: String, spanType: SpanType, topic: Topic ): AlgorithmIdentifier = {
+    AlgorithmIdentifier( planName = planName, planId = planId, spanType = spanType, span = spanType.nextIdFor( topic ) )
   }
 
   implicit val canGenerateHash: CanGenerateHashFrom[AlgorithmIdentifier] = new CanGenerateHashFrom[AlgorithmIdentifier] {

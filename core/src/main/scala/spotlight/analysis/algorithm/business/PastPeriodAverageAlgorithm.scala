@@ -76,7 +76,7 @@ object PastPeriod extends ClassLogging {
     */
   case class Shape(
       window: Int,
-      history: Int,
+      //      history: Int,
       N: Long = 0L,
       periods: CircularBuffer[PeriodValue] = CircularBuffer.empty[PeriodValue]
   ) {
@@ -120,9 +120,9 @@ object PastPeriod extends ClassLogging {
       }
     }
 
-    private val wholeWindow = window + 1 // to include current period at end of buffer
+    private def wholeWindow = window + 1 // to include current period at end of buffer
 
-    private val addToPeriods = CircularBuffer.addTo( wholeWindow )( periods, _: PeriodValue )
+    @transient private lazy val addToPeriods = CircularBuffer.addTo( wholeWindow )( periods, _: PeriodValue )
     private[this] def addPeriod( p: Period, v: Double ): Shape = this.copy( N = this.N + 1, periods = addToPeriods( p, v ) )
 
     private[this] def updatePeriod( p: Period, v: Double, index: Int ): Shape = {
@@ -161,17 +161,17 @@ object PastPeriod extends ClassLogging {
     val DefaultWindow: Int = 3
     def windowFrom( configuration: Option[Config] ): Int = getFromOrElse( configuration, WindowPath, DefaultWindow )
 
-    val HistoryPath = "history"
-    val DefaultHistory: Int = DefaultWindow * 10
-    def historyFrom( configuration: Option[Config] ): Int = getFromOrElse( configuration, HistoryPath, DefaultHistory )
+    //    val HistoryPath = "history"
+    //    val DefaultHistory: Int = DefaultWindow * 10
+    //    def historyFrom( configuration: Option[Config] ): Int = getFromOrElse( configuration, HistoryPath, DefaultHistory )
 
     //    def applyWindow[T]( window: Int )( periods: List[T] ): List[T] = periods drop ( periods.size - window )
 
     implicit val advancing = new Advancing[Shape] {
       override def zero( configuration: Option[Config] ): Shape = {
         val window = getFromOrElse[Int]( configuration, WindowPath, 3 )
-        val history = getFromOrElse[Int]( configuration, HistoryPath, 10 * window )
-        Shape( window = window, history = history )
+        //        val history = getFromOrElse[Int]( configuration, HistoryPath, 10 * window )
+        Shape( window = window /*, history = history*/ )
       }
 
       override def N( shape: Shape ): Long = shape.N
@@ -214,8 +214,8 @@ object PastPeriodAverageAlgorithm extends Algorithm[PastPeriod.Shape]( label = "
     * @return blended average size for the algorithm shape
     */
   override def estimatedAverageShapeSize( properties: Option[Config] ): Option[Information] = {
-    ( PastPeriod.Shape.windowFrom( properties ), PastPeriod.Shape.historyFrom( properties ) ) match {
-      case ( PastPeriod.Shape.DefaultWindow, PastPeriod.Shape.DefaultHistory ) ⇒ Some( Bytes( 1763 ) )
+    ( PastPeriod.Shape.windowFrom( properties ) /*, PastPeriod.Shape.historyFrom( properties )*/ ) match {
+      case ( PastPeriod.Shape.DefaultWindow /*, PastPeriod.Shape.DefaultHistory*/ ) ⇒ Some( Bytes( 1763 ) )
       //      case window if window <= 32 ⇒ Some( Bytes( 716 + ( window * 13 ) ) ) // identified through observation
       //      case window if window <= 42 ⇒ Some( Bytes( 798 + ( window * 13 ) ) )
       //      case window if window <= 73 ⇒ Some( Bytes( 839 + ( window * 13 ) ) )

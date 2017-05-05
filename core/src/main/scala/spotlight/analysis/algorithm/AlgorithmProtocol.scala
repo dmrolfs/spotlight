@@ -13,7 +13,12 @@ object AlgorithmProtocol extends AggregateProtocol[Algorithm.ID] {
   }
 
   case class EstimateSize( override val targetId: EstimateSize#TID ) extends Message with NotInfluenceReceiveTimeout
-  case class EstimatedSize( val sourceId: Algorithm.TID, nrShapes: Int, size: Information ) extends ProtocolMessage {
+
+  case class EstimatedSize(
+      val sourceId: Algorithm.TID,
+      nrShapes: Int,
+      size: Information
+  ) extends ProtocolMessage with NotInfluenceReceiveTimeout {
     def averageSizePerShape: Information = if ( nrShapes != 0 ) ( size / nrShapes ) else Bytes( 0 )
   }
 

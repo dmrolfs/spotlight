@@ -1,0 +1,20 @@
+[Unit]
+Description=Spotlight Batch
+After=docker.service
+
+[Service]
+EnvironmentFile=/etc/environment
+TimeoutStartSec=0
+ExecStartPre=-/usr/bin/docker kill spotlight-batch
+ExecStartPre=-/usr/bin/docker rm spotlight-batch
+ExecStartPre=/usr/bin/docker pull dmrolfs/spotlight-batch
+ExecStart=/usr/bin/docker run --rm --name spotlight-batch -p 20004:2004 -p 2551 -v /var/log/spotlight:/var/log -v /etc/spotlight:/etc/spotlight -e SPOTLIGHT_CONFIG=application-prod.conf dmrolfs/spotlight-graphite
+ExecStartPost=/bin/sh -c "/usr/bin/etcdctl set /services/carbonrelay/$COREOS_PRIVATE_IPV4 spotlight-batch"
+ExecStop=-/usr/bin/docker stop spotlight-batch
+ExecStopPost=/usr/bin/etcdctl rm /services/carbonrelay/$COREOS_PRIVATE_IPV4
+
+[Install]
+WantedBy=multi-user.target
+
+[X-Fleet]
+X-Conflicts=carbon-relay*

@@ -16,12 +16,14 @@ import omnibus.akka.publish.StackableStreamPublisher
 import omnibus.commons.{ TryV, V }
 import omnibus.commons.log.Trace
 import shapeless.Lens
+import spotlight.Settings
 import spotlight.analysis.AnalysisPlanModule.AggregateRoot.PlanActor
 import spotlight.analysis.AnalysisPlanModule.AggregateRoot.PlanActor.{ FlowConfigurationProvider, WorkerProvider }
 import spotlight.analysis.algorithm.statistical.SimpleMovingAverageAlgorithm
 import spotlight.model.outlier._
 import spotlight.testkit.EntityModuleSpec
 import spotlight.analysis.{ AnalysisPlanProtocol ⇒ P }
+import spotlight.infrastructure.ClusterRole
 import spotlight.model.timeseries._
 
 /** Created by rolfsd on 6/15/16.
@@ -37,10 +39,26 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[AnalysisPlanState] with Op
     override val idLens: Lens[AnalysisPlanState, AnalysisPlanState#TID] = AnalysisPlanModule.idLens
     override val nameLens: Lens[AnalysisPlanState, String] = AnalysisPlanModule.nameLens
     //      override def aggregateRootPropsOp: AggregateRootProps = testProps( _, _ )( proxy )
-    override def environment: AggregateEnvironment = LocalAggregate
+    override def environment: AggregateEnvironment.Resolver = AggregateEnvironment.Resolver.local
   }
 
-  override def testConfiguration( test: OneArgTest, slug: String ): Config = AnalysisPlanModuleSpec.config( systemName = slug )
+  override def testConfiguration( test: OneArgTest, slug: String ): Config = {
+    val tc = ConfigFactory.parseString(
+      """
+        |
+      """.stripMargin
+    )
+
+    Settings.adaptConfiguration(
+      config = tc.resolve().withFallback(
+        spotlight.testkit.config( systemName = slug, portOffset = scala.util.Random.nextInt( 20000 ) )
+      ),
+      role = ClusterRole.All,
+      externalHostname = "127.0.0.1",
+      requestedPort = 0,
+      systemName = slug
+    )
+  }
 
   override def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture = {
     test.tags match {
@@ -128,6 +146,7 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[AnalysisPlanState] with Op
     }
 
     class Module extends FixtureModule {
+      override val clusterRole: Option[String] = Option( ClusterRole.Analysis.entryName )
       override def passivateTimeout: Duration = Duration.Undefined
       override def snapshotPeriod: Option[FiniteDuration] = None
       override def aggregateRootPropsOp: AggregateRootProps = testProps( _, _ )
@@ -168,6 +187,7 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[AnalysisPlanState] with Op
     }
 
     class Module extends FixtureModule {
+      override val clusterRole: Option[String] = Option( ClusterRole.Analysis.entryName )
       override def passivateTimeout: Duration = Duration.Undefined
       override def snapshotPeriod: Option[FiniteDuration] = None
       override def aggregateRootPropsOp: AggregateRootProps = {

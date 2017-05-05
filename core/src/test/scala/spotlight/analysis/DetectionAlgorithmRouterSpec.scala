@@ -9,8 +9,9 @@ import org.joda.{ time ⇒ joda }
 import org.scalatest.mockito.MockitoSugar
 import org.mockito.Mockito._
 import omnibus.akka.envelope.{ Envelope, WorkId }
+import spotlight.analysis.algorithm.AlgorithmRoute
 import spotlight.analysis.shard._
-import spotlight.model.outlier.{ IsQuorum, AnalysisPlan, ReduceOutliers }
+import spotlight.model.outlier.{ AnalysisPlan, IsQuorum, ReduceOutliers }
 import spotlight.model.timeseries.{ DataPoint, TimeSeries }
 import spotlight.testkit.ParallelAkkaSpec
 

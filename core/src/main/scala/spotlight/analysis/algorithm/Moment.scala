@@ -1,14 +1,13 @@
-package spotlight.analysis
+package spotlight.analysis.algorithm
 
 import scalaz._
 import Scalaz._
+import com.persist.logging._
 import com.typesafe.config.Config
 import net.ceedubs.ficus.Ficus._
-import com.persist.logging._
 import org.apache.commons.math3.stat.descriptive.StatisticalSummary
 import omnibus.commons.Valid
 import omnibus.commons.util._
-import spotlight.analysis.algorithm.Advancing
 import spotlight.analysis.algorithm.AlgorithmProtocol.Advanced
 
 /** Created by rolfsd on 1/26/16.
@@ -27,12 +26,12 @@ object Moment extends ClassLogging {
     checkAlpha( alpha ) map { a ⇒ SimpleMoment( alpha ) }
   }
 
-  def withCenterOfMass( com: Double ): Valid[Moment] = withAlpha( 1D / ( 1D + com / 100D ) )
+  def withCenterOfMass( com: Double ): Valid[Moment] = withAlpha( 1.0 / ( 1.0 + com / 100.0 ) )
 
-  def withHalfLife( halfLife: Double ): Valid[Moment] = withAlpha( 1D - math.exp( math.log( 0.5 ) / halfLife ) )
+  def withHalfLife( halfLife: Double ): Valid[Moment] = withAlpha( 1.0 - math.exp( math.log( 0.5 ) / halfLife ) )
 
   def checkAlpha( alpha: Double ): Valid[Double] = {
-    if ( alpha < 0D || 1D < alpha ) Validation.failureNel( InvalidMomentAlphaError( alpha ) )
+    if ( alpha < 0.0 || 1.0 < alpha ) Validation.failureNel( InvalidMomentAlphaError( alpha ) )
     else alpha.successNel
   }
 
@@ -60,7 +59,7 @@ object Moment extends ClassLogging {
   object Statistics {
     def apply( alpha: Double, values: Double* ): Statistics = {
       values.foldLeft(
-        Statistics( alpha = alpha, N = 0, sum = 0.0, movingMin = 0.0, movingMax = 0.0, ewma = 0.0, ewmsd = 0.0 )
+        Statistics( N = 0L, alpha = alpha, sum = 0.0, movingMin = 0.0, movingMax = 0.0, ewma = 0.0, ewmsd = 0.0 )
       ) {
           _ :+ _
         }
@@ -68,7 +67,7 @@ object Moment extends ClassLogging {
   }
 
   final case class Statistics private[analysis] (
-      N: Long = 1L,
+      N: Long,
       alpha: Double,
       sum: Double,
       movingMax: Double,
@@ -88,9 +87,9 @@ object Moment extends ClassLogging {
       val newSum = this.sum + value
       val newMax = math.max( this.movingMax, value )
       val newMin = math.min( this.movingMin, value )
-      val newEWMA = ( this.alpha * value ) + ( 1 - this.alpha ) * this.ewma
-      val newEWMSD = math.sqrt( this.alpha * math.pow( this.ewmsd, 2 ) + ( 1 - this.alpha ) * math.pow( value - this.ewma, 2 ) )
-      this.copy( N = this.N + 1, sum = newSum, movingMax = newMax, movingMin = newMin, ewma = newEWMA, ewmsd = newEWMSD )
+      val newEWMA = ( this.alpha * value ) + ( 1.0 - this.alpha ) * this.ewma
+      val newEWMSD = math.sqrt( this.alpha * math.pow( this.ewmsd, 2 ) + ( 1.0 - this.alpha ) * math.pow( value - this.ewma, 2 ) )
+      this.copy( N = this.N + 1L, sum = newSum, movingMax = newMax, movingMin = newMin, ewma = newEWMA, ewmsd = newEWMSD )
     }
 
     override def toString: String = {
@@ -102,7 +101,7 @@ object Moment extends ClassLogging {
       override val alpha: Double,
       override val statistics: Option[Moment.Statistics] = None
   ) extends Moment {
-    override def centerOfMass: Double = ( 1D / alpha ) - 1D
+    override def centerOfMass: Double = ( 1.0 / alpha ) - 1.0
     override def :+( value: Double ): Moment = {
       val newStatistics = statistics map { _ :+ value } getOrElse { Statistics( alpha, value ) }
       copy( statistics = Option( newStatistics ) )
