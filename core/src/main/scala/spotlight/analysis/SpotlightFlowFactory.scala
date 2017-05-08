@@ -35,7 +35,7 @@ class SpotlightFlowFactory( plans: Set[AnalysisPlan.Summary] ) extends FlowFacto
       planFlows ← collectPlanFlows( parallelism, model, plans )
       f ← detectFrom( planFlows ) map { _.named( "Spotlight" ) }
     } yield {
-      log.warn( Map( "@msg" → "Made catalog flow", "flow" → f.toString ) )
+      log.info( Map( "@msg" → "Made catalog flow", "flow" → f.toString ) )
       f
     }
   }

@@ -40,7 +40,7 @@ class AnalysisFlowFactory( plan: AnalysisPlan ) extends FlowFactory[TimeSeries, 
     detectorProxy() map { detector ⇒
       val name = s"AnalysisPlan:${plan.name}@${plan.id.id}"
       val flow = withGrouping.via( detectionFlow( parallelism, detector ) ).named( name )
-      log.warn( Map( "@msg" → "Made analysis plan flow", "flow" → flow.toString ) )
+      log.info( Map( "@msg" → "Made analysis plan flow", "flow" → flow.toString ) )
       flow
     }
   }
