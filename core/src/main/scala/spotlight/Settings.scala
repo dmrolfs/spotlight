@@ -165,9 +165,7 @@ object Settings extends ClassLogging {
   def forceLocalFrom( c: Config ): Boolean = {
     val force = for {
       f ← c.as[Option[Boolean]]( ForceLocalPath )
-      r ← roleFrom( c )
-      _ = log.debug( Map( "@msg" → "force local from config", ForceLocalPath → f, RolePath → r.toString ) )
-      if r == ClusterRole.All
+      r ← roleFrom( c ) if r == ClusterRole.All
     } yield f
 
     force getOrElse false
@@ -439,7 +437,13 @@ object Settings extends ClassLogging {
         "@msg" → "make settings from",
         "usage" → Map(
           "role" → usage.role.entryName,
-          "external-port" → usage.requestedExternalPort.toString,
+          "remote" → Map(
+            "external-hostname" → usage.externalHostname,
+            "requested-port" → usage.requestedExternalPort.toString,
+            "bind-hostname" → usage.bindHostname.toString,
+            "bind-port" → usage.bindPort.toString
+          ),
+          "force-local" → usage.forceLocal,
           "args" → usage.args.mkString( "[", ", ", "]" )
         ),
         "max-frame-length" → maxFrameLength,
@@ -570,6 +574,8 @@ object Settings extends ClassLogging {
 
     val requested = ( externalHostname, requestedPort )
 
+    def inetFormat( hostnamePort: ( String, Int ) ): String = hostnamePort._1 + ':' + hostnamePort._2.toString
+
     val clusterConfig = role match {
       case ClusterRole.All ⇒ {
         val ( hostname, port ) = {
@@ -579,8 +585,8 @@ object Settings extends ClassLogging {
               Map(
                 "@msg" → "requested hostname:port is not listed in cluster seed ports; overriding to first seed if possible",
                 "expected-seed-ports" → expectedSeeds,
-                "seed-override" → expectedSeeds.headOption.toString,
-                "requested" → Map( "hostname" → requested._1, "port" → requested._2 )
+                "seed-override" → expectedSeeds.headOption.map( inetFormat ).toString,
+                "requested" → inetFormat( requested )
               )
             )
             expectedSeeds.headOption getOrElse requested
@@ -597,9 +603,9 @@ object Settings extends ClassLogging {
             log.warn(
               Map(
                 "@msg" → "configured hostname:port is not listed in cluster seed ports; overriding to first seed if possible",
-                "expected-seed-ports" → expectedSeeds,
+                "expected-seed-ports" → expectedSeeds.map( inetFormat ),
                 "seed-override" → expectedSeeds.headOption.toString,
-                "requested" → Map( "hostname" → requested._1, "port" → requested._2 )
+                "requested" → inetFormat( requested )
               )
             )
             expectedSeeds.headOption getOrElse requested
@@ -762,10 +768,7 @@ object Settings extends ClassLogging {
         )
 
       opt[Unit]( "force-local" )
-        .action { ( _, c ) ⇒
-          log.error( "FORCE_LOCAL OPTION IDENTIFIED" )
-          c.copy( forceLocal = true )
-        }
+        .action { ( _, c ) ⇒ c.copy( forceLocal = true ) }
         .text(
           """
         |Use this setting in conjunction with "all" role to force system to work on only one node, which may improve performance.
@@ -828,17 +831,12 @@ object Settings extends ClassLogging {
               val REGEX = "regex"
 
               val grouping: Option[AnalysisPlan.Grouping] = {
-                val GROUP_LIMIT = "group.limit"
                 val GROUP_WITHIN = "group.within"
-                val limit = if ( spec hasPath GROUP_LIMIT ) spec getInt GROUP_LIMIT else 10000
-                log.info( Map( "@msg" → "grouping spec", "grouping" → spec.toString ) )
-                val window = if ( spec hasPath GROUP_WITHIN ) {
-                  Some( FiniteDuration( spec.getDuration( GROUP_WITHIN ).toNanos, NANOSECONDS ) )
-                } else {
-                  None
+                spec.as[Option[FiniteDuration]]( GROUP_WITHIN ) map { window ⇒
+                  val GROUP_LIMIT = "group.limit"
+                  val limit = spec.as[Option[Int]]( GROUP_LIMIT ) getOrElse 10000
+                  AnalysisPlan.Grouping( limit, window )
                 }
-
-                window map { w ⇒ AnalysisPlan.Grouping( limit, w ) }
               }
 
               //todo: add configuration for at-least and majority

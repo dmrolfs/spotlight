@@ -399,7 +399,7 @@ abstract class PlanCatalog( boundedContext: BoundedContext )
       log.info( Map( "@msg" → "index updated with additional plan(s)", "plans" → created ) )
 
       if ( remaining.nonEmpty ) {
-        log.warn(
+        log.info(
           Map(
             "@msg" → "not all newly created plans have been recorded in index yet",
             "remaining" → remaining.map( _._2.name ).mkString( "[", ", ", "]" )
