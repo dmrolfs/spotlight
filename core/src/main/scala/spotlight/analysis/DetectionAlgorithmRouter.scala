@@ -1,14 +1,18 @@
 package spotlight.analysis
 
+import akka.Done
+
 import scala.concurrent.{ ExecutionContext, Future }
+import scala.util.Try
 import akka.actor.{ Actor, ActorRef, Props }
 import akka.agent.Agent
 import akka.event.LoggingReceive
 
 import scalaz._
 import Scalaz._
+import scalaz.Kleisli.{ ask, kleisli }
 import com.persist.logging._
-import com.typesafe.config.{ Config, ConfigObject, ConfigValue }
+import com.typesafe.config.Config
 import net.ceedubs.ficus.Ficus._
 import demesne.{ AggregateRootType, BoundedContext, DomainModel, StartTask }
 import omnibus.akka.envelope._
@@ -82,25 +86,25 @@ object DetectionAlgorithmRouter extends ClassLogging {
 
       //TODO empty due to new algo registration mechanism.
       Agent(
-        Map(
-          //        SeriesDensityAnalyzer.Algorithm -> ???, // SeriesDensityAnalyzer.props( router ),
-          //        SeriesCentroidDensityAnalyzer.Algorithm -> ???, // SeriesCentroidDensityAnalyzer.props( router ),
-          //        CohortDensityAnalyzer.Algorithm -> ???, // CohortDensityAnalyzer.props( router ),
-          //        FirstHourAverageAnalyzer.Algorithm -> ???, // FirstHourAverageAnalyzer.props( router ),
-          //        HistogramBinsAnalyzer.Algorithm -> ???, // HistogramBinsAnalyzer.props( router ),
-          //        KolmogorovSmirnovAnalyzer.Algorithm -> ???, // KolmogorovSmirnovAnalyzer.props( router ),
-          //        LeastSquaresAnalyzer.Algorithm -> ???, // LeastSquaresAnalyzer.props( router ),
-          //        MeanSubtractionCumulationAnalyzer.Algorithm -> ???, // MeanSubtractionCumulationAnalyzer.props( router ),
-          //        MedianAbsoluteDeviationAnalyzer.Algorithm -> ???, // MedianAbsoluteDeviationAnalyzer.props( router ),
-          //        SeasonalExponentialMovingAverageAnalyzer.Algorithm -> ??? // SeasonalExponentialMovingAverageAnalyzer.props( router )
-          ExponentialMovingAverageAlgorithm.label → ExponentialMovingAverageAlgorithm.module.rootType,
-          GrubbsAlgorithm.label → GrubbsAlgorithm.module.rootType,
-          SimpleMovingAverageAlgorithm.label → SimpleMovingAverageAlgorithm.module.rootType
+        Map( //        SeriesDensityAnalyzer.Algorithm -> ???, // SeriesDensityAnalyzer.props( router ),
+        //        SeriesCentroidDensityAnalyzer.Algorithm -> ???, // SeriesCentroidDensityAnalyzer.props( router ),
+        //        CohortDensityAnalyzer.Algorithm -> ???, // CohortDensityAnalyzer.props( router ),
+        //        FirstHourAverageAnalyzer.Algorithm -> ???, // FirstHourAverageAnalyzer.props( router ),
+        //        HistogramBinsAnalyzer.Algorithm -> ???, // HistogramBinsAnalyzer.props( router ),
+        //        KolmogorovSmirnovAnalyzer.Algorithm -> ???, // KolmogorovSmirnovAnalyzer.props( router ),
+        //        LeastSquaresAnalyzer.Algorithm -> ???, // LeastSquaresAnalyzer.props( router ),
+        //        MeanSubtractionCumulationAnalyzer.Algorithm -> ???, // MeanSubtractionCumulationAnalyzer.props( router ),
+        //        MedianAbsoluteDeviationAnalyzer.Algorithm -> ???, // MedianAbsoluteDeviationAnalyzer.props( router ),
+        //        SeasonalExponentialMovingAverageAnalyzer.Algorithm -> ??? // SeasonalExponentialMovingAverageAnalyzer.props( router )
+        //          ExponentialMovingAverageAlgorithm.label → ExponentialMovingAverageAlgorithm.module.rootType,
+        //          GrubbsAlgorithm.label → GrubbsAlgorithm.module.rootType,
+        //          SimpleMovingAverageAlgorithm.label → SimpleMovingAverageAlgorithm.module.rootType
         )
       )
     }
 
     def registerWithRouter( algorithmRoots: List[( String, AggregateRootType )] ): Future[Map[String, AggregateRootType]] = {
+      //TODO: DMR: WORK HERE TO LOG
       algorithmRootTypes alter { _ ++ algorithmRoots }
     }
 
@@ -131,77 +135,91 @@ object DetectionAlgorithmRouter extends ClassLogging {
       }
     }
 
-    def loadAlgorithms(
-      boundedContext: BoundedContext,
-      configuration: Config
-    )(
-      implicit
-      ec: ExecutionContext
-    ): Future[List[( String, AggregateRootType )]] = {
-      def algorithmRootTypeFor( clazz: Class[_ <: Algorithm[_]] ): TryV[AggregateRootType] = {
-        \/ fromTryCatchNonFatal {
-          import scala.reflect.runtime.{ universe ⇒ ru }
-          val loader = getClass.getClassLoader
-          val mirror = ru runtimeMirror loader
-          val algorithmSymbol = mirror moduleSymbol clazz
-          val algorithmMirror = mirror reflectModule algorithmSymbol
-          val algorithm = algorithmMirror.instance.asInstanceOf[Algorithm[_]]
-          algorithm.module.rootType
+    type AlgorithmRootType = ( String, AggregateRootType )
+    type EC[_] = ExecutionContext
+    def loadAlgorithms[_: EC]( boundedContext: BoundedContext, configuration: Config ): Future[List[AlgorithmRootType]] = {
+      type AlgorithmClass = Class[_ <: Algorithm[_]]
+      type AlgorithmClasses = Map[String, AlgorithmClass]
+
+      def algorithmRootTypeFor( clazz: AlgorithmClass ): Future[AggregateRootType] = {
+        Future.fromTry[AggregateRootType] {
+          Try {
+            import scala.reflect.runtime.{ universe ⇒ ru }
+            val loader = getClass.getClassLoader
+            val mirror = ru runtimeMirror loader
+            val algorithmSymbol = mirror moduleSymbol clazz
+            val algorithmMirror = mirror reflectModule algorithmSymbol
+            val algorithm = algorithmMirror.instance.asInstanceOf[Algorithm[_]]
+            algorithm.module.rootType
+          }
         }
       }
 
-      def isKnownAlgorithm( rootType: AggregateRootType )( implicit model: DomainModel ): Boolean = {
-        model.rootTypes contains rootType
-      }
-
-      val userAlgos: TryV[Map[String, Class[_ <: Algorithm[_]]]] = {
-        Settings
-          .userAlgorithmClassesFrom( configuration )
-          .disjunction
-          .leftMap { exs ⇒
-            exs foreach { ex ⇒ log.error( "loading user algorithm failed", ex ) }
-            exs.head
-          }
-      }
-
-      def collectUnknowns(
-        algoClasses: Map[String, Class[_ <: Algorithm[_]]]
-      )(
-        implicit
-        model: DomainModel
-      ): TryV[List[( String, AggregateRootType )]] = {
-        algoClasses
-          .toList
-          .traverseU {
-            case ( a, c ) ⇒
-              algorithmRootTypeFor( c ) map { rt ⇒
-                if ( isKnownAlgorithm( rt ) ) None
-                else {
-                  log.info( Map( "@msg" → "loaded algorithm root type", "algorithm" → a, "root-type" → rt.name ) )
-                  Some( ( a, rt ) )
-                }
-              }
-          }
-          .map { _.flatten }
-      }
-
-      boundedContext
-        .futureModel
-        .flatMap { implicit model ⇒
-          val unknownRoots = {
-            for {
-              algorithmClasses ← userAlgos
-              unknowns ← collectUnknowns( algorithmClasses )
-            } yield {
-              unknowns
+      val userAlgorithms = kleisli[Future, ( DomainModel, Config ), ( DomainModel, AlgorithmClasses )] {
+        case ( m, c ) ⇒
+          Settings.userAlgorithmClassesFrom( c ) match {
+            case scalaz.Success( as ) ⇒ Future successful ( m, as )
+            case scalaz.Failure( exs ) ⇒ {
+              exs foreach { ex ⇒ log.error( "loading user algorithm failed", ex ) }
+              Future failed exs.head
             }
           }
+      }
 
-          unknownRoots match {
-            case \/-( us ) ⇒ Future successful us
-            case -\/( ex ) ⇒ Future failed ex
-          }
+      val collectRootTypes = kleisli[Future, ( DomainModel, AlgorithmClasses ), List[AlgorithmRootType]] {
+        case ( m, acs ) ⇒ {
+          acs
+            .toList
+            .traverseU {
+              case ( a, c ) ⇒ {
+                algorithmRootTypeFor( c ).map { rt ⇒
+                  log.debug(
+                    Map(
+                      "@msg" → "collecting unknown algorithms",
+                      "algorithm" → a,
+                      "fqcn" → c.getName,
+                      "identified-root-type" → rt.toString,
+                      "is-known" → m.rootTypes.contains( rt )
+                    )
+                  )
+
+                  ( a, rt )
+                }
+              }
+            }
+          //              .map { arts ⇒ arts.flatten }
         }
+      }
+
+      val loadRootTypesIntoModel = kleisli[Future, List[AlgorithmRootType], List[AlgorithmRootType]] { arts ⇒
+        boundedContext
+          .addAggregateTypes( arts.map( _._2 ).toSet )
+          .map { _ ⇒
+            log.debug(
+              Map(
+                "@msg" → "loaded algorithm root types into bounded context",
+                "algorithm root types" → arts.mkString( "[", ", ", "]" )
+              )
+            )
+
+            arts
+          }
+      }
+
+      val registerWithRouter = kleisli[Future, List[AlgorithmRootType], List[AlgorithmRootType]] { arts ⇒
+        for {
+          registered ← Registry.registerWithRouter( arts )
+          _ = log.debug( Map( "@msg" → "registered with router", "algorithm root types" → registered.mkString( "[", ", ", "]" ) ) )
+        } yield registered.toList
+      }
+
+      val addModel = kleisli[Future, ( BoundedContext, Config ), ( DomainModel, Config )] {
+        case ( bc, c ) ⇒ bc.futureModel map { ( _, c ) }
+      }
+
+      val loadAndRegister = addModel >=> userAlgorithms >=> collectRootTypes >=> loadRootTypesIntoModel >=> registerWithRouter
+
+      loadAndRegister.run( boundedContext, configuration )
     }
   }
 }
@@ -217,7 +235,7 @@ class DetectionAlgorithmRouter extends Actor with EnvelopingActor with Instrumen
     Map(
       "@msg" → "created routing-table",
       "self" → self.path.name,
-      "routing-table" → routingTable
+      "routing-table" → routingTable.mkString( "[", ", ", "]" )
     )
   )
 
