@@ -5,7 +5,7 @@ import sbt._
 import spray.revolver.RevolverPlugin._
 
 object BuildSettings {
-  val VERSION = "3.0.0-SNAPSHOT"
+  val VERSION = "3.0.0"
 
   val defaultBuildSettings = Defaults.coreDefaultSettings ++ Format.settings ++ /* Revolver.settings ++ */ Seq(
     version := VERSION,

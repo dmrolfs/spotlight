@@ -24,7 +24,7 @@ libraryDependencies ++=
     facility.scopt,
     demesne.core,
 //    facility.guava,
-    facility.offheap,
+    // facility.offheap,
     facility.lang,
     facility.parboiled,
     facility.squants,
@@ -38,7 +38,7 @@ libraryDependencies ++=
     akka.streamsTestkit,
     demesne.testkit,
     quality.inmemory,
-    "org.python" % "jython-standalone" % "2.5.3",
+    "org.python" % "jython-standalone" % "2.7.0",
     "com.github.marklister" %% "product-collections" % "1.4.5"
   )
 
