@@ -1,7 +1,8 @@
-package spotlight.analysis
+package spotlight.analysis.algorithm
+
+import omnibus.commons.Valid
 
 import scalaz.Validation
-import omnibus.commons.Valid
 
 /** Created by rolfsd on 9/21/16.
   */

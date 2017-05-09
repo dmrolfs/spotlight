@@ -13,7 +13,7 @@ import org.typelevel.scalatest.{ DisjunctionMatchers, DisjunctionValues }
 import com.persist.logging._
 import omnibus.commons.TryV
 import omnibus.commons.log.Trace
-import spotlight.analysis.algorithm.{ Algorithm, AlgorithmSpec, AlgorithmProtocol ⇒ P }
+import spotlight.analysis.algorithm.{ Algorithm, AlgorithmSpec, InsufficientDataSize, AlgorithmProtocol ⇒ P }
 import spotlight.model.timeseries._
 
 /** Created by rolfsd on 10/7/16.
@@ -131,14 +131,14 @@ class GrubbsAlgorithmSpec
             )
           }
 
-          case -\/( ex: Algorithm.InsufficientDataSize ) ⇒ ThresholdBoundary empty timestamp
+          case -\/( ex: InsufficientDataSize ) ⇒ ThresholdBoundary empty timestamp
 
           case -\/( ex ) ⇒ throw ex
         }
       }
     }
 
-    override def apply( points: Seq[DataPoint] ): Result = {
+    override def apply( points: Seq[DataPoint], tolerance: Double = 3.0 ): Result = {
       implicit val context = mock[GrubbsAlgorithm.Context]
       when( context.alpha ) thenReturn alpha
       when( context.properties ) thenReturn ConfigFactory.empty
@@ -150,7 +150,7 @@ class GrubbsAlgorithmSpec
       val shape = shapeFor( points.map { _.value } )
       val grubbs = GrubbsAlgorithm.grubbsScore( shape )
       logger.info( "TEST: SCORE = [{}]", grubbs )
-      Result( underlying = stats, timestamp = points.last.timestamp, tolerance = 3.0, score = grubbs )
+      Result( underlying = stats, timestamp = points.last.timestamp, tolerance = tolerance, score = grubbs )
     }
   }
 

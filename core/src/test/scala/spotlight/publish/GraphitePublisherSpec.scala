@@ -37,8 +37,8 @@ object GraphitePublisherSpec {
      |headerLength = struct.calcsize(format)
      |print "D headerLength=%d" % headerLength
      |payloadLength, = struct.unpack(format, payload[:headerLength])
-     |print "E payloadLength=%d" % payloadLength.intValue()
-     |batchLength = headerLength + payloadLength.intValue()
+     |print "E payloadLength=%d" % payloadLength
+     |batchLength = headerLength + payloadLength
      |print "F batchLength=%d" % batchLength
      |metrics = pickle.loads(payload[headerLength:batchLength])
      |print "G metrics=%s" % metrics
@@ -145,7 +145,7 @@ class GraphitePublisherSpec
         bindings.put( "payload", payload substring nextIndex )
         unpickleScript eval bindings
         result.addAll( result.size, bindings.get( "metrics" ).asInstanceOf[java.util.Collection[_]] )
-        nextIndex += bindings.get( "batchLength" ).asInstanceOf[Int]
+        nextIndex += bindings.get( "batchLength" ).asInstanceOf[java.math.BigInteger].intValue()
       }
 
       import scala.collection.JavaConverters._
@@ -172,7 +172,7 @@ class GraphitePublisherSpec
       verify( socket ).close()
     }
 
-    "first replicate python protocol test" in { f: Fixture ⇒
+    "first replicate python protocol test" taggedAs WIP in { f: Fixture ⇒
       import f._
       import org.joda.{ time ⇒ joda }
       import spotlight.model.timeseries._
@@ -287,7 +287,7 @@ class GraphitePublisherSpec
       openCount.get mustBe 1
     }
 
-    "write past full batch with threshold boundaries" taggedAs ( WIP ) in { f: Fixture ⇒
+    "write past full batch with threshold boundaries" in { f: Fixture ⇒
       import f._
 
       val algConfig = ConfigFactory.parseString( "publish-threshold: yes" )

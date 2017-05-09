@@ -1,0 +1,37 @@
+version: '2'
+
+services:
+
+  # Avoids duplicating common Cassandra configuration for each node
+  cassandra-base:
+    image: cassandra:3
+    networks:
+        - dockernet
+    environment:
+        WAIT_TIMEOUT: "60"
+        JVM_OPTS: "-Dcassandra.consistent.rangemovement=false"
+        CASSANDRA_CLUSTER_NAME: "SpotlightCluster"
+        CASSANDRA_ENDPOINT_SNITCH: "GossipingPropertyFileSnitch"
+        CASSANDRA_DC: "DATA"
+    restart: always # Sometimes it starts too fast, cheap way of retrying...
+
+  spotlight-base:
+    image: dmrolfs/spotlight-batch:latest
+    expose:
+      - 22
+      - 2551
+    links:
+      - cassandra-node1:cassandra
+    volumes_from:
+      - logs
+    volumes:
+      - /Users/rolfsd/spotlight/log/seed:/var/log
+      - /Users/rolfsd/spotlight/etc/seed:/etc/spotlight
+    restart: always
+
+  data:
+    image: gliderlabs/alpine
+    command: echo Data Container
+    user: 999:999
+    labels:
+      spotlight.role: "Volume Container"

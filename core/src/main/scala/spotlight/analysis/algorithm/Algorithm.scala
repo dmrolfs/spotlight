@@ -7,9 +7,11 @@ import scala.concurrent.duration._
 import scala.util.Random
 import scala.reflect._
 import akka.actor._
-import akka.cluster.sharding.ShardRegion
+import akka.cluster.sharding.{ ClusterShardingSettings, ShardRegion }
 import akka.event.LoggingReceive
 import akka.persistence._
+import spotlight.{ Settings, SpotlightContext }
+import spotlight.infrastructure.ClusterRole
 
 import scalaz._
 import Scalaz._
@@ -19,11 +21,12 @@ import bloomfilter.CanGenerateHashFrom
 import bloomfilter.CanGenerateHashFrom.CanGenerateHashFromString
 import com.typesafe.config.Config
 import com.typesafe.config.ConfigException.BadValue
+import net.ceedubs.ficus.Ficus._
 import org.apache.commons.math3.ml.clustering.DoublePoint
 import com.codahale.metrics.{ Metric, MetricFilter }
 import nl.grons.metrics.scala.{ Meter, MetricName, Timer }
 import squants.information.{ Bytes, Information }
-import com.persist.logging.{ ActorLogging ⇒ PersistActorLogging, _ }
+import com.persist.logging._
 import omnibus.akka.envelope._
 import omnibus.akka.metrics.{ Instrumented, InstrumentedActor }
 import omnibus.akka.persistence.{ Passivating, SnapshotLimiter }
@@ -32,9 +35,9 @@ import omnibus.archetype.domain.model.core.Entity
 import omnibus.commons.{ KOp, TryV, Valid }
 import omnibus.commons.identifier.{ Identifying, ShortUUID, TaggedID }
 import demesne._
-import demesne.repository.{ AggregateRootRepository, EnvelopingAggregateRootRepository }
-import demesne.repository.AggregateRootRepository.{ ClusteredAggregateContext, LocalAggregateContext }
+import demesne.repository._
 import spotlight.analysis._
+import spotlight.analysis.algorithm.Advancing.syntax._
 import spotlight.analysis.algorithm.AlgorithmProtocol.RouteMessage
 import spotlight.model.outlier.{ NoOutliers, Outliers }
 import spotlight.model.timeseries._
@@ -101,14 +104,6 @@ object Algorithm extends ClassLogging {
   }
 
   private[algorithm] val gitterFactor: Random = new Random()
-
-  case class InsufficientDataSize(
-    algorithm: String,
-    size: Long,
-    required: Long
-  ) extends IllegalArgumentException(
-    s"${size} data points is insufficient to perform ${algorithm} test, which requires at least ${required} points"
-  )
 
   case class RedundantAlgorithmConfiguration(
     aggregateId: TID,
@@ -184,11 +179,11 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
 
   def prepareData( c: Context ): Seq[DoublePoint] = {
     import Algorithm.ConfigurationProvider.TailAveragePath
-    val tail = if ( c.properties hasPath TailAveragePath ) c.properties getInt TailAveragePath else 1
+    val tail = c.properties.as[Option[Int]]( TailAveragePath ) getOrElse 1
     if ( 1 < tail ) { c.tailAverage( tail )( c.data ) } else c.data
   }
 
-  def step( point: PointT, shape: Shape )( implicit s: State, c: Context ): Option[( Boolean, ThresholdBoundary )]
+  def score( point: PointT, shape: Shape )( implicit s: State, c: Context ): Option[AnomalyScore]
 
   implicit lazy val identifying: Identifying.Aux[State, Algorithm.ID] = new Identifying[State] {
     override type ID = Algorithm.ID
@@ -288,6 +283,9 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
     class RootType extends AggregateRootType {
       override type S = State
       override val identifying: Identifying[S] = algorithmModule.identifying
+
+      override val clusterRole: Option[String] = Option( ClusterRole.Analysis.entryName )
+
       //todo: make configuration driven for algorithms
       override val snapshotPeriod: Option[FiniteDuration] = None // not used - snapshot timing explicitly defined below
       //    override def snapshot: Option[SnapshotSpecification] = None
@@ -310,7 +308,22 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
       override val passivateTimeout: Duration = Duration( 1, MINUTES ) //todo make config driven
 
       override lazy val name: String = algorithmModule.shardName
-      override def repositoryProps( implicit model: DomainModel ): Props = Repository localProps model //todo change to clustered with multi-jvm testing of cluster
+      override def repositoryProps( implicit model: DomainModel ): Props = {
+        val forceLocal = Settings forceLocalFrom model.configuration
+        val ( props, label ) = if ( forceLocal ) {
+          ( Repository.localProps( model ), "LOCAL" )
+        } else {
+          ( Repository.clusteredProps( model ), "CLUSTERED" )
+        }
+
+        log.alternative(
+          SpotlightContext.SystemLogCategory,
+          Map( "@msg" → "Algorithm Environment", "label" → label, "force-local" → forceLocal, "props" → props.toString )
+        )
+
+        props
+      }
+
       override def maximumNrClusterNodes: Int = algorithm.maximumNrClusterNodes
       override def aggregateIdFor: ShardRegion.ExtractEntityId = super.aggregateIdFor orElse {
         case AdvancedType( a ) ⇒ ( a.sourceId.id.toString, a )
@@ -325,7 +338,7 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
 
     class Repository( model: DomainModel )
         extends EnvelopingAggregateRootRepository( model, algorithmModule.rootType ) with AltActorLogging {
-      actor: AggregateRootRepository.AggregateContext ⇒
+      actor: AggregateContext ⇒
 
       override def aggregateProps: Props = AlgorithmActor.props( model, rootType )
 
@@ -441,20 +454,7 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
         }
       }
 
-      override def persistenceIdFromPath(): String = {
-        val p = self.path.toStringWithoutAddress
-        val sepPos = p lastIndexOf '/'
-        val aidRep = p drop ( sepPos + 1 )
-
-        AlgorithmIdentifier.fromAggregateId( aidRep ).disjunction match {
-          case \/-( aid ) ⇒ algorithmModule.identifying.tag( aid ).toString
-
-          case -\/( exs ) ⇒ {
-            exs foreach { ex ⇒ altLog.error( Map( "@msg" → "failed to parse persistenceId from path", "path" → p.toString ), ex ) }
-            throw exs.head
-          }
-        }
-      }
+      override def persistenceIdFromPath(): String = aggregateIdFromPath().toString
 
       override lazy val metricBaseName: MetricName = algorithm.metricBaseName
       lazy val executionTimer: Timer = metrics.timer( "execution" )
@@ -472,7 +472,7 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
         case ( AdvancedType( event ), cs ) ⇒ {
           val s = cs.shapes.get( event.topic ) getOrElse advancing.zero( Option( algorithmContext ) map { ctx ⇒ ctx.properties } )
           _advances += 1
-          val newShape = advancing.advance( s, event )
+          val newShape = s.advance( event )
           val newState = cs.withTopicShape( event.topic, newShape )
 
           altLog.debug( Map( "@msg" → "#TEST acceptance", "before" → s.toString, "advanced" → newShape.toString, "advances" → _advances ) )
@@ -505,11 +505,12 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
               aggregator !+ r
             }
 
-            case -\/( ex: Algorithm.InsufficientDataSize ) ⇒ {
+            case -\/( ex: NonFatalSkipScoringException ) ⇒ {
               stopTimer( start )
               altLog.info(
                 Map(
-                  "@msg" → "skipped algorithm analysis due to insufficient data - no outliers marked for interval",
+                  "@msg" → "skipped algorithm analysis",
+                  "message" → ex.getMessage,
                   "work-id" → workId.toString,
                   "algorithm" → algo,
                   "scope" → Map( "plan" → payload.plan.name, "topic" → payload.topic.toString ),
@@ -836,56 +837,30 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
         */
       private def checkSize( shape: S )( implicit analysisContext: Context ): TryV[Long] = {
         import Algorithm.ConfigurationProvider.MinimalPopulationPath
-        val minimumDataPoints = if ( analysisContext.properties hasPath MinimalPopulationPath ) {
-          analysisContext.properties getInt MinimalPopulationPath
-        } else {
-          0
-        }
 
-        advancing.N( shape ) match {
-          case s if s < minimumDataPoints ⇒ Algorithm.InsufficientDataSize( label, s, minimumDataPoints ).left
+        val minimumDataPoints = analysisContext.properties.as[Option[Int]]( MinimalPopulationPath ) getOrElse 0
+
+        shape.N match {
+          case s if s < minimumDataPoints ⇒ InsufficientDataSize( label, s, minimumDataPoints ).left
           case s ⇒ s.right
+        }
+      }
+
+      private def checkScore( score: AnomalyScore, shape: Shape )( implicit analysisContext: Context ): TryV[AnomalyScore] = {
+        ( score.threshold.floor, score.threshold.expected, score.threshold.ceiling ) match {
+          case ( Some( f ), Some( e ), Some( c ) ) if f == e && e == c ⇒ {
+            InsufficientVariance( algorithm.label, shape.N ).left
+          }
+          case ( Some( f ), _, Some( c ) ) if f.isNaN && c.isNaN ⇒ InsufficientVariance( algorithm.label, shape.N ).left
+          case _ ⇒ score.right
         }
       }
 
       private def collectOutlierPoints( points: Seq[DoublePoint] ): KOp[Context, Seq[Advanced]] = {
         kleisli[TryV, Context, Seq[Advanced]] { implicit analysisContext ⇒
-          def tryStep( pt: PointT, shape: Shape ): TryV[( Boolean, ThresholdBoundary )] = {
-            val attempt = \/ fromTryCatchNonFatal {
-              algorithm
-                .step( pt, shape )( state, analysisContext )
-                .getOrElse { ( false, ThresholdBoundary empty pt.timestamp.toLong ) }
-            }
-
-            val anomaly = {
-              for {
-                _ ← checkSize( shape )
-                result ← attempt
-              } yield result
-            }
-
-            anomaly match {
-              case \/-( a ) ⇒ a.right
-
-              case -\/( ex: Algorithm.InsufficientDataSize ) ⇒ {
-                altLog.info(
-                  Map(
-                    "@msg" → "skipping point due to insufficient history for algorithm",
-                    "point" → Map(
-                      "datetime" → pt.dateTime.toString,
-                      "timestamp" → pt.timestamp.toLong,
-                      "value" → f"${pt.value}%2.5f"
-                    ),
-                    "algorithm" → algorithm.label
-                  ),
-                  id = requestId
-                )
-
-                ( false, ThresholdBoundary empty pt.timestamp.toLong ).right
-              }
-
-              case ex ⇒ ex
-            }
+          val workingShape = state.shapes.get( analysisContext.topic ) match {
+            case None ⇒ advancing zero Option( analysisContext.properties )
+            case Some( shape ) ⇒ shape.copy
           }
 
           @tailrec def loop( points: List[DoublePoint], accumulation: TryV[Accumulation] ): TryV[Seq[Advanced]] = {
@@ -896,8 +871,7 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
                 val newAcc = {
                   for {
                     acc ← accumulation
-                    ot ← tryStep( pt, acc.shape )
-                    ( isOutlier, threshold ) = ot
+                    score ← tryScoring( pt, acc.shape )
                   } yield {
                     analysisContext.data
                       .find { _.timestamp == pt.timestamp }
@@ -906,8 +880,8 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
                           sourceId = aggregateId,
                           topic = acc.topic,
                           point = original.toDataPoint,
-                          isOutlier = isOutlier,
-                          threshold = threshold
+                          isOutlier = score.isOutlier,
+                          threshold = score.threshold
                         )
 
                         altLog.debug(
@@ -915,7 +889,7 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
                             "@msg" → "STEP",
                             "properties" → analysisContext.properties.toString,
                             "algorithm" → algorithm.label,
-                            "assessment" → ( if ( isOutlier ) "ANOMALY" else "normal" ),
+                            "assessment" → ( if ( score.isOutlier ) "ANOMALY" else "normal" ),
                             "point" → Map(
                               "datetime" → pt.dateTime.toString,
                               "timestamp" → pt.timestamp.toLong,
@@ -936,7 +910,7 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
                         )
 
                         acc.copy(
-                          shape = advancing.advance( acc.shape, event ),
+                          shape = acc.shape.advance( event ),
                           advances = acc.advances :+ event
                         )
                       }
@@ -963,9 +937,44 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
             }
           }
 
-          val workingShape = state.shapes.get( analysisContext.topic ) match {
-            case None ⇒ advancing zero Option( analysisContext.properties )
-            case Some( shape ) ⇒ advancing copy shape
+          def tryScoring( pt: PointT, shape: Shape ): TryV[AnomalyScore] = {
+            val attempt = \/ fromTryCatchNonFatal {
+              algorithm
+                .score( pt, shape )( state, analysisContext )
+                .getOrElse { AnomalyScore( false, ThresholdBoundary empty pt.timestamp.toLong ) }
+            }
+
+            val anomaly = {
+              for {
+                _ ← checkSize( shape )
+                score ← attempt
+                checkedScore ← checkScore( score, shape )
+              } yield checkedScore
+            }
+
+            anomaly match {
+              case \/-( a ) ⇒ a.right
+
+              case -\/( ex: NonFatalSkipScoringException ) ⇒ {
+                altLog.info(
+                  Map(
+                    "@msg" → "will not score point",
+                    "message" → ex.getMessage,
+                    "point" → Map(
+                      "datetime" → pt.dateTime.toString,
+                      "timestamp" → pt.timestamp.toLong,
+                      "value" → f"${pt.value}%2.5f"
+                    ),
+                    "algorithm" → algorithm.label
+                  ),
+                  id = requestId
+                )
+
+                AnomalyScore( false, ThresholdBoundary empty pt.timestamp.toLong ).right
+              }
+
+              case ex ⇒ ex // error fatal in processing algorithm
+            }
           }
 
           loop( points.toList, Accumulation( analysisContext.topic, workingShape ).right )

@@ -41,3 +41,6 @@ docs/
 tmp/
 *.hprof
 *.hprof.*
+*.orig
+out*.txt
+sample*.txt

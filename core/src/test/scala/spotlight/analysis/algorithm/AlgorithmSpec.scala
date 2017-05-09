@@ -23,9 +23,13 @@ import omnibus.akka.envelope._
 import omnibus.commons.{ TryV, V }
 import omnibus.commons.identifier.Identifying
 import omnibus.commons.log.Trace
-import spotlight.analysis.{ DetectOutliersInSeries, DetectUsing, HistoricalStatistics }
+import spotlight.Settings
+import spotlight.analysis.{ AnomalyScore, DetectOutliersInSeries, DetectUsing, HistoricalStatistics }
+import spotlight.analysis.algorithm.Advancing.syntax._
 import spotlight.analysis.algorithm.{ AlgorithmProtocol ⇒ P }
+import spotlight.infrastructure.ClusterRole
 import spotlight.model.outlier._
+import spotlight.model.statistics.MovingStatistics
 import spotlight.model.timeseries._
 import squants.information.Bytes
 
@@ -57,7 +61,21 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
   }
 
   override def testConfiguration( test: OneArgTest, slug: String ): Config = {
-    val c = spotlight.testkit.config( systemName = slug )
+    val tc = ConfigFactory.parseString(
+      """
+        |
+      """.stripMargin
+    )
+
+    val c = Settings.adaptConfiguration(
+      config = tc.resolve().withFallback(
+        spotlight.testkit.config( systemName = slug, portOffset = scala.util.Random.nextInt( 20000 ) )
+      ),
+      role = ClusterRole.All,
+      externalHostname = "127.0.0.1",
+      requestedPort = 0,
+      systemName = slug
+    )
 
     import scala.collection.JavaConverters._
     log.debug(
@@ -81,6 +99,8 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
     val emptyConfig: Config = ConfigFactory.empty
     val sender = TestProbe()
     val subscriber = TestProbe()
+
+    def shapeMemoryConfig: Option[Config] = None
 
     val countDown = new CountDownFunction[String]
 
@@ -146,7 +166,7 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
         planName = plan.name,
         planId = plan.id.id.toString,
         spanType = AlgorithmIdentifier.TopicSpan,
-        spanHint = scope.topic.toString
+        topic = scope.topic
       )
     )
 
@@ -249,7 +269,7 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
           sender.ref
         )
 
-      sender.expectMsgPF( 500.millis.dilated, hint ) {
+      sender.expectMsgPF( 3.seconds.dilated, hint ) {
         case m @ Envelope( SeriesOutliers( a, s, p, o, t ), _ ) if expectedAnomalies.nonEmpty ⇒ {
           log.info( "evaluate EXPECTED ANOMALIES..." )
           a mustBe Set( defaultAlgorithm.label )
@@ -330,14 +350,16 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
   }
 
   case class Expected( isOutlier: Boolean, floor: Option[Double], expected: Option[Double], ceiling: Option[Double] ) {
-    def stepResult( i: Int, intervalSeconds: Int = 10 )( implicit start: joda.DateTime ): Option[( Boolean, ThresholdBoundary )] = {
+    def stepResult( i: Int, intervalSeconds: Int = 10 )( implicit start: joda.DateTime ): Option[AnomalyScore] = {
       Some(
-        isOutlier,
-        ThresholdBoundary(
-          timestamp = start.plusSeconds( i * intervalSeconds ),
-          floor = floor,
-          expected = expected,
-          ceiling = ceiling
+        AnomalyScore(
+          isOutlier,
+          ThresholdBoundary(
+            timestamp = start.plusSeconds( i * intervalSeconds ),
+            floor = floor,
+            expected = expected,
+            ceiling = ceiling
+          )
         )
       )
     }
@@ -409,7 +431,7 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
 
   trait CalculationMagnet {
     type Result <: CalculationMagnetResult
-    def apply( points: Seq[DataPoint] ): Result
+    def apply( points: Seq[DataPoint], tolerance: Double = 3.0 ): Result
   }
 
   abstract class CommonCalculationMagnet extends CalculationMagnet {
@@ -429,17 +451,27 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
       }
     }
 
-    override def apply( points: Seq[DataPoint] ): Result = {
+    override def apply( points: Seq[DataPoint], tolerance: Double = 3.0 ): Result = {
       Result(
         underlying = points.foldLeft( new SummaryStatistics() ) { ( s, p ) ⇒ s.addValue( p.value ); s },
         timestamp = points.last.timestamp,
-        tolerance = 3.0
+        tolerance = tolerance
       )
     }
   }
 
   object CalculationMagnet {
     implicit def fromNoHint( noHint: NoHint ): CalculationMagnet = new CommonCalculationMagnet {}
+
+    def sliding( width: Int = 3, tolerance: Double = 3.0 ) = new CommonCalculationMagnet {
+      override def apply( points: Seq[DataPoint], tolerance: Double = 3.0 ): Result = {
+        Result(
+          underlying = points.foldLeft( MovingStatistics( width ) ) { ( s, p ) ⇒ s :+ p.value },
+          timestamp = points.last.timestamp,
+          tolerance = tolerance
+        )
+      }
+    }
   }
 
   def makeDataPoints(
@@ -468,6 +500,8 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
       DataPoint( timestamp = ts, value = ( v * vadj ) )
     }
   }
+
+  def assemble[T]( collection: Seq[T], positions: Seq[Int] ): Seq[T] = positions map collection
 
   def spike( topic: Topic, data: Seq[DataPoint], value: Double = 1000D )( position: Int = data.size - 1 ): TimeSeries = {
     val ( front, last ) = data.sortBy { _.timestamp.getMillis }.splitAt( position )
@@ -520,12 +554,12 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
 
   def bootstrapSuite(): Unit = {
     s"${defaultAlgorithm.label} entity" should {
-      "have zero shape before advance" in { f: Fixture ⇒
+      "have zero shape before advance" taggedAs WIP in { f: Fixture ⇒
         import f._
 
         logger.debug( "aggregate = [{}]", aggregate )
         val actual = ( aggregate ? P.GetTopicShapeSnapshot( id, scope.topic ) ).mapTo[P.TopicShapeSnapshot]
-        whenReady( actual, timeout( 5.seconds ) ) { a ⇒
+        whenReady( actual, timeout( 10.seconds ) ) { a ⇒
           a.sourceId.id mustBe id.id
           a.snapshot mustBe None
         }
@@ -583,7 +617,7 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
         val expected = expectedUpdatedShape( zero, adv )
         log.debug( Map( "@msg" → "#TEST advance shape", "zero" → zero.toString, "expected" → expected.toString ) )
 
-        val actual = shapeless.the[Advancing[S]].advance( zero, adv )
+        val actual = zero.advance( adv )
         countDown await 25.millis.dilated
         actualVsExpectedShape( actual, expected )
       }
@@ -596,14 +630,13 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
           P.Advanced( id, scope.topic, pt, false, t )
         }
 
-        val config = Some( ConfigFactory.parseString( "sliding-window: 102" ) )
-        defaultAlgorithm.estimatedAverageShapeSize( config ) match {
+        defaultAlgorithm.estimatedAverageShapeSize( shapeMemoryConfig ) match {
           case None ⇒ pending
           case Some( expected ) ⇒ {
             val plateauNr = math.max( 1, memoryPlateauNr )
             val advancing = shapeless.the[Advancing[S]]
-            val zero = advancing.zero( config )
-            val atPlateau = ( 0 to plateauNr ).foldLeft( zero ) { ( acc, i ) ⇒ advancing.advance( acc, makeData( i ) ) }
+            val zero = advancing.zero( shapeMemoryConfig )
+            val atPlateau = ( 0 to plateauNr ).foldLeft( zero ) { ( acc, i ) ⇒ acc.advance( makeData( i ) ) }
 
             import akka.serialization.{ SerializationExtension, Serializer }
             val serializer: Serializer = SerializationExtension( system ).serializerFor( zero.getClass )
@@ -624,20 +657,20 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
         }
 
         val advancing: Advancing[S] = shapeless.the[Advancing[S]]
-        val zero = advancing.zero( None )
+        val zero = advancing.zero( shapeMemoryConfig )
 
         import akka.serialization.{ SerializationExtension, Serializer }
         val serializer: Serializer = SerializationExtension( system ).serializerFor( zero.getClass )
 
         val zeroSize = Bytes( serializer.toBinary( zero.asInstanceOf[AnyRef] ).size )
-        val first: S = advancing.advance( zero, makeData( 0 ) )
+        val first: S = zero.advance( makeData( 0 ) )
         val firstBytes = serializer.toBinary( first.asInstanceOf[AnyRef] )
         val firstSize = Bytes( firstBytes.size )
 
         val plateauNr = math.max( 1, memoryPlateauNr )
         val ( plateauState, plateauSize ) = ( 2 to plateauNr ).foldLeft( first, firstSize ) {
           case ( ( acc, accSize ), i ) ⇒ {
-            val next = advancing.advance( acc, makeData( i ) )
+            val next = acc.advance( makeData( i ) )
             val nextSize = Bytes( serializer.toBinary( next.asInstanceOf[AnyRef] ).size )
             log.debug(
               Map(
@@ -671,12 +704,13 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
 
         ( ( plateauNr + 1 ) to memoryStepsToValidate ).foldLeft( ( first, firstSize ) ) {
           case ( ( acc, accSize ), i ) ⇒ {
-            val next = advancing.advance( acc, makeData( i ) )
+            val next = acc.advance( makeData( i ) )
             val nextSize = Bytes( serializer.toBinary( next.asInstanceOf[AnyRef] ).size )
 
             log.debug(
               Map(
                 "@msg" → "checking memory impact on advance",
+                "algorithm" → defaultAlgorithm.label,
                 "step" → i,
                 "zero-size" → zeroSize.toString,
                 "plateau-size" → plateauSize.toString,

@@ -54,7 +54,7 @@ assemblyMergeStrategy in assembly := {
   case _ => MergeStrategy.deduplicate
 }
 
-docker <<= ( docker dependsOn assembly )
+docker := ( docker dependsOn assembly ).value
 
 dockerImageCreationTask := docker.value
 

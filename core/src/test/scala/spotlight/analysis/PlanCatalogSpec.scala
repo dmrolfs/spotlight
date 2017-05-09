@@ -18,6 +18,7 @@ import spotlight.analysis.PlanCatalogProtocol.CatalogedPlans
 import spotlight.analysis.{AnalysisPlanProtocol => AP}
 import spotlight.testkit.ParallelAkkaSpec
 import spotlight.analysis.{PlanCatalogProtocol => P}
+import spotlight.infrastructure.ClusterRole
 import spotlight.model.outlier.AnalysisPlan
 import spotlight.model.timeseries.Topic
 
@@ -27,7 +28,50 @@ import spotlight.model.timeseries.Topic
   */
 class PlanCatalogSpec extends ParallelAkkaSpec with ScalaFutures with StrictLogging { outer =>
 
-  override def testConfiguration( test: OneArgTest, slug: String ): Config = PlanCatalogSpec.config( slug )
+  override def testConfiguration( test: OneArgTest, slug: String ): Config = {
+    val catalogConfig: Config = ConfigFactory.parseString(
+      """
+       |spotlight {
+       |  detection-plans {
+       |#    default = ${spotlight.dbscan-plan} { is-default: on }
+       |#    bar = ${spotlight.dbscan-plan} { topics: [bar] }
+       |    foo = ${spotlight.dbscan-plan} { topics: [foo] }
+       |#    foo-bar = ${spotlight.dbscan-plan} { topics: [zed, bar] }
+       |  }
+       |
+       |  dbscan-plan = {
+       |    timeout: 100ms
+       |    algorithms {
+       |      dbscan {
+       |        tolerance: 3
+       |        seedEps: 5
+       |        minDensityConnectedPoints: 3
+       |#        distance: Euclidean
+       |      }
+       |    }
+       |  }
+       |
+       |  workflow {
+       |    buffer: 1000
+       |    detect {
+       |      timeout: 10s
+       |      parallelism-cpu-factor: 1
+       |    }
+       |  }
+       |}
+      """.stripMargin
+    )
+
+    Settings.adaptConfiguration(
+      config = catalogConfig.resolve().withFallback(
+        spotlight.testkit.config( systemName = slug, portOffset = scala.util.Random.nextInt( 20000 ) )
+      ),
+      role = ClusterRole.All,
+      externalHostname = "127.0.0.1",
+      requestedPort = 0,
+      systemName = slug
+    )
+  }
 
   override def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture = {
     test.tags match {
@@ -165,7 +209,7 @@ class PlanCatalogSpec extends ParallelAkkaSpec with ScalaFutures with StrictLogg
 
       logger.info( "TEST: ==============  CREATING CATALOG  ==============")
       val catalog = system.actorOf(
-        PlanCatalog.props(
+        PlanCatalog.actorProps(
           config,
           applicationPlans = Settings.PlanFactory.makePlans( planSpecs, globalAlgorithms, 30.seconds )
         )(
@@ -226,49 +270,5 @@ class PlanCatalogSpec extends ParallelAkkaSpec with ScalaFutures with StrictLogg
 //        actualPlan.name mustBe "foo"
 //      }
 //    }
-  }
-}
-
-object PlanCatalogSpec extends StrictLogging {
-  def config( systemName: String ): Config = {
-    val catalogConfig: Config = ConfigFactory.parseString(
-      """
-        |spotlight {
-        |  detection-plans {
-        |#    default = ${spotlight.dbscan-plan} { is-default: on }
-        |#    bar = ${spotlight.dbscan-plan} { topics: [bar] }
-        |    foo = ${spotlight.dbscan-plan} { topics: [foo] }
-        |#    foo-bar = ${spotlight.dbscan-plan} { topics: [zed, bar] }
-        |  }
-        |
-        |  dbscan-plan = {
-        |    timeout: 100ms
-        |    algorithms {
-        |      dbscan {
-        |        tolerance: 3
-        |        seedEps: 5
-        |        minDensityConnectedPoints: 3
-        |#        distance: Euclidean
-        |      }
-        |    }
-        |  }
-        |
-        |  workflow {
-        |    buffer: 1000
-        |    detect {
-        |      timeout: 10s
-        |      parallelism-cpu-factor: 1
-        |    }
-        |  }
-        |}
-      """.stripMargin
-    )
-
-    val result: Config = catalogConfig.resolve() withFallback spotlight.testkit.config( "core", systemName )
-//    logger.info(
-//      "TEST CONFIGURATION:[\n{}\n]",
-//      result.root().render( com.typesafe.config.ConfigRenderOptions.defaults().setFormatted(true))
-//    )
-    result
   }
 }

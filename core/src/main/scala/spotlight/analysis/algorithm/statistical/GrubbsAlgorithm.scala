@@ -3,13 +3,14 @@ package spotlight.analysis.algorithm.statistical
 import scalaz._
 import Scalaz._
 import com.typesafe.config.Config
+import net.ceedubs.ficus.Ficus._
 import com.persist.logging._
 import org.apache.commons.lang3.ClassUtils
 import org.apache.commons.math3.distribution.TDistribution
 import omnibus.commons.TryV
-import spotlight.analysis.algorithm.{ Advancing, Algorithm, CommonContext }
+import spotlight.analysis.algorithm.{ Advancing, Algorithm, CommonContext, InsufficientDataSize }
 import spotlight.analysis.algorithm.AlgorithmProtocol.Advanced
-import spotlight.analysis.DetectUsing
+import spotlight.analysis.{ AnomalyScore, DetectUsing }
 import spotlight.model.statistics.MovingStatistics
 import spotlight.model.timeseries._
 import squants.information.{ Bytes, Information }
@@ -66,16 +67,12 @@ object GrubbsShape extends ClassLogging {
   }
 
   def slidingWindowFrom( configuration: Option[Config] ): Int = {
-    configuration map { c ⇒
-      if ( c hasPath SlidingWindowPath ) {
-        val sliding = c getInt SlidingWindowPath
-        if ( 0 < sliding ) sliding else DefaultSlidingWindow
-      } else {
-        DefaultSlidingWindow
-      }
-    } getOrElse {
-      DefaultSlidingWindow
-    }
+    val sliding = for {
+      c ← configuration
+      s ← c.as[Option[Int]]( SlidingWindowPath ) if 0 < s
+    } yield s
+
+    sliding getOrElse DefaultSlidingWindow
   }
 }
 
@@ -97,7 +94,7 @@ object GrubbsAlgorithm extends Algorithm[GrubbsShape]( label = "grubbs" ) { algo
   object Context {
     val AlphaPath = "alpha"
     def getAlpha( c: Config ): TryV[Double] = {
-      val alpha = if ( c hasPath AlphaPath ) c getDouble AlphaPath else 0.05
+      val alpha = c.as[Option[Double]]( AlphaPath ) getOrElse 0.05
       alpha.right
     }
   }
@@ -106,7 +103,7 @@ object GrubbsAlgorithm extends Algorithm[GrubbsShape]( label = "grubbs" ) { algo
     TryV unsafeGet { Context.getAlpha( message.properties ) map { alpha ⇒ Context( message, alpha ) } }
   }
 
-  override def step( point: PointT, shape: Shape )( implicit s: State, c: Context ): Option[( Boolean, ThresholdBoundary )] = {
+  override def score( point: PointT, shape: Shape )( implicit s: State, c: Context ): Option[AnomalyScore] = {
     val result = grubbsScore( shape ) map { grubbs ⇒
       val threshold = ThresholdBoundary.fromExpectedAndDistance(
         timestamp = point.timestamp.toLong,
@@ -114,16 +111,16 @@ object GrubbsAlgorithm extends Algorithm[GrubbsShape]( label = "grubbs" ) { algo
         distance = c.tolerance * grubbs * shape.standardDeviation
       )
 
-      ( threshold isOutlier point.value, threshold )
+      AnomalyScore( threshold isOutlier point.value, threshold )
     }
 
     result match {
       case \/-( r ) ⇒ Some( r )
 
-      case -\/( ex: Algorithm.InsufficientDataSize ) ⇒ {
+      case -\/( ex: InsufficientDataSize ) ⇒ {
         import spotlight.model.timeseries._
         log.info( Map( "@msg" → "skipping point until sufficient history is establish", "point" → point ), ex )
-        Some( ( false, ThresholdBoundary empty point.timestamp.toLong ) )
+        Some( AnomalyScore( isOutlier = false, threshold = ThresholdBoundary empty point.timestamp.toLong ) )
       }
 
       case -\/( ex ) ⇒ {
@@ -165,7 +162,7 @@ object GrubbsAlgorithm extends Algorithm[GrubbsShape]( label = "grubbs" ) { algo
     */
   private def checkSize( size: Long )( implicit c: Context ): TryV[Long] = {
     size match {
-      case s if s < minimumDataPoints ⇒ Algorithm.InsufficientDataSize( label, s, minimumDataPoints ).left
+      case s if s < minimumDataPoints ⇒ InsufficientDataSize( label, s, minimumDataPoints ).left
       case s ⇒ s.right
     }
   }

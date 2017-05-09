@@ -30,36 +30,44 @@ object SingleBatchExample extends Instrumented with StrictLogging {
   def main( args: Array[String] ): Unit = {
     import scala.concurrent.ExecutionContext.Implicits.global
 
+    import SpotlightContext.{ Builder ⇒ B }
+
+    val context = {
+      SpotlightContext.Builder
+        .builder
+        .set( B.Arguments, args )
+        .set( B.StartTasks, Set( SharedLeveldbStore.start( true ) /*, Spotlight.kamonStartTask*/ ) )
+        //        .set( B.System, Some( system ) )
+        .build()
+    }
+
     val logger = Logger( LoggerFactory.getLogger( "Application" ) )
     logger.info( "Starting Application Up" )
 
-    implicit val actorSystem = ActorSystem( "Spotlight" )
-    val deadListener = actorSystem.actorOf( DeadListenerActor.props, "dead-listener" )
-    actorSystem.eventStream.subscribe( deadListener, classOf[DeadLetter] )
+    val deadListener = context.system.actorOf( DeadListenerActor.props, "dead-listener" )
+    context.system.eventStream.subscribe( deadListener, classOf[DeadLetter] )
 
-    implicit val materializer = ActorMaterializer( ActorMaterializerSettings( actorSystem ) )
-
-    start( args )
+    start( context )
       .map { results ⇒
         logger.info( "Example completed successfully and found {} result(s)", results.size )
         results
       }
-      .onComplete {
-        case Success( results ) ⇒ {
-          println( "\n\n  ********************************************** " )
-          println( s"\nbatch completed finding ${results.size} outliers:" )
-          results.zipWithIndex foreach { case ( o, i ) ⇒ println( s"${i + 1}: ${o}" ) }
-          println( "  **********************************************\n\n" )
-          actorSystem.terminate()
-        }
-
-        case Failure( ex ) ⇒ {
-          println( "\n\n  ********************************************** " )
-          println( s"\n batch completed with ERROR: ${ex}" )
-          println( "  **********************************************\n\n" )
-          actorSystem.terminate()
-        }
-      }
+    //      .onComplete {
+    //        case Success( results ) ⇒ {
+    //          println( "\n\n  ********************************************** " )
+    //          println( s"\nbatch completed finding ${results.size} outliers:" )
+    //          results.zipWithIndex foreach { case ( o, i ) ⇒ println( s"${i + 1}: ${o}" ) }
+    //          println( "  **********************************************\n\n" )
+    //          context.terminate()
+    //        }
+    //
+    //        case Failure( ex ) ⇒ {
+    //          println( "\n\n  ********************************************** " )
+    //          println( s"\n batch completed with ERROR: ${ex}" )
+    //          println( "  **********************************************\n\n" )
+    //          context.terminate()
+    //        }
+    //      }
   }
 
   case class OutlierInfo( metricName: String, metricWebId: String, metricSegment: String )
@@ -101,33 +109,52 @@ object SingleBatchExample extends Instrumented with StrictLogging {
 
   override protected val logger: Logger = Logger( LoggerFactory.getLogger( "DetectionFlow" ) )
 
-  def start( args: Array[String] )( implicit system: ActorSystem, materializer: Materializer ): Future[Seq[SimpleFlattenedOutlier]] = {
-
+  def start( context: SpotlightContext ): Future[Seq[SimpleFlattenedOutlier]] = {
     logger.debug( "starting the detecting flow logic " )
 
     import scala.concurrent.ExecutionContext.Implicits.global
 
-    val context = {
-      SpotlightContext
-        .builder
-        .set( SpotlightContext.StartTasks, Set( SharedLeveldbStore.start( true ) /*, Spotlight.kamonStartTask*/ ) )
-        .set( SpotlightContext.System, Some( system ) )
-        .build()
-    }
-
-    Spotlight( context )
-      .run( args )
+    Spotlight()
+      .run( context )
       .map { e ⇒ logger.debug( "bootstrapping process..." ); e }
       .flatMap {
-        case ( boundedContext, configuration, flow ) ⇒
+        case ( boundedContext, ctx, None ) ⇒ {
+          logger.info( "spotlight {} node started", ctx.settings.role )
+          Future.successful( Seq.empty[SimpleFlattenedOutlier] )
+        }
+
+        case ( boundedContext, ctx, Some( flow ) ) ⇒ {
           logger.debug( "process bootstrapped. processing data..." )
 
-          sourceData()
+          implicit val system = ctx.system
+          implicit val materializer = ActorMaterializer( ActorMaterializerSettings( system ) )
+
+          val process = sourceData()
             .limit( 100 )
             .map { e ⇒ logger.debug( "after the source ingestion step" ); e }
             .map { m ⇒ akka.util.ByteString( m.getBytes ) }
-            .via( detectionWorkflow( boundedContext, configuration, flow ) )
+            .via( detectionWorkflow( boundedContext, ctx.settings, flow ) )
             .runWith( Sink.seq )
+
+          process.onComplete {
+            case Success( results ) ⇒ {
+              println( "\n\n  ********************************************** " )
+              println( s"\nbatch completed finding ${results.size} outliers:" )
+              results.zipWithIndex foreach { case ( o, i ) ⇒ println( s"${i + 1}: ${o}" ) }
+              println( "  **********************************************\n\n" )
+              context.terminate()
+            }
+
+            case Failure( ex ) ⇒ {
+              println( "\n\n  ********************************************** " )
+              println( s"\n batch completed with ERROR: ${ex}" )
+              println( "  **********************************************\n\n" )
+              context.terminate()
+            }
+          }
+
+          process
+        }
       }
   }
 
@@ -150,15 +177,13 @@ object SingleBatchExample extends Instrumented with StrictLogging {
 
   def detectionWorkflow(
     context: BoundedContext,
-    configuration: Settings,
+    settings: Settings,
     scoring: DetectFlow
   )(
     implicit
     system: ActorSystem,
     materializer: Materializer
   ): Flow[ByteString, SimpleFlattenedOutlier, NotUsed] = {
-    val conf = configuration
-
     val graph = GraphDSL.create() { implicit b ⇒
       import GraphDSL.Implicits._
       import omnibus.akka.stream.StreamMonitor._
@@ -167,7 +192,7 @@ object SingleBatchExample extends Instrumented with StrictLogging {
 
       val intakeBuffer = b.add(
         Flow[ByteString]
-          .buffer( conf.tcpInboundBufferSize, OverflowStrategy.backpressure )
+          .buffer( settings.tcpInboundBufferSize, OverflowStrategy.backpressure )
           .watchFlow( 'intake )
       )
 

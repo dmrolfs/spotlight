@@ -3,10 +3,8 @@ package spotlight.analysis.algorithm.statistical
 import scala.annotation.tailrec
 import akka.actor.ActorSystem
 import com.typesafe.config.Config
-import org.joda.{ time ⇒ joda }
-import org.apache.commons.math3.stat.descriptive.StatisticalSummary
 import org.scalatest.Assertion
-import spotlight.analysis.Moment
+import spotlight.analysis.algorithm.Moment
 import spotlight.analysis.algorithm.{ AlgorithmSpec, AlgorithmProtocol ⇒ P }
 import spotlight.model.timeseries._
 
@@ -57,11 +55,11 @@ class ExponentialMovingAverageAlgorithmSpec extends AlgorithmSpec[Moment] {
   }
 
   implicit def fromAlpha( alpha: Double ): CalculationMagnet = new CommonCalculationMagnet {
-    override def apply( points: Seq[DataPoint] ): Result = {
+    override def apply( points: Seq[DataPoint], tolerance: Double = 3.0 ): Result = {
       Result(
         underlying = Moment.Statistics( 0.05, points.map { _.value }: _* ),
         timestamp = points.last.timestamp,
-        tolerance = 3.0
+        tolerance = tolerance
       )
     }
   }

@@ -18,12 +18,14 @@ import omnibus.commons.TryV
 import omnibus.commons.identifier.Identifying
 import omnibus.commons.log.Trace
 import shapeless.Lens
+import spotlight.Settings
 import spotlight.analysis.AnalysisPlanModule.AggregateRoot.PlanActor
 import spotlight.analysis.AnalysisPlanModule.AggregateRoot.PlanActor.{ FlowConfigurationProvider, WorkerProvider }
 import spotlight.analysis.algorithm.statistical.SimpleMovingAverageAlgorithm
 import spotlight.model.outlier.{ AnalysisPlan, IsQuorum, ReduceOutliers }
 import spotlight.testkit.EntityModuleSpec
 import spotlight.analysis.{ AnalysisPlanProtocol ⇒ P }
+import spotlight.infrastructure.ClusterRole
 
 /** Created by rolfsd on 6/15/16.
   */
@@ -37,7 +39,36 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[AnalysisPlanSta
   implicit val moduleIdentifying: Identifying.Aux[AnalysisPlanState, AnalysisPlanState#ID] = AnalysisPlanModule.identifying
 
   override def testConfiguration( test: OneArgTest, slug: String ): Config = {
-    AnalysisPlanModulePassivationSpec.config( systemName = slug )
+    val tc = ConfigFactory.parseString(
+      """
+        |in-flight-dispatcher {
+        |  type = Dispatcher
+        |  executor = "fork-join-executor"
+        |  fork-join-executor {
+        |#    # Min number of threads to cap factor-based parallelism number to
+        |#    parallelism-min = 2
+        |#    # Parallelism (threads) ... ceil(available processors * factor)
+        |#    parallelism-factor = 2.0
+        |#    # Max number of threads to cap factor-based parallelism number to
+        |#    parallelism-max = 10
+        |  }
+        |  # Throughput defines the maximum number of messages to be
+        |  # processed per actor before the thread jumps to the next actor.
+        |  # Set to 1 for as fair as possible.
+        |#  throughput = 100
+        |}
+      """.stripMargin
+    )
+
+    Settings.adaptConfiguration(
+      config = tc.resolve().withFallback(
+        spotlight.testkit.config( systemName = slug, portOffset = scala.util.Random.nextInt( 20000 ) )
+      ),
+      role = ClusterRole.All,
+      externalHostname = "127.0.0.1",
+      requestedPort = 0,
+      systemName = slug
+    )
   }
 
   override def createAkkaFixture( test: OneArgTest, config: Config, system: ActorSystem, slug: String ): Fixture = {
@@ -48,15 +79,15 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[AnalysisPlanSta
     class Module extends EntityAggregateModule[AnalysisPlanState] { testModule ⇒
       private val trace: Trace[_] = Trace[Module]
 
+      override val clusterRole: Option[String] = Option( ClusterRole.Analysis.entryName )
       override def passivateTimeout: Duration = Duration( 2, SECONDS )
       override def snapshotPeriod: Option[FiniteDuration] = Some( 1.second )
-
       override val idLens: Lens[AnalysisPlanState, AnalysisPlanState#TID] = AnalysisPlanModule.idLens
       override val nameLens: Lens[AnalysisPlanState, String] = AnalysisPlanModule.nameLens
       override def aggregateRootPropsOp: AggregateRootProps = testProps( _, _ )
       override type Protocol = outer.Protocol
       override val protocol: Protocol = outer.protocol
-      override def environment: AggregateEnvironment = LocalAggregate
+      override def environment: AggregateEnvironment.Resolver = AggregateEnvironment.Resolver.local
     }
 
     override val module: Module = new Module
@@ -170,10 +201,18 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[AnalysisPlanSta
 
       val p1 = makePlan( "TestPlan", None )
       entity ! protocol.Add( p1.id, Some( p1 ) )
+      countDown await 3.seconds
+
       bus.expectMsgClass( classOf[protocol.Added] )
+      logger.info( "TEST:looking at entity..." )
       stateFrom( entity, p1.id ) mustBe p1
 
       logger.info( "TEST:taking Snapshot..." )
+      module.rootType.snapshot foreach { ss ⇒
+        logger.warn( "commanding entity:[{}] to save snapshot: [{}]", entity.path.name, ss.saveSnapshotCommand( p1.id ).toString )
+        entity !+ ss.saveSnapshotCommand( p1.id )
+      }
+      //      countDown await 1.second
 
       //      EventFilter.debug( pattern = """Using serializer \[.+\] for message \[demesne.module.entity.EntityProtocol$Added\]""" ) intercept {
       //        intercept {
@@ -185,16 +224,18 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[AnalysisPlanSta
       //        }
       //      }
       //      EventFilter.debug( start = "aggregate snapshot successfully saved:", occurrences = 1 ) intercept {
-      EventFilter.debug( start = "saving snapshot for pid:[AnalysisPlan:", occurrences = 1 ) intercept {
-        logger.warn( "In snapshot intercept..." )
-        module.rootType.snapshot foreach { ss ⇒
-          logger.warn( "commanding entity:[{}] to save snapshot: [{}]", entity.path.name, ss.saveSnapshotCommand( p1.id ).toString )
-          entity !+ ss.saveSnapshotCommand( p1.id )
-        }
-      }
+      //      EventFilter.debug( start = s"saving snapshot for pid:[${p1.id}]", occurrences = 1 ) intercept {
+      //        logger.warn( "In snapshot intercept..." )
+      //        module.rootType.snapshot foreach { ss ⇒
+      //          logger.warn( "commanding entity:[{}] to save snapshot: [{}]", entity.path.name, ss.saveSnapshotCommand( p1.id ).toString )
+      //          entity !+ ss.saveSnapshotCommand( p1.id )
+      //        }
+      //      }
 
+      //      countDown await 1.second
+      logger.info( "TEST: setting algorithms..." )
       entity !+ P.UseAlgorithms( p1.id, Map( "stella" → emptyConfig, "otis" → emptyConfig, "apollo" → emptyConfig ) )
-      bus.expectMsgPF( 1.second.dilated, "change algos" ) {
+      bus.expectMsgPF( 3.seconds.dilated, "change algos" ) {
         case P.AlgorithmsChanged( pid, algos, added, dropped ) ⇒ {
           pid mustBe p1.id
           algos.keySet mustBe Set( "stella", "otis", "apollo" )
@@ -211,34 +252,5 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[AnalysisPlanSta
 
       stateFrom( entity, p1.id ) mustBe p1
     }
-  }
-}
-
-object AnalysisPlanModulePassivationSpec extends StrictLogging {
-  def config( systemName: String ): Config = {
-    val planConfig: Config = ConfigFactory.parseString(
-      """
-        |in-flight-dispatcher {
-        |  type = Dispatcher
-        |  executor = "fork-join-executor"
-        |  fork-join-executor {
-        |#    # Min number of threads to cap factor-based parallelism number to
-        |#    parallelism-min = 2
-        |#    # Parallelism (threads) ... ceil(available processors * factor)
-        |#    parallelism-factor = 2.0
-        |#    # Max number of threads to cap factor-based parallelism number to
-        |#    parallelism-max = 10
-        |  }
-        |  # Throughput defines the maximum number of messages to be
-        |  # processed per actor before the thread jumps to the next actor.
-        |  # Set to 1 for as fair as possible.
-        |#  throughput = 100
-        |}
-      """.stripMargin
-    )
-
-    val c = planConfig withFallback spotlight.testkit.config( "core", systemName )
-    logger.warn( "#TEST making config... akka.actor.kryo[{}]:[\n{}\n]", c.hasPath( "akka.actor.kryo" ).toString, c.getConfig( "akka.actor.kryo" ).root.render() )
-    c
   }
 }

@@ -1,9 +1,7 @@
 package spotlight
 
-import scala.concurrent.duration._
 import akka.NotUsed
 import akka.stream.scaladsl.Flow
-import com.typesafe.config.Config
 import org.apache.commons.math3.ml.distance.{ DistanceMeasure, EuclideanDistance }
 import omnibus.commons.math.MahalanobisDistance
 import spotlight.model.outlier.{ AnalysisPlan, Outliers }
@@ -17,15 +15,6 @@ package object analysis {
   type DetectFlow = Flow[TimeSeries, Outliers, NotUsed]
 
   type TimeSeriesScope = ( TimeSeries, AnalysisPlan.Scope )
-
-  def durationFrom( config: Config, path: String ): Option[Duration] = {
-    if ( config hasPath path ) {
-      if ( config.getString( path ).trim.compareToIgnoreCase( "Inf" ) == 0 ) Some( Duration.Inf )
-      else Some( FiniteDuration( config.getDuration( path, NANOSECONDS ), NANOSECONDS ).toCoarsest )
-    } else {
-      None
-    }
-  }
 
   /** Type class that determines circumstance when a distance measure is valid to use.
     *

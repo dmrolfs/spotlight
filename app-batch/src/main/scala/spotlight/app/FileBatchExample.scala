@@ -1,19 +1,20 @@
 package spotlight.app
 
-import java.nio.file.Paths
-import java.util.concurrent.atomic.AtomicInteger
+import java.nio.file.{ Paths, WatchEvent }
+import java.util.concurrent.atomic.AtomicLong
 
 import scala.concurrent.Future
 import scala.concurrent.duration._
 import scala.util.{ Failure, Success }
-import akka.NotUsed
-import akka.actor.{ Actor, ActorSystem, DeadLetter, Props }
+import akka.{ Done, NotUsed }
+import akka.actor.{ Actor, ActorRef, ActorSystem, DeadLetter, Props }
 import akka.event.LoggingReceive
-import akka.stream.scaladsl.{ FileIO, Flow, Framing, GraphDSL, Sink, Source }
+import akka.stream.scaladsl.{ FileIO, Flow, Framing, GraphDSL, Keep, Sink, Source }
 import akka.stream._
 import akka.util.ByteString
+import better.files.ThreadBackedFileMonitor
+import net.ceedubs.ficus.Ficus._
 import com.persist.logging._
-import com.persist.logging.LoggingLevels.{ DEBUG, Level, WARN }
 
 import scalaz.{ -\/, \/, \/- }
 import nl.grons.metrics.scala.MetricName
@@ -34,102 +35,47 @@ import spotlight.protocol.GraphiteSerializationProtocol
 /** Created by rolfsd on 11/17/16.
   */
 object FileBatchExample extends Instrumented with ClassLogging {
+  val inputCount: AtomicLong = new AtomicLong( 0L )
+  val resultCount: AtomicLong = new AtomicLong( 0L )
+
   def main( args: Array[String] ): Unit = {
     import scala.concurrent.ExecutionContext.Implicits.global
+    import SpotlightContext.{ Builder ⇒ B }
 
-    implicit val actorSystem = ActorSystem( "Spotlight" )
-    startLogging( actorSystem )
-    log.info( "Starting Application Up" )
-    log.info( Map( "@msg" → "spotlight build info", "build" → spotlight.BuildInfo.toString ) )
-    log.info( Map( "@msg" → "demesne build info", "build" → demesne.BuildInfo.toString ) )
-
-    val deadListener = actorSystem.actorOf( DeadListenerActor.props, "dead-listener" )
-    actorSystem.eventStream.subscribe( deadListener, classOf[DeadLetter] )
-
-    implicit val materializer = ActorMaterializer( ActorMaterializerSettings( actorSystem ) )
-
-    start( args )
-      .map { results ⇒
-        log.info(
-          Map(
-            "@msg" → "APP: Example processed records successfully and found result(s)",
-            "nr-records" → count.get().toString,
-            "nr-results" → results.size.toString
-          )
-        )
-
-        results
-      }
-      .onComplete {
-        case Success( results ) ⇒ {
-          println( "\n\nAPP:  ********************************************** " )
-          println( s"\nAPP:${count.get()} batch completed finding ${results.size} outliers:" )
-          results.zipWithIndex foreach { case ( o, i ) ⇒ println( s"${i + 1}: ${o}" ) }
-          println( "APP:  **********************************************\n\n" )
-          loggingSystem.stop
-          actorSystem.terminate()
-        }
-
-        case Failure( ex ) ⇒ {
-          println( "\n\nAPP:  ********************************************** " )
-          println( s"\nAPP: ${count.get()} batch completed with ERROR: ${ex}" )
-          println( "APP:  **********************************************\n\n" )
-          loggingSystem.stop
-          actorSystem.terminate()
-        }
-      }
-  }
-
-  def startLogging( system: ActorSystem ): Unit = {
-    val loggingSystem = LoggingSystem(
-      system,
-      spotlight.BuildInfo.name,
-      spotlight.BuildInfo.version,
-      java.net.InetAddress.getLocalHost.getHostName
-    )
-
-    activateLoggingFilter( loggingSystem, system )
-  }
-
-  def activateLoggingFilter( loggingSystem: LoggingSystem, system: ActorSystem ): Unit = {
-    val systemConfig = system.settings.config
-
-    val ActivePath = "spotlight.logging.filter.active"
-    if ( systemConfig.hasPath( ActivePath ) && systemConfig.getBoolean( ActivePath ) == true ) {
-      val IncludeClassnameSegmentsPath = "spotlight.logging.filter.include-classname-segments"
-
-      val watched = {
-        if ( systemConfig.hasPath( IncludeClassnameSegmentsPath ) ) {
-          import scala.collection.JavaConverters._
-          systemConfig.getStringList( IncludeClassnameSegmentsPath ).asScala.toSet
-        } else {
-          Set.empty[String]
-        }
-      }
-
-      log.warn(
-        Map(
-          "@msg" → "logging started",
-          "loglevel" → loggingSystem.logLevel.toString,
-          "log-debug-for" → watched.mkString( "[", ", ", "]" )
-        )
-      )
-
-      if ( watched.nonEmpty ) {
-        val loggingLevel = loggingSystem.logLevel
-        def inWatched( fqn: String ): Boolean = watched exists { fqn.contains }
-
-        def filter( fields: Map[String, RichMsg], level: Level ): Boolean = {
-          fields
-            .get( "class" )
-            .collect { case fqn: String if inWatched( fqn ) ⇒ level >= DEBUG }
-            .getOrElse { level >= loggingLevel }
-        }
-
-        loggingSystem.setFilter( Some( filter ) )
-        loggingSystem.setLevel( DEBUG )
-      }
+    val context = {
+      SpotlightContext.Builder
+        .builder
+        .set( B.Arguments, args )
+        //      .set( SpotlightContext.StartTasks, Set( /*SharedLeveldbStore.start(true), Spotlight.kamonStartTask*/ ) )
+        //      .set( SpotlightContext.System, Some( system ) )
+        .build()
     }
+
+    //    implicit val actorSystem = ActorSystem( "Spotlight" )
+    //    startLogging( actorSystem )
+    //    log.info( "Starting Application Up" )
+
+    val deadListener = context.system.actorOf( DeadListenerActor.props, "dead-listener" )
+    context.system.eventStream.subscribe( deadListener, classOf[DeadLetter] )
+
+    start( context )
+    //      .onComplete {
+    //        case Success( results ) ⇒ {
+    //          println( "\n\nAPP:  ********************************************** " )
+    //          println( s"\nAPP:${count.get()} batch completed finding ${results.size} outliers:" )
+    //          results.zipWithIndex foreach { case ( o, i ) ⇒ println( s"${i + 1}: ${o}" ) }
+    //          println( "APP:  **********************************************\n\n" )
+    //          context.terminate()
+    //        }
+    //
+    //        case Failure( ex ) ⇒ {
+    //          log.error( Map( "@msg" → "batch finished with error", "count" → count.get() ), ex )
+    //          println( "\n\nAPP:  ********************************************** " )
+    //          println( s"\nAPP: ${count.get()} batch completed with ERROR: ${ex}" )
+    //          println( "APP:  **********************************************\n\n" )
+    //          context.terminate()
+    //        }
+    //      }
   }
 
   //  case class OutlierInfo( metricName: String, metricWebId: String, metricSegment: String )
@@ -178,27 +124,23 @@ object FileBatchExample extends Instrumented with ClassLogging {
     val Results = 'results
   }
 
-  val count: AtomicInteger = new AtomicInteger( 0 )
-
-  def start( args: Array[String] )( implicit system: ActorSystem, materializer: Materializer ): Future[Seq[SimpleFlattenedOutlier]] = {
+  //todo
+  def start( context: SpotlightContext ): Future[Done] = {
 
     log.debug( "starting the detecting flow logic" )
 
     import scala.concurrent.ExecutionContext.Implicits.global
 
-    val context = {
-      SpotlightContext
-        .builder
-        //      .set( SpotlightContext.StartTasks, Set( /*SharedLeveldbStore.start(true), Spotlight.kamonStartTask*/ ) )
-        .set( SpotlightContext.System, Some( system ) )
-        .build()
-    }
-
-    Spotlight( context )
-      .run( args )
+    Spotlight()
+      .run( context )
       .map { e ⇒ log.debug( "bootstrapping process..." ); e }
       .flatMap {
-        case ( boundedContext, settings, scoring ) ⇒
+        case ( boundedContext, ctx, None ) ⇒ {
+          log.info( Map( "@msg" → "spotlight node started", "role" → ctx.settings.role.entryName ) )
+          Future.successful( Done )
+        }
+
+        case ( boundedContext, ctx, Some( scoring ) ) ⇒
           log.debug( "process bootstrapped. processing data..." )
 
           import StreamMonitor._
@@ -226,26 +168,150 @@ object FileBatchExample extends Instrumented with ClassLogging {
           //        OSM.ScoringUnrecognized
           )
 
-          val publish = Flow[SimpleFlattenedOutlier].buffer( 10, OverflowStrategy.backpressure ).watchFlow( Publish )
+          implicit val system = ctx.system
+          implicit val materializer = ActorMaterializer( ActorMaterializerSettings( system ) )
 
-          sourceData( settings )
+          val publish = Flow[SimpleFlattenedOutlier].buffer( 10, OverflowStrategy.backpressure ).watchFlow( Publish )
+          val sink = Sink.foreach[SimpleFlattenedOutlier] { o ⇒
+            log.alternative(
+              category = "results",
+              Map(
+                "topic" → o.topic,
+                "outliers-in-batch" → o.outliers.size,
+                "algorithm" → o.algorithm,
+                "outliers" → o.outliers.mkString( "[", ", ", "]" )
+              )
+            )
+          }
+
+          val process = sourceData( ctx.settings )
             .via( Flow[String].watchSourced( DataSource ) )
             //      .via( Flow[String].buffer( 10, OverflowStrategy.backpressure ).watchSourced( Data ) )
-            .via( detectionWorkflow( boundedContext, settings, scoring ) )
+            .via( detectionWorkflow( boundedContext, ctx.settings, scoring ) )
             .via( publish )
-            .runWith( Sink.seq )
+            .map { o ⇒
+              log.warn( Map( "@msg" → "published result - BEFORE SINK", "result" → o.toString ) )
+              resultCount.incrementAndGet()
+              o
+            }
+            .runWith( sink )
+
+          process
+            .map { d ⇒
+              log.info(
+                Map(
+                  "@msg" → "APP: Example processed records successfully and found result(s)",
+                  "nr-records" → inputCount.get().toString,
+                  "nr-results" → resultCount.get().toString
+                )
+              )
+
+              d
+            }
+            .onComplete {
+              case Success( _ ) ⇒ {
+                println( "\n\nAPP:  ********************************************** " )
+                println( s"\nAPP:${inputCount.get()} batch completed finding ${resultCount.get()} outliers:" )
+                //                results.zipWithIndex foreach { case ( o, i ) ⇒ println( s"${i + 1}: ${o}" ) }
+                println( "APP:  **********************************************\n\n" )
+                context.terminate()
+              }
+
+              case Failure( ex: akka.stream.AbruptTerminationException ) ⇒ {
+                println( "\n\nAPP:  ********************************************** " )
+                println( s"\nAPP:${inputCount.get()} batch completed with manual termination finding ${resultCount.get()} outliers:" )
+                //                results.zipWithIndex foreach { case ( o, i ) ⇒ println( s"${i + 1}: ${o}" ) }
+                println( "APP:  **********************************************\n\n" )
+                context.terminate()
+              }
+
+              case Failure( ex ) ⇒ {
+                log.error( Map( "@msg" → "batch finished with error", "count" → inputCount.get() ), ex )
+                println( "\n\nAPP:  ********************************************** " )
+                println( s"\nAPP: ${inputCount.get()} batch completed with ERROR - found ${resultCount.get()} outliers: ${ex}" )
+                println( "APP:  **********************************************\n\n" )
+                context.terminate()
+              }
+            }
+
+          process
       }
   }
 
-  def sourceData( settings: Settings ): Source[String, Future[IOResult]] = {
-    val data = settings.args.lastOption getOrElse "source.txt"
-    log.info( Map( "@msg" → "using data file", "file" → Paths.get( data ).toString ) )
+  //  def sourceData( settings: Settings ): Source[String, Future[IOResult]] = {
+  def sourceData( settings: Settings )( implicit materializer: Materializer ): Source[String, NotUsed] = {
+    val dataPath = Paths.get( settings.args.lastOption getOrElse "source.txt" )
+    log.info( Map( "@msg" → "using data file", "path" → dataPath.toString ) )
 
-    FileIO
-      .fromPath( Paths.get( data ) )
-      .via( Framing.delimiter( ByteString( "\n" ), maximumFrameLength = 1024 ) )
-      .map { _.utf8String }
+    //    FileIO
+    //      .fromPath( Paths.get( data ) )
+    //      .via( Framing.delimiter( ByteString( "\n" ), maximumFrameLength = 1024 ) )
+    //      .map { _.utf8String }
 
+    val ( recordPublisherRef, recordPublisher ) = {
+      Source
+        .actorPublisher[RecordPublisher.Record]( RecordPublisher.props )
+        .toMat( Sink.asPublisher( false ) )( Keep.both )
+        .run()
+    }
+
+    import better.files._
+    val watcher = new ThreadBackedFileMonitor( File( dataPath ), recursive = true ) {
+      override def onCreate( file: File ): Unit = {
+        log.info(
+          Map(
+            "@msg" → "loading newly CREATED data file",
+            "name" → file.path.toString,
+            "records" → file.lines.size
+          )
+        )
+        recordPublisherRef ! RecordPublisher.Record( payload = file.lines.to[scala.collection.immutable.Iterable] )
+      }
+
+      override def onModify( file: File ): Unit = {
+        log.warn(
+          Map(
+            "@msg" → "newly MODIFIED data file",
+            "name" → file.path.toString,
+            "records" → file.lines.size
+          )
+        )
+      }
+
+      override def onDelete( file: File ): Unit = {
+        log.warn(
+          Map(
+            "@msg" → "newly DELETED data file",
+            "name" → file.path.toString,
+            "records" → file.lines.size
+          )
+        )
+      }
+
+      override def onUnknownEvent( event: WatchEvent[_] ): Unit = {
+        log.error(
+          Map(
+            "@msg" → "UNKNOWN EVENT",
+            "kind" → event.kind(),
+            "count" → event.count(),
+            "event" → event.toString
+          )
+        )
+      }
+
+      override def onException( exception: Throwable ): Unit = {
+        log.error(
+          Map(
+            "@msg" → "EXCEPTION",
+            "message" → exception.getMessage
+          ),
+          ex = exception
+        )
+      }
+    }
+    watcher.start()
+
+    Source.fromPublisher( recordPublisher ).map( _.payload ).mapConcat { identity }
     //    import better.files._
     //
     //    val file = File( data )
@@ -254,7 +320,7 @@ object FileBatchExample extends Instrumented with ClassLogging {
 
   def rateLimitFlow( parallelism: Int, refreshPeriod: FiniteDuration )( implicit system: ActorSystem ): Flow[TimeSeries, TimeSeries, NotUsed] = {
     //    val limiterRef = system.actorOf( Limiter.props( parallelism, refreshPeriod, parallelism ), "rate-limiter" )
-    //    val limitDuration = 9.minutes // ( configuration.detectionBudget * 1.1 )
+    //    val limitDuration = 9.minutes // ( settings.detectionBudget * 1.1 )
     //    val limitWait = FiniteDuration( limitDuration._1, limitDuration._2 )
     //    Limiter.limitGlobal[TimeSeries](limiterRef, limitWait)( system.dispatcher )
 
@@ -265,15 +331,13 @@ object FileBatchExample extends Instrumented with ClassLogging {
 
   def detectionWorkflow(
     context: BoundedContext,
-    configuration: Settings,
+    settings: Settings,
     scoring: DetectFlow
   )(
     implicit
     system: ActorSystem,
     materializer: Materializer
   ): Flow[String, SimpleFlattenedOutlier, NotUsed] = {
-    val conf = configuration
-
     val graph = GraphDSL.create() { implicit b ⇒
       import GraphDSL.Implicits._
       import omnibus.akka.stream.StreamMonitor._
@@ -282,13 +346,17 @@ object FileBatchExample extends Instrumented with ClassLogging {
 
       val intakeBuffer = b.add(
         Flow[String]
-          .buffer( conf.tcpInboundBufferSize, OverflowStrategy.backpressure )
+          .buffer( settings.tcpInboundBufferSize, OverflowStrategy.backpressure )
           .watchFlow( WatchPoints.Intake )
       )
 
-      val timeSeries = b.add( Flow[String].via( unmarshalTimeSeriesData ) )
+      val timeSeries = b.add(
+        Flow[String]
+          .via( unmarshalTimeSeriesData )
+          .map { ts ⇒ inputCount.incrementAndGet(); ts }
+      )
 
-      val limiter = b.add( rateLimitFlow( configuration.parallelism, 25.milliseconds ).watchFlow( WatchPoints.Rate ) )
+      val limiter = b.add( rateLimitFlow( settings.parallelism, 25.milliseconds ).watchFlow( WatchPoints.Rate ) )
       val score = b.add( scoring )
 
       //todo remove after working
@@ -421,3 +489,4 @@ object FileBatchExample extends Instrumented with ClassLogging {
     }
   }
 }
+

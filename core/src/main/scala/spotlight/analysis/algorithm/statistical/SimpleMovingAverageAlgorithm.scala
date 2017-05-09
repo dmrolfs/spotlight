@@ -2,13 +2,14 @@ package spotlight.analysis.algorithm.statistical
 
 import com.persist.logging._
 import com.typesafe.config.Config
+import net.ceedubs.ficus.Ficus._
 import org.apache.commons.lang3.ClassUtils
 import org.apache.commons.math3.stat.descriptive.{ StatisticalSummary, SummaryStatistics }
 import squants.information.{ Bytes, Information }
 import omnibus.commons.util._
-import spotlight.analysis.DetectUsing
+import spotlight.analysis.{ AnomalyScore, DetectUsing }
 import spotlight.analysis.algorithm.AlgorithmProtocol.Advanced
-import spotlight.analysis.algorithm.{ Advancing, Algorithm, CommonContext }
+import spotlight.analysis.algorithm.{ Advancing, Algorithm, AlgorithmShapeCompanion, CommonContext }
 import spotlight.model.statistics
 import spotlight.model.statistics.MovingStatistics
 import spotlight.model.timeseries._
@@ -60,7 +61,7 @@ case class SimpleMovingAverageShape( underlying: StatisticalSummary ) extends Eq
   }
 }
 
-object SimpleMovingAverageShape extends ClassLogging {
+object SimpleMovingAverageShape extends AlgorithmShapeCompanion {
   def apply( width: Int ): SimpleMovingAverageShape = {
     val u = width match {
       case Int.MaxValue ⇒ new SummaryStatistics()
@@ -72,6 +73,9 @@ object SimpleMovingAverageShape extends ClassLogging {
 
   val SlidingWindowPath = "sliding-window"
   val DefaultSlidingWindow = Int.MaxValue
+  def slidingWindowFrom( configuration: Option[Config] ): Int = {
+    getFromOrElse( configuration, SlidingWindowPath, DefaultSlidingWindow )
+  }
 
   implicit val advancing = new Advancing[SimpleMovingAverageShape] {
     override def zero( configuration: Option[Config] ): SimpleMovingAverageShape = {
@@ -94,19 +98,6 @@ object SimpleMovingAverageShape extends ClassLogging {
       shape.copy( underlying = newUnderlying )
     }
   }
-
-  def slidingWindowFrom( configuration: Option[Config] ): Int = {
-    configuration map { c ⇒
-      if ( c hasPath SlidingWindowPath ) {
-        val sliding = c getInt SlidingWindowPath
-        if ( 0 < sliding ) sliding else DefaultSlidingWindow
-      } else {
-        DefaultSlidingWindow
-      }
-    } getOrElse {
-      DefaultSlidingWindow
-    }
-  }
 }
 
 /** Created by rolfsd on 6/8/16.
@@ -115,7 +106,7 @@ object SimpleMovingAverageAlgorithm extends Algorithm[SimpleMovingAverageShape](
   override type Context = CommonContext
   override def makeContext( message: DetectUsing, state: Option[State] ): Context = new CommonContext( message )
 
-  override def step( point: PointT, shape: Shape )( implicit s: State, c: Context ): Option[( Boolean, ThresholdBoundary )] = {
+  override def score( point: PointT, shape: Shape )( implicit s: State, c: Context ): Option[AnomalyScore] = {
     val mean = shape.mean
     val stddev = shape.standardDeviation
     val threshold = ThresholdBoundary.fromExpectedAndDistance(
@@ -124,8 +115,7 @@ object SimpleMovingAverageAlgorithm extends Algorithm[SimpleMovingAverageShape](
       distance = c.tolerance * stddev
     )
 
-    def property( path: String ): String = if ( c.properties hasPath path ) c.properties getString path else "-nil-"
-
+    //    def property( path: String ): String = if ( c.properties hasPath path ) c.properties getString path else "-nil-"
     //    log.debug(
     //      Map(
     //        "@msg" → "Step",
@@ -137,7 +127,7 @@ object SimpleMovingAverageAlgorithm extends Algorithm[SimpleMovingAverageShape](
     //      )
     //    )
 
-    Some( ( threshold isOutlier point.value, threshold ) )
+    Some( AnomalyScore( threshold isOutlier point.value, threshold ) )
   }
 
   /** Optimization available for algorithms to more efficiently respond to size estimate requests for algorithm sharding.

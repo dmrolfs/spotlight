@@ -20,7 +20,7 @@ object PythonPickleProtocolSpec {
       |format = '!L'
       |headerLength = struct.calcsize(format)
       |payloadLength, = struct.unpack(format, payload[:headerLength])
-      |batchLength = headerLength + payloadLength.intValue()
+      |batchLength = headerLength + payloadLength
       |metrics = cPickle.loads(payload[headerLength:batchLength])
     """.stripMargin
   )
@@ -58,7 +58,7 @@ class PythonPickleProtocolSpec
         bindings.put( "payload", payload substring nextIndex )
         unpickleScript eval bindings
         result.addAll( result.size, bindings.get( "metrics" ).asInstanceOf[java.util.Collection[_]] )
-        nextIndex += bindings.get( "batchLength" ).asInstanceOf[Int]
+        nextIndex += bindings.get( "batchLength" ).asInstanceOf[java.math.BigInteger].intValue()
       }
 
       result.iterator.asScala.foreach {
@@ -84,7 +84,7 @@ class PythonPickleProtocolSpec
   object WIP extends Tag( "wip" )
 
   "PythonPickleProtocol" should {
-    "first replicate dropwizard test" in { f: Fixture ⇒
+    "first replicate dropwizard test" taggedAs WIP in { f: Fixture ⇒
       import f._
       val pickler = new com.codahale.metrics.graphite.PicklerStub
       unpickleOutput( pickler.pickle( ( "name", 100L, "value" ) ) ) mustBe "name value 100\n"
