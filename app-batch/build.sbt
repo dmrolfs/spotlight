@@ -28,6 +28,7 @@ assemblyMergeStrategy in assembly := {
   case PathList( "javax", "servlet", xs @ _* ) => MergeStrategy.last
   case PathList( "org", "apache", "hadoop", "yarn", xs @ _* ) => MergeStrategy.last
   case PathList( "org", "slf4j", xs @ _* ) => MergeStrategy.first
+  case PathList( "org", "iq80", "leveldb", xs @ _* ) => MergeStrategy.last
   case PathList( "META-INF", "maven", "com.fasterxml.jackson.core", xs @ _* ) => MergeStrategy.discard
   case PathList( "META-INF", "maven", "commons-logging", xs @ _* ) => MergeStrategy.discard
   case PathList( "META-INF", "maven", "org.apache.avro", xs @ _* ) => MergeStrategy.discard
