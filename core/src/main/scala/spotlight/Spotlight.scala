@@ -16,6 +16,7 @@ import net.ceedubs.ficus.Ficus._
 import com.persist.logging._
 import nl.grons.metrics.scala.{ Meter, MetricName }
 import org.slf4j.LoggerFactory
+import org.joda.{ time ⇒ joda }
 import com.typesafe.scalalogging.Logger
 import omnibus.akka.metrics.{ Instrumented, Reporter }
 import omnibus.akka.supervision.IsolatedLifeCycleSupervisor.{ ChildStarted, StartChild }
@@ -23,12 +24,11 @@ import omnibus.akka.supervision.{ IsolatedLifeCycleSupervisor, OneForOneStrategy
 import omnibus.commons.util._
 import demesne.{ AggregateRootType, BoundedContext, DomainModel, StartTask }
 import omnibus.akka.stream.{ StreamEgress, StreamIngress }
-import omnibus.commons.{ TryV, Valid }
+import omnibus.commons.Valid
 import spotlight.analysis._
 import spotlight.analysis.algorithm.Algorithm
 import spotlight.analysis.{ PlanCatalogProtocol ⇒ CP }
 import spotlight.analysis.shard.{ CellShardModule, LookupShardModule }
-import spotlight.analysis.algorithm.statistical._
 import spotlight.infrastructure.ClusterRole
 import spotlight.model.outlier.Outliers
 import spotlight.model.timeseries.TimeSeries
@@ -36,17 +36,19 @@ import spotlight.model.timeseries.TimeSeries
 /** Created by rolfsd on 11/7/16.
   */
 object Spotlight extends Instrumented with ClassLogging {
+  type EC[_] = ExecutionContext
+
   @transient override lazy val metricBaseName: MetricName = MetricName( getClass.getPackage.getName, getClass.safeSimpleName )
   @transient lazy val workflowFailuresMeter: Meter = metrics meter "workflow.failures"
 
   type SpotlightBoundedContext = ( BoundedContext, SpotlightContext )
   type SpotlightModel = ( BoundedContext, SpotlightContext, Option[DetectFlow] )
 
-  def apply()( implicit ec: ExecutionContext ): Kleisli[Future, SpotlightContext, SpotlightModel] = {
+  def apply[_: EC](): Kleisli[Future, SpotlightContext, SpotlightModel] = {
     prep >=> startBoundedContext >=> makeFlow
   }
 
-  def apply( args: Array[String] )( implicit ec: ExecutionContext ): Kleisli[Future, Array[String], SpotlightModel] = {
+  def apply[_: EC]( args: Array[String] ): Kleisli[Future, Array[String], SpotlightModel] = {
     makeContext >=> apply()
   }
 
@@ -81,7 +83,7 @@ object Spotlight extends Instrumented with ClassLogging {
     }
   }
 
-  def systemStartTasks( settings: Settings )( implicit ec: ExecutionContext ): Set[StartTask] = {
+  def systemStartTasks[_: EC]( settings: Settings ): Set[StartTask] = {
     val all: Map[StartTask, Option[ClusterRole]] = Map(
       PlanCatalog.startSingleton( settings.config, settings.plans ) → Option( PlanCatalog.clusterRole ),
       DetectionAlgorithmRouter.startTask( settings.config ) → AnalysisPlanModule.module.rootType.clusterRole.map( ClusterRole withName _ ),
@@ -132,8 +134,10 @@ object Spotlight extends Instrumented with ClassLogging {
     }
   }
 
-  val prep: Kleisli[Future, SpotlightContext, SpotlightContext] = {
-    kleisli[Future, SpotlightContext, SpotlightContext] { context ⇒
+  def prep[_: EC]: Kleisli[Future, SpotlightContext, SpotlightContext] = logBuildInfo >=> prepareTimeZone
+
+  private val logBuildInfo: Kleisli[Future, SpotlightContext, SpotlightContext] = kleisli { context ⇒
+    Future successful {
       log.alternative(
         SpotlightContext.SystemLogCategory,
         Map(
@@ -153,7 +157,15 @@ object Spotlight extends Instrumented with ClassLogging {
         )
       )
 
-      Future successful context
+      context
+    }
+  }
+
+  private val prepareTimeZone: Kleisli[Future, SpotlightContext, SpotlightContext] = kleisli { context ⇒
+    Future successful {
+      log.debug( Map( "@msg" → "setting the spotlight timezone", "timezone" → context.settings.timeZone.toString ) )
+      joda.DateTimeZone setDefault context.settings.timeZone
+      context
     }
   }
 

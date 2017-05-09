@@ -9,6 +9,7 @@ import scalaz._
 import com.typesafe.config._
 import net.ceedubs.ficus.Ficus._
 import com.persist.logging._
+import org.joda.{ time ⇒ joda }
 
 import omnibus.commons.{ TryV, V, Valid }
 import omnibus.commons.config._
@@ -40,6 +41,7 @@ trait Settings extends ClassLogging {
   def tcpInboundBufferSize: Int
   //  def workflowBufferSize: Int
   def parallelism: Int = ( parallelismFactor * Runtime.getRuntime.availableProcessors() ).toInt
+  def timeZone: joda.DateTimeZone
   def forceLocal: Boolean
   def args: Seq[String]
 
@@ -360,6 +362,7 @@ object Settings extends ClassLogging {
     val DETECTION_BUDGET = "spotlight.workflow.detect.timeout"
     val PLAN_PATH = "spotlight.detection-plans"
     val TCP_INBOUND_BUFFER_SIZE = "spotlight.source.buffer"
+    val DEFAULT_TIME_ZONE = "spotlight.timezone"
     //    val WORKFLOW_BUFFER_SIZE = "spotlight.workflow.buffer"
   }
 
@@ -391,6 +394,12 @@ object Settings extends ClassLogging {
   }
 
   private def makeSettings( usage: UsageSettings, systemName: String, config: Config ): Settings = {
+    val defaultTZ = {
+      config.as[Option[String]]( Directory.DEFAULT_TIME_ZONE )
+        .map { joda.DateTimeZone.forID }
+        .getOrElse { joda.DateTimeZone.UTC }
+    }
+
     //    val sourceHost: InetAddress = {
     //      usage
     //        .sourceHost
@@ -432,7 +441,8 @@ object Settings extends ClassLogging {
 
     val usageExternalPort = usage.requestedExternalPort orElse Settings.remotePortFrom( config ) getOrElse { 0 }
 
-    log.info(
+    log.alternative(
+      SpotlightContext.SystemLogCategory,
       Map(
         "@msg" → "make settings from",
         "usage" → Map(
@@ -447,6 +457,7 @@ object Settings extends ClassLogging {
           "args" → usage.args.mkString( "[", ", ", "]" )
         ),
         "max-frame-length" → maxFrameLength,
+        "time-zone" → defaultTZ.toString,
         "protocol" → protocol.getClass.safeSimpleName,
         "graphite" → Map( "host" → graphiteHost.toString, "port" → graphitePort )
       )
@@ -472,6 +483,7 @@ object Settings extends ClassLogging {
         bindHostname = usage.bindHostname,
         bindPort = usage.bindPort
       ),
+      timeZone = defaultTZ,
       args = usage.args,
       forceLocal = usage.forceLocal
     )
@@ -648,6 +660,7 @@ object Settings extends ClassLogging {
       //      override val windowDuration: FiniteDuration,
       override val graphiteAddress: Option[InetSocketAddress],
       override val config: Config,
+      override val timeZone: joda.DateTimeZone,
       override val args: Seq[String],
       override val forceLocal: Boolean
   ) extends Settings {

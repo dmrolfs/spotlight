@@ -98,6 +98,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
     override def tcpInboundBufferSize: Int = underlying.tcpInboundBufferSize
     //    override def workflowBufferSize: Int = underlying.workflowBufferSize
     override def forceLocal: Boolean = underlying.forceLocal
+    override def timeZone: joda.DateTimeZone = joda.DateTimeZone.UTC
     override def args: Seq[String] = underlying.args
     override def config: Config = underlying.config
   }
@@ -444,6 +445,10 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
       import system.dispatcher
       import omnibus.akka.envelope._
 
+      DetectionAlgorithmRouter.Registry.registerWithRouter(
+        List( SimpleMovingAverageAlgorithm.label → SimpleMovingAverageAlgorithm.module.rootType )
+      )
+      //      via registry, load and register
       //      val algos = Map(
       //        algo → ConfigFactory.parseString(
       //          s"""
@@ -558,7 +563,7 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
       val data: List[TimeSeries] = topics.zip( List( dp1 ) ).map { case ( t, p ) ⇒ TimeSeries( t, p ) }
 
       logger.debug( "waiting to start....." )
-      Thread.sleep( 1000 )
+      Thread.sleep( 2000 )
       logger.debug( "....starting" )
       data foreach { ps.sendNext }
       val actual = sub.expectNext()

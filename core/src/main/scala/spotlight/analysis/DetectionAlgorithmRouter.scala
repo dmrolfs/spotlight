@@ -47,13 +47,12 @@ object DetectionAlgorithmRouter extends ClassLogging {
     StartTask.withBoundTask( "load user algorithms" ) { bc: BoundedContext ⇒
       val t: Future[StartTask.Result] = {
         for {
-          algoRoots ← Registry.loadAlgorithms( bc, configuration.resolve() )
-          roots ← Registry.registerWithRouter( algoRoots )
-          unknowns = algoRoots.map { case ( _, rt ) ⇒ rt }.toSet
-          _ = log.info( Map( "@msg" → "starting with new algorithm routes", "unknowns" → unknowns.mkString( "[", ", ", "]" ) ) )
+          loaded ← Registry.loadAlgorithms( bc, configuration.resolve() )
+          registered ← Registry.registerWithRouter( loaded )
+          _ = log.info( Map( "@msg" → "starting with new algorithm routes", "loaded" → loaded.mkString( "[", ", ", "]" ) ) )
         } yield {
-          log.info( Map( "@msg" → "DetectionAlgorithmRouter routing table", "routing-table" → roots.mkString( "[", ", ", "]" ) ) )
-          StartTask.Result( rootTypes = unknowns )
+          log.info( Map( "@msg" → "DetectionAlgorithmRouter routing table", "routing-table" → registered.mkString( "[", ", ", "]" ) ) )
+          StartTask.Result( rootTypes = registered.values.toSet )
         }
       }
 
@@ -71,7 +70,6 @@ object DetectionAlgorithmRouter extends ClassLogging {
 
   trait Provider {
     def initialRoutingTable: Map[String, AlgorithmRoute]
-
     def plan: AnalysisPlan.Summary
   }
 
@@ -83,24 +81,7 @@ object DetectionAlgorithmRouter extends ClassLogging {
   object Registry {
     private lazy val algorithmRootTypes: Agent[Map[String, AggregateRootType]] = {
       import scala.concurrent.ExecutionContext.Implicits.global
-
-      //TODO empty due to new algo registration mechanism.
-      Agent(
-        Map( //        SeriesDensityAnalyzer.Algorithm -> ???, // SeriesDensityAnalyzer.props( router ),
-        //        SeriesCentroidDensityAnalyzer.Algorithm -> ???, // SeriesCentroidDensityAnalyzer.props( router ),
-        //        CohortDensityAnalyzer.Algorithm -> ???, // CohortDensityAnalyzer.props( router ),
-        //        FirstHourAverageAnalyzer.Algorithm -> ???, // FirstHourAverageAnalyzer.props( router ),
-        //        HistogramBinsAnalyzer.Algorithm -> ???, // HistogramBinsAnalyzer.props( router ),
-        //        KolmogorovSmirnovAnalyzer.Algorithm -> ???, // KolmogorovSmirnovAnalyzer.props( router ),
-        //        LeastSquaresAnalyzer.Algorithm -> ???, // LeastSquaresAnalyzer.props( router ),
-        //        MeanSubtractionCumulationAnalyzer.Algorithm -> ???, // MeanSubtractionCumulationAnalyzer.props( router ),
-        //        MedianAbsoluteDeviationAnalyzer.Algorithm -> ???, // MedianAbsoluteDeviationAnalyzer.props( router ),
-        //        SeasonalExponentialMovingAverageAnalyzer.Algorithm -> ??? // SeasonalExponentialMovingAverageAnalyzer.props( router )
-        //          ExponentialMovingAverageAlgorithm.label → ExponentialMovingAverageAlgorithm.module.rootType,
-        //          GrubbsAlgorithm.label → GrubbsAlgorithm.module.rootType,
-        //          SimpleMovingAverageAlgorithm.label → SimpleMovingAverageAlgorithm.module.rootType
-        )
-      )
+      Agent( Map.empty[String, AggregateRootType] )
     }
 
     def registerWithRouter( algorithmRoots: List[( String, AggregateRootType )] ): Future[Map[String, AggregateRootType]] = {
@@ -206,20 +187,20 @@ object DetectionAlgorithmRouter extends ClassLogging {
           }
       }
 
-      val registerWithRouter = kleisli[Future, List[AlgorithmRootType], List[AlgorithmRootType]] { arts ⇒
-        for {
-          registered ← Registry.registerWithRouter( arts )
-          _ = log.debug( Map( "@msg" → "registered with router", "algorithm root types" → registered.mkString( "[", ", ", "]" ) ) )
-        } yield registered.toList
-      }
+      //      val registerWithRouter = kleisli[Future, List[AlgorithmRootType], List[AlgorithmRootType]] { arts ⇒
+      //        for {
+      //          registered ← Registry.registerWithRouter( arts )
+      //          _ = log.debug( Map( "@msg" → "registered with router", "algorithm root types" → registered.mkString( "[", ", ", "]" ) ) )
+      //        } yield registered.toList
+      //      }
 
       val addModel = kleisli[Future, ( BoundedContext, Config ), ( DomainModel, Config )] {
         case ( bc, c ) ⇒ bc.futureModel map { ( _, c ) }
       }
 
-      val loadAndRegister = addModel >=> userAlgorithms >=> collectRootTypes >=> loadRootTypesIntoModel >=> registerWithRouter
+      val load = addModel >=> userAlgorithms >=> collectRootTypes >=> loadRootTypesIntoModel // >=> registerWithRouter
 
-      loadAndRegister.run( boundedContext, configuration )
+      load.run( boundedContext, configuration )
     }
   }
 }

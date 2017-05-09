@@ -59,7 +59,7 @@ object Dependencies {
   }
 
   object time {
-    val joda = "joda-time" % "joda-time" % "2.9.7"
+    val joda = "joda-time" % "joda-time" % "2.9.9"
     val jodaConvert = "org.joda" % "joda-convert" % "1.8.1"
     val scalaTime = "com.github.nscala-time" %% "nscala-time" % "2.16.0"
     def all = Seq( joda, jodaConvert, scalaTime )
