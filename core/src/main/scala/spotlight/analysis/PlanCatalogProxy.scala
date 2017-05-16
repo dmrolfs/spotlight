@@ -9,8 +9,6 @@ import akka.event.LoggingReceive
 import akka.stream.actor.ActorSubscriberMessage.{ OnComplete, OnError, OnNext }
 import akka.stream.actor.{ ActorSubscriber, ActorSubscriberMessage, MaxInFlightRequestStrategy, RequestStrategy }
 
-import scalaz._
-import Scalaz._
 import com.codahale.metrics.{ Metric, MetricFilter }
 import com.typesafe.config.Config
 import com.persist.logging._
@@ -107,7 +105,7 @@ abstract class PlanCatalogProxy( finishSubscriberOnComplete: Boolean = true )
   def removeWorkRequests( correlationIds: Set[WorkId] ): Unit = {
     for {
       cid ← correlationIds
-      knownRequest ← _workRequests.get( cid ).toSet
+      knownRequest ← _workRequests.get( cid ).toSet[PlanCatalog.PlanRequest]
     } {
       catalogTimer.update( System.currentTimeMillis() - knownRequest.startMillis, scala.concurrent.duration.MILLISECONDS )
       _subscribersSeen -= knownRequest.subscriber

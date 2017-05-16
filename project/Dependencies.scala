@@ -3,7 +3,7 @@ import sbt._
 
 object Dependencies {
   object omnibus {
-    val version = "0.5.3"
+    val version = "0.60-SNAPSHOT"
     def module( id: String ) = "com.github.dmrolfs" %% s"omnibus-$id" % version withSources() withJavadoc()
     def all = Seq( commons, akka, archetype )
 
@@ -14,7 +14,7 @@ object Dependencies {
   }
 
   object demesne {
-    val version = "2.2.3"
+    val version = "2.3.0-SNAPSHOT"
     def module( id: String ) = "com.github.dmrolfs" %% s"demesne-$id" % version withSources() withJavadoc()
     val core = module( "core" )
     val testkit = module( "testkit" )
@@ -50,12 +50,25 @@ object Dependencies {
     val leveldbjni = "org.fusesource.leveldbjni" % "leveldbjni-all" % "1.8" // "org.fusesource.leveldbjni" % "leveldbjni-all" % "1.8"
   }
 
-  object scalaz {
-    val version = "7.2.8"
-    def module( id: String ) = "org.scalaz" %% s"scalaz-$id" % version withSources() withJavadoc()
+  object cats {
+    val version = "0.9.0"
+    def module( id: String ) = "org.typelevel" %% s"cats-${id}" % version
 
     val core = module( "core" )
-    val concurrent = module( "concurrent" )
+    val kernel = module( "kernel" )
+    val macros = module( "macros" )
+
+    val all = Seq( core, kernel, macros )
+  }
+
+  object monix {
+    val version = "2.3.0"
+    def module( id: String ) = "io.monix" %% s"""monix${if (id.nonEmpty) '-'+id else "" }""" % version
+
+    val core = module( "" )
+    val cats = module( "cats" )
+
+    val all = Seq( core, cats )
   }
 
   object time {
@@ -154,7 +167,6 @@ object Dependencies {
 
   object quality {
     val scalatest = "org.scalatest" %% "scalatest" % "3.0.1" withSources() withJavadoc()
-    val scalazMatchers = "org.typelevel" %% "scalaz-scalatest" % "1.1.1" withSources() withJavadoc()
 
     val inmemory = "com.github.dnvriend" %% "akka-persistence-inmemory" % "2.5.1.0"
 
@@ -169,6 +181,8 @@ object Dependencies {
     log.all ++
     omnibus.all ++
     time.all ++
+    cats.all ++
+    monix.all ++
     Seq(
       akka.actor,
       akka.cluster,
@@ -191,22 +205,16 @@ object Dependencies {
       facility.uuid,
       facility.config,
       facility.ficus,
-      facility.shapeless,
-      scalaz.core
+      facility.shapeless
     ) ++
     Scope.test(
       akka.testkit,
       quality.scalatest,
-      quality.scalazMatchers,
       quality.mockito.core
     )
   }
 
-  val defaultDependencyOverrides = Set(
-    scalaz.core //,
-//    akka.actor,
-//    time.joda
-  )
+  val defaultDependencyOverrides = Set.empty[sbt.ModuleID]
 
 
   object Scope {

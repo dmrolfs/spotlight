@@ -3,9 +3,9 @@ package spotlight.analysis.algorithm.skyline
 import scala.reflect.ClassTag
 import akka.actor.{ ActorRef, Props }
 
-import scalaz._
-import Scalaz._
-import omnibus.commons.{ KOp, Valid }
+import cats.instances.either._
+import cats.syntax.validated._
+import omnibus.commons.{ KOp, AllIssuesOr }
 import spotlight.analysis.algorithm.AlgorithmActor.AlgorithmContext
 import spotlight.analysis.algorithm.CommonAnalyzer
 import CommonAnalyzer.WrappingContext
@@ -45,8 +45,8 @@ class HistogramBinsAnalyzer( override val router: ActorRef ) extends CommonAnaly
 
   override def algorithm: String = HistogramBinsAnalyzer.Algorithm
 
-  override def wrapContext( c: AlgorithmContext ): Valid[WrappingContext] = {
-    CommonAnalyzer.SimpleWrappingContext( underlying = c ).successNel
+  override def wrapContext( c: AlgorithmContext ): AllIssuesOr[WrappingContext] = {
+    CommonAnalyzer.SimpleWrappingContext( underlying = c ).validNel
   }
 
   /** A timeseries is anomalous if the average of the last three datapoints

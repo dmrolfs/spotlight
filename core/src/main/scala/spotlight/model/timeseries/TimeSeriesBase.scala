@@ -1,10 +1,9 @@
 package spotlight.model.timeseries
 
+import cats.syntax.validated._
 import org.joda.{ time ⇒ joda }
 import com.github.nscala_time.time.Imports._
-import scalaz.Scalaz._
-import scalaz.Validation
-import omnibus.commons._
+import omnibus.commons.AllIssuesOr
 
 trait TimeSeriesBase {
   def topic: Topic
@@ -26,12 +25,11 @@ object TimeSeriesBase {
     with TimeSeriesError
 
   trait Merging[T <: TimeSeriesBase] {
-    def merge( lhs: T, rhs: T ): Valid[T]
+    def merge( lhs: T, rhs: T ): AllIssuesOr[T]
     def zero( topic: Topic ): T
 
-    protected def checkTopic( lhs: Topic, rhs: Topic ): Valid[Topic] = {
-      if ( lhs == rhs ) lhs.successNel[Throwable]
-      else Validation.failureNel( IncompatibleTopicsError( originalTopic = lhs, newTopic = rhs ) )
+    protected def checkTopic( lhs: Topic, rhs: Topic ): AllIssuesOr[Topic] = {
+      if ( lhs == rhs ) lhs.validNel else IncompatibleTopicsError( originalTopic = lhs, newTopic = rhs ).invalidNel
     }
   }
 }

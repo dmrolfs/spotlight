@@ -7,6 +7,8 @@ import akka.stream.Supervision.Decider
 import akka.stream.{ ActorAttributes, Materializer, Supervision }
 import akka.stream.scaladsl.Flow
 import akka.util.Timeout
+import cats.syntax.traverse._
+import cats.instances.list._
 import com.persist.logging._
 import demesne.BoundedContext
 import nl.grons.metrics.scala.{ Meter, MetricName }
@@ -89,8 +91,8 @@ class AnalysisFlowFactory( plan: AnalysisPlan ) extends FlowFactory[TimeSeries, 
     }
 
     Flow[TimeSeries]
-      .map { ts ⇒ OutlierDetectionMessage( ts, plan ).disjunction }
-      .collect { case scalaz.\/-( m ) ⇒ m }
+      .map { ts ⇒ OutlierDetectionMessage( ts, plan ).toEither }
+      .collect { case Right( m ) ⇒ m }
       .map { m ⇒
         Metrics.inletSeries.mark()
         Metrics.inletPoints.mark( m.source.points.size )

@@ -2,16 +2,13 @@ package spotlight.analysis
 
 import scala.reflect.ClassTag
 import akka.actor.ActorRef
-import scalaz.{ Scalaz, Validation }
-import Scalaz._
+import cats.syntax.validated._
 import com.typesafe.config.{ Config, ConfigFactory }
-import omnibus.commons.Valid
-import omnibus.commons.identifier.TaggedID
+import omnibus.commons.AllIssuesOr
 import demesne.CommandLike
 import omnibus.akka.envelope.WorkId
-import spotlight.model.outlier.{ CorrelatedSeries, AnalysisPlan }
+import spotlight.model.outlier.AnalysisPlan
 import spotlight.model.timeseries.{ TimeSeries, TimeSeriesBase, Topic }
-import spotlight.model.outlier.AnalysisPlan.Scope
 
 /** Created by rolfsd on 9/21/16.
   */
@@ -36,14 +33,14 @@ object OutlierDetectionMessage {
     plan: AnalysisPlan,
     subscriber: Option[ActorRef] = None,
     correlationIds: Set[WorkId] = Set.empty[WorkId]
-  ): Valid[OutlierDetectionMessage] = {
+  ): AllIssuesOr[OutlierDetectionMessage] = {
     checkPlan( plan, ts ) map { p ⇒ DetectOutliersInSeries( ts, p, subscriber, correlationIds ) }
   }
 
   def unapply( m: OutlierDetectionMessage ): Option[( AnalysisPlan, Topic, m.Source )] = Some( ( m.plan, m.topic, m.source ) )
 
-  def checkPlan( plan: AnalysisPlan, ts: TimeSeriesBase ): Valid[AnalysisPlan] = {
-    if ( plan appliesTo ts ) plan.successNel else Validation.failureNel( PlanMismatchError( plan, ts ) )
+  def checkPlan( plan: AnalysisPlan, ts: TimeSeriesBase ): AllIssuesOr[AnalysisPlan] = {
+    if ( plan appliesTo ts ) plan.validNel else PlanMismatchError( plan, ts ).invalidNel
   }
 }
 

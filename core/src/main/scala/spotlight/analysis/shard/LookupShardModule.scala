@@ -428,8 +428,6 @@ object LookupShardModule extends AggregateRootModule[LookupShardCatalog, LookupS
 
       val assignRouting: Receive = {
         case m: DetectUsing if Option( state ).isDefined ⇒ {
-          import scalaz.Scalaz.{ state ⇒ _, _ }
-
           val aid = {
             availability
               .mostAvailable

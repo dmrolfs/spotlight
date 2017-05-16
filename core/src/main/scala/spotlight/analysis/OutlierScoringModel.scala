@@ -8,6 +8,8 @@ import akka.stream.FanOutShape.{ Init, Name }
 import akka.stream._
 import akka.stream.scaladsl._
 import akka.stream.stage._
+import cats.syntax.either._
+import cats.syntax.validated._
 import com.typesafe.scalalogging.{ Logger, StrictLogging }
 import org.slf4j.LoggerFactory
 //import bloomfilter.mutable.BloomFilter
@@ -152,9 +154,6 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
     materializer: Materializer,
     tsMerging: Merging[TimeSeries]
   ): Flow[TimeSeries, TimeSeries, NotUsed] = {
-    import scalaz.{ -\/, Scalaz, \/- }
-    import Scalaz._
-
     type TopicAccumulator = Map[Topic, TimeSeries]
     val seedFn: ( TimeSeries ) ⇒ ( TopicAccumulator, Long ) = ( ts: TimeSeries ) ⇒ ( Map( ts.topic → ts ), 0 )
 
@@ -164,18 +163,15 @@ object OutlierScoringModel extends Instrumented with StrictLogging {
           val existing = acc get ts.topic
           val updatedAcc = {
             for {
-              updated ← existing map { e ⇒ tsMerging.merge( e, ts ).disjunction } getOrElse ts.right
+              updated ← existing map { e ⇒ tsMerging.merge( e, ts ).toEither } getOrElse ts.asRight
             } yield {
               acc + ( ts.topic → updated )
             }
           }
 
-          val newAcc = updatedAcc match {
-            case \/-( uacc ) ⇒ uacc
-            case -\/( exs ) ⇒ {
-              exs foreach { ex ⇒ logger.error( "flow regulation for topic:[{}] failed on series merge", ts.topic, ex ) }
-              acc
-            }
+          val newAcc = updatedAcc valueOr { exs ⇒
+            exs map { ex ⇒ logger.error( "flow regulation for topic:[{}] failed on series merge", ts.topic, ex ) }
+            acc
           }
 
           ( newAcc, count + 1 )

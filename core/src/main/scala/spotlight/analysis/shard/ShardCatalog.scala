@@ -1,8 +1,9 @@
 package spotlight.analysis.shard
 
-import scalaz.{ -\/, Validation }
+import cats.data.Validated
+import cats.syntax.either._
 import omnibus.archetype.domain.model.core.Entity
-import omnibus.commons.{ TryV, Valid }
+import omnibus.commons._
 import omnibus.commons.identifier.{ Identifying, ShortUUID }
 import omnibus.commons.util._
 import spotlight.analysis.algorithm.AlgorithmIdGenerator
@@ -30,20 +31,19 @@ object ShardCatalog {
 
   object ID {
     val Delimeter = '@'
-    def fromString( rep: String ): Valid[ID] = {
-      Validation
-        .fromTryCatchNonFatal {
-          val Array( algo, pid ) = rep.split( Delimeter )
-          ID( planId = ShortUUID.fromString( pid ), algorithmLabel = algo )
-        }
-        .toValidationNel
+    def fromString( rep: String ): AllIssuesOr[ID] = {
+      Validated.catchNonFatal {
+        val Array( algo, pid ) = rep.split( Delimeter )
+        ID( planId = ShortUUID.fromString( pid ), algorithmLabel = algo )
+      }
+        .toValidatedNel
     }
   }
 
   trait ShardCatalogIdentifying[T <: ShardCatalog] extends Identifying[T] {
     override type ID = ShardCatalog.ID
     override def tidOf( c: T ): TID = c.id
-    override def nextTID: TryV[TID] = -\/( new IllegalStateException( s"${getClass.safeSimpleName} does not support nextId" ) )
-    override def idFromString( idRep: String ): ID = Valid.unsafeGet( ShardCatalog.ID fromString idRep )
+    override def nextTID: ErrorOr[TID] = new IllegalStateException( s"${getClass.safeSimpleName} does not support nextId" ).asLeft
+    override def idFromString( idRep: String ): ID = ShardCatalog.ID.fromString( idRep ).unsafeGet
   }
 }

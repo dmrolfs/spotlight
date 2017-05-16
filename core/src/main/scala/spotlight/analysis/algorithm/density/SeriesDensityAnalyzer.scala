@@ -6,10 +6,13 @@ import akka.actor.{ ActorRef, Props }
 import nl.grons.metrics.scala.{ Histogram, Timer }
 import org.apache.commons.math3.linear.EigenDecomposition
 
-import scalaz._
-import Scalaz._
-import scalaz.Kleisli.{ ask, kleisli }
-import omnibus.commons.{ KOp, TryV, Valid }
+import cats.data.Kleisli
+import cats.data.Kleisli.ask
+import cats.instances.either._
+import cats.syntax.either._
+import cats.syntax.validated._
+
+import omnibus.commons.{ KOp, ErrorOr, AllIssuesOr }
 import omnibus.commons.util._
 import org.apache.commons.math3.ml.clustering.{ Cluster, DBSCANClusterer, DoublePoint }
 import org.apache.commons.math3.ml.distance.{ DistanceMeasure, EuclideanDistance }
@@ -39,7 +42,7 @@ object SeriesDensityAnalyzer {
       override val underlying: AlgorithmContext,
       distanceStatistics: DescriptiveStatistics
   ) extends WrappingContext {
-    override def withUnderlying( ctx: AlgorithmContext ): Valid[WrappingContext] = copy( underlying = ctx ).successNel
+    override def withUnderlying( ctx: AlgorithmContext ): AllIssuesOr[WrappingContext] = copy( underlying = ctx ).validNel
 
     override type That = Context
     override def withSource( newSource: TimeSeriesBase ): That = {
@@ -74,15 +77,15 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
 
   override val algorithm: String = SeriesDensityAnalyzer.Algorithm
 
-  override def wrapContext( c: AlgorithmContext ): Valid[WrappingContext] = {
+  override def wrapContext( c: AlgorithmContext ): AllIssuesOr[WrappingContext] = {
     makeMovingStatistics( c ) map { movingStats ⇒ Context( underlying = c, distanceStatistics = movingStats ) }
   }
 
-  def makeMovingStatistics( context: AlgorithmContext ): Valid[DescriptiveStatistics] = {
-    new DescriptiveStatistics( CommonAnalyzer.ApproximateDayWindow ).successNel
+  def makeMovingStatistics( context: AlgorithmContext ): AllIssuesOr[DescriptiveStatistics] = {
+    new DescriptiveStatistics( CommonAnalyzer.ApproximateDayWindow ).validNel
   }
 
-  val distanceMeasure: KOp[AlgorithmContext, DistanceMeasure] = kleisli { _.distanceMeasure }
+  val distanceMeasure: KOp[AlgorithmContext, DistanceMeasure] = Kleisli { _.distanceMeasure }
 
   val updateDistanceMoment: KOp[AlgorithmContext, AlgorithmContext] = {
     import spotlight.analysis._
@@ -121,8 +124,8 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
   }
 
   val minDensityPoints: KOp[AlgorithmContext, Int] = {
-    kleisli[TryV, AlgorithmContext, Int] { ctx ⇒
-      \/ fromTryCatchNonFatal { ctx.messageConfig getInt algorithm + ".minDensityConnectedPoints" }
+    Kleisli[ErrorOr, AlgorithmContext, Int] { ctx ⇒
+      Either catchNonFatal { ctx.messageConfig getInt algorithm + ".minDensityConnectedPoints" }
     }
   }
 
@@ -131,7 +134,7 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
     for {
       ctx ← toConcreteContextK
       filled ← fillDataFromHistory( 6 * 5 ) // fill up to 5 minutes @ 1pt / 10s
-      e ← eps <=< toConcreteContextK
+      e ← toConcreteContextK andThen eps
       distance ← distanceMeasure
       minPoints ← minDensityPoints
     } yield {
@@ -144,7 +147,7 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
       filledSizeHistogram += filled.size
 
       val clustersD = clusterTimer.time {
-        \/ fromTryCatchNonFatal {
+        Either catchNonFatal {
           new DBSCANClusterer[DoublePoint]( e, minPoints, distance ).cluster( filled.asJava ).asScala.toSeq
         }
       }
@@ -161,7 +164,7 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
   }
 
   val eps: KOp[Context, Double] = {
-    kleisli[TryV, Context, Double] { ctx ⇒
+    Kleisli[ErrorOr, Context, Double] { ctx ⇒
       val config = ctx.messageConfig
       val distanceStatistcs = ctx.distanceStatistics
       log.debug( "distance-statistics=[{}]", distanceStatistcs )
@@ -180,7 +183,7 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
       }
 
       calculatedEps getOrElse {
-        \/ fromTryCatchNonFatal {
+        Either catchNonFatal {
           log.debug( "eps seed = {}", config getDouble algorithm + ".seedEps" )
           config getDouble algorithm + ".seedEps"
         }
@@ -200,7 +203,7 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
 
   val filterOutliers: KOp[( Clusters, AlgorithmContext ), ( Seq[DataPoint], AlgorithmContext )] = {
     for {
-      clustersAndContext ← ask[TryV, ( Clusters, AlgorithmContext )]
+      clustersAndContext ← ask[ErrorOr, ( Clusters, AlgorithmContext )]
       ( clusters, ctx ) = clustersAndContext
     } yield {
       val isOutlier = makeOutlierTest( clusters )
@@ -212,14 +215,14 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
   }
 
   val makeOutliers: KOp[( Seq[DataPoint], AlgorithmContext ), ( Outliers, AlgorithmContext )] = {
-    val toContext = kleisli[TryV, ( Seq[DataPoint], AlgorithmContext ), AlgorithmContext] { case ( _, ctx ) ⇒ ctx.right }
+    val toContext = Kleisli[ErrorOr, ( Seq[DataPoint], AlgorithmContext ), AlgorithmContext] { case ( _, ctx ) ⇒ ctx.asRight }
 
     for {
-      anomaliesAndContext ← ask[TryV, ( Seq[DataPoint], AlgorithmContext )]
+      anomaliesAndContext ← ask[ErrorOr, ( Seq[DataPoint], AlgorithmContext )]
       ( anomalies, ctx ) = anomaliesAndContext
-      ts ← thresholds <=< toContext
+      ts ← toContext andThen thresholds
       ctxWithThresholds = ts.foldLeft( ctx ) { _ addThresholdBoundary _ }
-      result ← makeOutliers( anomalies, ctxWithThresholds ) <=< toContext
+      result ← toContext andThen makeOutliers( anomalies, ctxWithThresholds )
     } yield {
       ( result, ctxWithThresholds )
     }
@@ -228,7 +231,7 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
   val thresholds: KOp[AlgorithmContext, Seq[ThresholdBoundary]] = {
     for {
       ctx ← toConcreteContextK
-      e ← eps <=< toConcreteContextK
+      e ← toConcreteContextK andThen eps
       distance ← distanceMeasure
       tol ← tolerance
     } yield {
@@ -303,7 +306,7 @@ class SeriesDensityAnalyzer( override val router: ActorRef ) extends CommonAnaly
   /**
     */
   override val findOutliers: KOp[AlgorithmContext, ( Outliers, AlgorithmContext )] = {
-    updateDistanceMoment >=> cluster >=> filterOutliers >=> makeOutliers
+    updateDistanceMoment andThen cluster andThen filterOutliers andThen makeOutliers
   }
 
 }

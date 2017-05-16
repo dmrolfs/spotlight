@@ -1,9 +1,13 @@
 package spotlight.model.outlier
 
-import scalaz._, Scalaz._
+import cats.instances.list._
+import cats.instances.either._
+import cats.syntax.either._
+import cats.syntax.validated._
+import cats.syntax.traverse._
 import org.joda.{ time ⇒ joda }
 import com.github.nscala_time.time.Imports._
-import omnibus.commons.Valid
+import omnibus.commons.{ AllIssuesOr, ErrorOr }
 
 trait OutlierAnnotation {
   def start: joda.DateTime
@@ -11,13 +15,13 @@ trait OutlierAnnotation {
 }
 
 object OutlierAnnotation {
-  def outlierAnnotation( obm: OutlierBoundsMagnet ): Valid[OutlierAnnotation] = { obm() }
+  def outlierAnnotation( obm: OutlierBoundsMagnet ): AllIssuesOr[OutlierAnnotation] = { obm() }
 
-  def cleanAnnotation( start: Option[joda.DateTime], end: Option[joda.DateTime] ): Valid[OutlierAnnotation] = {
+  def cleanAnnotation( start: Option[joda.DateTime], end: Option[joda.DateTime] ): AllIssuesOr[OutlierAnnotation] = {
     check( start, end ) map { i ⇒ NoOutlierIntervalAnnotation( i ) }
   }
 
-  def annotationsFromSeries( series: Outliers ): Valid[Seq[OutlierAnnotation]] = {
+  def annotationsFromSeries( series: Outliers ): AllIssuesOr[Seq[OutlierAnnotation]] = {
     val result = series match {
       case no: NoOutliers ⇒ List( cleanAnnotation( no.source.start, no.source.end ) )
 
@@ -36,13 +40,13 @@ object OutlierAnnotation {
   }
 
   sealed trait OutlierBoundsMagnet {
-    type Result = Valid[OutlierAnnotation]
+    type Result = AllIssuesOr[OutlierAnnotation]
     def apply(): Result
   }
 
   implicit def fromInstant( instant: joda.DateTime ): OutlierBoundsMagnet = new OutlierBoundsMagnet {
     override def apply(): Result = check map { i ⇒ OutlierInstantAnnotation( i ) }
-    val check: Valid[joda.DateTime] = instant.successNel
+    val check: AllIssuesOr[joda.DateTime] = instant.validNel
     override def toString: String = s"fromInstant($instant)"
   }
 
@@ -56,27 +60,27 @@ object OutlierAnnotation {
   implicit def fromUncertainInterval( start: Option[joda.DateTime], end: Option[joda.DateTime] ) = {
     new OutlierBoundsMagnet {
       override def apply(): Result = {
-        import scalaz.Validation.FlatMap._
-
-        check flatMap { flex ⇒
-          flex match {
-            case ( None, None ) ⇒ Validation.failureNel( OutlierTimeBoundsError( None, None ) )
-            case ( Some( start ), None ) ⇒ OutlierUnboundedAnnotaion( start ).successNel[Throwable]
-            case interval @ ( None, Some( _ ) ) ⇒ Validation.failureNel( OutlierTimeBoundsError( interval ) )
-            case ( Some( s ), Some( e ) ) if s isEqual e ⇒ OutlierInstantAnnotation( s ).successNel[Throwable]
-            case interval @ ( Some( s ), Some( e ) ) if s isAfter e ⇒ Validation.failureNel( OutlierTimeBoundsError( interval ) )
-            case ( Some( start ), Some( end ) ) ⇒ OutlierIntervalAnnotation( start to end ).successNel[Throwable]
+        check
+          .flatMap { flex ⇒
+            flex match {
+              case ( None, None ) ⇒ OutlierTimeBoundsError( None, None ).asLeft
+              case ( Some( start ), None ) ⇒ OutlierUnboundedAnnotaion( start ).asRight
+              case interval @ ( None, Some( _ ) ) ⇒ OutlierTimeBoundsError( interval ).asLeft
+              case ( Some( s ), Some( e ) ) if s isEqual e ⇒ OutlierInstantAnnotation( s ).asRight
+              case interval @ ( Some( s ), Some( e ) ) if s isAfter e ⇒ OutlierTimeBoundsError( interval ).asLeft
+              case ( Some( start ), Some( end ) ) ⇒ OutlierIntervalAnnotation( start to end ).asRight
+            }
           }
-        }
+          .toValidatedNel
       }
 
-      val check: Valid[FlexInterval] = {
+      val check: ErrorOr[FlexInterval] = {
         ( start, end ) match {
-          case ( None, None ) ⇒ Validation.failureNel( OutlierTimeBoundsError( None, None ) )
-          case interval @ ( Some( _ ), None ) ⇒ interval.successNel[Throwable]
-          case interval @ ( None, Some( _ ) ) ⇒ interval.successNel[Throwable]
-          case interval @ ( Some( s ), Some( e ) ) if s isAfter e ⇒ Validation.failureNel( OutlierTimeBoundsError( interval ) )
-          case interval @ ( Some( _ ), Some( _ ) ) ⇒ interval.successNel[Throwable]
+          case ( None, None ) ⇒ OutlierTimeBoundsError( None, None ).asLeft
+          case interval @ ( Some( _ ), None ) ⇒ interval.asRight
+          case interval @ ( None, Some( _ ) ) ⇒ interval.asRight
+          case interval @ ( Some( s ), Some( e ) ) if s isAfter e ⇒ OutlierTimeBoundsError( interval ).asLeft
+          case interval @ ( Some( _ ), Some( _ ) ) ⇒ interval.asRight
         }
       }
 
@@ -84,16 +88,16 @@ object OutlierAnnotation {
     }
   }
 
-  private def check( start: Option[joda.DateTime], end: Option[joda.DateTime] ): Valid[joda.Interval] = {
+  private def check( start: Option[joda.DateTime], end: Option[joda.DateTime] ): AllIssuesOr[joda.Interval] = {
     val result = for {
       s ← start
       e ← end
     } yield {
-      if ( s isAfter e ) Validation.failureNel[Throwable, joda.Interval]( OutlierTimeBoundsError( Some( s ), Some( e ) ) )
-      else ( s to e ).successNel[Throwable]
+      if ( s isAfter e ) OutlierTimeBoundsError( Some( s ), Some( e ) ).invalidNel
+      else ( s to e ).validNel
     }
 
-    result getOrElse Validation.failureNel[Throwable, joda.Interval]( OutlierTimeBoundsError( start, end ) )
+    result getOrElse OutlierTimeBoundsError( start, end ).invalidNel
   }
 
   /** An outlier annotation that describes a single outlier observation. This annotation directly reflects an additive outlier.

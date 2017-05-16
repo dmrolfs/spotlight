@@ -1,23 +1,23 @@
 package spotlight.analysis
 
-import akka.Done
-
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.util.Try
 import akka.actor.{ Actor, ActorRef, Props }
 import akka.agent.Agent
 import akka.event.LoggingReceive
 
-import scalaz._
-import Scalaz._
-import scalaz.Kleisli.{ ask, kleisli }
+import cats.data.Kleisli
+import cats.instances.future._
+import cats.instances.list._
+import cats.syntax.traverse._
+
 import com.persist.logging._
 import com.typesafe.config.Config
 import net.ceedubs.ficus.Ficus._
 import demesne.{ AggregateRootType, BoundedContext, DomainModel, StartTask }
 import omnibus.akka.envelope._
 import omnibus.akka.metrics.InstrumentedActor
-import omnibus.commons.{ TryV, Valid }
+import omnibus.commons.{ AllIssuesOr, ErrorOr }
 import omnibus.commons.concurrent._
 import spotlight.Settings
 import spotlight.analysis.algorithm._
@@ -136,43 +136,40 @@ object DetectionAlgorithmRouter extends ClassLogging {
         }
       }
 
-      val userAlgorithms = kleisli[Future, ( DomainModel, Config ), ( DomainModel, AlgorithmClasses )] {
-        case ( m, c ) ⇒
-          Settings.userAlgorithmClassesFrom( c ) match {
-            case scalaz.Success( as ) ⇒ Future successful ( m, as )
-            case scalaz.Failure( exs ) ⇒ {
-              exs foreach { ex ⇒ log.error( "loading user algorithm failed", ex ) }
+      val userAlgorithms = Kleisli[Future, ( DomainModel, Config ), ( DomainModel, AlgorithmClasses )] {
+        case ( m, c ) ⇒ {
+          Settings
+            .userAlgorithmClassesFrom( c )
+            .map { as ⇒ Future successful ( m, as ) }
+            .valueOr { exs ⇒
+              exs map { ex ⇒ log.error( "loading user algorithm failed", ex ) }
               Future failed exs.head
+            }
+        }
+      }
+
+      val collectRootTypes = Kleisli[Future, ( DomainModel, AlgorithmClasses ), List[AlgorithmRootType]] {
+        case ( m, acs ) ⇒
+          acs.toList traverse {
+            case ( a, c ) ⇒ {
+              algorithmRootTypeFor( c ) map { rt ⇒
+                log.debug(
+                  Map(
+                    "@msg" → "collecting unknown algorithms",
+                    "algorithm" → a,
+                    "fqcn" → c.getName,
+                    "identified-root-type" → rt.toString,
+                    "is-known" → m.rootTypes.contains( rt )
+                  )
+                )
+
+                ( a, rt )
+              }
             }
           }
       }
 
-      val collectRootTypes = kleisli[Future, ( DomainModel, AlgorithmClasses ), List[AlgorithmRootType]] {
-        case ( m, acs ) ⇒ {
-          acs
-            .toList
-            .traverseU {
-              case ( a, c ) ⇒ {
-                algorithmRootTypeFor( c ).map { rt ⇒
-                  log.debug(
-                    Map(
-                      "@msg" → "collecting unknown algorithms",
-                      "algorithm" → a,
-                      "fqcn" → c.getName,
-                      "identified-root-type" → rt.toString,
-                      "is-known" → m.rootTypes.contains( rt )
-                    )
-                  )
-
-                  ( a, rt )
-                }
-              }
-            }
-          //              .map { arts ⇒ arts.flatten }
-        }
-      }
-
-      val loadRootTypesIntoModel = kleisli[Future, List[AlgorithmRootType], List[AlgorithmRootType]] { arts ⇒
+      val loadRootTypesIntoModel = Kleisli[Future, List[AlgorithmRootType], List[AlgorithmRootType]] { arts ⇒
         boundedContext
           .addAggregateTypes( arts.map( _._2 ).toSet )
           .map { _ ⇒
@@ -194,11 +191,11 @@ object DetectionAlgorithmRouter extends ClassLogging {
       //        } yield registered.toList
       //      }
 
-      val addModel = kleisli[Future, ( BoundedContext, Config ), ( DomainModel, Config )] {
+      val addModel = Kleisli[Future, ( BoundedContext, Config ), ( DomainModel, Config )] {
         case ( bc, c ) ⇒ bc.futureModel map { ( _, c ) }
       }
 
-      val load = addModel >=> userAlgorithms >=> collectRootTypes >=> loadRootTypesIntoModel // >=> registerWithRouter
+      val load = addModel andThen userAlgorithms andThen collectRootTypes andThen loadRootTypesIntoModel // andThen registerWithRouter
 
       load.run( boundedContext, configuration )
     }

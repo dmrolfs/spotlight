@@ -3,11 +3,13 @@ package spotlight.analysis.algorithm.skyline
 import scala.reflect.ClassTag
 import akka.actor.{ ActorRef, Props }
 
-import scalaz._
-import Scalaz._
+import cats.instances.either._
+import cats.syntax.either._
+import cats.syntax.validated._
+
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import org.apache.commons.math3.stat.regression.MillerUpdatingRegression
-import omnibus.commons.{ KOp, Valid }
+import omnibus.commons.{ KOp, AllIssuesOr }
 import omnibus.commons.util._
 import spotlight.analysis.algorithm.AlgorithmActor.AlgorithmContext
 import spotlight.analysis.algorithm.CommonAnalyzer
@@ -26,7 +28,7 @@ object LeastSquaresAnalyzer {
       override val underlying: AlgorithmContext,
       regression: MillerUpdatingRegression
   ) extends WrappingContext {
-    override def withUnderlying( ctx: AlgorithmContext ): Valid[WrappingContext] = copy( underlying = ctx ).successNel
+    override def withUnderlying( ctx: AlgorithmContext ): AllIssuesOr[WrappingContext] = copy( underlying = ctx ).validNel
 
     override type That = Context
     override def withSource( newSource: TimeSeriesBase ): That = {
@@ -49,14 +51,14 @@ class LeastSquaresAnalyzer( override val router: ActorRef ) extends CommonAnalyz
 
   override def algorithm: String = LeastSquaresAnalyzer.Algorithm
 
-  override def wrapContext( c: AlgorithmContext ): Valid[WrappingContext] = {
+  override def wrapContext( c: AlgorithmContext ): AllIssuesOr[WrappingContext] = {
     makeRegression( c ) map { rm ⇒ Context( underlying = c, regression = rm ) }
   }
 
-  def makeRegression( context: AlgorithmContext ): Valid[MillerUpdatingRegression] = {
+  def makeRegression( context: AlgorithmContext ): AllIssuesOr[MillerUpdatingRegression] = {
     val config = context.messageConfig
     val k = 1 // one coefficient: ts is x-axis
-    new MillerUpdatingRegression( k, true ).successNel
+    new MillerUpdatingRegression( k, true ).validNel
   }
 
   /** A timeseries is anomalous if the average of the last three datapoints
@@ -78,7 +80,7 @@ class LeastSquaresAnalyzer( override val router: ActorRef ) extends CommonAnalyz
         analysisContext = ctx,
         evaluateOutlier = ( p: PointT, cx: Context ) ⇒ {
         val ( ts, v ) = p
-        val result = \/ fromTryCatchNonFatal {
+        val result = Either catchNonFatal {
           cx.regression.regress.getParameterEstimates
         } map {
           case Array( c, m ) ⇒

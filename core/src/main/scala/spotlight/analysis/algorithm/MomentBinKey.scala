@@ -1,8 +1,7 @@
 package spotlight.analysis.algorithm
 
-import omnibus.commons.Valid
-
-import scalaz.Validation
+import cats.data.Validated
+import omnibus.commons.AllIssuesOr
 
 /** Created by rolfsd on 9/21/16.
   */
@@ -19,7 +18,7 @@ class MomentBinKey {
   }
 
   object DayOfWeek {
-    def fromJodaKey( key: Int ): Valid[DayOfWeek] = Validation.fromTryCatchNonFatal { JodaDays( key ) }.toValidationNel
+    def fromJodaKey( key: Int ): AllIssuesOr[DayOfWeek] = Validated.catchNonFatal { JodaDays( key ) }.toValidatedNel
 
     val JodaDays: Map[Int, DayOfWeek] = Map(
       Seq( Sunday, Monday, Tuesday, Wednesday, Thursday, Friday, Saturday ).map { d ⇒ d.jodaKey → d }: _*

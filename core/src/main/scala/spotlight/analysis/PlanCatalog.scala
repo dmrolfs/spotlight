@@ -11,9 +11,8 @@ import akka.event.LoggingReceive
 import akka.stream.{ ActorMaterializer, ActorMaterializerSettings, Materializer }
 import akka.util.Timeout
 
-import scalaz._
-import Scalaz._
 import shapeless.syntax.typeable._
+import shapeless.the
 import com.typesafe.config.Config
 import net.ceedubs.ficus.Ficus._
 import com.persist.logging._
@@ -24,6 +23,7 @@ import omnibus.akka.metrics.InstrumentedActor
 import omnibus.akka.persistence.query.{ AgentProjection, QueryJournal }
 import omnibus.commons.config._
 import demesne.{ BoundedContext, DomainModel, StartTask }
+import spotlight.{ EC, BC, AS, T, M }
 import spotlight.Settings
 import spotlight.infrastructure.ClusterRole
 import spotlight.model.outlier.AnalysisPlan
@@ -34,13 +34,7 @@ import spotlight.model.timeseries._
 object PlanCatalog extends ClassLogging {
   val clusterRole: ClusterRole = ClusterRole.Intake
 
-  def startSingleton(
-    configuration: Config,
-    applicationPlans: Set[AnalysisPlan] = Set.empty[AnalysisPlan]
-  )(
-    implicit
-    ec: ExecutionContext
-  ): StartTask = {
+  def startSingleton[_: EC]( configuration: Config, applicationPlans: Set[AnalysisPlan] = Set.empty[AnalysisPlan] ): StartTask = {
     StartTask.withFunction( "start plan catalog cluster singleton" ) { implicit bc ⇒
       val SettingsBase = "spotlight.settings"
       val mifFactor = configuration.as[Option[Double]]( SettingsBase + ".parallelism-factor" ) getOrElse 8.0
@@ -59,38 +53,27 @@ object PlanCatalog extends ClassLogging {
     }
   }
 
-  def props( implicit system: ActorSystem ): Props = {
+  def props[_: AS]: Props = {
     ClusterSingletonProxy.props(
       singletonManagerPath = "/user/" + name,
-      settings = ClusterSingletonProxySettings( system ).withRole( clusterRole.entryName )
+      settings = ClusterSingletonProxySettings( the[ActorSystem] ).withRole( clusterRole.entryName )
     )
   }
 
-  private[analysis] def actorProps(
+  private[analysis] def actorProps[_: BC](
     configuration: Config,
     maxInFlightCpuFactor: Double = 8.0,
     applicationDetectionBudget: Option[Duration] = None,
     applicationPlans: Set[AnalysisPlan] = Set.empty[AnalysisPlan]
-  )(
-    implicit
-    boundedContext: BoundedContext
   ): Props = {
-    Props( new Default( boundedContext, configuration, applicationPlans, maxInFlightCpuFactor, applicationDetectionBudget ) )
+    Props( new Default( the[BoundedContext], configuration, applicationPlans, maxInFlightCpuFactor, applicationDetectionBudget ) )
   }
 
   val name: String = "PlanCatalog"
 
-  def flow(
-    catalogRef: ActorRef,
-    parallelism: Int
-  )(
-    implicit
-    boundedContext: BoundedContext,
-    timeout: Timeout,
-    materializer: Materializer
-  ): Future[DetectFlow] = {
+  def flow[_: BC: T: M]( catalogRef: ActorRef, parallelism: Int ): Future[DetectFlow] = {
     import spotlight.analysis.{ PlanCatalogProtocol ⇒ P }
-    implicit val ec = boundedContext.system.dispatcher
+    implicit val ec = the[BoundedContext].system.dispatcher
 
     for {
       _ ← ( catalogRef ?+ P.WaitForStart )
@@ -236,7 +219,7 @@ abstract class PlanCatalog( boundedContext: BoundedContext )
   }
   val EventType = classTag[AP.Event]
 
-  def collectPlans()( implicit ec: ExecutionContext ): Future[Plans] = {
+  def collectPlans(): Future[Plans] = {
     for {
       fromIndex ← knownPlans
       _ = log.debug( Map( "@msg" → "PlanCatalog fromIndex", "index" → fromIndex.toString ) )
@@ -264,7 +247,7 @@ abstract class PlanCatalog( boundedContext: BoundedContext )
     Await.result( knownPlans.map( _.exists( applyTest ) ), 3.seconds )
   }
 
-  def futureApplicablePlanExists( ts: TimeSeries )( implicit ec: ExecutionContext ): Future[Boolean] = {
+  def futureApplicablePlanExists( ts: TimeSeries ): Future[Boolean] = {
     knownPlans map { entries ⇒
       log.debug(
         Map(
@@ -350,7 +333,7 @@ abstract class PlanCatalog( boundedContext: BoundedContext )
     case P.WaitForStart ⇒ sender() ! P.Started
   }
 
-  private def dispatch( route: P.Route, interestedRef: ActorRef )( implicit ec: ExecutionContext ): Unit = {
+  private def dispatch( route: P.Route, interestedRef: ActorRef ): Unit = {
     val cid = route.correlationId getOrElse outer.correlationId
     outstandingWork += ( cid → interestedRef ) // keep this out of future closure or use an Agent to protect against race conditions
 
@@ -374,7 +357,7 @@ abstract class PlanCatalog( boundedContext: BoundedContext )
     }
   }
 
-  private def initializePlans()( implicit ec: ExecutionContext, timeout: Timeout ): Future[Done] = {
+  private def initializePlans[_: T](): Future[Done] = {
     for {
       entries ← knownPlans
       entryNames = entries map { _.name }
@@ -411,13 +394,7 @@ abstract class PlanCatalog( boundedContext: BoundedContext )
     }
   }
 
-  def makeMissingSpecifiedPlans(
-    missing: Set[AnalysisPlan]
-  )(
-    implicit
-    ec: ExecutionContext,
-    to: Timeout
-  ): Future[Map[String, AnalysisPlan.Summary]] = {
+  def makeMissingSpecifiedPlans[_: T]( missing: Set[AnalysisPlan] ): Future[Map[String, AnalysisPlan.Summary]] = {
     def loadSpecifiedPlans( model: DomainModel ): Future[Seq[AnalysisPlan]] = { // Seq[Future[( String, AnalysisPlan.Summary )]] = {
       val loaded: Seq[Future[Option[AnalysisPlan]]] = missing.toSeq.map { p ⇒
         log.info( Map( "@msg" → "making plan entity", "entry" → p.name ) )
