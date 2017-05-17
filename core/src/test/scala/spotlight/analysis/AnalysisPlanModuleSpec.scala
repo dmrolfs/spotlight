@@ -3,6 +3,7 @@ package spotlight.analysis
 import scala.concurrent.Await
 import scala.concurrent.duration._
 import akka.testkit._
+import cats.syntax.validated._
 import com.typesafe.config.{ Config, ConfigFactory }
 import omnibus.akka.envelope._
 import omnibus.akka.envelope.pattern.ask
@@ -13,7 +14,7 @@ import demesne.repository.AggregateRootProps
 import demesne.module.entity.EntityAggregateModule
 import org.scalatest.{ OptionValues, Tag }
 import omnibus.akka.publish.StackableStreamPublisher
-import omnibus.commons.{ TryV, V }
+import omnibus.commons._
 import omnibus.commons.log.Trace
 import shapeless.Lens
 import spotlight.Settings
@@ -72,7 +73,7 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[AnalysisPlanState] with Op
     protected val trace: Trace[_]
 
     val identifying = AnalysisPlanModule.identifying
-    override def nextId(): module.TID = TryV.unsafeGet( identifying.nextTID )
+    override def nextId(): module.TID = identifying.nextTID.unsafeGet
     lazy val plan = makePlan( "TestPlan", None )
     override lazy val tid: TID = plan.id
 
@@ -401,8 +402,8 @@ class AnalysisPlanModuleSpec extends EntityModuleSpec[AnalysisPlanState] with Op
           results: OutlierAlgorithmResults,
           source: TimeSeriesBase,
           plan: AnalysisPlan
-        ): V[Outliers] = {
-          Validation.failureNel[Throwable, Outliers]( new IllegalStateException( "dummy" ) ).disjunction
+        ): AllErrorsOr[Outliers] = {
+          new IllegalStateException( "dummy" ).invalidNel.toEither
         }
       }
 

@@ -1,17 +1,17 @@
 package spotlight.analysis.algorithm.statistical
 
 import scala.annotation.tailrec
+import scala.math
 import akka.actor.ActorSystem
-
-import scalaz.{ -\/, \/- }
+import cats.syntax.validated._
+import cats.scalatest.{ EitherMatchers, EitherValues }
 import com.typesafe.config.{ Config, ConfigFactory }
 import org.apache.commons.math3.stat.descriptive.{ DescriptiveStatistics, StatisticalSummary }
 import org.joda.{ time ⇒ joda }
 import org.mockito.Mockito._
 import org.scalatest.Assertion
-import org.typelevel.scalatest.{ DisjunctionMatchers, DisjunctionValues }
 import com.persist.logging._
-import omnibus.commons.TryV
+import omnibus.commons._
 import omnibus.commons.log.Trace
 import spotlight.analysis.algorithm.{ Algorithm, AlgorithmSpec, InsufficientDataSize, AlgorithmProtocol ⇒ P }
 import spotlight.model.timeseries._
@@ -20,8 +20,8 @@ import spotlight.model.timeseries._
   */
 class GrubbsAlgorithmSpec
     extends AlgorithmSpec[GrubbsShape]
-    with DisjunctionMatchers
-    with DisjunctionValues {
+    with EitherMatchers
+    with EitherValues {
   private val trace = Trace[GrubbsAlgorithmSpec]
 
   override type Algo = GrubbsAlgorithm.type
@@ -87,7 +87,7 @@ class GrubbsAlgorithmSpec
 
     val allPoints = lastPoints ++ points
     val shape = shapeFor( allPoints map { _.value } )
-    val score = TryV.unsafeGet( GrubbsAlgorithm.grubbsScore( shape ) )
+    val score = GrubbsAlgorithm.grubbsScore( shape ).unsafeGet
 
     @tailrec def loop( pts: List[DataPoint], history: Array[Double], acc: Seq[ThresholdBoundary] ): Seq[ThresholdBoundary] = {
       pts match {
@@ -117,13 +117,13 @@ class GrubbsAlgorithmSpec
         override val underlying: StatisticalSummary,
         override val timestamp: joda.DateTime,
         override val tolerance: Double,
-        score: TryV[Double]
+        score: ErrorOr[Double]
     ) extends CalculationMagnetResult {
       override type Value = StatisticalSummary
       override def statistics: Option[StatisticalSummary] = Option( underlying )
       override def thresholdBoundary: ThresholdBoundary = {
         score match {
-          case \/-( s ) ⇒ {
+          case Right( s ) ⇒ {
             ThresholdBoundary.fromExpectedAndDistance(
               timestamp,
               expected = underlying.getMean,
@@ -131,9 +131,9 @@ class GrubbsAlgorithmSpec
             )
           }
 
-          case -\/( ex: InsufficientDataSize ) ⇒ ThresholdBoundary empty timestamp
+          case Left( ex: InsufficientDataSize ) ⇒ ThresholdBoundary empty timestamp
 
-          case -\/( ex ) ⇒ throw ex
+          case Left( ex ) ⇒ throw ex
         }
       }
     }
@@ -207,7 +207,7 @@ class GrubbsAlgorithmSpec
         d.take( size ).foldLeft( GrubbsShape() ) { _ :+ _ }
       }
 
-      def score( s: GrubbsShape ): TryV[Double] = GrubbsAlgorithm.grubbsScore( s )
+      def score( s: GrubbsShape ): ErrorOr[Double] = GrubbsAlgorithm.grubbsScore( s )
 
       for ( i ← 0 until minPopulation ) {
         val s = score( caller( i ) )

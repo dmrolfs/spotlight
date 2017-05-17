@@ -123,7 +123,7 @@ object DetectionAlgorithmRouter extends ClassLogging {
       type AlgorithmClasses = Map[String, AlgorithmClass]
 
       def algorithmRootTypeFor( clazz: AlgorithmClass ): Future[AggregateRootType] = {
-        Future.fromTry[AggregateRootType] {
+        Future fromTry[AggregateRootType] {
           Try {
             import scala.reflect.runtime.{ universe ⇒ ru }
             val loader = getClass.getClassLoader

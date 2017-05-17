@@ -12,11 +12,13 @@ import akka.event.LoggingReceive
 import akka.stream.scaladsl.{ FileIO, Flow, Framing, GraphDSL, Keep, Sink, Source }
 import akka.stream._
 import akka.util.ByteString
+
+import cats.syntax.either._
+
 import better.files.ThreadBackedFileMonitor
 import net.ceedubs.ficus.Ficus._
 import com.persist.logging._
 
-import scalaz.{ -\/, \/, \/- }
 import nl.grons.metrics.scala.MetricName
 import org.joda.time.DateTime
 import org.json4s._
@@ -25,7 +27,7 @@ import omnibus.akka.metrics.Instrumented
 import omnibus.akka.stream.StreamMonitor
 import demesne.BoundedContext
 import omnibus.akka.stream.Limiter
-import omnibus.commons.TryV
+import omnibus.commons.ErrorOr
 import spotlight.{ Settings, Spotlight, SpotlightContext }
 import spotlight.analysis.DetectFlow
 import spotlight.model.outlier._
@@ -375,12 +377,9 @@ object FileBatchExample extends Instrumented with ClassLogging {
       val flatter = b.add(
         Flow[SeriesOutliers]
           .map { s ⇒
-            flattenObject( s ) match {
-              case \/-( f ) ⇒ f
-              case -\/( ex ) ⇒ {
-                log.error( Map( "@msg" → "Failure: flatter.flattenObject", "series-outlier" → s.toString ), ex )
-                throw ex
-              }
+            flattenObject( s ) valueOr { ex ⇒
+              log.error( Map( "@msg" → "Failure: flatter.flattenObject", "series-outlier" → s.toString ), ex )
+              throw ex
             }
           }
       )
@@ -419,8 +418,8 @@ object FileBatchExample extends Instrumented with ClassLogging {
   //    }
   //  }
 
-  def flattenObject( outlier: SeriesOutliers ): TryV[List[SimpleFlattenedOutlier]] = {
-    \/ fromTryCatchNonFatal {
+  def flattenObject( outlier: SeriesOutliers ): ErrorOr[List[SimpleFlattenedOutlier]] = {
+    Either catchNonFatal {
       outlier.algorithms.toList.map { a ⇒
         val o = parseOutlierObject( outlier.outliers )
         val t = outlier.thresholdBoundaries.get( a ) getOrElse {
@@ -457,22 +456,19 @@ object FileBatchExample extends Instrumented with ClassLogging {
   def unmarshalTimeSeriesData: Flow[String, TimeSeries, NotUsed] = {
     Flow[String]
       .mapConcat { s ⇒
-        toTimeSeries( s ) match {
-          case \/-( tss ) ⇒ tss
-          case -\/( ex ) ⇒ {
-            log.error( Map( "@msg" → "Failure: unmarshalTimeSeries.toTimeSeries", "time-series" → s.toString ), ex )
-            throw ex
-          }
+        toTimeSeries( s ) valueOr { ex ⇒
+          log.error( Map( "@msg" → "Failure: unmarshalTimeSeries.toTimeSeries", "time-series" → s.toString ), ex )
+          throw ex
         }
       }
       //    .map { ts => logger.info( "unmarshalled time series: [{}]", ts ); ts }
       .withAttributes( ActorAttributes.supervisionStrategy( GraphiteSerializationProtocol.decider ) )
   }
 
-  def toTimeSeries( bytes: String ): TryV[List[TimeSeries]] = {
+  def toTimeSeries( bytes: String ): ErrorOr[List[TimeSeries]] = {
     import spotlight.model.timeseries._
 
-    \/ fromTryCatchNonFatal {
+    Either catchNonFatal {
       for {
         JObject( obj ) ← JsonMethods parse bytes
         JField( "topic", JString( topic ) ) ← obj

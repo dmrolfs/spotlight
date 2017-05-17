@@ -238,7 +238,7 @@ object Settings extends ClassLogging {
 
   def userAlgorithmClassesFrom( configuration: Config ): AllIssuesOr[Map[String, Class[_ <: Algorithm[_]]]] = {
     def loadClass( algorithm: String, fqcn: String ): ErrorOr[Class[_ <: Algorithm[_]]] = {
-      Either fromTry { Try { Class.forName( fqcn, true, getClass.getClassLoader ).asInstanceOf[Class[_ <: Algorithm[_]]] } }
+      Either catchNonFatal { Class.forName( fqcn, true, getClass.getClassLoader ).asInstanceOf[Class[_ <: Algorithm[_]]] }
     }
 
     def unwrapAlgorithmFQCN( algorithm: String, cv: ConfigValue ): ErrorOr[( String, String )] = {

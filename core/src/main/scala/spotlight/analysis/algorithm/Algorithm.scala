@@ -815,18 +815,16 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
       // -- algorithm functional elements --
       val makeAlgorithmContext: KOp[DetectUsing, Context] = Kleisli[ErrorOr, DetectUsing, Context] { message ⇒
         //todo: with algorithm global config support. merge with state config (probably persist and accept ConfigChanged evt)
-        Either fromTry {
-          Try {
-            algorithmContext = algorithm.makeContext( message, Option( state ) )
-            algorithmContext
-          }
+        Either catchNonFatal {
+          algorithmContext = algorithm.makeContext( message, Option( state ) )
+          algorithmContext
         }
       }
 
       def findOutliers: KOp[Context, ( Outliers, Context )] = {
         for {
           ctx ← ask[ErrorOr, Context]
-          data ← Kleisli[ErrorOr, Context, Seq[DoublePoint]] { c ⇒ Either fromTry { Try { algorithm prepareData c } } }
+          data ← Kleisli[ErrorOr, Context, Seq[DoublePoint]] { c ⇒ Either catchNonFatal { algorithm prepareData c } }
           events ← collectOutlierPoints( data ) andThen recordAdvancements
           o ← makeOutliers( events )
         } yield ( o, ctx )
@@ -942,12 +940,10 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
           }
 
           def tryScoring( pt: PointT, shape: Shape ): ErrorOr[AnomalyScore] = {
-            val attempt = Either fromTry {
-              Try {
-                algorithm
-                  .score( pt, shape )( state, analysisContext )
-                  .getOrElse { AnomalyScore( false, ThresholdBoundary empty pt.timestamp.toLong ) }
-              }
+            val attempt = Either catchNonFatal {
+              algorithm
+                .score( pt, shape )( state, analysisContext )
+                .getOrElse { AnomalyScore( false, ThresholdBoundary empty pt.timestamp.toLong ) }
             }
 
             val anomaly = {
