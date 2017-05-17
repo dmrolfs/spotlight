@@ -106,7 +106,7 @@ object GrubbsAlgorithm extends Algorithm[GrubbsShape]( label = "grubbs" ) { algo
       .unsafeGet
   }
 
-  override def score( point: PointT, shape: Shape )( implicit s: State, c: Context ): Option[AnomalyScore] = {
+  override def score( point: PointT, shape: Shape )( implicit c: Context ): Option[AnomalyScore] = {
     val result = grubbsScore( shape ) map { grubbs ⇒
       val threshold = ThresholdBoundary.fromExpectedAndDistance(
         timestamp = point.timestamp.toLong,

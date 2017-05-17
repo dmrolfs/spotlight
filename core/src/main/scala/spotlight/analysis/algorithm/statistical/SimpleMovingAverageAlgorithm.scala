@@ -106,7 +106,7 @@ object SimpleMovingAverageAlgorithm extends Algorithm[SimpleMovingAverageShape](
   override type Context = CommonContext
   override def makeContext( message: DetectUsing, state: Option[State] ): Context = new CommonContext( message )
 
-  override def score( point: PointT, shape: Shape )( implicit s: State, c: Context ): Option[AnomalyScore] = {
+  override def score( point: PointT, shape: Shape )( implicit c: Context ): Option[AnomalyScore] = {
     val mean = shape.mean
     val stddev = shape.standardDeviation
     val threshold = ThresholdBoundary.fromExpectedAndDistance(
