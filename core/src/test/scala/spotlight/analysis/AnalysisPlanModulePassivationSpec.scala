@@ -14,7 +14,7 @@ import demesne.module.entity.EntityAggregateModule
 import demesne.repository.AggregateRootProps
 import omnibus.akka.publish.StackableStreamPublisher
 import omnibus.archetype.domain.model.core.EntityIdentifying
-import omnibus.commons.TryV
+import omnibus.commons._
 import omnibus.commons.identifier.Identifying
 import omnibus.commons.log.Trace
 import shapeless.Lens
@@ -107,7 +107,7 @@ class AnalysisPlanModulePassivationSpec extends EntityModuleSpec[AnalysisPlanSta
     }
 
     override val identifying: EntityIdentifying[AnalysisPlanState] = AnalysisPlanModule.identifying
-    override def nextId(): module.TID = TryV.unsafeGet( identifying.nextTID )
+    override def nextId(): module.TID = identifying.nextTID.unsafeGet
 
     val algo: String = SimpleMovingAverageAlgorithm.label
 

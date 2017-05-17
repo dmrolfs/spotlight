@@ -10,9 +10,6 @@ object ThresholdBoundary {
   }
 
   def fromExpectedAndDistance( timestamp: joda.DateTime, expected: Double, distance: Double ): ThresholdBoundary = {
-    import scalaz.Unzip
-    import scalaz.std.option._
-
     @inline def optional( v: Double ): Option[Double] = if ( v.isNaN ) None else Some( v )
 
     val checked = for {
@@ -20,8 +17,8 @@ object ThresholdBoundary {
       d ← optional( distance )
     } yield ( e - d, e + d )
 
-    val ( f, c ) = Unzip[Option] unzip checked
-    ThresholdBoundary( timestamp = timestamp, floor = f, expected = optional( expected ), ceiling = c )
+    val ( f, c ) = checked.unzip // Unzip[Option] unzip checked
+    ThresholdBoundary( timestamp = timestamp, floor = f.headOption, expected = optional( expected ), ceiling = c.headOption )
   }
 
   def empty( timestamp: Long ): ThresholdBoundary = empty( new joda.DateTime( timestamp ) )

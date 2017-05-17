@@ -1,13 +1,14 @@
 package spotlight.analysis.algorithm.statistical
 
-import scalaz._
-import Scalaz._
+import scala.math
+import cats.syntax.either._
+
 import com.typesafe.config.Config
 import net.ceedubs.ficus.Ficus._
 import com.persist.logging._
 import org.apache.commons.lang3.ClassUtils
 import org.apache.commons.math3.distribution.TDistribution
-import omnibus.commons.TryV
+import omnibus.commons._
 import spotlight.analysis.algorithm.{ Advancing, Algorithm, CommonContext, InsufficientDataSize }
 import spotlight.analysis.algorithm.AlgorithmProtocol.Advanced
 import spotlight.analysis.{ AnomalyScore, DetectUsing }
@@ -82,25 +83,27 @@ object GrubbsAlgorithm extends Algorithm[GrubbsShape]( label = "grubbs" ) { algo
   def minimumDataPoints( implicit c: Context ): Int = {
     val grubbsRequirement = 7
 
-    if ( c.properties hasPath MinimalPopulationPath ) {
-      math.max( grubbsRequirement, c.properties getInt MinimalPopulationPath )
-    } else {
-      grubbsRequirement
-    }
+    c.properties
+      .as[Option[Int]]( MinimalPopulationPath )
+      .map { mpp ⇒ math.max( grubbsRequirement, mpp ) }
+      .getOrElse { grubbsRequirement }
   }
 
   case class Context( override val message: DetectUsing, alpha: Double ) extends CommonContext( message )
 
   object Context {
     val AlphaPath = "alpha"
-    def getAlpha( c: Config ): TryV[Double] = {
+    def getAlpha( c: Config ): ErrorOr[Double] = {
       val alpha = c.as[Option[Double]]( AlphaPath ) getOrElse 0.05
-      alpha.right
+      alpha.asRight
     }
   }
 
   override def makeContext( message: DetectUsing, state: Option[State] ): Context = {
-    TryV unsafeGet { Context.getAlpha( message.properties ) map { alpha ⇒ Context( message, alpha ) } }
+    Context
+      .getAlpha( message.properties )
+      .map { alpha ⇒ Context( message, alpha ) }
+      .unsafeGet
   }
 
   override def score( point: PointT, shape: Shape )( implicit s: State, c: Context ): Option[AnomalyScore] = {
@@ -115,22 +118,22 @@ object GrubbsAlgorithm extends Algorithm[GrubbsShape]( label = "grubbs" ) { algo
     }
 
     result match {
-      case \/-( r ) ⇒ Some( r )
+      case Right( r ) ⇒ Some( r )
 
-      case -\/( ex: InsufficientDataSize ) ⇒ {
+      case Left( ex: InsufficientDataSize ) ⇒ {
         import spotlight.model.timeseries._
         log.info( Map( "@msg" → "skipping point until sufficient history is establish", "point" → point ), ex )
         Some( AnomalyScore( isOutlier = false, threshold = ThresholdBoundary empty point.timestamp.toLong ) )
       }
 
-      case -\/( ex ) ⇒ {
+      case Left( ex ) ⇒ {
         log.warn( Map( "@msg" → "exception raised in algorithm step calculation", "algorithm" → label ), ex )
         throw ex
       }
     }
   }
 
-  def grubbsScore( shape: Shape )( implicit c: Context ): TryV[Double] = {
+  def grubbsScore( shape: Shape )( implicit c: Context ): ErrorOr[Double] = {
     for {
       size ← checkSize( shape.N )
       critical ← criticalValue( shape )
@@ -142,9 +145,9 @@ object GrubbsAlgorithm extends Algorithm[GrubbsShape]( label = "grubbs" ) { algo
     }
   }
 
-  def criticalValue( shape: Shape )( implicit c: Context ): TryV[Double] = {
-    def calculateCritical( size: Long ): TryV[Double] = {
-      \/ fromTryCatchNonFatal {
+  def criticalValue( shape: Shape )( implicit c: Context ): ErrorOr[Double] = {
+    def calculateCritical( size: Long ): ErrorOr[Double] = {
+      Either catchNonFatal {
         val degreesOfFreedom = math.max( size - 2, 1 ) //todo: not a great idea but for now avoiding error if size <= 2
         new TDistribution( degreesOfFreedom ).inverseCumulativeProbability( c.alpha / ( 2.0 * size ) )
       }
@@ -160,10 +163,10 @@ object GrubbsAlgorithm extends Algorithm[GrubbsShape]( label = "grubbs" ) { algo
     * @param size
     * @return
     */
-  private def checkSize( size: Long )( implicit c: Context ): TryV[Long] = {
+  private def checkSize( size: Long )( implicit c: Context ): ErrorOr[Long] = {
     size match {
-      case s if s < minimumDataPoints ⇒ InsufficientDataSize( label, s, minimumDataPoints ).left
-      case s ⇒ s.right
+      case s if s < minimumDataPoints ⇒ InsufficientDataSize( label, s, minimumDataPoints ).asLeft
+      case s ⇒ s.asRight
     }
   }
 

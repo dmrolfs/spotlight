@@ -1,11 +1,14 @@
 package spotlight.model.timeseries
 
 import scala.concurrent.duration.{ SECONDS, TimeUnit }
-import scalaz.{ Ordering ⇒ _, _ }, Scalaz._
+import cats.syntax.cartesian._
+import cats.syntax.validated._
+import cats.instances.list._
+import cats.syntax.traverse._
 import shapeless.Lens
 import org.joda.{ time ⇒ joda }
 import com.github.nscala_time.time.Imports._
-import omnibus.commons.Valid
+import omnibus.commons.AllIssuesOr
 import omnibus.commons.math.Interpolator
 
 trait TimeSeriesCohort extends TimeSeriesBase {
@@ -71,8 +74,8 @@ object TimeSeriesCohort {
   implicit val cohortMerging: Merging[TimeSeriesCohort] = new Merging[TimeSeriesCohort] {
     override def zero( topic: Topic ): TimeSeriesCohort = TimeSeriesCohort( topic )
 
-    override def merge( lhs: TimeSeriesCohort, rhs: TimeSeriesCohort ): Valid[TimeSeriesCohort] = {
-      ( checkTopic( lhs.topic, rhs.topic ) |@| combineSeries( lhs.data, rhs.data ) ) { ( _, merged ) ⇒
+    override def merge( lhs: TimeSeriesCohort, rhs: TimeSeriesCohort ): AllIssuesOr[TimeSeriesCohort] = {
+      ( checkTopic( lhs.topic, rhs.topic ) |@| combineSeries( lhs.data, rhs.data ) ) map { ( _, merged ) ⇒
         dataLens.set( lhs )( merged )
       }
     }
@@ -83,17 +86,19 @@ object TimeSeriesCohort {
     )(
       implicit
       seriesMerge: Merging[TimeSeries]
-    ): Valid[IndexedSeq[TimeSeries]] = {
-      import scalaz.Validation.FlatMap._
-
+    ): AllIssuesOr[IndexedSeq[TimeSeries]] = {
       val merged = lhs ++ rhs
       val ( uniques, dups ) = merged groupBy { _.topic } map { _._2 } partition { _.size == 1 }
       val dupsMerged = for {
         d ← dups
       } yield {
-        val zero: Valid[TimeSeries] = TimeSeries( d.head.topic, IndexedSeq.empty[DataPoint] ).successNel
-        d.foldLeft( zero ) { ( acc: Valid[TimeSeries], c: TimeSeries ) ⇒
-          acc flatMap { seriesMerge.merge( _, c ) }
+        val zero: AllIssuesOr[TimeSeries] = TimeSeries( d.head.topic, IndexedSeq.empty[DataPoint] ).validNel
+        import cats.syntax.either._
+
+        d.foldLeft( zero ) { ( acc: AllIssuesOr[TimeSeries], c: TimeSeries ) ⇒
+          val eacc = acc.toEither
+          val merged = eacc flatMap { ts ⇒ seriesMerge.merge( ts, c ).toEither }
+          merged.toValidated
         }
       }
 

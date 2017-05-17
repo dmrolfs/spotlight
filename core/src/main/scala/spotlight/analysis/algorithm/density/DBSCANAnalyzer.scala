@@ -2,14 +2,16 @@ package spotlight.analysis.algorithm.density
 
 import akka.event.LoggingReceive
 
-import scalaz._
-import Scalaz._
-import scalaz.Kleisli.{ ask, kleisli }
+import cats.data.Kleisli
+import cats.data.Kleisli.ask
+import cats.instances.either._
+import cats.syntax.either._
+
 import com.typesafe.config.Config
 import org.apache.commons.math3.ml.clustering.{ Cluster, DBSCANClusterer, DoublePoint }
 import org.apache.commons.math3.ml.distance.DistanceMeasure
 import org.slf4j.LoggerFactory
-import omnibus.commons.{ KOp, TryV }
+import omnibus.commons.{ KOp, ErrorOr }
 import spotlight.analysis.algorithm.AlgorithmActor
 import spotlight.analysis.{ DetectOutliersInSeries, DetectUsing }
 import spotlight.model.outlier.Outliers
@@ -32,13 +34,13 @@ trait DBSCANAnalyzer extends AlgorithmActor {
 
       val start = System.currentTimeMillis()
 
-      ( algorithmContext >=> cluster >=> findOutliers ).run( s ) match {
-        case \/-( r ) ⇒ {
+      ( algorithmContext andThen cluster andThen findOutliers ).run( s ) match {
+        case Right( r ) ⇒ {
           algorithmTimer.update( System.currentTimeMillis() - start, scala.concurrent.duration.MILLISECONDS )
           aggregator ! r
         }
 
-        case -\/( ex ) ⇒ {
+        case Left( ex ) ⇒ {
           log.error(
             ex,
             "failed [{}] analysis on [{}] : [{}]",
@@ -54,28 +56,28 @@ trait DBSCANAnalyzer extends AlgorithmActor {
   def findOutliers: KOp[( AlgorithmContext, Clusters ), Outliers]
 
   val minDensityConnectedPoints: KOp[Config, Int] = {
-    Kleisli[TryV, Config, Int] { c ⇒ \/ fromTryCatchNonFatal { c getInt algorithm + ".minDensityConnectedPoints" } }
+    Kleisli[ErrorOr, Config, Int] { c ⇒ Either catchNonFatal { c getInt algorithm + ".minDensityConnectedPoints" } }
   }
 
-  def historyMean: KOp[AlgorithmContext, Double] = kleisli[TryV, AlgorithmContext, Double] { context ⇒
-    context.history.mean( 1 ).right
+  def historyMean: KOp[AlgorithmContext, Double] = Kleisli[ErrorOr, AlgorithmContext, Double] { context ⇒
+    context.history.mean( 1 ).asRight
   }
 
-  def historyStandardDeviation: KOp[AlgorithmContext, Double] = kleisli[TryV, AlgorithmContext, Double] { context ⇒
-    context.history.standardDeviation( 1 ).right
+  def historyStandardDeviation: KOp[AlgorithmContext, Double] = Kleisli[ErrorOr, AlgorithmContext, Double] { context ⇒
+    context.history.standardDeviation( 1 ).asRight
   }
 
   val eps: KOp[AlgorithmContext, Double] = {
     val epsContext = for {
-      context ← ask[TryV, AlgorithmContext]
+      context ← ask[ErrorOr, AlgorithmContext]
       config ← messageConfig
       historyMean ← historyMean
       historyStdDev ← historyStandardDeviation
       tol ← tolerance
     } yield ( context, config, historyMean, historyStdDev, tol )
 
-    epsContext flatMapK {
-      case ( ctx, config, hsm, hsd, tol ) ⇒
+    epsContext flatMapF {
+      case ( ctx, config, hsm, hsd, tol ) ⇒ {
         log.debug( "eps config = {}", config )
         log.debug( "eps historical mean=[{}] stddev=[{}] tolerance=[{}]", hsm, hsd, tol )
 
@@ -95,21 +97,22 @@ trait DBSCANAnalyzer extends AlgorithmActor {
           calculatedEps
         )
 
-        \/ fromTryCatchNonFatal {
+        Either catchNonFatal {
           calculatedEps getOrElse {
             log.debug( "eps seed = {}", config getDouble algorithm + ".seedEps" )
             config getDouble algorithm + ".seedEps"
           }
         }
+      }
     }
   }
 
   val cluster: KOp[AlgorithmContext, ( AlgorithmContext, Clusters )] = {
     for {
-      ctx ← ask[TryV, AlgorithmContext]
+      ctx ← ask[ErrorOr, AlgorithmContext]
       e ← eps
-      minDensityPts ← minDensityConnectedPoints <=< messageConfig
-      distance ← kleisli[TryV, AlgorithmContext, DistanceMeasure] { _.distanceMeasure }
+      minDensityPts ← messageConfig andThen minDensityConnectedPoints
+      distance ← Kleisli[ErrorOr, AlgorithmContext, DistanceMeasure] { _.distanceMeasure }
     } yield {
       val data = ctx.data
 
@@ -119,7 +122,7 @@ trait DBSCANAnalyzer extends AlgorithmActor {
       log.debug( "cluster: data[{}] = [{}]", data.size, data.mkString( "," ) )
 
       import scala.collection.JavaConverters._
-      val clustersD = \/ fromTryCatchNonFatal {
+      val clustersD = Either catchNonFatal {
         new DBSCANClusterer[DoublePoint]( e, minDensityPts, distance ).cluster( data.asJava ).asScala.toSeq
       }
 

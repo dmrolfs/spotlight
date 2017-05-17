@@ -7,6 +7,8 @@ import scala.concurrent.duration._
 import akka.actor.ActorSystem
 import akka.event.EventStream
 import akka.testkit._
+import cats.instances.either._
+import cats.syntax.validated._
 import com.github.nscala_time.time.OrderingImplicits._
 import com.typesafe.config.{ Config, ConfigFactory }
 import org.apache.commons.math3.ml.distance.EuclideanDistance
@@ -16,7 +18,7 @@ import org.joda.{ time ⇒ joda }
 import org.mockito.Mockito._
 import org.scalatest.mockito.MockitoSugar
 import omnibus.akka.envelope.WorkId
-import omnibus.commons.V
+import omnibus.commons._
 import omnibus.commons.identifier.{ ShortUUID, TaggedID }
 import shapeless._
 import spotlight.analysis._
@@ -44,7 +46,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
           results: OutlierAlgorithmResults,
           source: TimeSeriesBase,
           plan: AnalysisPlan
-        ): V[Outliers] = Validation.failureNel[Throwable, Outliers]( new IllegalStateException( "should not use" ) ).disjunction
+        ): AllErrorsOr[Outliers] = new IllegalStateException( "should not use" ).invalidNel.toEither
       }
 
       val grouping: Option[AnalysisPlan.Grouping] = {
@@ -457,7 +459,7 @@ class SeriesDensityAnalyzerSpec extends ParallelAkkaSpec with MockitoSugar {
       val densityExpectedA = makeDensityExpectedHistory( pointsA, None, None )
       //      densityExpectedA.getN mustBe ( pointsA.size - 1)
 
-      val operationToTest = analyzer.underlyingActor.algorithmContext >=> analyzer.underlyingActor.updateDistanceMoment
+      val operationToTest = analyzer.underlyingActor.algorithmContext andThen analyzer.underlyingActor.updateDistanceMoment
 
       assertDescriptiveStats(
         operationToTest.run( msgA ).toOption.get.asInstanceOf[SeriesDensityAnalyzer.Context].distanceStatistics,

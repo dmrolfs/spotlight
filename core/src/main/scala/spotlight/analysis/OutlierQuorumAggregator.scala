@@ -4,7 +4,6 @@ import scala.concurrent.duration.{ Duration, FiniteDuration }
 import akka.actor.{ Actor, ActorLogging, Cancellable, Props }
 import akka.event.LoggingReceive
 
-import scalaz.{ -\/, \/- }
 import com.typesafe.scalalogging.Logger
 import org.slf4j.LoggerFactory
 import nl.grons.metrics.scala.{ Meter, MetricName, Timer }
@@ -132,12 +131,12 @@ class OutlierQuorumAggregator( plan: AnalysisPlan, source: TimeSeriesBase )
     conclusionsMeter.mark()
 
     plan.reduce( fulfilled, source, plan ) match {
-      case \/-( o ) ⇒ {
+      case Right( o ) ⇒ {
         context.parent !+ o
         logTally( o, fulfilled )
       }
 
-      case -\/( exs ) ⇒ exs.foreach { ex ⇒ log.error( "failed to create Outliers for plan [{}] due to: {}", plan, ex ) }
+      case Left( exs ) ⇒ exs.map { ex ⇒ log.error( "failed to create Outliers for plan [{}] due to: {}", plan, ex ) }
     }
 
     context stop self

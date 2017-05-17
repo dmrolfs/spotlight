@@ -4,6 +4,7 @@ import akka.actor.ActorSystem
 
 import scala.concurrent.duration._
 import akka.testkit._
+import cats.syntax.validated._
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.LazyLogging
 import spotlight.analysis.HistoricalStatistics
@@ -15,7 +16,7 @@ import org.joda.{ time ⇒ joda }
 import org.mockito.Mockito._
 import org.scalatest.Tag
 import org.scalatest.mockito.MockitoSugar
-import omnibus.commons.V
+import omnibus.commons._
 import spotlight.analysis.algorithm.CommonAnalyzer
 
 /** Created by rolfsd on 2/15/16.
@@ -30,7 +31,7 @@ abstract class SkylineBaseSpec extends ParallelAkkaSpec with MockitoSugar {
           results: OutlierAlgorithmResults,
           source: TimeSeriesBase,
           plan: AnalysisPlan
-        ): V[Outliers] = Validation.failureNel[Throwable, Outliers]( new IllegalStateException( "should not use" ) ).disjunction
+        ): AllErrorsOr[Outliers] = new IllegalStateException( "should not use" ).invalidNel.toEither
       }
 
       import scala.concurrent.duration._

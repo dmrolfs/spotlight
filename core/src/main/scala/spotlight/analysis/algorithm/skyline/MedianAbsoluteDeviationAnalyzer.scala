@@ -3,11 +3,13 @@ package spotlight.analysis.algorithm.skyline
 import scala.reflect.ClassTag
 import akka.actor.{ ActorRef, Props }
 
-import scalaz._
-import Scalaz._
-import scalaz.Kleisli.ask
+import cats.instances.either._
+import cats.syntax.either._
+import cats.syntax.validated._
+import cats.syntax.cartesian._
+
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
-import omnibus.commons.{ KOp, TryV, Valid }
+import omnibus.commons.{ KOp, AllIssuesOr }
 import omnibus.commons.util._
 import spotlight.analysis.algorithm.AlgorithmActor.AlgorithmContext
 import spotlight.analysis.algorithm.CommonAnalyzer
@@ -27,7 +29,7 @@ object MedianAbsoluteDeviationAnalyzer {
       movingStatistics: DescriptiveStatistics,
       deviationStatistics: DescriptiveStatistics
   ) extends WrappingContext {
-    override def withUnderlying( ctx: AlgorithmContext ): Valid[WrappingContext] = copy( underlying = ctx ).successNel
+    override def withUnderlying( ctx: AlgorithmContext ): AllIssuesOr[WrappingContext] = copy( underlying = ctx ).validNel
 
     override type That = Context
     override def withSource( newSource: TimeSeriesBase ): That = {
@@ -57,18 +59,18 @@ class MedianAbsoluteDeviationAnalyzer( override val router: ActorRef )
 
   override def algorithm: String = MedianAbsoluteDeviationAnalyzer.Algorithm
 
-  override def wrapContext( c: AlgorithmContext ): Valid[WrappingContext] = {
-    ( makeMovingStatistics( c ) |@| makeDeviationStatistics( c ) ) { ( m, d ) ⇒
+  override def wrapContext( c: AlgorithmContext ): AllIssuesOr[WrappingContext] = {
+    ( makeMovingStatistics( c ) |@| makeDeviationStatistics( c ) ) map { ( m, d ) ⇒
       Context( underlying = c, movingStatistics = m, deviationStatistics = d )
     }
   }
 
-  def makeMovingStatistics( context: AlgorithmContext ): Valid[DescriptiveStatistics] = {
-    new DescriptiveStatistics( ApproximateDayWindow ).successNel
+  def makeMovingStatistics( context: AlgorithmContext ): AllIssuesOr[DescriptiveStatistics] = {
+    new DescriptiveStatistics( ApproximateDayWindow ).validNel
   }
 
-  def makeDeviationStatistics( context: AlgorithmContext ): Valid[DescriptiveStatistics] = {
-    new DescriptiveStatistics( ApproximateDayWindow ).successNel
+  def makeDeviationStatistics( context: AlgorithmContext ): AllIssuesOr[DescriptiveStatistics] = {
+    new DescriptiveStatistics( ApproximateDayWindow ).validNel
   }
 
   /** A timeseries is anomalous if the deviation of its latest datapoint with

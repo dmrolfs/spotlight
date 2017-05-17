@@ -166,12 +166,9 @@ class OutlierScoringModelSpec extends ParallelAkkaSpec with MockitoSugar {
 
     val settings: Settings = new TestSettingsWithPlans(
       plans,
-      Settings( Array( "-r", "all", "-p", "2551" ), config = config, systemName = system.name ).disjunction match {
-        case scalaz.\/-( s ) ⇒ s
-        case scalaz.-\/( exs ) ⇒ {
-          exs foreach { ex ⇒ logger.info( "Setting error: [{}]", ex ) }
-          throw exs.head
-        }
+      Settings( Array( "-r", "all", "-p", "2551" ), config = config, systemName = system.name ).valueOr { exs ⇒
+        exs map { ex ⇒ logger.info( "Setting error: [{}]", ex ) }
+        throw exs.head
       }
     )
 

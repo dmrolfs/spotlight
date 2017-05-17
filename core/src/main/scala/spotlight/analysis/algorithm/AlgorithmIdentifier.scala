@@ -1,9 +1,8 @@
 package spotlight.analysis.algorithm
 
-import scalaz._
-import Scalaz._
+import cats.syntax.validated._
 import com.persist.logging._
-import omnibus.commons.Valid
+import omnibus.commons.AllIssuesOr
 import AlgorithmIdentifier.SpanType
 import bloomfilter.CanGenerateHashFrom
 import demesne.AggregateRootType
@@ -59,10 +58,10 @@ object AlgorithmIdentifier extends ClassLogging {
   }
 
   object SpanType {
-    def from( spanRep: String ): Valid[SpanType] = {
+    def from( spanRep: String ): AllIssuesOr[SpanType] = {
       options
-        .collectFirst { case st if st.label == spanRep ⇒ st.successNel[Throwable] }
-        .getOrElse { Validation.failureNel( new IllegalStateException( s"unknown algorithm id span type:${spanRep}" ) ) }
+        .collectFirst { case st if st.label == spanRep ⇒ st.validNel }
+        .getOrElse { new IllegalStateException( s"unknown algorithm id span type:${spanRep}" ).invalidNel }
     }
 
     lazy val options: Seq[SpanType] = Seq( TopicSpan, GroupSpan )
@@ -90,7 +89,7 @@ object AlgorithmIdentifier extends ClassLogging {
 
   def toAggregateId( id: AlgorithmIdentifier ): String = id.planName + "@" + id.planId + ":" + id.spanType.label + ":" + id.span
 
-  def fromAggregateId( aggregateId: String ): Valid[AlgorithmIdentifier] = {
+  def fromAggregateId( aggregateId: String ): AllIssuesOr[AlgorithmIdentifier] = {
     aggregateId match {
       case IdFormat( planName, planId, stype, span ) ⇒ {
         SpanType.from( stype )
@@ -113,11 +112,9 @@ object AlgorithmIdentifier extends ClassLogging {
       }
 
       case _ ⇒ {
-        Validation.failureNel(
-          new IllegalStateException(
-            s"failed to parse algorithm aggregateId[${aggregateId}], which does not match expected format."
-          )
-        )
+        new IllegalStateException(
+          s"failed to parse algorithm aggregateId[${aggregateId}], which does not match expected format."
+        ).invalidNel
       }
     }
   }

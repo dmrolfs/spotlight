@@ -1,11 +1,11 @@
 package spotlight.analysis.algorithm.density
 
 import scala.reflect.ClassTag
-import scalaz._
-import Scalaz._
 import akka.actor.{ ActorRef, Props }
+import cats.data.Kleisli
+import cats.syntax.either._
 import org.apache.commons.math3.ml.clustering.DoublePoint
-import omnibus.commons.{ KOp, TryV }
+import omnibus.commons.{ KOp, ErrorOr }
 import spotlight.analysis.algorithm.AlgorithmActor
 import spotlight.analysis.algorithm.density.DBSCANAnalyzer.Clusters
 import spotlight.analysis.{ DetectUsing, HistoricalStatistics }
@@ -34,11 +34,11 @@ class SeriesCentroidDensityAnalyzer( override val router: ActorRef ) extends DBS
       distFromCentroid
     }
 
-    Kleisli[TryV, DetectUsing, AlgorithmContext] { d ⇒
+    Kleisli[ErrorOr, DetectUsing, AlgorithmContext] { d ⇒
       val points = {
         d.payload.source match {
-          case s: TimeSeries ⇒ centroidDistances( s.points.toDoublePoints, d.history ).right
-          case x ⇒ -\/( new UnsupportedOperationException( s"cannot extract test context from [${x.getClass}]" ) )
+          case s: TimeSeries ⇒ centroidDistances( s.points.toDoublePoints, d.history ).asRight
+          case x ⇒ new UnsupportedOperationException( s"cannot extract test context from [${x.getClass}]" ).asLeft
         }
       }
 
@@ -47,7 +47,7 @@ class SeriesCentroidDensityAnalyzer( override val router: ActorRef ) extends DBS
   }
 
   override def findOutliers: KOp[( AlgorithmContext, Clusters ), Outliers] = {
-    Kleisli[TryV, ( AlgorithmContext, Clusters ), Outliers] {
+    Kleisli[ErrorOr, ( AlgorithmContext, Clusters ), Outliers] {
       case ( context, clusters ) ⇒
         val isOutlier = makeOutlierTest( clusters )
         val centroidOutliers: Set[Long] = {
@@ -66,10 +66,10 @@ class SeriesCentroidDensityAnalyzer( override val router: ActorRef ) extends DBS
               source = src,
               outliers = outliers,
               plan = context.message.plan
-            ).right
+            ).asRight
           }
 
-          case src ⇒ NoOutliers( algorithms = Set( algorithm ), source = src, plan = context.message.plan ).right
+          case src ⇒ NoOutliers( algorithms = Set( algorithm ), source = src, plan = context.message.plan ).asRight
         }
     }
   }

@@ -4,18 +4,19 @@ import java.io.Serializable
 
 import scala.annotation.tailrec
 import scala.concurrent.duration._
-import scala.util.Random
+import scala.util.{ Failure, Random, Success, Try }
 import scala.reflect._
 import akka.actor._
 import akka.cluster.sharding.{ ClusterShardingSettings, ShardRegion }
 import akka.event.LoggingReceive
 import akka.persistence._
-import spotlight.{ Settings, SpotlightContext }
-import spotlight.infrastructure.ClusterRole
+import cats.data.Kleisli
+import cats.data.Kleisli.ask
+import cats.data.Validated.{ Invalid, Valid }
+import cats.syntax.either._
+import cats.instances.either._
+import cats.syntax.applicative._
 
-import scalaz._
-import Scalaz._
-import scalaz.Kleisli.{ ask, kleisli }
 //import bloomfilter.mutable.BloomFilter
 import bloomfilter.CanGenerateHashFrom
 import bloomfilter.CanGenerateHashFrom.CanGenerateHashFromString
@@ -32,7 +33,7 @@ import omnibus.akka.metrics.{ Instrumented, InstrumentedActor }
 import omnibus.akka.persistence.{ Passivating, SnapshotLimiter }
 import omnibus.akka.publish.{ EventPublisher, StackableStreamPublisher }
 import omnibus.archetype.domain.model.core.Entity
-import omnibus.commons.{ KOp, TryV, Valid }
+import omnibus.commons._
 import omnibus.commons.identifier.{ Identifying, ShortUUID, TaggedID }
 import demesne._
 import demesne.repository._
@@ -41,6 +42,8 @@ import spotlight.analysis.algorithm.Advancing.syntax._
 import spotlight.analysis.algorithm.AlgorithmProtocol.RouteMessage
 import spotlight.model.outlier.{ NoOutliers, Outliers }
 import spotlight.model.timeseries._
+import spotlight.{ Settings, SpotlightContext }
+import spotlight.infrastructure.ClusterRole
 
 case class AlgorithmState[S](
     override val id: Algorithm.TID,
@@ -189,8 +192,8 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
     override type ID = Algorithm.ID
     override val idTag: Symbol = Symbol( algorithm.label )
     override def tidOf( s: AlgorithmState[Shape] ): TID = s.id
-    override def nextTID: TryV[TID] = -\/( new IllegalStateException( "Algorithm TIDs are created via AlgorithmRoutes" ) )
-    override def idFromString( idRep: String ): ID = Valid.unsafeGet( AlgorithmIdentifier fromAggregateId idRep )
+    override def nextTID: ErrorOr[TID] = Left( new IllegalStateException( "Algorithm TIDs are created via AlgorithmRoutes" ) )
+    override def idFromString( idRep: String ): ID = AlgorithmIdentifier.fromAggregateId( idRep ).unsafeGet
   }
 
   val shardMonitor: Algorithm.ShardMonitor = new Algorithm.ShardMonitor( label )
@@ -239,11 +242,10 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
 
   def initializeMetrics(): Unit = {
     stripLingeringMetrics()
-    \/ fromTryCatchNonFatal {
-      metrics.gauge( Algorithm.ShardMonitor.ShardsMetricName ) { algorithm.shardMonitor.shards }
-    } match {
-      case \/-( g ) ⇒ log.debug( Map( "@msg" → "gauge created", "gauge" → Algorithm.ShardMonitor.ShardsMetricName ) )
-      case -\/( ex ) ⇒ log.debug( Map( "@msg" → "gauge already exists", "gauge" → Algorithm.ShardMonitor.ShardsMetricName ) )
+
+    Try { metrics.gauge( Algorithm.ShardMonitor.ShardsMetricName ) { algorithm.shardMonitor.shards } } match {
+      case Success( g ) ⇒ log.debug( Map( "@msg" → "gauge created", "gauge" → Algorithm.ShardMonitor.ShardsMetricName ) )
+      case Failure( ex ) ⇒ log.debug( Map( "@msg" → "gauge already exists", "gauge" → Algorithm.ShardMonitor.ShardsMetricName ) )
     }
   }
 
@@ -371,15 +373,15 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
           )
         }
         val ( id, _ ) = rootType aggregateIdFor command
-        AlgorithmIdentifier.fromAggregateId( id ).disjunction match {
-          case \/-( aid ) ⇒ {
+        AlgorithmIdentifier.fromAggregateId( id ) match {
+          case Valid( aid ) ⇒ {
             val options = backoffOptionsFor( id )
             val name = "backoff:" + aid.span
             context.child( name ) getOrElse { context.actorOf( BackoffSupervisor.props( options ), name ) }
           }
 
-          case -\/( exs ) ⇒ {
-            exs foreach { ex ⇒
+          case Invalid( exs ) ⇒ {
+            exs map { ex ⇒
               altLog.error(
                 Map(
                   "@msg" → "failed to parse aggregateId via root type",
@@ -498,14 +500,14 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
             executionTimer.update( System.currentTimeMillis() - start, scala.concurrent.duration.MILLISECONDS )
           }
 
-          ( makeAlgorithmContext >=> findOutliers >=> toOutliers ).run( msg ) match {
-            case \/-( r ) ⇒ {
+          ( makeAlgorithmContext andThen findOutliers andThen toOutliers ).run( msg ) match {
+            case Right( r ) ⇒ {
               stopTimer( start )
               //            log.debug( "[{}] sending detect result to aggregator[{}]: [{}]", workId, aggregator.path.name, r )
               aggregator !+ r
             }
 
-            case -\/( ex: NonFatalSkipScoringException ) ⇒ {
+            case Left( ex: NonFatalSkipScoringException ) ⇒ {
               stopTimer( start )
               altLog.info(
                 Map(
@@ -528,7 +530,7 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
               )
             }
 
-            case -\/( ex ) ⇒ {
+            case Left( ex ) ⇒ {
               stopTimer( start )
               altLog.error(
                 Map(
@@ -811,9 +813,9 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
       }
 
       // -- algorithm functional elements --
-      val makeAlgorithmContext: KOp[DetectUsing, Context] = kleisli[TryV, DetectUsing, Context] { message ⇒
+      val makeAlgorithmContext: KOp[DetectUsing, Context] = Kleisli[ErrorOr, DetectUsing, Context] { message ⇒
         //todo: with algorithm global config support. merge with state config (probably persist and accept ConfigChanged evt)
-        \/ fromTryCatchNonFatal {
+        Either catchNonFatal {
           algorithmContext = algorithm.makeContext( message, Option( state ) )
           algorithmContext
         }
@@ -821,49 +823,49 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
 
       def findOutliers: KOp[Context, ( Outliers, Context )] = {
         for {
-          ctx ← ask[TryV, Context]
-          data ← kleisli[TryV, Context, Seq[DoublePoint]] { c ⇒ \/ fromTryCatchNonFatal { algorithm prepareData c } }
-          events ← collectOutlierPoints( data ) >=> recordAdvancements
+          ctx ← ask[ErrorOr, Context]
+          data ← Kleisli[ErrorOr, Context, Seq[DoublePoint]] { c ⇒ Either catchNonFatal { algorithm prepareData c } }
+          events ← collectOutlierPoints( data ) andThen recordAdvancements
           o ← makeOutliers( events )
         } yield ( o, ctx )
       }
 
-      val toOutliers = kleisli[TryV, ( Outliers, Context ), Outliers] { case ( o, _ ) ⇒ o.right }
+      val toOutliers = Kleisli[ErrorOr, ( Outliers, Context ), Outliers] { case ( o, _ ) ⇒ o.asRight }
 
       case class Accumulation( topic: Topic, shape: Shape, advances: Seq[Advanced] = Seq.empty[Advanced] )
 
       /** The test should not be used for sample sizes of six or fewer since it frequently tags most of the points as outliers.
         * @return
         */
-      private def checkSize( shape: S )( implicit analysisContext: Context ): TryV[Long] = {
+      private def checkSize( shape: S )( implicit analysisContext: Context ): ErrorOr[Long] = {
         import Algorithm.ConfigurationProvider.MinimalPopulationPath
 
         val minimumDataPoints = analysisContext.properties.as[Option[Int]]( MinimalPopulationPath ) getOrElse 0
 
         shape.N match {
-          case s if s < minimumDataPoints ⇒ InsufficientDataSize( label, s, minimumDataPoints ).left
-          case s ⇒ s.right
+          case s if s < minimumDataPoints ⇒ InsufficientDataSize( label, s, minimumDataPoints ).asLeft
+          case s ⇒ s.asRight
         }
       }
 
-      private def checkScore( score: AnomalyScore, shape: Shape )( implicit analysisContext: Context ): TryV[AnomalyScore] = {
+      private def checkScore( score: AnomalyScore, shape: Shape )( implicit analysisContext: Context ): ErrorOr[AnomalyScore] = {
         ( score.threshold.floor, score.threshold.expected, score.threshold.ceiling ) match {
           case ( Some( f ), Some( e ), Some( c ) ) if f == e && e == c ⇒ {
-            InsufficientVariance( algorithm.label, shape.N ).left
+            InsufficientVariance( algorithm.label, shape.N ).asLeft
           }
-          case ( Some( f ), _, Some( c ) ) if f.isNaN && c.isNaN ⇒ InsufficientVariance( algorithm.label, shape.N ).left
-          case _ ⇒ score.right
+          case ( Some( f ), _, Some( c ) ) if f.isNaN && c.isNaN ⇒ InsufficientVariance( algorithm.label, shape.N ).asLeft
+          case _ ⇒ score.asRight
         }
       }
 
       private def collectOutlierPoints( points: Seq[DoublePoint] ): KOp[Context, Seq[Advanced]] = {
-        kleisli[TryV, Context, Seq[Advanced]] { implicit analysisContext ⇒
+        Kleisli[ErrorOr, Context, Seq[Advanced]] { implicit analysisContext ⇒
           val workingShape = state.shapes.get( analysisContext.topic ) match {
             case None ⇒ advancing zero Option( analysisContext.properties )
             case Some( shape ) ⇒ shape.copy
           }
 
-          @tailrec def loop( points: List[DoublePoint], accumulation: TryV[Accumulation] ): TryV[Seq[Advanced]] = {
+          @tailrec def loop( points: List[DoublePoint], accumulation: ErrorOr[Accumulation] ): ErrorOr[Seq[Advanced]] = {
             points match {
               case Nil ⇒ accumulation map { _.advances }
 
@@ -937,8 +939,8 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
             }
           }
 
-          def tryScoring( pt: PointT, shape: Shape ): TryV[AnomalyScore] = {
-            val attempt = \/ fromTryCatchNonFatal {
+          def tryScoring( pt: PointT, shape: Shape ): ErrorOr[AnomalyScore] = {
+            val attempt = Either catchNonFatal {
               algorithm
                 .score( pt, shape )( state, analysisContext )
                 .getOrElse { AnomalyScore( false, ThresholdBoundary empty pt.timestamp.toLong ) }
@@ -952,10 +954,8 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
               } yield checkedScore
             }
 
-            anomaly match {
-              case \/-( a ) ⇒ a.right
-
-              case -\/( ex: NonFatalSkipScoringException ) ⇒ {
+            anomaly recover {
+              case ex: NonFatalSkipScoringException ⇒ {
                 altLog.info(
                   Map(
                     "@msg" → "will not score point",
@@ -970,26 +970,24 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
                   id = requestId
                 )
 
-                AnomalyScore( false, ThresholdBoundary empty pt.timestamp.toLong ).right
+                AnomalyScore( false, ThresholdBoundary empty pt.timestamp.toLong )
               }
-
-              case ex ⇒ ex // error fatal in processing algorithm
             }
           }
 
-          loop( points.toList, Accumulation( analysisContext.topic, workingShape ).right )
+          loop( points.toList, Accumulation( analysisContext.topic, workingShape ).asRight )
         }
       }
 
       private val recordAdvancements: KOp[Seq[Advanced], Seq[Advanced]] = {
-        kleisli[TryV, Seq[Advanced], Seq[Advanced]] { advances ⇒
+        Kleisli[ErrorOr, Seq[Advanced], Seq[Advanced]] { advances ⇒
           persistAll( advances.to[scala.collection.immutable.Seq] ) { accept }
-          advances.right
+          advances.asRight
         }
       }
 
       private def makeOutliers( events: Seq[Advanced] ): KOp[Context, Outliers] = {
-        kleisli[TryV, Context, Outliers] { ctx ⇒
+        Kleisli[ErrorOr, Context, Outliers] { ctx ⇒
           val outliers = events collect { case e if e.isOutlier ⇒ e.point }
           val thresholds = events map { _.threshold }
 
@@ -1000,7 +998,7 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
             outliers = outliers,
             thresholdBoundaries = Map( algorithm.label → thresholds )
           )
-            .disjunction
+            .toEither
             .leftMap { _.head }
         }
       }

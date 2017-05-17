@@ -1,11 +1,10 @@
 package spotlight.model.outlier
 
-import scalaz._
-import Scalaz._
+import cats.syntax.validated._
 import com.typesafe.scalalogging.{ LazyLogging, Logger }
 import org.slf4j.LoggerFactory
 import org.joda.{ time ⇒ joda }
-import omnibus.commons.{ V, Valid }
+import omnibus.commons.{ AllErrorsOr, AllIssuesOr }
 import shapeless.syntax.typeable._
 import spotlight.model.outlier.ReduceOutliers.CorroboratedReduceOutliers.Check
 import spotlight.model.timeseries.{ ThresholdBoundary, DataPoint, TimeSeriesBase, Topic }
@@ -15,7 +14,7 @@ trait ReduceOutliers extends Serializable {
     results: OutlierAlgorithmResults,
     source: TimeSeriesBase,
     plan: AnalysisPlan
-  ): V[Outliers]
+  ): AllErrorsOr[Outliers]
 }
 
 object ReduceOutliers extends LazyLogging {
@@ -38,9 +37,9 @@ object ReduceOutliers extends LazyLogging {
   final case class EmptyResultsError private[outlier] ( plan: AnalysisPlan, topic: Topic )
     extends IllegalStateException( s"ReduceOutliers called on empty results in plan:[${plan.name}] topic:[${topic}]" )
 
-  def checkResults( results: OutlierAlgorithmResults, plan: AnalysisPlan, topic: Topic ): Valid[OutlierAlgorithmResults] = {
-    if ( results.nonEmpty ) results.successNel
-    else Validation.failureNel( EmptyResultsError( plan, topic ) )
+  def checkResults( results: OutlierAlgorithmResults, plan: AnalysisPlan, topic: Topic ): AllIssuesOr[OutlierAlgorithmResults] = {
+    if ( results.nonEmpty ) results.validNel
+    else EmptyResultsError( plan, topic ).invalidNel
   }
 
   object CorroboratedReduceOutliers {
@@ -54,7 +53,7 @@ object ReduceOutliers extends LazyLogging {
       results: OutlierAlgorithmResults,
       source: TimeSeriesBase,
       plan: AnalysisPlan
-    ): V[Outliers] = {
+    ): AllErrorsOr[Outliers] = {
       // logger.debug(
       //   "REDUCE before [{}]:[{}]:\n\t+ outliers: [{}]\n\t+ threshold: [{}]",
       //   plan.name,
@@ -64,8 +63,8 @@ object ReduceOutliers extends LazyLogging {
       // )
 
       for {
-        r ← checkResults( results, plan, source.topic ).disjunction
-        result ← reduce( r, source, plan ).disjunction
+        r ← checkResults( results, plan, source.topic ).toEither
+        result ← reduce( r, source, plan )
       } yield result
     }
 
@@ -73,7 +72,7 @@ object ReduceOutliers extends LazyLogging {
       results: OutlierAlgorithmResults,
       source: TimeSeriesBase,
       plan: AnalysisPlan
-    ): Valid[Outliers] = {
+    ): AllErrorsOr[Outliers] = {
       val tally = OutlierAlgorithmResults tally results
 
       val corroboratedTimestamps = tally.collect { case ( dp, c ) if isCorroborated( plan )( c.size ) ⇒ dp }.toSet
@@ -98,6 +97,7 @@ object ReduceOutliers extends LazyLogging {
         outliers = corroboratedOutliers,
         thresholdBoundaries = combinedThresholds
       )
+        .toEither
     }
 
     private def logDebug(

@@ -3,15 +3,17 @@ package spotlight.analysis.algorithm
 import scala.annotation.tailrec
 import scala.reflect.ClassTag
 
-import scalaz.Kleisli.kleisli
-import scalaz.Scalaz._
-import scalaz._
+import cats.data.Kleisli
+import cats.instances.either._
+import cats.syntax.either._
+import cats.syntax.validated._
+
 import shapeless.syntax.typeable._
 import com.typesafe.config.Config
 import org.apache.commons.math3.ml.clustering.DoublePoint
 import org.apache.commons.math3.ml.distance.DistanceMeasure
 import org.joda.{ time ⇒ joda }
-import omnibus.commons.{ KOp, TryV, Valid }
+import omnibus.commons.{ KOp, ErrorOr, AllIssuesOr }
 import omnibus.commons.util._
 import spotlight.analysis._
 import spotlight.analysis.algorithm.AlgorithmActor.{ AlgorithmContext ⇒ OLD_AlgorithmContext }
@@ -24,7 +26,7 @@ import spotlight.model.timeseries._
 object CommonAnalyzer {
   trait WrappingContext extends OLD_AlgorithmContext {
     def underlying: OLD_AlgorithmContext
-    def withUnderlying( ctx: OLD_AlgorithmContext ): Valid[WrappingContext]
+    def withUnderlying( ctx: OLD_AlgorithmContext ): AllIssuesOr[WrappingContext]
 
     override def message: DetectUsing = underlying.message
     override def data: Seq[DoublePoint] = underlying.data
@@ -35,15 +37,15 @@ object CommonAnalyzer {
     override def history: HistoricalStatistics = underlying.history
     override def source: TimeSeriesBase = underlying.source
     override def messageConfig: Config = underlying.messageConfig
-    override def distanceMeasure: TryV[DistanceMeasure] = underlying.distanceMeasure
-    override def tolerance: TryV[Option[Double]] = underlying.tolerance
+    override def distanceMeasure: ErrorOr[DistanceMeasure] = underlying.distanceMeasure
+    override def tolerance: ErrorOr[Option[Double]] = underlying.tolerance
     override def thresholdBoundaries: Seq[ThresholdBoundary] = underlying.thresholdBoundaries
   }
 
   val DefaultTailAverageLength: Int = 1
 
   final case class SimpleWrappingContext private[algorithm] ( override val underlying: OLD_AlgorithmContext ) extends WrappingContext {
-    override def withUnderlying( ctx: OLD_AlgorithmContext ): Valid[WrappingContext] = copy( underlying = ctx ).successNel
+    override def withUnderlying( ctx: OLD_AlgorithmContext ): AllIssuesOr[WrappingContext] = copy( underlying = ctx ).validNel
 
     override type That = SimpleWrappingContext
     override def withSource( newSource: TimeSeriesBase ): That = {
@@ -70,10 +72,10 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
   import CommonAnalyzer.WrappingContext
 
   implicit val contextClassTag: ClassTag[C]
-  def toConcreteContext( actx: OLD_AlgorithmContext ): TryV[C] = {
+  def toConcreteContext( actx: OLD_AlgorithmContext ): ErrorOr[C] = {
     actx match {
-      case contextClassTag( ctx ) ⇒ ctx.right
-      case ctx ⇒ CommonAnalyzer.CommonContextError( ctx ).left
+      case contextClassTag( ctx ) ⇒ ctx.asRight
+      case ctx ⇒ CommonAnalyzer.CommonContextError( ctx ).asLeft
     }
   }
 
@@ -86,20 +88,20 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
     case msg @ DetectUsing( _, algo, payload: DetectOutliersInSeries, history, algorithmConfig ) ⇒ {
       val aggregator = sender()
       log.info( "TEST: AGGREGATOR=[{}]", aggregator )
-      val toOutliers = kleisli[TryV, ( Outliers, OLD_AlgorithmContext ), Outliers] {
+      val toOutliers = Kleisli[ErrorOr, ( Outliers, OLD_AlgorithmContext ), Outliers] {
         case ( o, _ ) ⇒
           //        logOutlierToDebug( o )
-          o.right
+          o.asRight
       }
 
       val start = System.currentTimeMillis()
-      ( algorithmContext >=> findOutliers >=> toOutliers ).run( msg ) match {
-        case \/-( r ) ⇒ {
+      ( algorithmContext andThen findOutliers andThen toOutliers ).run( msg ) match {
+        case Right( r ) ⇒ {
           log.debug( "sending detect result to aggregator[{}]: [{}]", aggregator.path, r )
           algorithmTimer.update( System.currentTimeMillis() - start, scala.concurrent.duration.MILLISECONDS )
           aggregator ! r
         }
-        case -\/( ex ) ⇒ {
+        case Left( ex ) ⇒ {
           log.error(
             ex,
             "failed [{}] analysis on [{}] @ [{}]",
@@ -125,34 +127,34 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
   var _scopedContexts: Map[AnalysisPlan.Scope, WrappingContext] = Map.empty[AnalysisPlan.Scope, WrappingContext]
 
   def setScopedContext( c: WrappingContext ): Unit = { _scopedContexts += c.historyKey → c }
-  def wrapContext( c: OLD_AlgorithmContext ): Valid[WrappingContext]
-  def preStartContext( context: OLD_AlgorithmContext, priorContext: WrappingContext ): TryV[WrappingContext] = {
+  def wrapContext( c: OLD_AlgorithmContext ): AllIssuesOr[WrappingContext]
+  def preStartContext( context: OLD_AlgorithmContext, priorContext: WrappingContext ): ErrorOr[WrappingContext] = {
     log.debug( "preStartContext: [{}]", context )
-    priorContext.withUnderlying( context ).disjunction.leftMap { _.head }
+    priorContext.withUnderlying( context ).toEither.leftMap { _.head }
   }
 
   override val algorithmContext: KOp[DetectUsing, OLD_AlgorithmContext] = {
-    val wrap = kleisli[TryV, OLD_AlgorithmContext, OLD_AlgorithmContext] { c ⇒
+    val wrap = Kleisli[ErrorOr, OLD_AlgorithmContext, OLD_AlgorithmContext] { c ⇒
       _scopedContexts
         .get( c.historyKey )
         .map { priorContext ⇒ preStartContext( c, priorContext ) }
         .getOrElse {
           val context = wrapContext( c )
           context foreach { setScopedContext }
-          context.disjunction.leftMap { _.head }
+          context.toEither.leftMap { _.head }
         }
     }
 
-    super.algorithmContext >=> wrap
+    super.algorithmContext andThen wrap
   }
 
-  def toConcreteContextK: KOp[OLD_AlgorithmContext, C] = kleisli { toConcreteContext }
+  def toConcreteContextK: KOp[OLD_AlgorithmContext, C] = Kleisli { toConcreteContext }
 
   def tailAverage(
     data: Seq[DoublePoint],
     tailLength: Int = CommonAnalyzer.DefaultTailAverageLength
   ): KOp[OLD_AlgorithmContext, Seq[PointT]] = {
-    kleisli[TryV, OLD_AlgorithmContext, Seq[PointT]] { ctx ⇒
+    Kleisli[ErrorOr, OLD_AlgorithmContext, Seq[PointT]] { ctx ⇒
       val values = data map { _.value }
       val lastPos: Int = {
         data.headOption
@@ -184,7 +186,7 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
             log.debug( "points to tail average ({}, [{}]) = {}", ts.toLong, pts.mkString( "," ), pts.sum / pts.size )
             ( ts, pts.sum / pts.size )
         }
-        .right
+        .asRight
     }
   }
 
@@ -254,7 +256,7 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
   }
 
   def makeOutliers( outliers: Seq[DataPoint], resultingContext: OLD_AlgorithmContext ): KOp[OLD_AlgorithmContext, Outliers] = {
-    kleisli[TryV, OLD_AlgorithmContext, Outliers] { originalContext ⇒
+    Kleisli[ErrorOr, OLD_AlgorithmContext, Outliers] { originalContext ⇒
       Outliers.forSeries(
         algorithms = Set( algorithm ),
         plan = originalContext.plan,
@@ -262,7 +264,7 @@ trait CommonAnalyzer[C <: CommonAnalyzer.WrappingContext] extends AlgorithmActor
         outliers = outliers,
         thresholdBoundaries = Map( algorithm → resultingContext.thresholdBoundaries )
       )
-        .disjunction
+        .toEither
         .leftMap { _.head }
     }
   }

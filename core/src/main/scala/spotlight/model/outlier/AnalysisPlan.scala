@@ -2,8 +2,7 @@ package spotlight.model.outlier
 
 import scala.concurrent.duration._
 import scala.util.matching.Regex
-import scalaz.{ Ordering ⇒ _, _ }
-import Scalaz._
+import cats.syntax.either._
 import com.typesafe.config.{ Config, ConfigFactory }
 import net.ceedubs.ficus.Ficus._
 import com.persist.logging._
@@ -103,7 +102,9 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] with ClassLogging w
 
     trait ScopeIdentifying[T] { self: Identifying[T] ⇒
       override type ID = Scope
-      override def nextTID: TryV[TID] = new IllegalStateException( "scopes are fixed to plan:topic pairs so not generated" ).left
+      override def nextTID: ErrorOr[TID] = {
+        new IllegalStateException( "scopes are fixed to plan:topic pairs so not generated" ).asLeft
+      }
       override def idFromString( idRep: String ): ID = {
         val Array( p, t ) = idRep split ':'
         Scope( plan = p, topic = t )
@@ -216,7 +217,7 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] with ClassLogging w
 
   type ExtractTopic = PartialFunction[Any, Option[Topic]]
 
-  type Creator = () ⇒ V[Set[AnalysisPlan]]
+  type Creator = () ⇒ AllErrorsOr[Set[AnalysisPlan]]
 
   final case class Grouping( limit: Int, window: FiniteDuration )
 
@@ -232,7 +233,7 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] with ClassLogging w
     appliesTo: ( Any ) ⇒ Boolean
   ): AnalysisPlan = {
     SimpleAnalysisPlan(
-      id = TryV.unsafeGet( analysisPlanIdentifying.nextTID ),
+      id = analysisPlanIdentifying.nextTID.unsafeGet,
       name = name,
       appliesTo = AppliesTo.function( appliesTo ),
       algorithms = algorithms,
@@ -258,7 +259,7 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] with ClassLogging w
     appliesTo: PartialFunction[Any, Boolean]
   ): AnalysisPlan = {
     SimpleAnalysisPlan(
-      id = TryV.unsafeGet( analysisPlanIdentifying.nextTID ),
+      id = analysisPlanIdentifying.nextTID.unsafeGet,
       name = name,
       appliesTo = AppliesTo.partialFunction( appliesTo ),
       algorithms = algorithms,
@@ -283,7 +284,7 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] with ClassLogging w
     topics: Set[Topic]
   ): AnalysisPlan = {
     SimpleAnalysisPlan(
-      id = TryV.unsafeGet( analysisPlanIdentifying.nextTID ),
+      id = analysisPlanIdentifying.nextTID.unsafeGet,
       name = name,
       appliesTo = AppliesTo.topics( topics, extractTopic ),
       algorithms = algorithms,
@@ -308,7 +309,7 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] with ClassLogging w
     topics: String*
   ): AnalysisPlan = {
     SimpleAnalysisPlan(
-      id = TryV.unsafeGet( analysisPlanIdentifying.nextTID ),
+      id = analysisPlanIdentifying.nextTID.unsafeGet,
       name = name,
       appliesTo = AppliesTo.topics( topics.map { Topic( _ ) }.toSet, extractTopic ),
       algorithms = algorithms,
@@ -333,7 +334,7 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] with ClassLogging w
     regex: Regex
   ): AnalysisPlan = {
     SimpleAnalysisPlan(
-      id = TryV.unsafeGet( analysisPlanIdentifying.nextTID ),
+      id = analysisPlanIdentifying.nextTID.unsafeGet,
       name = name,
       appliesTo = AppliesTo.regex( regex, extractTopic ),
       algorithms = algorithms,
@@ -356,7 +357,7 @@ object AnalysisPlan extends EntityLensProvider[AnalysisPlan] with ClassLogging w
     planSpecification: Config = ConfigFactory.empty
   ): AnalysisPlan = {
     SimpleAnalysisPlan(
-      id = TryV.unsafeGet( analysisPlanIdentifying.nextTID ),
+      id = analysisPlanIdentifying.nextTID.unsafeGet,
       name = name,
       appliesTo = AppliesTo.all,
       algorithms = algorithms,

@@ -5,9 +5,11 @@ import java.util.concurrent.atomic.AtomicInteger
 
 import scala.concurrent.duration._
 import scala.reflect.ClassTag
+import scala.math
 import akka.actor.{ ActorRef, ActorSystem }
 import akka.pattern.ask
 import akka.testkit._
+import cats.syntax.validated._
 import com.persist.logging._
 import com.typesafe.config.{ Config, ConfigFactory }
 import org.scalatest.concurrent.ScalaFutures
@@ -20,7 +22,7 @@ import org.apache.commons.math3.stat.descriptive.{ StatisticalSummary, SummarySt
 import org.mockito.Mockito._
 import org.scalatest.{ Assertion, OptionValues, Tag }
 import omnibus.akka.envelope._
-import omnibus.commons.{ TryV, V }
+import omnibus.commons._
 import omnibus.commons.identifier.Identifying
 import omnibus.commons.log.Trace
 import spotlight.Settings
@@ -127,8 +129,8 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
           results: OutlierAlgorithmResults,
           source: TimeSeriesBase,
           plan: AnalysisPlan
-        ): V[Outliers] = {
-          Validation.failureNel[Throwable, Outliers]( new IllegalStateException( "should not use" ) ).disjunction
+        ): AllErrorsOr[Outliers] = {
+          new IllegalStateException( "should not use" ).invalidNel.toEither
         }
       }
 
@@ -149,7 +151,7 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
 
     val scope = AnalysisPlan.Scope( plan = "TestPlan", topic = "test.topic" )
     val plan = mock[AnalysisPlan]
-    when( plan.id ).thenReturn( TryV.unsafeGet( AnalysisPlan.analysisPlanIdentifying.nextTID ) )
+    when( plan.id ).thenReturn( AnalysisPlan.analysisPlanIdentifying.nextTID.unsafeGet )
     when( plan.name ).thenReturn( scope.plan )
     when( plan.appliesTo ).thenReturn( fixture.appliesToAll )
     when( plan.algorithms ).thenReturn( Map( defaultAlgorithm.label → emptyConfig ) )
@@ -554,7 +556,7 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
 
   def bootstrapSuite(): Unit = {
     s"${defaultAlgorithm.label} entity" should {
-      "have zero shape before advance" taggedAs WIP in { f: Fixture ⇒
+      "have zero shape before advance" in { f: Fixture ⇒
         import f._
 
         logger.debug( "aggregate = [{}]", aggregate )
@@ -622,7 +624,7 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
         actualVsExpectedShape( actual, expected )
       }
 
-      "verify estimated memory usage" taggedAs ( WIP, MEMORY ) in { f: Fixture ⇒
+      "verify estimated memory usage" taggedAs ( MEMORY ) in { f: Fixture ⇒
         import f._
         def makeData( i: Int ): P.Advanced = {
           val pt = DataPoint( nowTimestamp.plusMillis( 10 * i ), 0.14159265353 + 0.0001 * i )

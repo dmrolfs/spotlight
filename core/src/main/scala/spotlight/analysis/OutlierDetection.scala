@@ -1,22 +1,22 @@
 package spotlight.analysis
 
 import java.net.URI
-import scala.concurrent.ExecutionContext
 import akka.actor.{ Actor, ActorPath, ActorRef, Props }
 import akka.agent.Agent
 import akka.event.LoggingReceive
 import akka.pattern.AskTimeoutException
 import akka.stream.Supervision
 import akka.stream.actor.ActorSubscriberMessage
-import scalaz.{ -\/, \/, \/- }
+import cats.syntax.either._
 import nl.grons.metrics.scala.{ Meter, MetricName, Timer }
 import com.persist.logging._
 import omnibus.akka.envelope._
 import omnibus.akka.metrics.{ Instrumented, InstrumentedActor }
-import omnibus.commons.TryV
+import omnibus.commons.ErrorOr
 import omnibus.commons.identifier.ShortUUID
+import spotlight.EC
 import spotlight.model.timeseries._
-import spotlight.model.outlier.{ CorrelatedData, AnalysisPlan, Outliers }
+import spotlight.model.outlier.{ AnalysisPlan, CorrelatedData, Outliers }
 
 object OutlierDetection extends Instrumented with ClassLogging {
   sealed trait DetectionProtocol
@@ -109,11 +109,11 @@ class OutlierDetection extends Actor with EnvelopingActor with InstrumentedActor
     case m: OutlierDetectionMessage ⇒ {
       log.debug( Map( "@msg" → "received detection request", "topic" → m.topic.toString, "plan" → m.plan.name ), id = requestId )
       dispatch( m, m.plan )( context.dispatcher ) match {
-        case \/-( aggregator ) ⇒ {
+        case Right( aggregator ) ⇒ {
           addToOutstanding( aggregator, DetectionRequest.from( m, sender() ) )
           stopIfFullyComplete( isWaitingToComplete )
         }
-        case -\/( ex ) ⇒ {
+        case Left( ex ) ⇒ {
           log.error( Map( "@msg" → "failed to create aggregator", "topic" → m.topic.toString ), ex = ex, id = requestId )
         }
       }
@@ -158,11 +158,11 @@ class OutlierDetection extends Actor with EnvelopingActor with InstrumentedActor
     }
   }
 
-  def dispatch( m: OutlierDetectionMessage, p: AnalysisPlan )( implicit ec: ExecutionContext ): TryV[ActorRef] = {
+  def dispatch[_: EC]( m: OutlierDetectionMessage, p: AnalysisPlan ): ErrorOr[ActorRef] = {
     log.debug( Map( "@msg" → "dispatching", "topic" → m.topic.toString, "plan" → m.plan.name ), id = requestId )
 
     for {
-      aggregator ← \/ fromTryCatchNonFatal {
+      aggregator ← Either catchNonFatal {
         context.actorOf( OutlierQuorumAggregator.props( p, m.source ), aggregatorNameForMessage( m, p ) )
       }
     } yield {

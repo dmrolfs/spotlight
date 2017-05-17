@@ -3,13 +3,14 @@ package spotlight.analysis.algorithm.skyline
 import scala.reflect.ClassTag
 import akka.actor.{ ActorRef, Props }
 
-import scalaz._
-import Scalaz._
+import cats.instances.either._
+import cats.syntax.validated._
+
 import org.joda.{ time ⇒ joda }
 import com.typesafe.scalalogging.LazyLogging
 import org.apache.commons.math3.ml.clustering.DoublePoint
 import org.apache.commons.math3.stat.descriptive.SummaryStatistics
-import omnibus.commons.{ KOp, Valid }
+import omnibus.commons.{ KOp, AllIssuesOr }
 import omnibus.commons.util._
 import spotlight.analysis.algorithm.AlgorithmActor.AlgorithmContext
 import spotlight.analysis.algorithm.CommonAnalyzer
@@ -35,7 +36,7 @@ object FirstHourAverageAnalyzer {
       override val underlying: AlgorithmContext,
       firstHour: SummaryStatistics
   ) extends WrappingContext with LazyLogging {
-    override def withUnderlying( ctx: AlgorithmContext ): Valid[WrappingContext] = copy( underlying = ctx ).successNel
+    override def withUnderlying( ctx: AlgorithmContext ): AllIssuesOr[WrappingContext] = copy( underlying = ctx ).validNel
 
     override type That = Context
     override def withSource( newSource: TimeSeriesBase ): That = {
@@ -77,7 +78,7 @@ class FirstHourAverageAnalyzer( override val router: ActorRef ) extends CommonAn
 
   override def algorithm: String = FirstHourAverageAnalyzer.Algorithm
 
-  override def wrapContext( c: AlgorithmContext ): Valid[WrappingContext] = {
+  override def wrapContext( c: AlgorithmContext ): AllIssuesOr[WrappingContext] = {
     //todo: bad recreating summary statistics for each pt!!!  need to retain and build incrementally (is this the case in other algos?)
     makeFirstHourStatistics( c ) map { firstHour ⇒ Context( underlying = c, firstHour = firstHour ) }
   }
@@ -85,9 +86,9 @@ class FirstHourAverageAnalyzer( override val router: ActorRef ) extends CommonAn
   def makeFirstHourStatistics(
     context: AlgorithmContext,
     initialStatistics: Option[SummaryStatistics] = None
-  ): Valid[SummaryStatistics] = {
+  ): AllIssuesOr[SummaryStatistics] = {
     val firstHourStats = initialStatistics getOrElse { new SummaryStatistics }
-    firstHourStats.successNel
+    firstHourStats.validNel
   }
 
   val contextWithFirstHourStats: KOp[AlgorithmContext, Context] = toConcreteContextK map { c ⇒ c withPoints c.source.points }

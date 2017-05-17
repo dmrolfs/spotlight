@@ -1,9 +1,12 @@
 package spotlight.model.outlier
 
 import scala.annotation.tailrec
+import cats.syntax.cartesian._
+import cats.syntax.validated._
+import cats.syntax.applicative._
 import org.joda.{ time ⇒ joda }
 import omnibus.commons.util._
-import omnibus.commons.Valid
+import omnibus.commons.AllIssuesOr
 import spotlight.model.timeseries._
 
 //todo re-seal with FanOutShape Outlier Detection
@@ -53,8 +56,6 @@ abstract class Outliers extends Equals {
 }
 
 object Outliers {
-  import scalaz._, Scalaz._
-
   type OutlierGroups = Map[joda.DateTime, Double]
 
   def forSeries(
@@ -63,55 +64,55 @@ object Outliers {
     source: TimeSeriesBase,
     outliers: Seq[DataPoint],
     thresholdBoundaries: Map[String, Seq[ThresholdBoundary]]
-  ): Valid[Outliers] = {
+  ): AllIssuesOr[Outliers] = {
     (
       checkAlgorithms( algorithms, plan )
       |@| checkSeriesSource( source, plan )
       |@| checkOutliers( outliers, source )
       |@| checkThresholdBoundaries( algorithms, thresholdBoundaries )
-    ) { ( a, s, o, t ) ⇒
+    ) map { ( a, s, o, t ) ⇒
         if ( o.isEmpty ) NoOutliers( algorithms = a, source = s, plan = plan, thresholdBoundaries = t )
         else SeriesOutliers( algorithms = a, source = s, plan = plan, outliers = o, thresholdBoundaries = t )
       }
   }
 
   //todo
-  def forCohort( algorithms: Set[String], plan: AnalysisPlan, source: TimeSeriesBase, outliers: Seq[TimeSeries] ): Valid[Outliers] = ???
+  def forCohort( algorithms: Set[String], plan: AnalysisPlan, source: TimeSeriesBase, outliers: Seq[TimeSeries] ): AllIssuesOr[Outliers] = ???
 
   def unapply( so: Outliers ): Option[( Topic, Set[String], Boolean, so.Source )] = {
     Some( ( so.topic, so.algorithms, so.hasAnomalies, so.source ) )
   }
 
-  def checkAlgorithms( algorithms: Set[String], plan: AnalysisPlan ): Valid[Set[String]] = {
+  def checkAlgorithms( algorithms: Set[String], plan: AnalysisPlan ): AllIssuesOr[Set[String]] = {
     val notIncluded = algorithms filter { !plan.algorithms.contains( _ ) }
-    if ( notIncluded.isEmpty ) algorithms.successNel
-    else Validation.failureNel( PlanAlgorithmsMismatchError( notIncluded, plan ) )
+    if ( notIncluded.isEmpty ) algorithms.validNel
+    else PlanAlgorithmsMismatchError( notIncluded, plan ).invalidNel
   }
 
-  def checkSeriesSource( source: TimeSeriesBase, plan: AnalysisPlan ): Valid[TimeSeries] = {
-    if ( !plan.appliesTo( source ) ) Validation.failureNel( PlanSourceMismatchError( source, plan ) )
+  def checkSeriesSource( source: TimeSeriesBase, plan: AnalysisPlan ): AllIssuesOr[TimeSeries] = {
+    if ( !plan.appliesTo( source ) ) PlanSourceMismatchError( source, plan ).invalidNel
     else {
       source match {
-        case series: TimeSeries ⇒ series.successNel
-        case s ⇒ Validation.failureNel( PlanSourceMismatchError( s, plan ) )
+        case series: TimeSeries ⇒ series.validNel
+        case s ⇒ PlanSourceMismatchError( s, plan ).invalidNel
       }
     }
   }
 
-  def checkOutliers( outliers: Seq[DataPoint], source: TimeSeriesBase ): Valid[Seq[DataPoint]] = {
+  def checkOutliers( outliers: Seq[DataPoint], source: TimeSeriesBase ): AllIssuesOr[Seq[DataPoint]] = {
     val timestamps = source.points.map { _.timestamp }.toSet
     val notIncluded = outliers filter { o ⇒ !timestamps.contains( o.timestamp ) }
-    if ( notIncluded.isEmpty ) outliers.successNel
-    else Validation.failureNel( SourceOutliersMismatchError( notIncluded, source ) )
+    if ( notIncluded.isEmpty ) outliers.validNel
+    else SourceOutliersMismatchError( notIncluded, source ).invalidNel
   }
 
   def checkThresholdBoundaries(
     algorithms: Set[String],
     thresholdBoundaries: Map[String, Seq[ThresholdBoundary]]
-  ): Valid[Map[String, Seq[ThresholdBoundary]]] = {
+  ): AllIssuesOr[Map[String, Seq[ThresholdBoundary]]] = {
     val boundaryAlgorithms = thresholdBoundaries.keySet
-    if ( boundaryAlgorithms == boundaryAlgorithms.intersect( algorithms ) ) thresholdBoundaries.successNel
-    else Validation.failureNel( ThresholdBoundaryAlgorithmMismatchError( boundaryAlgorithms, algorithms ) )
+    if ( boundaryAlgorithms == boundaryAlgorithms.intersect( algorithms ) ) thresholdBoundaries.validNel
+    else ThresholdBoundaryAlgorithmMismatchError( boundaryAlgorithms, algorithms ).invalidNel
   }
 
   final case class PlanAlgorithmsMismatchError private[outlier] ( algorithms: Set[String], plan: AnalysisPlan )

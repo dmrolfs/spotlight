@@ -3,13 +3,14 @@ package spotlight.testkit
 import scala.concurrent.duration._
 import scala.reflect.ClassTag
 import akka.actor.{ ActorRef, ActorSystem }
+import cats.syntax.validated._
 import com.typesafe.config.Config
 import org.joda.{ time ⇒ joda }
 import org.apache.commons.math3.random.RandomDataGenerator
 import org.scalatest.concurrent.ScalaFutures
 import com.persist.logging._
 import omnibus.archetype.domain.model.core.{ Entity, EntityIdentifying }
-import omnibus.commons.{ TryV, V }
+import omnibus.commons._
 import omnibus.commons.log.Trace
 import demesne.AggregateRootType
 import demesne.module.entity.EntityAggregateModule
@@ -64,7 +65,7 @@ abstract class EntityModuleSpec[E <: Entity: ClassTag] extends AggregateRootSpec
           results: OutlierAlgorithmResults,
           source: TimeSeriesBase,
           plan: AnalysisPlan
-        ): V[Outliers] = Validation.failureNel[Throwable, Outliers]( new IllegalStateException( "should not use" ) ).disjunction
+        ): AllErrorsOr[Outliers] = new IllegalStateException( "should not use" ).invalidNel.toEither
       }
 
       import scala.concurrent.duration._
@@ -83,7 +84,7 @@ abstract class EntityModuleSpec[E <: Entity: ClassTag] extends AggregateRootSpec
 
     val identifying: EntityIdentifying[E]
 
-    override def nextId(): TID = TryV.unsafeGet( identifying.nextTID )
+    override def nextId(): TID = identifying.nextTID.unsafeGet
     override lazy val tid: TID = nextId()
     lazy val entity: ActorRef = trace.block( "entity" ) {
       module aggregateOf tid
