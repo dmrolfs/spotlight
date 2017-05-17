@@ -33,7 +33,9 @@ import spotlight.infrastructure.ClusterRole
 import spotlight.model.outlier._
 import spotlight.model.statistics.MovingStatistics
 import spotlight.model.timeseries._
-import squants.information.Bytes
+import squants.information.{ Bytes, Information }
+
+import scala.annotation.tailrec
 
 /** Created by rolfsd on 6/9/16.
   */
@@ -704,8 +706,13 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
           )
         )
 
-        ( ( plateauNr + 1 ) to memoryStepsToValidate ).foldLeft( ( first, firstSize ) ) {
-          case ( ( acc, accSize ), i ) ⇒ {
+        val watermarkTolerance = memoryPlateauNr * 10
+        @tailrec def loop( i: Int, watermark: Information, atWatermark: Int, acc: S, size: Information ): Assertion = {
+          if ( memoryStepsToValidate <= i ) fail( s"memory continues unbounded as of step ${memoryStepsToValidate}" )
+          else if ( watermarkTolerance < atWatermark ) succeed
+          else if ( ( plateauSize * ( 1 + memoryAllowedMargin ) ) <= size ) {
+            size mustBe <( plateauSize * ( 1 + memoryAllowedMargin ) )
+          } else {
             val next = acc.advance( makeData( i ) )
             val nextSize = Bytes( serializer.toBinary( next.asInstanceOf[AnyRef] ).size )
 
@@ -714,24 +721,58 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
                 "@msg" → "checking memory impact on advance",
                 "algorithm" → defaultAlgorithm.label,
                 "step" → i,
+                "at-watermark" → atWatermark,
+                //                "check-size" → ( plateauSize * ( 1 + memoryAllowedMargin ) ),
+                //                "check" → ( ( plateauSize * ( 1 + memoryAllowedMargin ) ) <= nextSize ),
+                //                "watermark-tolerance" → watermarkTolerance,
                 "zero-size" → zeroSize.toString,
                 "plateau-size" → plateauSize.toString,
                 "accumulated" → Map(
-                  "size" → accSize.toString,
+                  "size" → size.toString,
                   "nr-shapes" → i,
-                  "average-increment" → ( ( accSize - zeroSize ) / i ).toString
+                  "average-increment" → ( ( size - zeroSize ) / i ).toString
                 ),
                 "next-size" → nextSize.toString
               )
             )
 
+            val watermarkCount = if ( nextSize <= watermark ) atWatermark + 1 else 0
+            val nextWaterMark = if ( watermark < nextSize ) nextSize else watermark
+
             countDown await 5.millis.dilated
-
-            nextSize mustBe <( plateauSize * ( 1 + memoryAllowedMargin ) )
-
-            ( next, nextSize )
+            loop( i + 1, nextWaterMark, watermarkCount, next, nextSize )
           }
         }
+
+        loop( 0, Bytes( 0 ), 0, first, firstSize )
+        //        ( ( plateauNr + 1 ) to memoryStepsToValidate ).foldLeft( ( first, firstSize ) ) {
+        //          case ( ( acc, accSize ), i ) ⇒ {
+        //            val next = acc.advance( makeData( i ) )
+        //            val nextSize = Bytes( serializer.toBinary( next.asInstanceOf[AnyRef] ).size )
+        //
+        //            log.debug(
+        //              Map(
+        //                "@msg" → "checking memory impact on advance",
+        //                "algorithm" → defaultAlgorithm.label,
+        //                "step" → i,
+        //                "zero-size" → zeroSize.toString,
+        //                "plateau-size" → plateauSize.toString,
+        //                "accumulated" → Map(
+        //                  "size" → accSize.toString,
+        //                  "nr-shapes" → i,
+        //                  "average-increment" → ( ( accSize - zeroSize ) / i ).toString
+        //                ),
+        //                "next-size" → nextSize.toString
+        //              )
+        //            )
+        //
+        //            countDown await 5.millis.dilated
+        //
+        //            nextSize mustBe <( plateauSize * ( 1 + memoryAllowedMargin ) )
+        //
+        //            ( next, nextSize )
+        //          }
+        //        }
       }
     }
   }

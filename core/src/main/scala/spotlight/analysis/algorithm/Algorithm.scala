@@ -186,7 +186,7 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
     if ( 1 < tail ) { c.tailAverage( tail )( c.data ) } else c.data
   }
 
-  def score( point: PointT, shape: Shape )( implicit s: State, c: Context ): Option[AnomalyScore]
+  def score( point: PointT, shape: Shape )( implicit c: Context ): Option[AnomalyScore]
 
   implicit lazy val identifying: Identifying.Aux[State, Algorithm.ID] = new Identifying[State] {
     override type ID = Algorithm.ID
@@ -942,7 +942,7 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
           def tryScoring( pt: PointT, shape: Shape ): ErrorOr[AnomalyScore] = {
             val attempt = Either catchNonFatal {
               algorithm
-                .score( pt, shape )( state, analysisContext )
+                .score( pt, shape )( analysisContext )
                 .getOrElse { AnomalyScore( false, ThresholdBoundary empty pt.timestamp.toLong ) }
             }
 
