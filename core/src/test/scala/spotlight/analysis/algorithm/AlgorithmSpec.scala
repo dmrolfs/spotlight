@@ -556,7 +556,7 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
 
   def bootstrapSuite(): Unit = {
     s"${defaultAlgorithm.label} entity" should {
-      "have zero shape before advance" taggedAs WIP in { f: Fixture ⇒
+      "have zero shape before advance" in { f: Fixture ⇒
         import f._
 
         logger.debug( "aggregate = [{}]", aggregate )
@@ -624,7 +624,7 @@ abstract class AlgorithmSpec[S <: Serializable: Advancing: ClassTag]
         actualVsExpectedShape( actual, expected )
       }
 
-      "verify estimated memory usage" taggedAs ( WIP, MEMORY ) in { f: Fixture ⇒
+      "verify estimated memory usage" taggedAs ( MEMORY ) in { f: Fixture ⇒
         import f._
         def makeData( i: Int ): P.Advanced = {
           val pt = DataPoint( nowTimestamp.plusMillis( 10 * i ), 0.14159265353 + 0.0001 * i )

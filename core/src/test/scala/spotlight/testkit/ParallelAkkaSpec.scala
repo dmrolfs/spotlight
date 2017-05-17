@@ -207,7 +207,7 @@ trait ParallelAkkaSpec
         outcome
     }
 
-    outcome valueOr { ex =>
+    outcome valueOr { ex ⇒
       logger.error( s"test[${test.name}] failed", ex )
       system.terminate()
       throw ex
