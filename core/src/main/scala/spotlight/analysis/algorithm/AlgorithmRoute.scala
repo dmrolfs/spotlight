@@ -1,46 +1,43 @@
 package spotlight.analysis.algorithm
 
 import akka.actor.{ ActorContext, ActorRef }
+import cats.syntax.either._
+import cats.syntax.validated._
 import com.persist.logging._
 import com.typesafe.config._
+import shapeless.the
 import demesne.{ AggregateRootType, DomainModel }
 import net.ceedubs.ficus.Ficus._
 import omnibus.akka.envelope._
 import omnibus.commons.config._
 import omnibus.commons.identifier.Identifying
 import omnibus.commons.util._
+import spotlight.{ DM, AC }
 import spotlight.Settings
 import spotlight.analysis.DetectUsing
 import spotlight.analysis.shard._
 import spotlight.model.outlier.AnalysisPlan
 import squants.information.{ Information, Megabytes }
 
-import scalaz.\/
-
 sealed abstract class AlgorithmRoute {
-  def forward( message: Any )( implicit sender: ActorRef, context: ActorContext ): Unit = {
-    referenceFor( message ) forwardEnvelope message
-  }
+  import AlgorithmRoute.AR
 
-  def referenceFor( message: Any )( implicit context: ActorContext ): ActorRef
+  def forward[_: AR: AC]( message: Any ): Unit = referenceFor( message ) forwardEnvelope message
+  def referenceFor[_: AC]( message: Any ): ActorRef
 }
 
 object AlgorithmRoute extends ClassLogging {
   import ShardedRoute.Strategy
 
-  def routeFor(
-    plan: AnalysisPlan.Summary,
-    algorithmRootType: AggregateRootType
-  )(
-    implicit
-    model: DomainModel
-  ): AlgorithmRoute = {
+  type AR[_] = ActorRef
+
+  def routeFor[_: DM]( plan: AnalysisPlan.Summary, algorithmRootType: AggregateRootType ): AlgorithmRoute = {
     val strategy = Strategy from plan
 
     val route = {
       strategy
-        .map { strategy ⇒ ShardedRoute( plan, algorithmRootType, strategy, model ) }
-        .getOrElse { RootTypeRoute( plan, algorithmRootType, model ) }
+        .map { strategy ⇒ ShardedRoute( plan, algorithmRootType, strategy, the[DomainModel] ) }
+        .getOrElse { RootTypeRoute( plan, algorithmRootType, the[DomainModel] ) }
     }
 
     log.debug(
@@ -57,7 +54,7 @@ object AlgorithmRoute extends ClassLogging {
   }
 
   case class DirectRoute( reference: ActorRef ) extends AlgorithmRoute {
-    override def referenceFor( message: Any )( implicit context: ActorContext ): ActorRef = reference
+    override def referenceFor[_: AC]( message: Any ): ActorRef = reference
   }
 
   case class RootTypeRoute(
@@ -69,7 +66,7 @@ object AlgorithmRoute extends ClassLogging {
       algorithmRootType.identifying.asInstanceOf[Identifying.Aux[_, Algorithm.ID]]
     }
 
-    override def forward( message: Any )( implicit sender: ActorRef, context: ActorContext ): Unit = {
+    override def forward[_: AR: AC]( message: Any ): Unit = {
       referenceFor( message ) forwardEnvelope AlgorithmProtocol.RouteMessage( targetId = algorithmIdFor( message ), message )
     }
 
@@ -87,13 +84,13 @@ object AlgorithmRoute extends ClassLogging {
         }
 
         case m if algorithmRootType.aggregateIdFor isDefinedAt m ⇒ {
-          import scalaz.{ -\/, \/- }
-
           val ( aid, _ ) = algorithmRootType.aggregateIdFor( m )
-          AlgorithmIdentifier.fromAggregateId( aid ).disjunction match {
-            case \/-( pid ) ⇒ algorithmIdentifying.tag( pid.asInstanceOf[algorithmIdentifying.ID] )
-            case -\/( exs ) ⇒ {
-              exs foreach { ex ⇒
+
+          AlgorithmIdentifier
+            .fromAggregateId( aid )
+            .map { pid ⇒ algorithmIdentifying.tag( pid.asInstanceOf[algorithmIdentifying.ID] ) }
+            .valueOr { exs ⇒
+              exs map { ex ⇒
                 log.error(
                   Map(
                     "@msg" → "failed to parse algorithm identifier from aggregate id",
@@ -106,7 +103,6 @@ object AlgorithmRoute extends ClassLogging {
 
               throw exs.head
             }
-          }
         }
 
         case m ⇒ {
@@ -130,9 +126,9 @@ object AlgorithmRoute extends ClassLogging {
       result.asInstanceOf[Algorithm.TID]
     }
 
-    override def referenceFor( message: Any )( implicit context: ActorContext ): ActorRef = {
-      \/
-        .fromTryCatchNonFatal { model( algorithmRootType, algorithmIdFor( message ) ) }
+    override def referenceFor[_: AC]( message: Any ): ActorRef = {
+      Either
+        .catchNonFatal { model( algorithmRootType, algorithmIdFor( message ) ) }
         .valueOr { ex ⇒
           log.error(
             Map(
@@ -157,11 +153,11 @@ object AlgorithmRoute extends ClassLogging {
     val shardingId: ShardCatalog#TID = strategy.idFor( plan, algorithmRootType.name )
     val shardingRef = strategy.actorFor( plan, algorithmRootType )( model )
 
-    override def forward( message: Any )( implicit sender: ActorRef, context: ActorContext ): Unit = {
+    override def forward[_: AR: AC]( message: Any ): Unit = {
       referenceFor( message ) forwardEnvelope ShardProtocol.RouteMessage( shardingId, message )
     }
 
-    override def referenceFor( message: Any )( implicit context: ActorContext ): ActorRef = shardingRef
+    override def referenceFor[_: AC]( message: Any ): ActorRef = shardingRef
     override def toString: String = {
       s"${getClass.safeSimpleName}( " +
         s"plan:[${plan.name}] " +
@@ -181,15 +177,9 @@ object AlgorithmRoute extends ClassLogging {
         rootType.identifying.asInstanceOf[Identifying.Aux[_, ShardCatalog.ID]]
       }
 
-      def actorFor(
-        plan: AnalysisPlan.Summary,
-        algorithmRootType: AggregateRootType
-      )(
-        implicit
-        model: DomainModel
-      ): ActorRef = {
+      def actorFor[_: DM]( plan: AnalysisPlan.Summary, algorithmRootType: AggregateRootType ): ActorRef = {
         val sid = idFor( plan, algorithmRootType.name )
-        val ref = model( rootType, sid )
+        val ref = the[DomainModel].apply( rootType, sid )
         val add = makeAddCommand( plan, algorithmRootType )
         add foreach { ref !+ _ }
         ref

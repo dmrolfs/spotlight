@@ -1,5 +1,6 @@
 package spotlight.model.outlier
 
+import cats.syntax.validated._
 import org.scalatest._
 import org.scalatest.mockito.MockitoSugar
 import org.mockito.Mockito._
@@ -97,7 +98,7 @@ class ReduceOutliersSpec
         logger.debug( "TEST oneOutlier = {}", oneOutlier )
         val reduce = byCorroborationCount( 1 )
         val actual = reduce( results = Map( algo1 → oneOutlier ), series, plan )
-        val expected = Outliers.forSeries( Set( algo1 ), plan, series, points.take( 1 ), oneControls ).disjunction
+        val expected = Outliers.forSeries( Set( algo1 ), plan, series, points.take( 1 ), oneControls ).toEither
         actual mustBe expected
       }
 
@@ -112,7 +113,7 @@ class ReduceOutliersSpec
         outliers2.anomalySize mustBe 2
         val reduce = byCorroborationCount( 2 )
         val actual = reduce( results = Map( algo1 → outliers1, algo2 → outliers2 ), series, plan )
-        val expected = Outliers.forSeries( Set( algo1, algo2 ), plan, series, Seq( points( 1 ) ), controls1 ++ controls2 ).disjunction
+        val expected = Outliers.forSeries( Set( algo1, algo2 ), plan, series, Seq( points( 1 ) ), controls1 ++ controls2 ).toEither
         actual mustBe expected
       }
 
@@ -130,7 +131,7 @@ class ReduceOutliersSpec
         outliers3.anomalySize mustBe 1
         val reduce = byCorroborationPercentage( 50 )
         val actual = reduce( results = Map( algo1 → outliers1, algo2 → outliers2, algo3 → outliers3 ), series, plan )
-        val expected = Outliers.forSeries( Set( algo1, algo2, algo3 ), plan, series, points.drop( 1 ), controls1 ++ controls2 ++ controls3 ).disjunction
+        val expected = Outliers.forSeries( Set( algo1, algo2, algo3 ), plan, series, points.drop( 1 ), controls1 ++ controls2 ++ controls3 ).toEither
         actual mustBe expected
       }
 
@@ -142,7 +143,7 @@ class ReduceOutliersSpec
         val noOutliers = makeOutliers( Set( algo1 ), Nil, noControls )
         val reduce = byCorroborationCount( 1 )
         val actual = reduce( results = Map( algo1 → noOutliers ), series, plan )
-        val expected = Outliers.forSeries( Set( algo1 ), plan, series, points.take( 0 ), noControls ).disjunction
+        val expected = Outliers.forSeries( Set( algo1 ), plan, series, points.take( 0 ), noControls ).toEither
         actual mustBe expected
       }
     }

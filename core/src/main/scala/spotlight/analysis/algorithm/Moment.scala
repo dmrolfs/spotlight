@@ -1,12 +1,11 @@
 package spotlight.analysis.algorithm
 
-import scalaz._
-import Scalaz._
+import cats.syntax.validated._
 import com.persist.logging._
 import com.typesafe.config.Config
 import net.ceedubs.ficus.Ficus._
 import org.apache.commons.math3.stat.descriptive.StatisticalSummary
-import omnibus.commons.Valid
+import omnibus.commons.AllIssuesOr
 import omnibus.commons.util._
 import spotlight.analysis.algorithm.AlgorithmProtocol.Advanced
 
@@ -22,17 +21,17 @@ sealed trait Moment extends Serializable {
 }
 
 object Moment extends ClassLogging {
-  def withAlpha( alpha: Double ): Valid[Moment] = {
+  def withAlpha( alpha: Double ): AllIssuesOr[Moment] = {
     checkAlpha( alpha ) map { a ⇒ SimpleMoment( alpha ) }
   }
 
-  def withCenterOfMass( com: Double ): Valid[Moment] = withAlpha( 1.0 / ( 1.0 + com / 100.0 ) )
+  def withCenterOfMass( com: Double ): AllIssuesOr[Moment] = withAlpha( 1.0 / ( 1.0 + com / 100.0 ) )
 
-  def withHalfLife( halfLife: Double ): Valid[Moment] = withAlpha( 1.0 - math.exp( math.log( 0.5 ) / halfLife ) )
+  def withHalfLife( halfLife: Double ): AllIssuesOr[Moment] = withAlpha( 1.0 - math.exp( math.log( 0.5 ) / halfLife ) )
 
-  def checkAlpha( alpha: Double ): Valid[Double] = {
-    if ( alpha < 0.0 || 1.0 < alpha ) Validation.failureNel( InvalidMomentAlphaError( alpha ) )
-    else alpha.successNel
+  def checkAlpha( alpha: Double ): AllIssuesOr[Double] = {
+    if ( alpha < 0.0 || 1.0 < alpha ) InvalidMomentAlphaError( alpha ).invalidNel
+    else alpha.validNel
   }
 
   implicit val advancing: Advancing[Moment] = new Advancing[Moment] {
@@ -40,12 +39,9 @@ object Moment extends ClassLogging {
 
     override def zero( configuration: Option[Config] ): Moment = {
       val alpha = getFromOrElse[Double]( configuration, AlphaPath, 0.05 )
-      Moment.withAlpha( alpha ).disjunction match {
-        case \/-( m ) ⇒ m
-        case -\/( exs ) ⇒ {
-          exs foreach { ex ⇒ log.error( "failed to create moment shape", ex ) }
-          throw exs.head
-        }
+      Moment.withAlpha( alpha ) valueOr { exs ⇒
+        exs map { ex ⇒ log.error( "failed to create moment shape", ex ) }
+        throw exs.head
       }
     }
 

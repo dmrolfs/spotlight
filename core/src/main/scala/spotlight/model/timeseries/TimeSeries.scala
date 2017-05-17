@@ -1,10 +1,11 @@
 package spotlight.model.timeseries
 
-import scalaz._, Scalaz._
+import cats.syntax.cartesian._
+import cats.syntax.validated._
 import shapeless.Lens
 import org.joda.{ time ⇒ joda }
 import com.github.nscala_time.time.Imports._
-import omnibus.commons.Valid
+import omnibus.commons.AllIssuesOr
 import omnibus.commons.util._
 
 sealed trait TimeSeries extends TimeSeriesBase {
@@ -33,13 +34,13 @@ object TimeSeries {
   implicit val seriesMerging: TimeSeriesBase.Merging[TimeSeries] = new TimeSeriesBase.Merging[TimeSeries] {
     override def zero( topic: Topic ): TimeSeries = TimeSeries( topic )
 
-    override def merge( lhs: TimeSeries, rhs: TimeSeries ): Valid[TimeSeries] = {
-      ( checkTopic( lhs.topic, rhs.topic ) |@| combinePoints( lhs.points, rhs.points ) ) { ( _, merged ) ⇒
+    override def merge( lhs: TimeSeries, rhs: TimeSeries ): AllIssuesOr[TimeSeries] = {
+      ( checkTopic( lhs.topic, rhs.topic ) |@| combinePoints( lhs.points, rhs.points ) ) map { ( _, merged ) ⇒
         pointsLens.set( lhs )( merged )
       }
     }
 
-    private def combinePoints( lhs: Seq[DataPoint], rhs: Seq[DataPoint] ): Valid[Seq[DataPoint]] = {
+    private def combinePoints( lhs: Seq[DataPoint], rhs: Seq[DataPoint] ): AllIssuesOr[Seq[DataPoint]] = {
       val merged = lhs ++ rhs
       val ( uniques, dups ) = merged.groupBy { _.timestamp }.values.partition { _.size == 1 }
 
@@ -51,7 +52,7 @@ object TimeSeries {
       } yield DataPoint( timestamp = ts, value = avg )
 
       val normalized = uniques.flatten ++ dupsAveraged
-      normalized.toIndexedSeq.sortBy { _.timestamp }.successNel
+      normalized.toIndexedSeq.sortBy { _.timestamp }.validNel
     }
 
   }

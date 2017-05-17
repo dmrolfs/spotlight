@@ -4,12 +4,13 @@ import scala.concurrent.Await
 import scala.concurrent.duration._
 import akka.actor.{ ActorSystem, Terminated }
 import akka.testkit._
+import cats.syntax.either._
 import org.scalatest.Outcome
 import org.scalatest.mockito.MockitoSugar
 import org.mockito.Mockito._
 import com.typesafe.config.{ Config, ConfigFactory }
 import omnibus.akka.envelope.Envelope
-import omnibus.commons.V
+import omnibus.commons._
 import spotlight.model.timeseries.{ ThresholdBoundary, TimeSeries, TimeSeriesBase, Topic }
 import spotlight.testkit.ParallelAkkaSpec
 import omnibus.commons.log.Trace
@@ -41,11 +42,11 @@ class OutlierQuorumAggregatorSpec extends ParallelAkkaSpec with MockitoSugar {
     when( some.thresholdBoundaries ) thenReturn Map.empty[String, Seq[ThresholdBoundary]]
 
     val demoReduce = new ReduceOutliers {
-      override def apply( results: OutlierAlgorithmResults, source: TimeSeriesBase, plan: AnalysisPlan ): V[Outliers] = {
+      override def apply( results: OutlierAlgorithmResults, source: TimeSeriesBase, plan: AnalysisPlan ): AllErrorsOr[Outliers] = {
         import scalaz.Scalaz._
         val outlierCount = results.foldLeft( 0 ) { ( cnt, r ) ⇒ cnt + r._2.anomalySize }
         val result = if ( outlierCount > 0 ) fixture.some else fixture.none
-        result.right
+        result.asRight
       }
     }
 

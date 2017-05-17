@@ -9,7 +9,7 @@ import com.persist.logging._
 import com.persist.logging.LoggingLevels.{ DEBUG, Level }
 import net.ceedubs.ficus.Ficus._
 import demesne.{ AggregateRootType, StartTask }
-import omnibus.commons.Valid
+import omnibus.commons._
 import omnibus.commons.builder.HasBuilder
 import shapeless.{ Generic, HNil }
 
@@ -109,7 +109,7 @@ object SpotlightContext extends ClassLogging {
         )
       )
 
-      val s = Valid.unsafeGet( Settings( applicationArguments, systemName = name, config = ConfigFactory.load() ) )
+      val s = Settings( applicationArguments, systemName = name, config = ConfigFactory.load() ).unsafeGet
 
       println( s"SETTINGS external-port:[${Settings.remotePortFrom( s.config )}]" )
 

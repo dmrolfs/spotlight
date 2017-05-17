@@ -7,10 +7,9 @@ import akka.actor.{ ActorRef, ActorSystem, Props, SupervisorStrategy }
 import akka.stream._
 import akka.stream.scaladsl.{ Flow, GraphDSL, Keep, Sink, Source }
 import akka.util.Timeout
+import cats.data.Kleisli
+import cats.instances.future._
 
-import scalaz.{ Source ⇒ _, _ }
-import scalaz.Scalaz._
-import scalaz.Kleisli.kleisli
 import com.typesafe.config.Config
 import net.ceedubs.ficus.Ficus._
 import com.persist.logging._
@@ -24,7 +23,7 @@ import omnibus.akka.supervision.{ IsolatedLifeCycleSupervisor, OneForOneStrategy
 import omnibus.commons.util._
 import demesne.{ AggregateRootType, BoundedContext, DomainModel, StartTask }
 import omnibus.akka.stream.{ StreamEgress, StreamIngress }
-import omnibus.commons.Valid
+import omnibus.commons._
 import spotlight.analysis._
 import spotlight.analysis.algorithm.Algorithm
 import spotlight.analysis.{ PlanCatalogProtocol ⇒ CP }
@@ -44,13 +43,9 @@ object Spotlight extends Instrumented with ClassLogging {
   type SpotlightBoundedContext = ( BoundedContext, SpotlightContext )
   type SpotlightModel = ( BoundedContext, SpotlightContext, Option[DetectFlow] )
 
-  def apply[_: EC](): Kleisli[Future, SpotlightContext, SpotlightModel] = {
-    prep >=> startBoundedContext >=> makeFlow
-  }
+  def apply[_: EC](): Kleisli[Future, SpotlightContext, SpotlightModel] = prep andThen startBoundedContext andThen makeFlow
 
-  def apply[_: EC]( args: Array[String] ): Kleisli[Future, Array[String], SpotlightModel] = {
-    makeContext >=> apply()
-  }
+  def apply[_: EC]( args: Array[String] ): Kleisli[Future, Array[String], SpotlightModel] = makeContext andThen apply()
 
   def systemRootTypes( settings: Settings ): Set[AggregateRootType] = {
     val base = Set(
@@ -60,7 +55,9 @@ object Spotlight extends Instrumented with ClassLogging {
     )
 
     val algorithms = {
-      Valid.unsafeGet( Settings.userAlgorithmClassesFrom( settings.config ) )
+      Settings
+        .userAlgorithmClassesFrom( settings.config )
+        .unsafeGet
         .values
         .map { clazz ⇒
           import scala.reflect.runtime.{ universe ⇒ ru }
@@ -119,24 +116,22 @@ object Spotlight extends Instrumented with ClassLogging {
     Done
   }
 
-  val makeContext: Kleisli[Future, Array[String], SpotlightContext] = {
-    kleisli[Future, Array[String], SpotlightContext] { args ⇒
-      import SpotlightContext.{ Builder ⇒ B }
+  val makeContext = Kleisli[Future, Array[String], SpotlightContext] { args ⇒
+    import SpotlightContext.{ Builder ⇒ B }
 
-      Future successful {
-        SpotlightContext.Builder
-          .builder
-          .set( B.Arguments, args )
-          //      .set( SpotlightContext.StartTasks, Set( /*SharedLeveldbStore.start(true), Spotlight.kamonStartTask*/ ) )
-          //      .set( SpotlightContext.System, Some( system ) )
-          .build()
-      }
+    Future successful {
+      SpotlightContext.Builder
+        .builder
+        .set( B.Arguments, args )
+        //      .set( SpotlightContext.StartTasks, Set( /*SharedLeveldbStore.start(true), Spotlight.kamonStartTask*/ ) )
+        //      .set( SpotlightContext.System, Some( system ) )
+        .build()
     }
   }
 
-  def prep[_: EC]: Kleisli[Future, SpotlightContext, SpotlightContext] = logBuildInfo >=> prepareTimeZone
+  def prep[_: EC]: Kleisli[Future, SpotlightContext, SpotlightContext] = logBuildInfo andThen prepareTimeZone
 
-  private val logBuildInfo: Kleisli[Future, SpotlightContext, SpotlightContext] = kleisli { context ⇒
+  private val logBuildInfo = Kleisli[Future, SpotlightContext, SpotlightContext] { context ⇒
     Future successful {
       log.alternative(
         SpotlightContext.SystemLogCategory,
@@ -161,7 +156,7 @@ object Spotlight extends Instrumented with ClassLogging {
     }
   }
 
-  private val prepareTimeZone: Kleisli[Future, SpotlightContext, SpotlightContext] = kleisli { context ⇒
+  private val prepareTimeZone = Kleisli[Future, SpotlightContext, SpotlightContext] { context ⇒
     Future successful {
       log.debug( Map( "@msg" → "setting the spotlight timezone", "timezone" → context.settings.timeZone.toString ) )
       joda.DateTimeZone setDefault context.settings.timeZone
@@ -169,69 +164,65 @@ object Spotlight extends Instrumented with ClassLogging {
     }
   }
 
-  val startBoundedContext: Kleisli[Future, SpotlightContext, SpotlightBoundedContext] = {
-    kleisli[Future, SpotlightContext, SpotlightBoundedContext] { context ⇒
-      implicit val sys = context.system
-      implicit val ec = context.system.dispatcher
-      implicit val timeout = context.timeout
+  val startBoundedContext = Kleisli[Future, SpotlightContext, SpotlightBoundedContext] { context ⇒
+    implicit val sys = context.system
+    implicit val ec = context.system.dispatcher
+    implicit val timeout = context.timeout
 
-      val role = context.settings.role
-      val nodeRootTypes = context.rootTypes ++ systemRootTypes( context.settings )
-      val nodeStartTasks = context.startTasks ++ systemStartTasks( context.settings )
+    val role = context.settings.role
+    val nodeRootTypes = context.rootTypes ++ systemRootTypes( context.settings )
+    val nodeStartTasks = context.startTasks ++ systemStartTasks( context.settings )
 
-      log.info(
-        Map(
-          "@msg" → "making bounded context on node",
-          "key" → context.name,
-          "root-types" → nodeRootTypes.mkString( "[", ", ", "]" ),
-          "user-resources" → context.resources.map( kv ⇒ ( kv._1.name, kv._2.toString ) ),
-          "#TEST CONTEXT START TASKS" → context.startTasks.map( _.description ).mkString( "[", ", ", "]" ),
-          "#TEST SYSTEM START TASKS" → systemStartTasks( context.settings ).map( _.description ).mkString( "[", ", ", "]" ),
-          "#TEST CONTEXT ROOT TYPES" → context.rootTypes.map( _.name ).mkString( "[", ", ", "]" ),
-          "#TEST SYSTEM ROOT TYPES" → systemRootTypes( context.settings ).map( _.name ).mkString( "[", ", ", "]" ),
-          "start-tasks" → nodeStartTasks.map( _.description ).mkString( "[", ", ", "] " ),
-          "usage" → context.settings.usage._2.mapValues( _.toString )
-        )
+    log.info(
+      Map(
+        "@msg" → "making bounded context on node",
+        "key" → context.name,
+        "root-types" → nodeRootTypes.mkString( "[", ", ", "]" ),
+        "user-resources" → context.resources.map( kv ⇒ ( kv._1.name, kv._2.toString ) ),
+        "#TEST CONTEXT START TASKS" → context.startTasks.map( _.description ).mkString( "[", ", ", "]" ),
+        "#TEST SYSTEM START TASKS" → systemStartTasks( context.settings ).map( _.description ).mkString( "[", ", ", "]" ),
+        "#TEST CONTEXT ROOT TYPES" → context.rootTypes.map( _.name ).mkString( "[", ", ", "]" ),
+        "#TEST SYSTEM ROOT TYPES" → systemRootTypes( context.settings ).map( _.name ).mkString( "[", ", ", "]" ),
+        "start-tasks" → nodeStartTasks.map( _.description ).mkString( "[", ", ", "] " ),
+        "usage" → context.settings.usage._2.mapValues( _.toString )
+      )
+    )
+
+    for {
+      made ← BoundedContext.make(
+        key = Symbol( context.name ),
+        configuration = context.settings.toConfig,
+        rootTypes = nodeRootTypes,
+        userResources = context.resources,
+        startTasks = nodeStartTasks
+      )
+
+      started ← made.start()
+    } yield ( started, context )
+  }
+
+  val makeFlow = Kleisli[Future, SpotlightBoundedContext, SpotlightModel] {
+    case ( boundedContext, context ) if context.settings.role.hostsFlow == false ⇒ {
+      Future successful ( boundedContext, context, None )
+    }
+
+    case ( boundedContext, context ) ⇒ {
+      val settings = context.settings
+      implicit val bc = boundedContext
+      implicit val system = context.system
+      implicit val dispatcher = system.dispatcher
+      implicit val detectionTimeout = Timeout( 5.minutes ) //todo: define in Settings
+      implicit val materializer = ActorMaterializer(
+        ActorMaterializerSettings( system ) withSupervisionStrategy supervisionDecider
       )
 
       for {
-        made ← BoundedContext.make(
-          key = Symbol( context.name ),
-          configuration = context.settings.toConfig,
-          rootTypes = nodeRootTypes,
-          userResources = context.resources,
-          startTasks = nodeStartTasks
-        )
-
-        started ← made.start()
-      } yield ( started, context )
-    }
-  }
-
-  val makeFlow: Kleisli[Future, SpotlightBoundedContext, SpotlightModel] = {
-    kleisli[Future, SpotlightBoundedContext, SpotlightModel] {
-      case ( boundedContext, context ) if context.settings.role.hostsFlow == false ⇒ {
-        Future successful ( boundedContext, context, None )
-      }
-
-      case ( boundedContext, context ) ⇒ {
-        val settings = context.settings
-        implicit val bc = boundedContext
-        implicit val system = context.system
-        implicit val dispatcher = system.dispatcher
-        implicit val detectionTimeout = Timeout( 5.minutes ) //todo: define in Settings
-        implicit val materializer = ActorMaterializer(
-          ActorMaterializerSettings( system ) withSupervisionStrategy supervisionDecider
-        )
-
-        for {
-          catalog ← makeCatalog( bc )
-          catalogFlow ← PlanCatalog.flow( catalog, settings.parallelism )
-        } yield {
-          val detectFlow = detectFlowFrom( catalogFlow, settings )
-          val clusteredFlow = clusterFlowFrom( detectFlow, settings )
-          ( boundedContext, context, Option( clusteredFlow ) )
-        }
+        catalog ← makeCatalog( bc )
+        catalogFlow ← PlanCatalog.flow( catalog, settings.parallelism )
+      } yield {
+        val detectFlow = detectFlowFrom( catalogFlow, settings )
+        val clusteredFlow = clusterFlowFrom( detectFlow, settings )
+        ( boundedContext, context, Option( clusteredFlow ) )
       }
     }
   }

@@ -4,14 +4,17 @@ import java.net.{ InetAddress, InetSocketAddress }
 
 import scala.concurrent.duration._
 import scala.util.matching.Regex
-import scalaz.Scalaz._
-import scalaz._
+import cats.Traverse
+import cats.instances.list._
+import cats.syntax.either._
+import cats.syntax.traverse._
+import cats.syntax.validated._
+
 import com.typesafe.config._
 import net.ceedubs.ficus.Ficus._
 import com.persist.logging._
 import org.joda.{ time ⇒ joda }
-
-import omnibus.commons.{ TryV, V, Valid }
+import omnibus.commons.{ AllErrorsOr, AllIssuesOr, ErrorOr }
 import omnibus.commons.config._
 import omnibus.commons.util._
 import spotlight.analysis.OutlierDetection
@@ -20,6 +23,8 @@ import spotlight.infrastructure.ClusterRole
 import spotlight.model.outlier._
 import spotlight.model.timeseries.Topic
 import spotlight.protocol.{ GraphiteSerializationProtocol, MessagePackProtocol, PythonPickleProtocol }
+
+import scala.util.Try
 
 //todo refactor into base required settings and allow for app-specific extension
 /** Created by rolfsd on 1/12/16.
@@ -231,12 +236,12 @@ object Settings extends ClassLogging {
       }
   }
 
-  def userAlgorithmClassesFrom( configuration: Config ): Valid[Map[String, Class[_ <: Algorithm[_]]]] = {
-    def loadClass( algorithm: String, fqcn: String ): TryV[Class[_ <: Algorithm[_]]] = {
-      \/ fromTryCatchNonFatal { Class.forName( fqcn, true, getClass.getClassLoader ).asInstanceOf[Class[_ <: Algorithm[_]]] }
+  def userAlgorithmClassesFrom( configuration: Config ): AllIssuesOr[Map[String, Class[_ <: Algorithm[_]]]] = {
+    def loadClass( algorithm: String, fqcn: String ): ErrorOr[Class[_ <: Algorithm[_]]] = {
+      Either catchNonFatal { Class.forName( fqcn, true, getClass.getClassLoader ).asInstanceOf[Class[_ <: Algorithm[_]]] }
     }
 
-    def unwrapAlgorithmFQCN( algorithm: String, cv: ConfigValue ): TryV[( String, String )] = {
+    def unwrapAlgorithmFQCN( algorithm: String, cv: ConfigValue ): ErrorOr[( String, String )] = {
       import scala.reflect._
       val ConfigObjectType = classTag[ConfigObject]
       val ClassPath = "class"
@@ -255,30 +260,46 @@ object Settings extends ClassLogging {
         algoConfig ← ConfigObjectType.unapply( cv ) map { _.toConfig }
         fqcn ← algoConfig.as[Option[String]]( ClassPath )
         _ = log.debug( Map( "@msg" → "fqcn from algo config", "algorithm" → algorithm, "fqcn" → fqcn ) )
-      } yield ( algorithm, fqcn ).right
+      } yield ( algorithm, fqcn ).asRight
 
-      algoFQCN getOrElse InsufficientAlgorithmError( algorithm, value.toString ).left
+      algoFQCN getOrElse InsufficientAlgorithmError( algorithm, value.toString ).asLeft
     }
 
     val AlgorithmPath = "spotlight.algorithms"
     configuration.as[Option[Config]]( AlgorithmPath )
       .map { algoConfig ⇒
         import scala.collection.JavaConverters._
-        algoConfig.root.entrySet.asScala.toList
-          .map { entry ⇒ ( entry.getKey, entry.getValue ) }
-          .traverseU {
-            case ( a, cv ) ⇒
-              val ac = for {
-                algorithmFqcn ← unwrapAlgorithmFQCN( a, cv )
-                ( algorithm, fqcn ) = algorithmFqcn
-                clazz ← loadClass( algorithm, fqcn )
-              } yield ( algorithm, clazz )
-              ac.validationNel
+
+        val algoEntries: List[( String, ConfigValue )] = algoConfig.root.asScala.toList
+        val r1: AllIssuesOr[List[( String, Class[_ <: Algorithm[_]] )]] = algoEntries traverse {
+          case ( a, cv ) ⇒ {
+            val ac: ErrorOr[( String, Class[_ <: Algorithm[_]] )] = for {
+              algorithmFqcn ← unwrapAlgorithmFQCN( a, cv )
+              ( algorithm, fqcn ) = algorithmFqcn
+              clazz ← loadClass( algorithm, fqcn )
+            } yield ( algorithm, clazz )
+
+            ac.toValidatedNel
           }
-          .map { algorithmClasses ⇒ Map( algorithmClasses: _* ) }
+        }
+
+        r1 map { algorithmClasses ⇒ Map( algorithmClasses: _* ) }
+
+        //        algoConfig.root.entrySet.asScala.toList
+        //          .map { entry ⇒ ( entry.getKey, entry.getValue ) }
+        //          .traverseU {
+        //            case ( a, cv ) ⇒
+        //              val ac = for {
+        //                algorithmFqcn ← unwrapAlgorithmFQCN( a, cv )
+        //                ( algorithm, fqcn ) = algorithmFqcn
+        //                clazz ← loadClass( algorithm, fqcn )
+        //              } yield ( algorithm, clazz )
+        //              ac.validationNel
+        //          }
+        //          .map { algorithmClasses ⇒ Map( algorithmClasses: _* ) }
       }
       .getOrElse {
-        Map.empty[String, Class[_ <: Algorithm[_]]].successNel
+        Map.empty[String, Class[_ <: Algorithm[_]]].validNel
       }
   }
 
@@ -308,7 +329,7 @@ object Settings extends ClassLogging {
     nodes
   }
 
-  type Reload = () ⇒ V[Settings]
+  type Reload = () ⇒ AllErrorsOr[Settings]
 
   def reloader(
     args: Array[String],
@@ -323,8 +344,8 @@ object Settings extends ClassLogging {
     () ⇒ {
       invalidateCache()
       for {
-        u ← usage.disjunction
-        c ← checkConfiguration( config, u ).disjunction
+        u ← usage.toEither
+        c ← checkConfiguration( config, u ).toEither
       } yield makeSettings( u, systemName, c )
     }
   }
@@ -333,21 +354,21 @@ object Settings extends ClassLogging {
     args: Array[String],
     systemName: String = ActorSystemName,
     config: ⇒ Config = ConfigFactory.load()
-  ): Valid[Settings] = {
-    import scalaz.Validation.FlatMap._
-
-    for {
-      u ← checkUsage( args )
-      c ← checkConfiguration( config, u )
+  ): AllIssuesOr[Settings] = {
+    val s = for {
+      u ← checkUsage( args ).toEither
+      c ← checkConfiguration( config, u ).toEither
     } yield makeSettings( u, systemName, c )
+
+    s.toValidated
   }
 
-  private def checkUsage( args: Array[String] ): Valid[UsageSettings] = {
+  private def checkUsage( args: Array[String] ): AllIssuesOr[UsageSettings] = {
     val parser = UsageSettings.makeUsageConfig
     log.info( Map( "@msg" → "Settings args", "args" → args ) )
     parser.parse( args, UsageSettings.zero ) match {
-      case Some( settings ) ⇒ settings.successNel
-      case None ⇒ Validation.failureNel( UsageConfigurationError( parser.usage ) )
+      case Some( settings ) ⇒ settings.validNel
+      case None ⇒ UsageConfigurationError( parser.usage ).invalidNel
     }
   }
 
@@ -366,15 +387,15 @@ object Settings extends ClassLogging {
     //    val WORKFLOW_BUFFER_SIZE = "spotlight.workflow.buffer"
   }
 
-  private def checkConfiguration( config: Config, usage: UsageSettings ): Valid[Config] = {
+  private def checkConfiguration( config: Config, usage: UsageSettings ): AllIssuesOr[Config] = {
     object Req {
       def withUsageSetting( path: String, setting: Option[_] ): Req = new Req( path, () ⇒ { setting.isDefined } )
       def withoutUsageSetting( path: String ): Req = new Req( path, NotDefined )
       val NotDefined = () ⇒ { false }
 
-      def check( r: Req ): Valid[String] = {
-        if ( r.inUsage() || config.hasPath( r.path ) ) r.path.successNel
-        else Validation.failureNel( UsageConfigurationError( s"expected configuration path [${r.path}]" ) )
+      def check( r: Req ): AllIssuesOr[String] = {
+        if ( r.inUsage() || config.hasPath( r.path ) ) r.path.validNel
+        else UsageConfigurationError( s"expected configuration path [${r.path}]" ).invalidNel
       }
     }
     case class Req( path: String, inUsage: () ⇒ Boolean )
@@ -390,7 +411,7 @@ object Settings extends ClassLogging {
     //      Req.withoutUsageSetting( Directory.WORKFLOW_BUFFER_SIZE )
     )
 
-    required.traverseU { Req.check }.map { _ ⇒ config }
+    required traverse { Req.check } map { _ ⇒ config }
   }
 
   private def makeSettings( usage: UsageSettings, systemName: String, config: Config ): Settings = {

@@ -9,9 +9,11 @@ import akka.dispatch.Dispatchers
 import akka.event.{ Logging, LoggingAdapter }
 import akka.testkit.TestEvent.Mute
 import akka.testkit.{ DeadLettersFilter, TestKit }
+
+import cats.syntax.either._
+
 import com.persist.logging._
 
-import scalaz.{ -\/, \/, \/- }
 import com.typesafe.config.{ Config, ConfigFactory }
 import com.typesafe.scalalogging.{ LazyLogging, StrictLogging }
 import demesne.testkit.concurrent.CountDownFunction
@@ -182,7 +184,7 @@ trait ParallelAkkaSpec
     val config = testConfiguration( test, slug )
     val system = testSystem( test, config, slug )
 
-    val fixture = \/ fromTryCatchNonFatal { createAkkaFixture( test, config, system, slug ) }
+    val fixture = Either catchNonFatal { createAkkaFixture( test, config, system, slug ) }
 
     val results = fixture map { f ⇒
       logger.debug( ".......... before test .........." )
@@ -205,13 +207,10 @@ trait ParallelAkkaSpec
         outcome
     }
 
-    outcome match {
-      case \/-( o ) ⇒ o
-      case -\/( ex ) ⇒ {
-        logger.error( s"test[${test.name}] failed", ex )
-        system.terminate()
-        throw ex
-      }
+    outcome valueOr { ex ⇒
+      logger.error( s"test[${test.name}] failed", ex )
+      system.terminate()
+      throw ex
     }
   }
 }

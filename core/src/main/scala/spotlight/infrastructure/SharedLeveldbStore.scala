@@ -7,7 +7,7 @@ import akka.actor.{ ActorIdentity, ActorPath, ActorRef, Identify, Props }
 import akka.persistence.journal.leveldb
 import akka.util.Timeout
 
-import scalaz.concurrent.Task
+import monix.eval.Task
 import net.ceedubs.ficus.Ficus._
 import com.typesafe.scalalogging.{ Logger, StrictLogging }
 import omnibus.commons.concurrent._

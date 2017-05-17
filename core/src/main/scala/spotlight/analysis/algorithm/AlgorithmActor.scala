@@ -2,9 +2,10 @@ package spotlight.analysis.algorithm
 
 import akka.actor.{ Actor, ActorLogging, ActorPath, ActorRef }
 import akka.event.LoggingReceive
-import scalaz._
-import Scalaz._
-import scalaz.Kleisli.{ ask, kleisli }
+import cats.data.Kleisli
+import cats.data.Kleisli.ask
+import cats.instances.either._
+import cats.syntax.either._
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.LazyLogging
 import nl.grons.metrics.scala.{ MetricName, Timer }
@@ -12,7 +13,7 @@ import org.apache.commons.math3.linear.{ EigenDecomposition, MatrixUtils }
 import org.apache.commons.math3.ml.distance.{ DistanceMeasure, EuclideanDistance }
 import org.apache.commons.math3.ml.clustering.DoublePoint
 import omnibus.akka.metrics.InstrumentedActor
-import omnibus.commons.{ KOp, TryV }
+import omnibus.commons.{ KOp, ErrorOr }
 import omnibus.commons.math.MahalanobisDistance
 import spotlight.analysis.{ DetectUsing, DetectionAlgorithmRouter, HistoricalStatistics, RecentHistory, UnrecognizedPayload }
 import spotlight.model.outlier.AnalysisPlan
@@ -27,7 +28,7 @@ object AlgorithmProtocolOLD extends {
 
 @deprecated( "replaced by AlgorithmModule and AlgorithmModule.AlgorithmProtocol", "v2" )
 trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
-  import AlgorithmActor._
+  import AlgorithmActor.{ AlgorithmContext ⇒ OLD_AlgorithmContext }
 
   def algorithm: String
   def router: ActorRef
@@ -82,22 +83,22 @@ trait AlgorithmActor extends Actor with InstrumentedActor with ActorLogging {
 
   // -- algorithm functional elements --
 
-  def algorithmContext: KOp[DetectUsing, AlgorithmContext] = {
-    Kleisli[TryV, DetectUsing, AlgorithmContext] { m ⇒ AlgorithmContext( m, m.source.points ).right }
+  def algorithmContext: KOp[DetectUsing, OLD_AlgorithmContext] = {
+    Kleisli[ErrorOr, DetectUsing, OLD_AlgorithmContext] { m ⇒ OLD_AlgorithmContext( m, m.source.points ).asRight }
   }
 
-  val tolerance: KOp[AlgorithmContext, Option[Double]] = Kleisli[TryV, AlgorithmContext, Option[Double]] { _.tolerance }
+  val tolerance: KOp[OLD_AlgorithmContext, Option[Double]] = Kleisli[ErrorOr, OLD_AlgorithmContext, Option[Double]] { _.tolerance }
 
-  val messageConfig: KOp[AlgorithmContext, Config] = kleisli[TryV, AlgorithmContext, Config] { _.messageConfig.right }
+  val messageConfig: KOp[OLD_AlgorithmContext, Config] = Kleisli[ErrorOr, OLD_AlgorithmContext, Config] { _.messageConfig.asRight }
 
   /** Some algorithms require a minimum number of points in order to determine an anomaly. To address this circumstance, these
     * algorithms can use fillDataFromHistory to draw from shape the points necessary to create an appropriate group.
     * @param minimalSize of the data grouping
     * @return
     */
-  def fillDataFromHistory( minimalSize: Int = RecentHistory.LastN ): KOp[AlgorithmContext, Seq[DoublePoint]] = {
+  def fillDataFromHistory( minimalSize: Int = RecentHistory.LastN ): KOp[OLD_AlgorithmContext, Seq[DoublePoint]] = {
     for {
-      ctx ← ask[TryV, AlgorithmContext]
+      ctx ← ask[ErrorOr, OLD_AlgorithmContext]
     } yield {
       val original = ctx.data
       if ( minimalSize < original.size ) original
@@ -125,8 +126,8 @@ object AlgorithmActor {
     def source: TimeSeriesBase
     def thresholdBoundaries: Seq[ThresholdBoundary]
     def messageConfig: Config
-    def distanceMeasure: TryV[DistanceMeasure]
-    def tolerance: TryV[Option[Double]]
+    def distanceMeasure: ErrorOr[DistanceMeasure]
+    def tolerance: ErrorOr[Option[Double]]
 
     type That <: AlgorithmContext
     def withSource( newSource: TimeSeriesBase ): That
@@ -152,8 +153,8 @@ object AlgorithmActor {
       override def history: HistoricalStatistics = message.history
       override def messageConfig: Config = message.properties
 
-      override def distanceMeasure: TryV[DistanceMeasure] = {
-        def makeMahalanobisDistance: TryV[DistanceMeasure] = {
+      override def distanceMeasure: ErrorOr[DistanceMeasure] = {
+        def makeMahalanobisDistance: ErrorOr[DistanceMeasure] = {
           val mahal = if ( message.history.N > 0 ) {
             logger.debug(
               "DISTANCE_MEASURE message.shape.covariance = [{}] determinant:[{}]",
@@ -166,13 +167,13 @@ object AlgorithmActor {
             MahalanobisDistance.fromPoints( MatrixUtils.createRealMatrix( data.toArray map { _.toPointA } ) )
           }
           logger.debug( "DISTANCE_MEASURE mahal = [{}]", mahal )
-          mahal.disjunction.leftMap { _.head }
+          mahal.toEither.leftMap { _.head }
         }
 
         val distancePath = algorithm + ".distance"
         if ( message.properties hasPath distancePath ) {
           message.properties.getString( distancePath ).toLowerCase match {
-            case "euclidean" | "euclid" ⇒ new EuclideanDistance().right[Throwable]
+            case "euclidean" | "euclid" ⇒ new EuclideanDistance().asRight
             case "mahalanobis" | "mahal" | _ ⇒ makeMahalanobisDistance
           }
         } else {
@@ -180,9 +181,9 @@ object AlgorithmActor {
         }
       }
 
-      override def tolerance: TryV[Option[Double]] = {
+      override def tolerance: ErrorOr[Option[Double]] = {
         val path = algorithm + ".tolerance"
-        \/ fromTryCatchNonFatal {
+        Either catchNonFatal {
           if ( messageConfig hasPath path ) Some( messageConfig getDouble path ) else None
         }
       }

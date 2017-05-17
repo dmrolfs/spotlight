@@ -4,14 +4,17 @@ import scala.collection.immutable.Queue
 import scala.reflect.ClassTag
 import akka.actor.{ ActorRef, Props }
 
-import scalaz._
-import Scalaz._
-import scalaz.Kleisli.{ ask, kleisli }
+import cats.instances.either._
+import cats.syntax.either._
+import cats.syntax.validated._
+import cats.data.Kleisli
+import cats.data.Kleisli.ask
+
 import org.joda.{ time ⇒ joda }
 import com.github.nscala_time.time.Imports._
 import org.apache.commons.math3.stat.inference.TestUtils
 import org.apache.commons.math3.exception.{ InsufficientDataException, MathInternalError }
-import omnibus.commons.{ KOp, TryV, Valid }
+import omnibus.commons.{ KOp, ErrorOr, AllIssuesOr }
 import omnibus.commons.util._
 import spotlight.analysis.algorithm.AlgorithmActor.AlgorithmContext
 import spotlight.analysis.algorithm.CommonAnalyzer
@@ -32,10 +35,10 @@ object KolmogorovSmirnovAnalyzer {
       referenceOffset: joda.Duration,
       referenceHistory: Queue[DataPoint]
   ) extends WrappingContext {
-    override def withUnderlying( ctx: AlgorithmContext ): Valid[WrappingContext] = {
+    override def withUnderlying( ctx: AlgorithmContext ): AllIssuesOr[WrappingContext] = {
       val boundary = ctx.source.start map { _ - referenceOffset }
       val updatedHistory = boundary map { b ⇒ referenceHistory.dropWhile { _.timestamp < b } } getOrElse { referenceHistory }
-      copy( underlying = ctx, referenceHistory = updatedHistory ).successNel
+      copy( underlying = ctx, referenceHistory = updatedHistory ).validNel
     }
 
     override type That = Context
@@ -74,14 +77,14 @@ class KolmogorovSmirnovAnalyzer( override val router: ActorRef ) extends CommonA
 
   override def algorithm: String = KolmogorovSmirnovAnalyzer.Algorithm
 
-  override def wrapContext( c: AlgorithmContext ): Valid[WrappingContext] = {
+  override def wrapContext( c: AlgorithmContext ): AllIssuesOr[WrappingContext] = {
     referenceOffset( c ) map { offset ⇒
       log.debug( "makeSkylingContext: [{}]", c )
       Context( underlying = c, referenceOffset = offset, referenceHistory = c.source.points.to[Queue] )
     }
   }
 
-  def referenceOffset( c: AlgorithmContext ): Valid[joda.Duration] = {
+  def referenceOffset( c: AlgorithmContext ): AllIssuesOr[joda.Duration] = {
     import java.util.concurrent.TimeUnit.MILLISECONDS
     val ReferenceOffset = algorithm + ".reference-offset"
 
@@ -93,7 +96,7 @@ class KolmogorovSmirnovAnalyzer( override val router: ActorRef ) extends CommonA
       }
     }
 
-    result.successNel
+    result.validNel
   }
 
   /** A timeseries is anomalous if the average of the last three datapoints
@@ -101,7 +104,7 @@ class KolmogorovSmirnovAnalyzer( override val router: ActorRef ) extends CommonA
     */
   override val findOutliers: KOp[AlgorithmContext, ( Outliers, AlgorithmContext )] = {
     def isDistributionUnlikeReference( tol: Double ): KOp[Context, Boolean] = {
-      kleisli[TryV, Context, Boolean] { implicit ctx ⇒
+      Kleisli[ErrorOr, Context, Boolean] { implicit ctx ⇒
         val reference = ctx.referenceSeries.map { _.value }.toArray
         log.debug( "reference-history[{}] = [{}]", ctx.referenceHistory.size, ctx.referenceHistory.mkString( "," ) )
         log.debug( "reference-offset = [{}]", ctx.referenceOffset )
@@ -115,9 +118,9 @@ class KolmogorovSmirnovAnalyzer( override val router: ActorRef ) extends CommonA
 
     val outliers = {
       for {
-        ctx ← ask[TryV, AlgorithmContext]
+        ctx ← ask[ErrorOr, AlgorithmContext]
         tolerance ← tolerance
-        unlike ← isDistributionUnlikeReference( tolerance getOrElse 3D ) <=< toConcreteContextK
+        unlike ← toConcreteContextK andThen isDistributionUnlikeReference( tolerance getOrElse 3D )
       } yield {
         if ( unlike ) ( ctx.source.points, ctx ) else ( Seq.empty[DataPoint], ctx )
       }
@@ -132,13 +135,13 @@ class KolmogorovSmirnovAnalyzer( override val router: ActorRef ) extends CommonA
   )(
     implicit
     context: AlgorithmContext
-  ): TryV[Boolean] = {
+  ): ErrorOr[Boolean] = {
     val same = {
-      if ( reference.isEmpty || series.isEmpty ) false.right
+      if ( reference.isEmpty || series.isEmpty ) false.asRight
       else {
         for {
-          pValue ← \/ fromTryCatchNonFatal { TestUtils.kolmogorovSmirnovTest( reference, series ) }
-          testStatisticD ← \/ fromTryCatchNonFatal { TestUtils.kolmogorovSmirnovStatistic( reference, series ) }
+          pValue ← Either catchNonFatal { TestUtils.kolmogorovSmirnovTest( reference, series ) }
+          testStatisticD ← Either catchNonFatal { TestUtils.kolmogorovSmirnovStatistic( reference, series ) }
         } yield {
           val isStationary = ( s: Array[Double] ) ⇒ {
             val adf = AugmentedDickeyFuller( s ).statistic

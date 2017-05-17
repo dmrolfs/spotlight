@@ -1,10 +1,9 @@
 package spotlight.model.outlier
 
 import scala.reflect._
-import scalaz.{ Lens ⇒ _, _ }
-import Scalaz._
+import cats.syntax.validated._
 import shapeless._
-import omnibus.commons.Valid
+import omnibus.commons.AllIssuesOr
 import omnibus.archetype.domain.model.core.Entity
 import omnibus.commons.identifier.TaggedID
 import spotlight.model.timeseries.Topic
@@ -20,11 +19,11 @@ object OutlierHistory {
   val idTag: Symbol = 'outlierHistory
   implicit def tag( id: OutlierHistory#ID ): OutlierHistory#TID = TaggedID( idTag, id )
 
-  def apply( topic: Topic, outlierAnnotations: Seq[OutlierAnnotation] ): Valid[OutlierHistory] = {
-    SimpleOutlierHistory( id = topic, outlierAnnotations = outlierAnnotations ).successNel
+  def apply( topic: Topic, outlierAnnotations: Seq[OutlierAnnotation] ): AllIssuesOr[OutlierHistory] = {
+    SimpleOutlierHistory( id = topic, outlierAnnotations = outlierAnnotations ).validNel
   }
 
-  def apply( series: Outliers ): Valid[OutlierHistory] = {
+  def apply( series: Outliers ): AllIssuesOr[OutlierHistory] = {
     val annotations = OutlierAnnotation annotationsFromSeries series
     annotations map { a ⇒ SimpleOutlierHistory( id = series.topic, outlierAnnotations = a ) }
   }
