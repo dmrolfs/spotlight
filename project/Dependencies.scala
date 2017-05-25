@@ -3,7 +3,7 @@ import sbt._
 
 object Dependencies {
   object omnibus {
-    val version = "0.60"
+    val version = "0.61-SNAPSHOT"
     def module( id: String ) = "com.github.dmrolfs" %% s"omnibus-$id" % version withSources() withJavadoc()
     def all = Seq( commons, akka, archetype )
 
@@ -14,14 +14,14 @@ object Dependencies {
   }
 
   object demesne {
-    val version = "2.3.0"
+    val version = "2.3.1-SNAPSHOT"
     def module( id: String ) = "com.github.dmrolfs" %% s"demesne-$id" % version withSources() withJavadoc()
     val core = module( "core" )
     val testkit = module( "testkit" )
   }
 
   object akka {
-    val version = "2.5.1"
+    val version = "2.5.2"
     def module( id: String ) = "com.typesafe.akka" %% s"akka-${id}" % version withSources() withJavadoc()
     val all: Seq[ModuleID] = Seq( actor, stream, agent, cluster, clusterSharding, contrib, persistence, remote, slf4j )
 
