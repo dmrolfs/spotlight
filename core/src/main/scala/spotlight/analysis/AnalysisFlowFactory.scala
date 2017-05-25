@@ -4,16 +4,18 @@ import scala.concurrent.{ ExecutionContext, Future, TimeoutException }
 import akka.NotUsed
 import akka.actor.{ ActorRef, ActorSystem }
 import akka.stream.Supervision.Decider
-import akka.stream.{ ActorAttributes, Materializer, Supervision }
+import akka.stream.{ ActorAttributes, Supervision }
 import akka.stream.scaladsl.Flow
 import akka.util.Timeout
-import cats.syntax.traverse._
-import cats.instances.list._
+//import cats.syntax.traverse._
+//import cats.instances.list._
+import shapeless.the
 import com.persist.logging._
 import demesne.BoundedContext
 import nl.grons.metrics.scala.{ Meter, MetricName }
 import omnibus.akka.envelope.Envelope
 import omnibus.akka.metrics.Instrumented
+import spotlight.{ BC, T, M }
 import spotlight.analysis.AnalysisPlanProtocol.RouteDetection
 import spotlight.analysis.OutlierDetection.{ DetectionResult, DetectionTimedOut }
 import spotlight.model.outlier.{ AnalysisPlan, Outliers }
@@ -25,15 +27,8 @@ import spotlight.model.timeseries.TimeSeriesBase.Merging
 class AnalysisFlowFactory( plan: AnalysisPlan ) extends FlowFactory[TimeSeries, Outliers] with ClassLogging {
   import AnalysisFlowFactory.Metrics
 
-  override def makeFlow(
-    parallelism: Int
-  )(
-    implicit
-    boundedContext: BoundedContext,
-    timeout: Timeout,
-    materializer: Materializer
-  ): Future[DetectFlow] = {
-    implicit val system = boundedContext.system
+  override def makeFlow[_: BC: T: M]( parallelism: Int ): Future[DetectFlow] = {
+    implicit val system = the[BoundedContext].system
     implicit val ec = system.dispatcher
 
     val entry = Flow[TimeSeries].filter { plan.appliesTo }

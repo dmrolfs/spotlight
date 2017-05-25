@@ -2,20 +2,11 @@ package spotlight.analysis
 
 import scala.concurrent.Future
 import akka.NotUsed
-import akka.stream.Materializer
 import akka.stream.scaladsl.Flow
-import akka.util.Timeout
-import demesne.BoundedContext
+import spotlight.{ BC, T, M }
 
 /** Created by rolfsd on 3/15/17.
   */
 abstract class FlowFactory[I, O] extends Serializable {
-  def makeFlow(
-    parallelism: Int
-  )(
-    implicit
-    boundedContext: BoundedContext,
-    timeout: Timeout,
-    materializer: Materializer
-  ): Future[Flow[I, O, NotUsed]]
+  def makeFlow[_: BC: T: M]( parallelism: Int ): Future[Flow[I, O, NotUsed]]
 }

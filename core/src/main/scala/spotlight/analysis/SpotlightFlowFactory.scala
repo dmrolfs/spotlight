@@ -1,14 +1,14 @@
 package spotlight.analysis
 
-import scala.concurrent.{ ExecutionContext, Future }
-import akka.actor.ActorSystem
-import akka.stream.{ FlowShape, Materializer }
+import scala.concurrent.Future
+import akka.stream.FlowShape
 import akka.stream.scaladsl.{ Broadcast, Flow, GraphDSL, Merge }
-import akka.util.Timeout
+import shapeless.the
 import com.persist.logging._
 import demesne.{ BoundedContext, DomainModel }
 import omnibus.akka.envelope._
 import omnibus.akka.envelope.pattern.ask
+import spotlight.{ BC, EC, M, T }
 import spotlight.analysis.PlanCatalog.WatchPoints
 import spotlight.analysis.{ AnalysisPlanProtocol ⇒ AP }
 import spotlight.model.outlier.{ AnalysisPlan, Outliers }
@@ -17,21 +17,14 @@ import spotlight.model.timeseries._
 /** Created by rolfsd on 3/16/17.
   */
 class SpotlightFlowFactory( plans: Set[AnalysisPlan.Summary] ) extends FlowFactory[TimeSeries, Outliers] with ClassLogging {
-  override def makeFlow(
-    parallelism: Int
-  )(
-    implicit
-    boundedContext: BoundedContext,
-    timeout: Timeout,
-    materializer: Materializer
-  ): Future[DetectFlow] = {
-    implicit val system = boundedContext.system
+  override def makeFlow[_: BC: T: M]( parallelism: Int ): Future[DetectFlow] = {
+    implicit val system = the[BoundedContext].system
     implicit val ec = system.dispatcher
 
     log.debug( Map( "@msg" → "making detection flow with plans", "plans" → plans.toSeq.map { p ⇒ ( p.name, p.id ) } ) )
 
     for {
-      model ← boundedContext.futureModel
+      model ← the[BoundedContext].futureModel
       planFlows ← collectPlanFlows( parallelism, model, plans )
       f ← detectFrom( planFlows ) map { _.named( "Spotlight" ) }
     } yield {
@@ -40,17 +33,12 @@ class SpotlightFlowFactory( plans: Set[AnalysisPlan.Summary] ) extends FlowFacto
     }
   }
 
-  private def collectPlanFlows(
+  private def collectPlanFlows[_: BC: T: M](
     parallelism: Int,
     model: DomainModel,
     plans: Set[AnalysisPlan.Summary]
-  )(
-    implicit
-    boundedContext: BoundedContext,
-    timeout: Timeout,
-    materializer: Materializer
   ): Future[Set[DetectFlow]] = {
-    implicit val ec = boundedContext.system.dispatcher
+    implicit val ec = the[BoundedContext].system.dispatcher
 
     def makeFlow( plan: AnalysisPlan.Summary, af: AP.AnalysisFlow ): Future[DetectFlow] = {
       log.debug(
@@ -78,7 +66,7 @@ class SpotlightFlowFactory( plans: Set[AnalysisPlan.Summary] ) extends FlowFacto
     }
   }
 
-  private def detectFrom( planFlows: Set[DetectFlow] )( implicit ec: ExecutionContext ): Future[DetectFlow] = {
+  private def detectFrom[_: EC]( planFlows: Set[DetectFlow] ): Future[DetectFlow] = {
     val nrFlows = planFlows.size
     log.debug( Map( "@msg" → "making PlanCatalog graph for plans", "nr-plans" → nrFlows ) )
 

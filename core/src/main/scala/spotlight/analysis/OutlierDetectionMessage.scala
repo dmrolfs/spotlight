@@ -7,12 +7,13 @@ import com.typesafe.config.{ Config, ConfigFactory }
 import omnibus.commons.AllIssuesOr
 import demesne.CommandLike
 import omnibus.akka.envelope.WorkId
+import spotlight.SpotlightProtocol
 import spotlight.model.outlier.AnalysisPlan
 import spotlight.model.timeseries.{ TimeSeries, TimeSeriesBase, Topic }
 
 /** Created by rolfsd on 9/21/16.
   */
-sealed trait OutlierDetectionMessage extends CommandLike {
+sealed trait OutlierDetectionMessage extends SpotlightProtocol with CommandLike {
   override type ID = Any // AnalysisPlanModule.module.ID
   //todo: detect message is routed to many algorithms, each with own tag. This targetId is set to a dummy tag knowing that
   // aggregate routing uses id portion only and ignores tag.
