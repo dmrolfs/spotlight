@@ -84,6 +84,14 @@ case class AlgorithmState[S](
   override def toString: String = s"""State( algorithm:${name} id:[${id}] shapesNr:[${shapes.size}] )"""
 }
 
+case class SaveAlgorithmSnapshot(
+  override val targetId: TaggedID[_],
+  correlation: Option[Any] = None
+) extends CommandLike with NotInfluenceReceiveTimeout {
+  override type ID = Any
+}
+
+
 /** Created by rolfsd on 6/5/16.
   */
 object Algorithm extends ClassLogging {
@@ -292,19 +300,18 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
       override val snapshotPeriod: Option[FiniteDuration] = None // not used - snapshot timing explicitly defined below
       //    override def snapshot: Option[SnapshotSpecification] = None
       override def snapshot: Option[SnapshotSpecification] = {
-        snapshotPeriod map { _ ⇒ super.snapshot } getOrElse {
-          import scala.concurrent.duration._
+        import scala.concurrent.duration._
 
-          Some(
-            new SnapshotSpecification {
-              override val snapshotInterval: FiniteDuration = 2.minutes // 5.minutes okay //todo make config driven
-              override val snapshotInitialDelay: FiniteDuration = {
-                val delay = snapshotInterval + snapshotInterval * Algorithm.gitterFactor.nextDouble()
-                FiniteDuration( delay.toMillis, MILLISECONDS )
-              }
+        Some(
+          new SnapshotSpecification {
+            override def saveSnapshotCommand[ID]( tid: TaggedID[ID] ): Any = SaveAlgorithmSnapshot( targetId = tid )
+            override val snapshotInterval: FiniteDuration = 2.minutes // 5.minutes okay //todo make config driven
+            override val snapshotInitialDelay: FiniteDuration = {
+              val delay = snapshotInterval + snapshotInterval * Algorithm.gitterFactor.nextDouble()
+              FiniteDuration( delay.toMillis, MILLISECONDS )
             }
-          )
-        }
+          }
+        )
       }
 
       override val passivateTimeout: Duration = Duration( 1, MINUTES ) //todo make config driven
