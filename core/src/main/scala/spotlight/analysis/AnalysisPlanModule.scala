@@ -6,7 +6,9 @@ import scala.concurrent.Await
 import akka.actor._
 import akka.actor.SupervisorStrategy.{ Resume, Stop }
 import akka.event.LoggingReceive
+import akka.persistence.journal.Tagged
 import akka.util.Timeout
+import cats.syntax.show._
 import com.persist.logging._
 import shapeless.{ Lens, lens }
 import com.typesafe.config.Config
@@ -20,6 +22,7 @@ import omnibus.akka.supervision.{ IsolatedDefaultSupervisor, OneForOneStrategyFa
 import demesne._
 import demesne.module.{ AggregateEnvironment, ClusteredAggregate, LocalAggregate }
 import demesne.module.entity.EntityAggregateModule
+import spotlight.Show._
 import spotlight.{ Settings, SpotlightContext }
 import spotlight.model.outlier._
 import spotlight.analysis.algorithm.AlgorithmRoute
@@ -97,6 +100,9 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
   }
 
   object AggregateRoot {
+    implicit class EventTagging( val event: Any ) extends AnyVal {
+      def tagged: Tagged = Tagged( event, Set( module.rootType.name ) )
+    }
 
     object PlanActor {
       def props( model: DomainModel, rootType: AggregateRootType ): Props = Props( new Default( model, rootType ) )
@@ -229,10 +235,13 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
 
       override def acceptance: Acceptance = myAcceptance orElse entityAcceptance
 
+      var myStatus: String = "quiescent"
+
       val myAcceptance: Acceptance = {
         case ( P.Added( _, info ), s ) ⇒ {
           preActivate()
           context become LoggingReceive { around( active ) }
+          myStatus = "active"
           val newState = info match {
             case Some( ps: AnalysisPlanState ) ⇒ ps
             case Some( p: AnalysisPlan ) ⇒ AnalysisPlanState( p )
@@ -247,7 +256,7 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
               "@msg" → "Plan added",
               "plan" → newState.plan.name,
               "state" → newState.toString(),
-              "detector" → actorOuter.detector.path
+              "detector" → actorOuter.detector.show
             )
           )
 
@@ -273,15 +282,17 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
           //todo: cast for expediency. my ideal is to define a Lens in the AnalysisPlan trait; minor solace is this module is in the same package
           s.copy( plan = s.plan.asInstanceOf[AnalysisPlan.SimpleAnalysisPlan].copy( isQuorum = e.isQuorum, reduce = e.reduce ) )
         }
+
+        case ( Tagged( event, _ ), s ) if myAcceptance.isDefinedAt( ( event, s ) ) ⇒ myAcceptance( ( event, s ) )
       }
 
       val IdType = classTag[identifying.TID]
 
       override def quiescent: Receive = {
         case P.Add( IdType( targetId ), info ) if targetId == aggregateId ⇒ {
-          persist( P.Added( targetId, info ) ) { e ⇒
+          persist( P.Added( targetId, info ).tagged ) { e ⇒
             acceptAndPublish( e )
-            sender() !+ e // per akka docs: safe to use sender() here
+            sender() !+ e.payload // per akka docs: safe to use sender() here
           }
         }
 
@@ -321,12 +332,12 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
       val planEntity: Receive = {
         case _: P.GetPlan ⇒ sender() !+ P.PlanInfo( state.id, state.plan )
 
-        case P.ApplyTo( id, appliesTo ) ⇒ persist( P.ScopeChanged( id, appliesTo ) ) { acceptAndPublish }
+        case P.ApplyTo( id, appliesTo ) ⇒ persist( P.ScopeChanged( id, appliesTo ).tagged ) { acceptAndPublish }
 
-        case P.UseAlgorithms( id, algorithms ) ⇒ persist( changeAlgorithms( algorithms ) ) { acceptAndPublish }
+        case P.UseAlgorithms( id, algorithms ) ⇒ persist( changeAlgorithms( algorithms ).tagged ) { acceptAndPublish }
 
         case P.ResolveVia( id, isQuorum, reduce ) ⇒ {
-          persist( P.AnalysisResolutionChanged( id, isQuorum, reduce ) ) { acceptAndPublish }
+          persist( P.AnalysisResolutionChanged( id, isQuorum, reduce ).tagged ) { acceptAndPublish }
         }
       }
 
@@ -342,7 +353,7 @@ object AnalysisPlanModule extends EntityLensProvider[AnalysisPlanState] with Ins
       }
 
       override def unhandled( message: Any ): Unit = {
-        altLog.error( Map( "@msg" → "unhandled message", "aggregateId" → aggregateId.toString, "message" → message.toString ) )
+        altLog.error( Map( "@msg" → "unhandled message", "aggregateId" → aggregateId.toString, "message" → message.toString, "status" → myStatus ) )
         super.unhandled( message )
       }
 

@@ -10,7 +10,6 @@ import akka.cluster.singleton.{ ClusterSingletonManager, ClusterSingletonManager
 import akka.event.LoggingReceive
 import akka.stream.{ ActorMaterializer, ActorMaterializerSettings, Materializer }
 import akka.util.Timeout
-
 import shapeless.syntax.typeable._
 import shapeless.the
 import com.typesafe.config.Config
@@ -428,7 +427,7 @@ abstract class PlanCatalog( boundedContext: BoundedContext )
     made.transform(
       identity,
       ex ⇒ {
-        log.error( Map( "@msg" → "failed to make missing plans", "missing" → missing.map( _.name ) ), ex )
+        log.error( Map( "@msg" → "failed to make missing plans", "missing" → missing.map( _.name ).mkString( "[", ", ", "]" ) ), ex )
         ex
       }
     )

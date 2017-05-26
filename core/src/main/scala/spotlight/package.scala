@@ -1,6 +1,6 @@
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.FiniteDuration
-import akka.actor.{ ActorContext, ActorRef, ActorSystem }
+import akka.actor.{ ActorContext, ActorPath, ActorRef, ActorSystem }
 import akka.stream.Materializer
 import akka.util.Timeout
 import cats.Show
@@ -21,20 +21,26 @@ package object spotlight {
   type T[_] = Timeout
   type M[_] = Materializer
 
-  val MetricBasePath = "spotlight.metrics.basename"
+  object Metric {
+    val BasePath = "spotlight.metrics.basename"
 
-  lazy val BaseMetricName: String = {
-    val base = "spotlight"
-    ConfigFactory.load().as[Option[String]]( MetricBasePath ) map { _ + "." + base } getOrElse { base }
+    lazy val BaseName: String = {
+      val base = "spotlight"
+      ConfigFactory.load().as[Option[String]]( BasePath ) map { _ + "." + base } getOrElse { base }
+    }
   }
 
   object showImplicits {
     implicit val actorRefShow = new Show[ActorRef] {
-      override def show( ref: ActorRef ): String = ref.toString
+      override def show( r: ActorRef ): String = actorPathShow show r.path
+    }
+
+    implicit val actorPathShow = new Show[ActorPath] {
+      override def show( p: ActorPath ): String = p.toString
     }
 
     implicit val finiteDurationShow = new Show[FiniteDuration] {
-      override def show( d: FiniteDuration ): String = d.toCoarsest.toString()
+      override def show( d: FiniteDuration ): String = d.toCoarsest.toString
     }
 
     implicit val jodaDateTimeShow = new Show[joda.DateTime] {

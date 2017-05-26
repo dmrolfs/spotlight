@@ -24,22 +24,20 @@ object AnalysisPlanProtocol extends EntityProtocol[AnalysisPlanState#ID] {
     reduce: ReduceOutliers
   ) extends Command
 
-  override def tags: Set[String] = Set( AnalysisPlanModule.module.rootType.name )
-
-  case class ScopeChanged( override val sourceId: ScopeChanged#TID, appliesTo: AnalysisPlan.AppliesTo ) extends TaggedEvent
+  case class ScopeChanged( override val sourceId: ScopeChanged#TID, appliesTo: AnalysisPlan.AppliesTo ) extends Event
 
   case class AlgorithmsChanged(
     override val sourceId: AlgorithmsChanged#TID,
     algorithms: Map[String, Config],
     added: Set[String],
     dropped: Set[String]
-  ) extends TaggedEvent
+  ) extends Event
 
   case class AnalysisResolutionChanged(
     override val sourceId: AnalysisResolutionChanged#TID,
     isQuorum: IsQuorum,
     reduce: ReduceOutliers
-  ) extends TaggedEvent
+  ) extends Event
 
   case class GetPlan( override val targetId: GetPlan#TID ) extends Command
   case class PlanInfo( override val sourceId: PlanInfo#TID, info: AnalysisPlan ) extends Event {
