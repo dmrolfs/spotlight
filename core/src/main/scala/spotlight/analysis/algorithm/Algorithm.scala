@@ -85,12 +85,11 @@ case class AlgorithmState[S](
 }
 
 case class SaveAlgorithmSnapshot(
-  override val targetId: TaggedID[_],
-  correlation: Option[Any] = None
+    override val targetId: TaggedID[_],
+    correlation: Option[Any] = None
 ) extends CommandLike with NotInfluenceReceiveTimeout {
   override type ID = Any
 }
-
 
 /** Created by rolfsd on 6/5/16.
   */
