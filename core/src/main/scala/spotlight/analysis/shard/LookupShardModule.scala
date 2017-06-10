@@ -240,7 +240,7 @@ object LookupShardModule extends AggregateRootModule[LookupShardCatalog, LookupS
 
         override lazy val metricBaseName: MetricName = {
           MetricName(
-            spotlight.BaseMetricName,
+            spotlight.Metric.BaseName,
             spotlight.analysis.BaseMetricName,
             "algorithm",
             plan.name,

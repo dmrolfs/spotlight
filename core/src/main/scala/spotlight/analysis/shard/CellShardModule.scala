@@ -150,7 +150,7 @@ object CellShardModule extends ClassLogging {
 
       override lazy val metricBaseName: MetricName = {
         MetricName(
-          spotlight.BaseMetricName,
+          spotlight.Metric.BaseName,
           spotlight.analysis.BaseMetricName,
           "algorithm",
           plan.name,

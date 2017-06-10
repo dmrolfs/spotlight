@@ -22,7 +22,7 @@ import omnibus.akka.supervision.{ IsolatedDefaultSupervisor, OneForOneStrategyFa
 import demesne._
 import demesne.module.{ AggregateEnvironment, ClusteredAggregate, LocalAggregate }
 import demesne.module.entity.EntityAggregateModule
-import spotlight.Show._
+import spotlight.showImplicits._
 import spotlight.{ Settings, SpotlightContext }
 import spotlight.model.outlier._
 import spotlight.analysis.algorithm.AlgorithmRoute

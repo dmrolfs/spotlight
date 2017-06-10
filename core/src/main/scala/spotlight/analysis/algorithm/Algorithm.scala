@@ -244,7 +244,7 @@ abstract class Algorithm[S <: Serializable: Advancing]( val label: String )
   initializeMetrics()
 
   override lazy val metricBaseName: MetricName = {
-    MetricName( spotlight.BaseMetricName, spotlight.analysis.BaseMetricName, "algorithm", label )
+    MetricName( spotlight.Metric.BaseName, spotlight.analysis.BaseMetricName, "algorithm", label )
   }
 
   def initializeMetrics(): Unit = {

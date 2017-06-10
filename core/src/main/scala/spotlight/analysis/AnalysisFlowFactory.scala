@@ -155,7 +155,7 @@ class AnalysisFlowFactory( plan: AnalysisPlan ) extends FlowFactory[TimeSeries, 
 
 object AnalysisFlowFactory {
   object Metrics extends Instrumented {
-    override lazy val metricBaseName: MetricName = MetricName( spotlight.BaseMetricName, spotlight.analysis.BaseMetricName )
+    override lazy val metricBaseName: MetricName = MetricName( spotlight.Metric.BaseName, spotlight.analysis.BaseMetricName )
 
     val InletBaseMetricName = "inlet"
     val inletSeries: Meter = metrics.meter( InletBaseMetricName, "series" )
