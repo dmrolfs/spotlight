@@ -67,4 +67,22 @@ object AlgorithmProtocol extends AggregateProtocol[Algorithm.ID] {
   ) extends IllegalStateException(
     s"actor [${path}] not registered algorithm [${algorithm}] with scope [${sourceId}] before use"
   ) with OutlierAlgorithmError
+
+  case class SavePoint[S <: Serializable](
+    aggregateId: Algorithm.TID,
+    shape: S,
+    label: String,
+    sequenceNr: Long,
+    timestamp: Long = 0L
+  )
+
+  case class SavePointSuccess( aggregateId: Algorithm.TID, label: String, sequenceNr: Long, timestamp: Long = 0L )
+
+  case class SavePointFailure(
+    aggregateId: Algorithm.TID,
+    cause: Throwable,
+    label: String,
+    sequenceNr: Long,
+    timestamp: Long = 0L
+  )
 }

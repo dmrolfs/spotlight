@@ -6,7 +6,6 @@ import akka.stream.stage._
 import com.persist.logging._
 import enumeratum._
 
-
 trait ValveSwitch {
   def open: Unit
   def close: Unit

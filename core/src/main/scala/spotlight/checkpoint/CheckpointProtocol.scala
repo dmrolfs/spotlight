@@ -1,8 +1,7 @@
 package spotlight.checkpoint
 
-import akka.actor.ActorRef
-
 import scala.concurrent.duration.FiniteDuration
+import akka.actor.ActorRef
 import cats.Show
 import cats.data.NonEmptyList
 import demesne.{ CommandLike, EventLike }
@@ -11,11 +10,23 @@ import org.joda.{ time ⇒ joda }
 import spotlight.SpotlightProtocol
 import spotlight.analysis.algorithm.Algorithm
 
+
 /** Created by rolfsd on 5/19/17.
   */
 sealed trait CheckpointProtocol extends SpotlightProtocol
 
 case class Checkpoint( label: String, start: joda.DateTime = joda.DateTime.now ) extends CheckpointProtocol
+object Checkpoint {
+  def apply( start: joda.DateTime = joda.DateTime.now ): Checkpoint = Checkpoint( label = start.toString, start )
+}
+
+case class RecoverCheckpoint( label: String ) extends CheckpointProtocol
+
+case class CheckpointRecovered( label: String ) extends CheckpointProtocol
+
+case class CheckpointAdded( label: String, client: ActorRef, start: joda.DateTime ) extends CheckpointProtocol
+
+case class CheckpointStatusChanged( label: String, status: CheckpointStatus ) extends CheckpointProtocol
 
 case class CheckpointMarked( label: String, start: joda.DateTime, leadTime: FiniteDuration ) extends CheckpointProtocol
 
@@ -32,7 +43,7 @@ object CheckpointFailure {
       f
         .failures
         .toList
-        .map { f0 ⇒ s"${f0._1.path.name}: ${f0._2.getClass.getName}:${f0._2.getMessage}" }
+        .map { f0 ⇒ f0._1.path.name + ": " + f0._2.getClass.getName + ":" + f0._2.getMessage }
         .mkString( "[", ", ", "]" )
     }
   }
